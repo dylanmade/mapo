@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">pcpad</string>
+    <string name="accessibility_service_label">pcpad Input Service</string>
+    <string name="accessibility_service_description">Injects keyboard and mouse input events for PC games running via FEX emulation on the secondary screen.</string>
+</resources>

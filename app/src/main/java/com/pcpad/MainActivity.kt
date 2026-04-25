@@ -1,6 +1,5 @@
 package com.pcpad
 
-import android.hardware.display.DisplayManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,8 +19,8 @@ class MainActivity : ComponentActivity() {
         // Use DisplayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
         // to enumerate presentation displays and launch a PresentationWindow on the
         // secondary screen when one is detected.
-        val displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
-        val presentationDisplays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+        // val displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
+        // val presentationDisplays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
         // presentationDisplays.firstOrNull()?.let { display -> /* launch on secondary */ }
 
         setContent {

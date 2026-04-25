@@ -1,10 +1,30 @@
+# Gradle files
+.gradle/
+build/
+
+# IDE files
 *.iml
-.gradle
-/local.properties
-/.idea
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+.idea/
+*.ipr
+*.iws
+
+# Android Studio / Local files
 local.properties
+/captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.ap_
+*.dex
+
+# Testing / Profiling
+/testResults/
+*.hprof
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Kotlin / Java
+*.pyc
+*.class

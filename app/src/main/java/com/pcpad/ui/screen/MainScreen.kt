@@ -26,7 +26,7 @@ private val PLACEHOLDER_KEYS = listOf(
     "W", "A", "S", "D",
     "Q", "E", "R", "F",
     "Shift", "Ctrl", "Alt", "Tab",
-    "1", "2", "3", "Esc"
+    "1", "2", "3", "Esc",
 )
 
 @Composable

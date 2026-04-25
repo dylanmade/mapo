@@ -11,7 +11,7 @@ private val DarkColorScheme = darkColorScheme(
     surface = DarkSurface,
     onPrimary = OnAccent,
     onBackground = KeyText,
-    onSurface = KeyText
+    onSurface = KeyText,
 )
 
 @Composable

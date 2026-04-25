@@ -1,5 +1,6 @@
 package com.pcpad.ui.screen
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,16 +9,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,11 +39,12 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            ScrollableTabRow(
-                selectedTabIndex = selectedIndex,
-                edgePadding = 0.dp
-            ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+        ) {
+            TabRow(selectedTabIndex = selectedIndex) {
                 viewModel.layouts.forEachIndexed { index, layout ->
                     Tab(
                         selected = index == selectedIndex,
@@ -98,11 +102,17 @@ private fun KeyRow(
             if (key.code.isEmpty()) {
                 Spacer(modifier = Modifier.weight(key.weight))
             } else {
-                Button(
+                val primary = MaterialTheme.colorScheme.primary
+                OutlinedButton(
                     onClick = { onKeyPress(key.code) },
                     modifier = Modifier
                         .weight(key.weight)
                         .fillMaxSize(),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, primary),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = primary
+                    ),
                     contentPadding = PaddingValues(2.dp)
                 ) {
                     Text(

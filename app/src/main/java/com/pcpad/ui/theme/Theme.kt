@@ -5,13 +5,13 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 
 private val DarkColorScheme = darkColorScheme(
-    primary = AccentBlue,
-    secondary = AccentBlueVariant,
-    background = DarkBackground,
-    surface = DarkSurface,
-    onPrimary = OnAccent,
-    onBackground = KeyText,
-    onSurface = KeyText,
+    primary         = TabAccent,    // tab indicator + selected tab text
+    background      = DarkBackground,
+    surface         = KeyFill,      // button container fill
+    onSurface       = KeyLabel,     // button text
+    outline         = KeyOutline,   // button border
+    onBackground    = KeyLabel,
+    onPrimary       = OnAccent,
 )
 
 @Composable

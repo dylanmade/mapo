@@ -102,16 +102,16 @@ private fun KeyRow(
             if (key.code.isEmpty()) {
                 Spacer(modifier = Modifier.weight(key.weight))
             } else {
-                val primary = MaterialTheme.colorScheme.primary
                 OutlinedButton(
                     onClick = { onKeyPress(key.code) },
                     modifier = Modifier
                         .weight(key.weight)
                         .fillMaxSize(),
                     shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, primary),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = primary
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
                     ),
                     contentPadding = PaddingValues(2.dp)
                 ) {

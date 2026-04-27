@@ -63,6 +63,9 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
 
+    // Gson
+    implementation(libs.gson)
+
     // Room
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

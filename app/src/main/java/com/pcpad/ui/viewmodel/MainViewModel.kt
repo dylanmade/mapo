@@ -5,10 +5,13 @@ import androidx.lifecycle.viewModelScope
 import com.pcpad.data.defaults.DefaultLayouts
 import com.pcpad.data.model.GridButton
 import com.pcpad.data.model.GridLayout
+import com.pcpad.data.model.findFirstEmptyCell
 import com.pcpad.data.model.toGridLayout
 import com.pcpad.data.model.toKeyLayout
+import com.pcpad.data.model.wouldOverlap
 import com.pcpad.data.repository.LayoutRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -38,7 +41,9 @@ class MainViewModel @Inject constructor(
     private val _selectedButtonId = MutableStateFlow<String?>(null)
     val selectedButtonId: StateFlow<String?> = _selectedButtonId.asStateFlow()
 
-    // What the grid should display: editing copy in edit mode, live layout otherwise
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
     val displayLayout: StateFlow<GridLayout> = combine(
         _selectedIndex, _isEditMode, _editingLayout, _layouts
     ) { index, editMode, editLayout, layouts ->
@@ -46,7 +51,6 @@ class MainViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DefaultLayouts.all[0])
 
     init {
-        // Merge Room-persisted layouts with defaults on startup
         viewModelScope.launch {
             repository.getLayouts().collect { roomLayouts ->
                 val persisted = roomLayouts.map { it.toGridLayout() }
@@ -60,9 +64,7 @@ class MainViewModel @Inject constructor(
 
     // ── Navigation ────────────────────────────────────────────────────────────
 
-    fun selectLayout(index: Int) {
-        _selectedIndex.value = index
-    }
+    fun selectLayout(index: Int) { _selectedIndex.value = index }
 
     // ── Normal mode ───────────────────────────────────────────────────────────
 
@@ -86,10 +88,7 @@ class MainViewModel @Inject constructor(
 
     fun saveEdits() {
         val layout = _editingLayout.value ?: return
-        viewModelScope.launch {
-            repository.saveLayout(layout.toKeyLayout())
-        }
-        // Optimistically update in-memory list
+        viewModelScope.launch { repository.saveLayout(layout.toKeyLayout()) }
         val updated = _layouts.value.toMutableList()
         val existingIdx = updated.indexOfFirst { it.name == layout.name }
         if (existingIdx >= 0) updated[existingIdx] = layout else updated.add(layout)
@@ -105,16 +104,17 @@ class MainViewModel @Inject constructor(
         _selectedButtonId.value = if (_selectedButtonId.value == id) null else id
     }
 
-    fun clearSelection() {
-        _selectedButtonId.value = null
-    }
-
     // ── Button CRUD ───────────────────────────────────────────────────────────
 
-    fun addButton(button: GridButton) {
-        _editingLayout.value = _editingLayout.value?.let {
-            it.copy(buttons = it.buttons + button)
+    fun addButton(label: String, code: String) {
+        val layout = _editingLayout.value ?: return
+        val cell = layout.findFirstEmptyCell()
+        if (cell == null) {
+            emitError("No empty space available in this layout")
+            return
         }
+        val button = GridButton(label = label, code = code, col = cell.first, row = cell.second)
+        _editingLayout.value = layout.copy(buttons = layout.buttons + button)
         _selectedButtonId.value = button.id
     }
 
@@ -138,15 +138,39 @@ class MainViewModel @Inject constructor(
     // ── Drag to move ──────────────────────────────────────────────────────────
 
     fun moveButton(buttonId: String, newCol: Int, newRow: Int) {
-        _editingLayout.value = _editingLayout.value?.let { layout ->
-            layout.copy(buttons = layout.buttons.map { btn ->
-                if (btn.id == buttonId)
-                    btn.copy(
-                        col = newCol.coerceIn(0, layout.columns - btn.colSpan),
-                        row = newRow.coerceIn(0, layout.rows - btn.rowSpan)
-                    )
-                else btn
-            })
+        val layout = _editingLayout.value ?: return
+        val button = layout.buttons.find { it.id == buttonId } ?: return
+        val col = newCol.coerceIn(0, layout.columns - button.colSpan)
+        val row = newRow.coerceIn(0, layout.rows - button.rowSpan)
+        if (layout.wouldOverlap(buttonId, col, row, button.colSpan, button.rowSpan)) return
+        _editingLayout.value = layout.copy(
+            buttons = layout.buttons.map { if (it.id == buttonId) it.copy(col = col, row = row) else it }
+        )
+    }
+
+    // ── Resize ────────────────────────────────────────────────────────────────
+
+    fun resizeButton(buttonId: String, newColSpan: Int, newRowSpan: Int) {
+        val layout = _editingLayout.value ?: return
+        val button = layout.buttons.find { it.id == buttonId } ?: return
+        val colSpan = newColSpan.coerceIn(1, layout.columns - button.col)
+        val rowSpan = newRowSpan.coerceIn(1, layout.rows - button.row)
+        if (layout.wouldOverlap(buttonId, button.col, button.row, colSpan, rowSpan)) {
+            emitError("Cannot resize: overlaps another button")
+            return
+        }
+        _editingLayout.value = layout.copy(
+            buttons = layout.buttons.map { if (it.id == buttonId) it.copy(colSpan = colSpan, rowSpan = rowSpan) else it }
+        )
+    }
+
+    // ── Error display ─────────────────────────────────────────────────────────
+
+    private fun emitError(message: String) {
+        _errorMessage.value = message
+        viewModelScope.launch {
+            delay(3_000)
+            _errorMessage.value = null
         }
     }
 }

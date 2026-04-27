@@ -1,9 +1,12 @@
 package com.pcpad.ui.screen
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.offset
@@ -44,7 +47,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import com.pcpad.data.model.GridButton
 import com.pcpad.data.model.GridLayout
 import com.pcpad.ui.theme.TabAccent
 import com.pcpad.ui.viewmodel.MainViewModel
@@ -57,8 +59,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val layouts by viewModel.layouts.collectAsState()
     val displayLayout by viewModel.displayLayout.collectAsState()
     val selectedButtonId by viewModel.selectedButtonId.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
 
-    // Dialog state
     var showButtonDialog by remember { mutableStateOf(false) }
     var dialogLabel by remember { mutableStateOf("") }
     var dialogCode by remember { mutableStateOf("") }
@@ -89,9 +91,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     if (dialogIsEdit) {
                         viewModel.updateSelectedButton(dialogLabel, dialogCode)
                     } else {
-                        viewModel.addButton(
-                            GridButton(label = dialogLabel, code = dialogCode, col = 0, row = 0)
-                        )
+                        viewModel.addButton(dialogLabel, dialogCode)
                     }
                     showButtonDialog = false
                 }) { Text("OK") }
@@ -114,6 +114,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             if (isEditMode) {
                 EditModeBar(
                     hasSelection = selectedButtonId != null,
+                    errorMessage = errorMessage,
                     onAdd = {
                         dialogLabel = ""
                         dialogCode = ""
@@ -149,6 +150,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 onKeyPress = viewModel::onKeyPress,
                 onSelectButton = viewModel::selectButton,
                 onMoveButton = viewModel::moveButton,
+                onResizeButton = viewModel::resizeButton,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -166,10 +168,7 @@ private fun NormalModeBar(
     onEnterEditMode: () -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        TabRow(
-            selectedTabIndex = selectedIndex,
-            modifier = Modifier.weight(1f)
-        ) {
+        TabRow(selectedTabIndex = selectedIndex, modifier = Modifier.weight(1f)) {
             layouts.forEachIndexed { index, layout ->
                 Tab(
                     selected = index == selectedIndex,
@@ -187,25 +186,36 @@ private fun NormalModeBar(
 @Composable
 private fun EditModeBar(
     hasSelection: Boolean,
+    errorMessage: String?,
     onAdd: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        TextButton(onClick = onAdd) { Text("Add") }
-        TextButton(onClick = onEdit, enabled = hasSelection) { Text("Edit") }
-        TextButton(onClick = onDelete, enabled = hasSelection) { Text("Delete") }
-        Spacer(modifier = Modifier.weight(1f))
-        TextButton(onClick = onSave) { Text("Save") }
-        TextButton(onClick = onCancel) { Text("Cancel") }
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onAdd) { Text("Add") }
+            TextButton(onClick = onEdit, enabled = hasSelection) { Text("Edit") }
+            TextButton(onClick = onDelete, enabled = hasSelection) { Text("Delete") }
+            Spacer(modifier = Modifier.weight(1f))
+            TextButton(onClick = onSave) { Text("Save") }
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        }
+        if (errorMessage != null) {
+            Text(
+                text = errorMessage,
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+        }
     }
 }
 
@@ -217,32 +227,31 @@ private fun KeyGrid(
     onKeyPress: (String) -> Unit,
     onSelectButton: (String) -> Unit,
     onMoveButton: (String, Int, Int) -> Unit,
+    onResizeButton: (String, Int, Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
+    val handleSize = 20.dp
+    val gap = 3.dp
 
     BoxWithConstraints(modifier = modifier) {
         val cellW = maxWidth / layout.columns
         val cellH = maxHeight / layout.rows
         val cellWPx = with(density) { cellW.toPx() }
         val cellHPx = with(density) { cellH.toPx() }
-        val gap = 3.dp
 
         layout.buttons.forEach { button ->
             var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
             var isDragging by remember(button.id) { mutableStateOf(false) }
+            var resizeDragPx by remember(button.id) { mutableStateOf(Offset.Zero) }
 
             val bx = cellW * button.col
             val by = cellH * button.row
             val bw = cellW * button.colSpan - gap
             val bh = cellH * button.rowSpan - gap
-
             val isSelected = button.id == selectedButtonId
-            val borderColor = when {
-                isSelected -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.outline
-            }
 
+            // ── Button ────────────────────────────────────────────────────────
             OutlinedButton(
                 onClick = {
                     if (isEditMode) onSelectButton(button.id) else onKeyPress(button.code)
@@ -253,36 +262,33 @@ private fun KeyGrid(
                     .zIndex(if (isDragging) 10f else 0f)
                     .offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }
                     .then(
-                        if (isEditMode) {
-                            Modifier.pointerInput(button.id) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = {
-                                        isDragging = true
-                                        onSelectButton(button.id)
-                                    },
-                                    onDrag = { change, delta ->
-                                        change.consume()
-                                        dragOffset += delta
-                                    },
-                                    onDragEnd = {
-                                        val newCol = ((button.col * cellWPx + dragOffset.x) / cellWPx)
-                                            .roundToInt()
-                                        val newRow = ((button.row * cellHPx + dragOffset.y) / cellHPx)
-                                            .roundToInt()
-                                        onMoveButton(button.id, newCol, newRow)
-                                        isDragging = false
-                                        dragOffset = Offset.Zero
-                                    },
-                                    onDragCancel = {
-                                        isDragging = false
-                                        dragOffset = Offset.Zero
-                                    }
-                                )
-                            }
+                        if (isEditMode) Modifier.pointerInput(button.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    isDragging = true
+                                    onSelectButton(button.id)
+                                },
+                                onDrag = { change, delta ->
+                                    change.consume()
+                                    dragOffset += delta
+                                },
+                                onDragEnd = {
+                                    val newCol = ((button.col * cellWPx + dragOffset.x) / cellWPx).roundToInt()
+                                    val newRow = ((button.row * cellHPx + dragOffset.y) / cellHPx).roundToInt()
+                                    onMoveButton(button.id, newCol, newRow)
+                                    isDragging = false
+                                    dragOffset = Offset.Zero
+                                },
+                                onDragCancel = {
+                                    isDragging = false
+                                    dragOffset = Offset.Zero
+                                }
+                            )
                         } else Modifier
                     ),
                 shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(if (isSelected) 2.dp else 1.dp, borderColor),
+                border = BorderStroke(if (isSelected) 2.dp else 1.dp,
+                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline),
                 colors = ButtonDefaults.outlinedButtonColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface
@@ -296,6 +302,35 @@ private fun KeyGrid(
                     maxLines = 2,
                     overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Center
+                )
+            }
+
+            // ── Resize handle (selected button only, not while dragging) ──────
+            if (isEditMode && isSelected && !isDragging) {
+                Box(
+                    modifier = Modifier
+                        .absoluteOffset(
+                            x = bx + bw - handleSize + gap,
+                            y = by + bh - handleSize + gap
+                        )
+                        .size(handleSize)
+                        .zIndex(20f)
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))
+                        .pointerInput(button.id + "_resize") {
+                            detectDragGestures(
+                                onDragEnd = {
+                                    val dCols = (resizeDragPx.x / cellWPx).roundToInt()
+                                    val dRows = (resizeDragPx.y / cellHPx).roundToInt()
+                                    onResizeButton(button.id, button.colSpan + dCols, button.rowSpan + dRows)
+                                    resizeDragPx = Offset.Zero
+                                },
+                                onDragCancel = { resizeDragPx = Offset.Zero },
+                                onDrag = { change, delta ->
+                                    change.consume()
+                                    resizeDragPx += delta
+                                }
+                            )
+                        }
                 )
             }
         }

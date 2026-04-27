@@ -3,6 +3,7 @@ package com.pcpad.di
 import android.content.Context
 import com.pcpad.data.db.AppDatabase
 import com.pcpad.data.db.LayoutDao
+import com.pcpad.data.db.ProfileDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -22,4 +23,8 @@ object AppModule {
     @Provides
     @Singleton
     fun provideLayoutDao(db: AppDatabase): LayoutDao = db.layoutDao()
+
+    @Provides
+    @Singleton
+    fun provideProfileDao(db: AppDatabase): ProfileDao = db.profileDao()
 }

@@ -11,8 +11,11 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface LayoutDao {
 
-    @Query("SELECT * FROM key_layouts ORDER BY name ASC")
-    fun getAll(): Flow<List<KeyLayout>>
+    @Query("SELECT * FROM key_layouts WHERE profileId = :profileId ORDER BY name ASC")
+    fun getByProfile(profileId: Long): Flow<List<KeyLayout>>
+
+    @Query("SELECT * FROM key_layouts WHERE profileId = :profileId ORDER BY name ASC")
+    suspend fun getByProfileOnce(profileId: Long): List<KeyLayout>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(layout: KeyLayout)

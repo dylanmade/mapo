@@ -2,6 +2,9 @@
 .gradle/
 build/
 
+# claude files
+.claude/
+
 # IDE files
 *.iml
 .idea/

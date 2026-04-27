@@ -9,7 +9,7 @@ import javax.inject.Singleton
 @Singleton
 class LayoutRepository @Inject constructor(private val dao: LayoutDao) {
 
-    fun getLayouts(): Flow<List<KeyLayout>> = dao.getAll()
+    fun getLayoutsByProfile(profileId: Long): Flow<List<KeyLayout>> = dao.getByProfile(profileId)
 
     suspend fun saveLayout(layout: KeyLayout) = dao.insert(layout)
 

@@ -19,9 +19,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -32,12 +38,14 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +62,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.pcpad.data.model.GridLayout
 import com.pcpad.ui.theme.TabAccent
 import com.pcpad.ui.viewmodel.MainViewModel
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
@@ -63,6 +72,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val layouts by viewModel.layouts.collectAsState()
     val displayLayout by viewModel.displayLayout.collectAsState()
     val selectedButtonId by viewModel.selectedButtonId.collectAsState()
+    val activeProfile by viewModel.activeProfile.collectAsState()
+    val profiles by viewModel.profiles.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
@@ -71,10 +82,14 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         }
     }
 
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
     var showButtonDialog by remember { mutableStateOf(false) }
     var dialogLabel by remember { mutableStateOf("") }
     var dialogCode by remember { mutableStateOf("") }
     var dialogIsEdit by remember { mutableStateOf(false) }
+    var showProfilePicker by remember { mutableStateOf(false) }
 
     if (showButtonDialog) {
         AlertDialog(
@@ -112,60 +127,89 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         )
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
-    ) { _ ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-        ) {
-            if (isEditMode) {
-                EditModeBar(
-                    hasSelection = selectedButtonId != null,
-                    onAdd = {
-                        dialogLabel = ""
-                        dialogCode = ""
-                        dialogIsEdit = false
-                        showButtonDialog = true
-                    },
-                    onEdit = {
-                        val btn = displayLayout.buttons.find { it.id == selectedButtonId }
-                        if (btn != null) {
-                            dialogLabel = btn.label
-                            dialogCode = btn.code
-                            dialogIsEdit = true
+    if (showProfilePicker) {
+        ProfilePickerDialog(
+            profiles = profiles,
+            activeProfileId = activeProfile?.id,
+            onDismiss = { showProfilePicker = false },
+            onSelect = { profile ->
+                viewModel.selectProfile(profile)
+                showProfilePicker = false
+            },
+            onAdd = { name -> viewModel.addProfile(name) },
+            onDuplicate = { profile -> viewModel.duplicateProfile(profile) },
+            onDelete = { profile -> viewModel.deleteProfile(profile) }
+        )
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ProfileDrawerContent(
+                activeProfile = activeProfile,
+                onChangeProfile = {
+                    showProfilePicker = true
+                    scope.launch { drawerState.close() }
+                }
+            )
+        }
+    ) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
+        ) { _ ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+            ) {
+                if (isEditMode) {
+                    EditModeBar(
+                        hasSelection = selectedButtonId != null,
+                        onAdd = {
+                            dialogLabel = ""
+                            dialogCode = ""
+                            dialogIsEdit = false
                             showButtonDialog = true
-                        }
-                    },
-                    onDelete = { viewModel.deleteSelectedButton() },
-                    onSave = { viewModel.saveEdits() },
-                    onCancel = { viewModel.cancelEdits() }
-                )
-            } else {
-                NormalModeBar(
-                    layouts = layouts,
-                    selectedIndex = selectedIndex,
-                    onSelectLayout = { viewModel.selectLayout(it) },
-                    onEnterEditMode = { viewModel.enterEditMode() }
+                        },
+                        onEdit = {
+                            val btn = displayLayout.buttons.find { it.id == selectedButtonId }
+                            if (btn != null) {
+                                dialogLabel = btn.label
+                                dialogCode = btn.code
+                                dialogIsEdit = true
+                                showButtonDialog = true
+                            }
+                        },
+                        onDelete = { viewModel.deleteSelectedButton() },
+                        onSave = { viewModel.saveEdits() },
+                        onCancel = { viewModel.cancelEdits() }
+                    )
+                } else {
+                    NormalModeBar(
+                        layouts = layouts,
+                        selectedIndex = selectedIndex,
+                        onSelectLayout = { viewModel.selectLayout(it) },
+                        onEnterEditMode = { viewModel.enterEditMode() },
+                        onOpenDrawer = { scope.launch { drawerState.open() } }
+                    )
+                }
+
+                KeyGrid(
+                    layout = displayLayout,
+                    isEditMode = isEditMode,
+                    selectedButtonId = selectedButtonId,
+                    onKeyPress = viewModel::onKeyPress,
+                    onSelectButton = viewModel::selectButton,
+                    onMoveButton = viewModel::moveButton,
+                    onResizeButton = viewModel::resizeButton,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(4.dp)
                 )
             }
-
-            KeyGrid(
-                layout = displayLayout,
-                isEditMode = isEditMode,
-                selectedButtonId = selectedButtonId,
-                onKeyPress = viewModel::onKeyPress,
-                onSelectButton = viewModel::selectButton,
-                onMoveButton = viewModel::moveButton,
-                onResizeButton = viewModel::resizeButton,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(4.dp)
-            )
         }
     }
 }
@@ -175,9 +219,13 @@ private fun NormalModeBar(
     layouts: List<GridLayout>,
     selectedIndex: Int,
     onSelectLayout: (Int) -> Unit,
-    onEnterEditMode: () -> Unit
+    onEnterEditMode: () -> Unit,
+    onOpenDrawer: () -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onOpenDrawer) {
+            Icon(Icons.Default.Menu, contentDescription = "Open menu")
+        }
         TabRow(selectedTabIndex = selectedIndex, modifier = Modifier.weight(1f)) {
             layouts.forEachIndexed { index, layout ->
                 Tab(

@@ -5,11 +5,13 @@ import androidx.lifecycle.viewModelScope
 import com.pcpad.data.defaults.DefaultLayouts
 import com.pcpad.data.model.GridButton
 import com.pcpad.data.model.GridLayout
+import com.pcpad.data.model.Profile
 import com.pcpad.data.model.findFirstEmptyCell
 import com.pcpad.data.model.toGridLayout
 import com.pcpad.data.model.toKeyLayout
 import com.pcpad.data.model.wouldOverlap
 import com.pcpad.data.repository.LayoutRepository
+import com.pcpad.data.repository.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,13 +21,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    private val repository: LayoutRepository
+    private val layoutRepository: LayoutRepository,
+    private val profileRepository: ProfileRepository
 ) : ViewModel() {
 
     private val _layouts = MutableStateFlow(DefaultLayouts.all)
@@ -46,6 +53,12 @@ class MainViewModel @Inject constructor(
     private val _toastMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val toastMessage: SharedFlow<String> = _toastMessage.asSharedFlow()
 
+    private val _activeProfile = MutableStateFlow<Profile?>(null)
+    val activeProfile: StateFlow<Profile?> = _activeProfile.asStateFlow()
+
+    private val _profiles = MutableStateFlow<List<Profile>>(emptyList())
+    val profiles: StateFlow<List<Profile>> = _profiles.asStateFlow()
+
     val displayLayout: StateFlow<GridLayout> = combine(
         _selectedIndex, _isEditMode, _editingLayout, _layouts
     ) { index, editMode, editLayout, layouts ->
@@ -54,12 +67,52 @@ class MainViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            repository.getLayouts().collect { roomLayouts ->
+            profileRepository.getAllProfiles().collect { _profiles.value = it }
+        }
+        viewModelScope.launch {
+            profileRepository.getDefaultProfile().collect { profile ->
+                if (_activeProfile.value == null && profile != null) {
+                    _activeProfile.value = profile
+                }
+            }
+        }
+        viewModelScope.launch {
+            _activeProfile.filterNotNull().flatMapLatest { profile ->
+                layoutRepository.getLayoutsByProfile(profile.id)
+            }.collect { roomLayouts ->
                 val persisted = roomLayouts.map { it.toGridLayout() }
                 val overrideMap = persisted.associateBy { it.name }
                 val defaultNames = DefaultLayouts.all.map { it.name }.toSet()
                 val customNew = persisted.filter { it.name !in defaultNames }
                 _layouts.value = DefaultLayouts.all.map { overrideMap[it.name] ?: it } + customNew
+            }
+        }
+    }
+
+    // ── Profile ───────────────────────────────────────────────────────────────
+
+    fun selectProfile(profile: Profile) {
+        _activeProfile.value = profile
+        _selectedIndex.value = 0
+    }
+
+    fun addProfile(name: String) {
+        viewModelScope.launch { profileRepository.addProfile(name) }
+    }
+
+    fun duplicateProfile(source: Profile) {
+        viewModelScope.launch {
+            profileRepository.duplicateProfile(source, "Copy of ${source.name}")
+        }
+    }
+
+    fun deleteProfile(profile: Profile) {
+        val defaultProfile = _profiles.value.firstOrNull { it.isDefault }
+        viewModelScope.launch {
+            profileRepository.deleteProfile(profile)
+            if (_activeProfile.value?.id == profile.id && defaultProfile != null) {
+                _activeProfile.value = defaultProfile
+                _selectedIndex.value = 0
             }
         }
     }
@@ -90,7 +143,8 @@ class MainViewModel @Inject constructor(
 
     fun saveEdits() {
         val layout = _editingLayout.value ?: return
-        viewModelScope.launch { repository.saveLayout(layout.toKeyLayout()) }
+        val profileId = _activeProfile.value?.id ?: return
+        viewModelScope.launch { layoutRepository.saveLayout(layout.toKeyLayout(profileId)) }
         val updated = _layouts.value.toMutableList()
         val existingIdx = updated.indexOfFirst { it.name == layout.name }
         if (existingIdx >= 0) updated[existingIdx] = layout else updated.add(layout)

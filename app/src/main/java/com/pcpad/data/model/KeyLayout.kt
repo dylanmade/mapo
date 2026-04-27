@@ -1,13 +1,25 @@
 package com.pcpad.data.model
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 
-@Entity(tableName = "key_layouts")
+@Entity(
+    tableName = "key_layouts",
+    foreignKeys = [ForeignKey(
+        entity = Profile::class,
+        parentColumns = ["id"],
+        childColumns = ["profileId"],
+        onDelete = ForeignKey.CASCADE
+    )],
+    indices = [Index("profileId")]
+)
 data class KeyLayout(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val profileId: Long,
     val name: String,
     val columns: Int,
     val rows: Int,
@@ -24,8 +36,9 @@ fun KeyLayout.toGridLayout(): GridLayout = GridLayout(
     buttons = gson.fromJson(buttonsJson, object : TypeToken<List<GridButton>>() {}.type)
 )
 
-fun GridLayout.toKeyLayout(): KeyLayout = KeyLayout(
+fun GridLayout.toKeyLayout(profileId: Long): KeyLayout = KeyLayout(
     id = id,
+    profileId = profileId,
     name = name,
     columns = columns,
     rows = rows,

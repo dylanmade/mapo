@@ -11,10 +11,12 @@ import com.pcpad.data.model.toKeyLayout
 import com.pcpad.data.model.wouldOverlap
 import com.pcpad.data.repository.LayoutRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -41,8 +43,8 @@ class MainViewModel @Inject constructor(
     private val _selectedButtonId = MutableStateFlow<String?>(null)
     val selectedButtonId: StateFlow<String?> = _selectedButtonId.asStateFlow()
 
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+    private val _toastMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val toastMessage: SharedFlow<String> = _toastMessage.asSharedFlow()
 
     val displayLayout: StateFlow<GridLayout> = combine(
         _selectedIndex, _isEditMode, _editingLayout, _layouts
@@ -167,10 +169,6 @@ class MainViewModel @Inject constructor(
     // ── Error display ─────────────────────────────────────────────────────────
 
     private fun emitError(message: String) {
-        _errorMessage.value = message
-        viewModelScope.launch {
-            delay(3_000)
-            _errorMessage.value = null
-        }
+        _toastMessage.tryEmit(message)
     }
 }

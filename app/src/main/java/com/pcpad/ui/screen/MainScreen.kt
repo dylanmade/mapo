@@ -24,12 +24,16 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,7 +63,13 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val layouts by viewModel.layouts.collectAsState()
     val displayLayout by viewModel.displayLayout.collectAsState()
     val selectedButtonId by viewModel.selectedButtonId.collectAsState()
-    val errorMessage by viewModel.errorMessage.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        viewModel.toastMessage.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
 
     var showButtonDialog by remember { mutableStateOf(false) }
     var dialogLabel by remember { mutableStateOf("") }
@@ -102,10 +112,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         )
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
+    ) { _ ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -114,7 +125,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             if (isEditMode) {
                 EditModeBar(
                     hasSelection = selectedButtonId != null,
-                    errorMessage = errorMessage,
                     onAdd = {
                         dialogLabel = ""
                         dialogCode = ""
@@ -186,7 +196,6 @@ private fun NormalModeBar(
 @Composable
 private fun EditModeBar(
     hasSelection: Boolean,
-    errorMessage: String?,
     onAdd: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -207,14 +216,6 @@ private fun EditModeBar(
             Spacer(modifier = Modifier.weight(1f))
             TextButton(onClick = onSave) { Text("Save") }
             TextButton(onClick = onCancel) { Text("Cancel") }
-        }
-        if (errorMessage != null) {
-            Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 12.dp)
-            )
         }
     }
 }

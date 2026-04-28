@@ -19,6 +19,9 @@ class InputAccessibilityService : AccessibilityService() {
         // Active profile's remap mappings — updated by MainViewModel.
         @Volatile var currentMappings: Map<DeviceButton, RemapTarget> = emptyMap()
 
+        // Remapping on/off toggle — updated by MainViewModel.
+        @Volatile var remapEnabled: Boolean = false
+
         // Physical gamepad keycodes → DeviceButton enum
         private val GAMEPAD_KEYCODE_MAP: Map<Int, DeviceButton> = mapOf(
             KeyEvent.KEYCODE_BUTTON_A      to DeviceButton.BUTTON_A,
@@ -83,6 +86,7 @@ class InputAccessibilityService : AccessibilityService() {
     // ── Physical button interception (remap) ──────────────────────────────────
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (!remapEnabled) return false
         Log.d(TAG, "onKeyEvent: keyCode=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} mappings=${currentMappings.size}")
 
         val deviceButton = GAMEPAD_KEYCODE_MAP[event.keyCode] ?: return false

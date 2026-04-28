@@ -65,6 +65,9 @@ class MainViewModel @Inject constructor(
     private val _profiles = MutableStateFlow<List<Profile>>(emptyList())
     val profiles: StateFlow<List<Profile>> = _profiles.asStateFlow()
 
+    private val _remapEnabled = MutableStateFlow(false)
+    val remapEnabled: StateFlow<Boolean> = _remapEnabled.asStateFlow()
+
     private val _showRemapControls = MutableStateFlow(false)
     val showRemapControls: StateFlow<Boolean> = _showRemapControls.asStateFlow()
 
@@ -141,6 +144,12 @@ class MainViewModel @Inject constructor(
                 _selectedIndex.value = 0
             }
         }
+    }
+
+    fun toggleRemap() {
+        val enabled = !_remapEnabled.value
+        _remapEnabled.value = enabled
+        InputAccessibilityService.remapEnabled = enabled
     }
 
     fun openRemapControls() { _showRemapControls.value = true }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DrawerValue
@@ -84,6 +85,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 
     val showRemapControls by viewModel.showRemapControls.collectAsState()
     val activeProfileMappings by viewModel.activeProfileMappings.collectAsState()
+    val remapEnabled by viewModel.remapEnabled.collectAsState()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -186,9 +188,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     NormalModeBar(
                         layouts = layouts,
                         selectedIndex = selectedIndex,
+                        remapEnabled = remapEnabled,
                         onSelectLayout = { viewModel.selectLayout(it) },
                         onEnterEditMode = { viewModel.enterEditMode() },
-                        onOpenDrawer = { scope.launch { drawerState.open() } }
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onToggleRemap = { viewModel.toggleRemap() }
                     )
                 }
 
@@ -223,13 +227,24 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 private fun NormalModeBar(
     layouts: List<GridLayout>,
     selectedIndex: Int,
+    remapEnabled: Boolean,
     onSelectLayout: (Int) -> Unit,
     onEnterEditMode: () -> Unit,
-    onOpenDrawer: () -> Unit
+    onOpenDrawer: () -> Unit,
+    onToggleRemap: () -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
             Icon(Icons.Default.Menu, contentDescription = "Open menu", modifier = Modifier.size(20.dp))
+        }
+        IconButton(onClick = onToggleRemap, modifier = Modifier.size(40.dp)) {
+            Icon(
+                Icons.Default.SportsEsports,
+                contentDescription = if (remapEnabled) "Disable remapping" else "Enable remapping",
+                modifier = Modifier.size(20.dp),
+                tint = if (remapEnabled) MaterialTheme.colorScheme.primary
+                       else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         TabRow(selectedTabIndex = selectedIndex, modifier = Modifier.weight(1f)) {
             layouts.forEachIndexed { index, layout ->

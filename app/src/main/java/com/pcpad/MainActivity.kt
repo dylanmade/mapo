@@ -1,5 +1,7 @@
 package com.pcpad
 
+import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -18,6 +20,12 @@ class MainActivity : ComponentActivity() {
         // Touch events still work normally; only hardware keyboard/gamepad focus is withheld.
         window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.decorView.viewTreeObserver.addOnGlobalLayoutListener {
+                val dv = window.decorView
+                dv.systemGestureExclusionRects = listOf(Rect(0, 0, dv.width, dv.height))
+            }
+        }
 
         // TODO: Secondary display detection for AYN Thor secondary screen.
         // Use DisplayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)

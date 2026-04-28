@@ -16,5 +16,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "pcpad"
+rootProject.name = "mapo"
 include(":app")

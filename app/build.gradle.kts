@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.pcpad"
+    namespace = "com.mapo"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.pcpad"
+        applicationId = "com.mapo"
         minSdk = 26
         targetSdk = 37
         versionCode = 1

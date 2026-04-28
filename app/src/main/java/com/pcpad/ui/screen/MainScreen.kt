@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,7 +34,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -89,7 +89,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     var dialogLabel by remember { mutableStateOf("") }
     var dialogCode by remember { mutableStateOf("") }
     var dialogIsEdit by remember { mutableStateOf(false) }
-    var showProfilePicker by remember { mutableStateOf(false) }
 
     if (showButtonDialog) {
         AlertDialog(
@@ -127,30 +126,19 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         )
     }
 
-    if (showProfilePicker) {
-        ProfilePickerDialog(
-            profiles = profiles,
-            activeProfileId = activeProfile?.id,
-            onDismiss = { showProfilePicker = false },
-            onSelect = { profile ->
-                viewModel.selectProfile(profile)
-                showProfilePicker = false
-            },
-            onAdd = { name -> viewModel.addProfile(name) },
-            onDuplicate = { profile -> viewModel.duplicateProfile(profile) },
-            onDelete = { profile -> viewModel.deleteProfile(profile) }
-        )
-    }
-
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ProfileDrawerContent(
+                profiles = profiles,
                 activeProfile = activeProfile,
-                onChangeProfile = {
-                    showProfilePicker = true
+                onSelectProfile = { profile ->
+                    viewModel.selectProfile(profile)
                     scope.launch { drawerState.close() }
-                }
+                },
+                onAddProfile = { name -> viewModel.addProfile(name) },
+                onDuplicateProfile = { profile -> viewModel.duplicateProfile(profile) },
+                onDeleteProfile = { profile -> viewModel.deleteProfile(profile) }
             )
         }
     ) {
@@ -223,20 +211,25 @@ private fun NormalModeBar(
     onOpenDrawer: () -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onOpenDrawer) {
-            Icon(Icons.Default.Menu, contentDescription = "Open menu")
+        IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
+            Icon(Icons.Default.Menu, contentDescription = "Open menu", modifier = Modifier.size(20.dp))
         }
         TabRow(selectedTabIndex = selectedIndex, modifier = Modifier.weight(1f)) {
             layouts.forEachIndexed { index, layout ->
                 Tab(
                     selected = index == selectedIndex,
                     onClick = { onSelectLayout(index) },
-                    text = { Text(layout.name) }
+                    modifier = Modifier.height(40.dp),
+                    text = { Text(layout.name, fontSize = 12.sp) }
                 )
             }
         }
-        TextButton(onClick = onEnterEditMode) {
-            Text("Edit", color = TabAccent)
+        TextButton(
+            onClick = onEnterEditMode,
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            modifier = Modifier.height(40.dp)
+        ) {
+            Text("Edit", color = TabAccent, fontSize = 12.sp)
         }
     }
 }
@@ -250,21 +243,21 @@ private fun EditModeBar(
     onSave: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(onClick = onAdd) { Text("Add") }
-            TextButton(onClick = onEdit, enabled = hasSelection) { Text("Edit") }
-            TextButton(onClick = onDelete, enabled = hasSelection) { Text("Delete") }
-            Spacer(modifier = Modifier.weight(1f))
-            TextButton(onClick = onSave) { Text("Save") }
-            TextButton(onClick = onCancel) { Text("Cancel") }
-        }
+    val btnPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(onClick = onAdd, contentPadding = btnPadding) { Text("Add", fontSize = 12.sp) }
+        TextButton(onClick = onEdit, enabled = hasSelection, contentPadding = btnPadding) { Text("Edit", fontSize = 12.sp) }
+        TextButton(onClick = onDelete, enabled = hasSelection, contentPadding = btnPadding) { Text("Delete", fontSize = 12.sp) }
+        Spacer(modifier = Modifier.weight(1f))
+        TextButton(onClick = onSave, contentPadding = btnPadding) { Text("Save", fontSize = 12.sp) }
+        TextButton(onClick = onCancel, contentPadding = btnPadding) { Text("Cancel", fontSize = 12.sp) }
     }
 }
 

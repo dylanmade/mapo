@@ -18,9 +18,13 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile private var INSTANCE: AppDatabase? = null
 
         private val seedCallback = object : RoomDatabase.Callback() {
-            override fun onCreate(db: SupportSQLiteDatabase) {
-                super.onCreate(db)
-                db.execSQL("INSERT INTO profiles (name, isDefault) VALUES ('Default', 1)")
+            override fun onOpen(db: SupportSQLiteDatabase) {
+                super.onOpen(db)
+                db.execSQL(
+                    "INSERT INTO profiles (name, isDefault) " +
+                    "SELECT 'Default', 1 " +
+                    "WHERE NOT EXISTS (SELECT 1 FROM profiles WHERE isDefault = 1)"
+                )
             }
         }
 

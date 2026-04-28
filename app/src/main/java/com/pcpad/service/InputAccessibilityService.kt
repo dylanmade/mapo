@@ -1,6 +1,7 @@
 package com.pcpad.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
 import android.os.SystemClock
 import android.util.Log
@@ -63,7 +64,12 @@ class InputAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        Log.i(TAG, "Service connected")
+        // Set programmatically — XML config is cached by Android and may not reflect
+        // changes until the service is manually toggled off/on in Settings.
+        val info = serviceInfo
+        info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+        setServiceInfo(info)
+        Log.i(TAG, "Service connected, flags=0x${serviceInfo.flags.toString(16)} capabilities=0x${serviceInfo.capabilities.toString(16)}")
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -77,12 +83,15 @@ class InputAccessibilityService : AccessibilityService() {
     // ── Physical button interception (remap) ──────────────────────────────────
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        Log.d(TAG, "onKeyEvent: keyCode=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} mappings=${currentMappings.size}")
+
         val deviceButton = GAMEPAD_KEYCODE_MAP[event.keyCode] ?: return false
         val target = currentMappings[deviceButton]
 
         // No mapping or explicitly Unbound → pass through to game
         if (target == null || target is RemapTarget.Unbound) return false
 
+        Log.d(TAG, "Remapping $deviceButton → $target (isDown=${event.action == KeyEvent.ACTION_DOWN})")
         val isDown = event.action == KeyEvent.ACTION_DOWN
         dispatchRemapTarget(target, isDown)
         return true // consume the physical event

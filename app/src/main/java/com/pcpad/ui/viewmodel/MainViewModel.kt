@@ -104,11 +104,13 @@ class MainViewModel @Inject constructor(
         }
         viewModelScope.launch {
             activeProfileMappings.collect { rawMappings ->
-                InputAccessibilityService.currentMappings = rawMappings
+                val mapped = rawMappings
                     .mapNotNull { (key, value) ->
                         runCatching { DeviceButton.valueOf(key) }.getOrNull()?.let { it to value }
                     }
                     .toMap()
+                InputAccessibilityService.currentMappings = mapped
+                android.util.Log.d("MainViewModel", "Pushed ${mapped.size} remap entries to service: $mapped")
             }
         }
     }

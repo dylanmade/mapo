@@ -27,7 +27,8 @@ object DefaultLayouts {
                             code = key.code,
                             col = colF.roundToInt(),
                             row = rowIndex,
-                            colSpan = max(1, (colF + spanF).roundToInt() - colF.roundToInt())
+                            colSpan = max(1, (colF + spanF).roundToInt() - colF.roundToInt()),
+                            topText = key.topText.ifEmpty { null }
                         )
                     )
                 }
@@ -38,9 +39,11 @@ object DefaultLayouts {
     }
 
     // ── Row-based source definitions ──────────────────────────────────────────
-    private fun k(label: String, code: String, weight: Float = 1f) = KeyDef(label, code, weight)
+    private fun k(label: String, code: String, weight: Float = 1f, topText: String = "") = KeyDef(label, code, weight, topText)
     private fun gap(weight: Float = 1f) = KeyDef("", "", weight)
 
+    // Wide-key weights are reduced toward 1f so standard letter keys get more
+    // tap-friendly width, while wider keys remain visually distinguishable.
     private val keysMainDef = LayoutDef(
         name = "Keys Main",
         rows = listOf(
@@ -50,30 +53,51 @@ object DefaultLayouts {
                 k("F9", "F9"), k("F10", "F10"), k("F11", "F11"), k("F12", "F12")
             ),
             listOf(
-                k("`", "GRAVE"), k("1", "1"), k("2", "2"), k("3", "3"), k("4", "4"),
-                k("5", "5"), k("6", "6"), k("7", "7"), k("8", "8"), k("9", "9"),
-                k("0", "0"), k("-", "MINUS"), k("=", "EQUALS"), k("⌫", "BACKSPACE", 2f)
+                k("`",  "GRAVE",         topText = "~"),
+                k("1",  "1",             topText = "!"),
+                k("2",  "2",             topText = "@"),
+                k("3",  "3",             topText = "#"),
+                k("4",  "4",             topText = "$"),
+                k("5",  "5",             topText = "%"),
+                k("6",  "6",             topText = "^"),
+                k("7",  "7",             topText = "&"),
+                k("8",  "8",             topText = "*"),
+                k("9",  "9",             topText = "("),
+                k("0",  "0",             topText = ")"),
+                k("-",  "MINUS",         topText = "_"),
+                k("=",  "EQUALS",        topText = "+"),
+                k("⌫",  "BACKSPACE", 1.5f)
             ),
             listOf(
-                k("Tab", "TAB", 1.5f), k("Q", "Q"), k("W", "W"), k("E", "E"), k("R", "R"),
+                k("Tab", "TAB", 1.25f),
+                k("Q", "Q"), k("W", "W"), k("E", "E"), k("R", "R"),
                 k("T", "T"), k("Y", "Y"), k("U", "U"), k("I", "I"), k("O", "O"), k("P", "P"),
-                k("[", "LEFT_BRACKET"), k("]", "RIGHT_BRACKET"), k("\\", "BACKSLASH", 1.5f)
+                k("[",  "LEFT_BRACKET",  topText = "{"),
+                k("]",  "RIGHT_BRACKET", topText = "}"),
+                k("\\", "BACKSLASH", 1.25f, topText = "|")
             ),
             listOf(
-                k("Caps", "CAPS_LOCK", 1.75f), k("A", "A"), k("S", "S"), k("D", "D"),
-                k("F", "F"), k("G", "G"), k("H", "H"), k("J", "J"), k("K", "K"),
-                k("L", "L"), k(";", "SEMICOLON"), k("'", "APOSTROPHE"), k("↵", "ENTER", 2.25f)
+                k("Caps", "CAPS_LOCK", 1.35f),
+                k("A", "A"), k("S", "S"), k("D", "D"), k("F", "F"),
+                k("G", "G"), k("H", "H"), k("J", "J"), k("K", "K"), k("L", "L"),
+                k(";",  "SEMICOLON",  topText = ":"),
+                k("'",  "APOSTROPHE", topText = "\""),
+                k("↵",  "ENTER", 1.65f)
             ),
             listOf(
-                k("Shift", "SHIFT_LEFT", 2.25f), k("Z", "Z"), k("X", "X"), k("C", "C"),
-                k("V", "V"), k("B", "B"), k("N", "N"), k("M", "M"),
-                k(",", "COMMA"), k(".", "PERIOD"), k("/", "SLASH"), k("Shift", "SHIFT_RIGHT", 2.75f)
+                k("Shift", "SHIFT_LEFT", 1.35f),
+                k("Z", "Z"), k("X", "X"), k("C", "C"), k("V", "V"),
+                k("B", "B"), k("N", "N"), k("M", "M"),
+                k(",",  "COMMA",  topText = "<"),
+                k(".",  "PERIOD", topText = ">"),
+                k("/",  "SLASH",  topText = "?"),
+                k("Shift", "SHIFT_RIGHT", 1.35f)
             ),
             listOf(
-                k("Ctrl", "CTRL_LEFT", 1.25f), k("Win", "META_LEFT", 1.25f),
-                k("Alt", "ALT_LEFT", 1.25f), k("Space", "SPACE", 7.5f),
-                k("Alt", "ALT_RIGHT", 1.25f), k("Menu", "MENU", 1.25f),
-                k("Ctrl", "CTRL_RIGHT", 1.25f)
+                k("Ctrl", "CTRL_LEFT"), k("Win", "META_LEFT"),
+                k("Alt", "ALT_LEFT"), k("Space", "SPACE", 6f),
+                k("Alt", "ALT_RIGHT"), k("Menu", "MENU"),
+                k("Ctrl", "CTRL_RIGHT")
             )
         )
     )

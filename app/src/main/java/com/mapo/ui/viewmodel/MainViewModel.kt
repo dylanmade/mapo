@@ -206,23 +206,40 @@ class MainViewModel @Inject constructor(
 
     // ── Button CRUD ───────────────────────────────────────────────────────────
 
-    fun addButton(label: String, code: String) {
+    fun addButton(
+        label: String, code: String,
+        topText: String = "", topAlign: String = "CENTER",
+        bottomText: String = "", bottomAlign: String = "CENTER"
+    ) {
         val layout = _editingLayout.value ?: return
         val cell = layout.findFirstEmptyCell()
         if (cell == null) {
             emitError("No empty space available in this layout")
             return
         }
-        val button = GridButton(label = label, code = code, col = cell.first, row = cell.second)
+        val button = GridButton(
+            label = label, code = code,
+            col = cell.first, row = cell.second,
+            topText = topText.ifEmpty { null }, topAlign = topAlign,
+            bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign
+        )
         _editingLayout.value = layout.copy(buttons = layout.buttons + button)
         _selectedButtonId.value = button.id
     }
 
-    fun updateSelectedButton(label: String, code: String) {
+    fun updateSelectedButton(
+        label: String, code: String,
+        topText: String, topAlign: String,
+        bottomText: String, bottomAlign: String
+    ) {
         val id = _selectedButtonId.value ?: return
         _editingLayout.value = _editingLayout.value?.let { layout ->
             layout.copy(buttons = layout.buttons.map { btn ->
-                if (btn.id == id) btn.copy(label = label, code = code) else btn
+                if (btn.id == id) btn.copy(
+                    label = label, code = code,
+                    topText = topText.ifEmpty { null }, topAlign = topAlign,
+                    bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign
+                ) else btn
             })
         }
     }

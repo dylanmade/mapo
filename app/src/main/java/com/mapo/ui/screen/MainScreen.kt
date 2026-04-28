@@ -47,10 +47,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -61,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.mapo.data.model.GridLayout
+import com.mapo.data.model.wouldOverlap
 import com.mapo.ui.theme.TabAccent
 import com.mapo.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -93,6 +96,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     var showButtonDialog by remember { mutableStateOf(false) }
     var dialogLabel by remember { mutableStateOf("") }
     var dialogCode by remember { mutableStateOf("") }
+    var dialogTopText by remember { mutableStateOf("") }
+    var dialogTopAlign by remember { mutableStateOf("CENTER") }
+    var dialogBottomText by remember { mutableStateOf("") }
+    var dialogBottomAlign by remember { mutableStateOf("CENTER") }
     var dialogIsEdit by remember { mutableStateOf(false) }
 
     if (showButtonDialog) {
@@ -101,6 +108,19 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             title = { Text(if (dialogIsEdit) "Edit Button" else "Add Button") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = dialogTopText,
+                            onValueChange = { dialogTopText = it },
+                            label = { Text("Top text") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        AlignSelector(selected = dialogTopAlign, onSelect = { dialogTopAlign = it })
+                    }
                     OutlinedTextField(
                         value = dialogLabel,
                         onValueChange = { dialogLabel = it },
@@ -113,14 +133,35 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         label = { Text("Key Code") },
                         singleLine = true
                     )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = dialogBottomText,
+                            onValueChange = { dialogBottomText = it },
+                            label = { Text("Bottom text") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        AlignSelector(selected = dialogBottomAlign, onSelect = { dialogBottomAlign = it })
+                    }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     if (dialogIsEdit) {
-                        viewModel.updateSelectedButton(dialogLabel, dialogCode)
+                        viewModel.updateSelectedButton(
+                            dialogLabel, dialogCode,
+                            dialogTopText, dialogTopAlign,
+                            dialogBottomText, dialogBottomAlign
+                        )
                     } else {
-                        viewModel.addButton(dialogLabel, dialogCode)
+                        viewModel.addButton(
+                            dialogLabel, dialogCode,
+                            dialogTopText, dialogTopAlign,
+                            dialogBottomText, dialogBottomAlign
+                        )
                     }
                     showButtonDialog = false
                 }) { Text("OK") }
@@ -168,6 +209,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         onAdd = {
                             dialogLabel = ""
                             dialogCode = ""
+                            dialogTopText = ""
+                            dialogTopAlign = "CENTER"
+                            dialogBottomText = ""
+                            dialogBottomAlign = "CENTER"
                             dialogIsEdit = false
                             showButtonDialog = true
                         },
@@ -176,6 +221,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             if (btn != null) {
                                 dialogLabel = btn.label
                                 dialogCode = btn.code
+                                dialogTopText = btn.topText ?: ""
+                                dialogTopAlign = btn.topAlign ?: "CENTER"
+                                dialogBottomText = btn.bottomText ?: ""
+                                dialogBottomAlign = btn.bottomAlign ?: "CENTER"
                                 dialogIsEdit = true
                                 showButtonDialog = true
                             }
@@ -307,6 +356,12 @@ private fun KeyGrid(
     val density = LocalDensity.current
     val handleSize = 20.dp
     val gap = 3.dp
+    val currentSelectedId by rememberUpdatedState(selectedButtonId)
+
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dropTargetCol by remember { mutableStateOf(0) }
+    var dropTargetRow by remember { mutableStateOf(0) }
+    var dropIsValid by remember { mutableStateOf(true) }
 
     BoxWithConstraints(modifier = modifier) {
         val cellW = maxWidth / layout.columns
@@ -314,15 +369,47 @@ private fun KeyGrid(
         val cellWPx = with(density) { cellW.toPx() }
         val cellHPx = with(density) { cellH.toPx() }
 
+        // ── Drop indicator ────────────────────────────────────────────────────
+        val draggingButton = if (draggingId != null) layout.buttons.find { it.id == draggingId } else null
+        if (isEditMode && draggingButton != null) {
+            Box(
+                modifier = Modifier
+                    .absoluteOffset(
+                        x = cellW * dropTargetCol,
+                        y = cellH * dropTargetRow
+                    )
+                    .size(
+                        width = cellW * draggingButton.colSpan - gap,
+                        height = cellH * draggingButton.rowSpan - gap
+                    )
+                    .zIndex(5f)
+                    .background(
+                        if (dropIsValid) Color(0x6000C853) else Color(0x60FF1744),
+                        RoundedCornerShape(8.dp)
+                    )
+            )
+        }
+
         layout.buttons.forEach { button ->
+            // Always-fresh references inside gesture handlers (fixes stale-capture bug)
+            val currentButton by rememberUpdatedState(button)
+            val currentLayout by rememberUpdatedState(layout)
+
             var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
             var isDragging by remember(button.id) { mutableStateOf(false) }
             var resizeDragPx by remember(button.id) { mutableStateOf(Offset.Zero) }
 
             val bx = cellW * button.col
             val by = cellH * button.row
-            val bw = cellW * button.colSpan - gap
-            val bh = cellH * button.rowSpan - gap
+
+            // Live size preview while resize handle is being dragged
+            val displayColSpan = (button.colSpan + (resizeDragPx.x / cellWPx).roundToInt())
+                .coerceIn(1, layout.columns - button.col)
+            val displayRowSpan = (button.rowSpan + (resizeDragPx.y / cellHPx).roundToInt())
+                .coerceIn(1, layout.rows - button.row)
+            val bw = cellW * displayColSpan - gap
+            val bh = cellH * displayRowSpan - gap
+
             val isSelected = button.id == selectedButtonId
 
             // ── Button ────────────────────────────────────────────────────────
@@ -340,43 +427,88 @@ private fun KeyGrid(
                             detectDragGesturesAfterLongPress(
                                 onDragStart = {
                                     isDragging = true
-                                    onSelectButton(button.id)
+                                    draggingId = currentButton.id
+                                    dropTargetCol = currentButton.col
+                                    dropTargetRow = currentButton.row
+                                    dropIsValid = true
+                                    if (currentSelectedId != currentButton.id) {
+                                        onSelectButton(currentButton.id)
+                                    }
                                 },
                                 onDrag = { change, delta ->
                                     change.consume()
                                     dragOffset += delta
+                                    val rawCol = ((currentButton.col * cellWPx + dragOffset.x) / cellWPx).roundToInt()
+                                    val rawRow = ((currentButton.row * cellHPx + dragOffset.y) / cellHPx).roundToInt()
+                                    dropTargetCol = rawCol.coerceIn(0, currentLayout.columns - currentButton.colSpan)
+                                    dropTargetRow = rawRow.coerceIn(0, currentLayout.rows - currentButton.rowSpan)
+                                    dropIsValid = !currentLayout.wouldOverlap(
+                                        currentButton.id, dropTargetCol, dropTargetRow,
+                                        currentButton.colSpan, currentButton.rowSpan
+                                    )
                                 },
                                 onDragEnd = {
-                                    val newCol = ((button.col * cellWPx + dragOffset.x) / cellWPx).roundToInt()
-                                    val newRow = ((button.row * cellHPx + dragOffset.y) / cellHPx).roundToInt()
-                                    onMoveButton(button.id, newCol, newRow)
+                                    if (dropIsValid) {
+                                        onMoveButton(currentButton.id, dropTargetCol, dropTargetRow)
+                                    }
                                     isDragging = false
+                                    draggingId = null
                                     dragOffset = Offset.Zero
                                 },
                                 onDragCancel = {
                                     isDragging = false
+                                    draggingId = null
                                     dragOffset = Offset.Zero
                                 }
                             )
                         } else Modifier
                     ),
                 shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(if (isSelected) 2.dp else 1.dp,
-                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline),
+                border = BorderStroke(
+                    if (isSelected) 2.dp else 1.dp,
+                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                ),
                 colors = ButtonDefaults.outlinedButtonColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ),
-                contentPadding = PaddingValues(2.dp)
+                contentPadding = PaddingValues(0.dp)
             ) {
-                Text(
-                    text = button.label,
-                    fontSize = 11.sp,
-                    lineHeight = 13.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Clip,
-                    textAlign = TextAlign.Center
-                )
+                Box(modifier = Modifier.fillMaxSize().padding(2.dp)) {
+                    val topText = button.topText
+                    if (!topText.isNullOrEmpty()) {
+                        Text(
+                            text = topText,
+                            fontSize = 8.sp,
+                            lineHeight = 9.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            textAlign = button.topAlign.toTextAlign(),
+                            modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)
+                        )
+                    }
+                    Text(
+                        text = button.label,
+                        fontSize = 11.sp,
+                        lineHeight = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Clip,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().align(Alignment.Center)
+                    )
+                    val bottomText = button.bottomText
+                    if (!bottomText.isNullOrEmpty()) {
+                        Text(
+                            text = bottomText,
+                            fontSize = 8.sp,
+                            lineHeight = 9.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            textAlign = button.bottomAlign.toTextAlign(),
+                            modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter)
+                        )
+                    }
+                }
             }
 
             // ── Resize handle (selected button only, not while dragging) ──────
@@ -395,7 +527,11 @@ private fun KeyGrid(
                                 onDragEnd = {
                                     val dCols = (resizeDragPx.x / cellWPx).roundToInt()
                                     val dRows = (resizeDragPx.y / cellHPx).roundToInt()
-                                    onResizeButton(button.id, button.colSpan + dCols, button.rowSpan + dRows)
+                                    onResizeButton(
+                                        currentButton.id,
+                                        currentButton.colSpan + dCols,
+                                        currentButton.rowSpan + dRows
+                                    )
                                     resizeDragPx = Offset.Zero
                                 },
                                 onDragCancel = { resizeDragPx = Offset.Zero },
@@ -406,6 +542,37 @@ private fun KeyGrid(
                             )
                         }
                 )
+            }
+        }
+    }
+}
+
+private fun String?.toTextAlign() = when (this) {
+    "LEFT"  -> TextAlign.Left
+    "RIGHT" -> TextAlign.Right
+    else    -> TextAlign.Center
+}
+
+@Composable
+private fun AlignSelector(selected: String, onSelect: (String) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf("LEFT" to "L", "CENTER" to "C", "RIGHT" to "R").forEach { (align, label) ->
+            val isSelected = align == selected
+            OutlinedButton(
+                onClick = { onSelect(align) },
+                modifier = Modifier.size(32.dp),
+                contentPadding = PaddingValues(0.dp),
+                shape = RoundedCornerShape(4.dp),
+                border = BorderStroke(
+                    if (isSelected) 2.dp else 1.dp,
+                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                ),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                     else MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Text(label, fontSize = 12.sp)
             }
         }
     }

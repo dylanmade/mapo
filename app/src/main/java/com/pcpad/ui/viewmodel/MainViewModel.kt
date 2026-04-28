@@ -13,6 +13,7 @@ import com.pcpad.data.model.toGridLayout
 import com.pcpad.data.model.toKeyLayout
 import com.pcpad.data.model.wouldOverlap
 import com.pcpad.data.repository.GamepadMappingRepository
+import com.pcpad.service.InputAccessibilityService
 import com.pcpad.data.repository.LayoutRepository
 import com.pcpad.data.repository.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -101,6 +102,15 @@ class MainViewModel @Inject constructor(
                 _layouts.value = DefaultLayouts.all.map { overrideMap[it.name] ?: it } + customNew
             }
         }
+        viewModelScope.launch {
+            activeProfileMappings.collect { rawMappings ->
+                InputAccessibilityService.currentMappings = rawMappings
+                    .mapNotNull { (key, value) ->
+                        runCatching { DeviceButton.valueOf(key) }.getOrNull()?.let { it to value }
+                    }
+                    .toMap()
+            }
+        }
     }
 
     // ── Profile ───────────────────────────────────────────────────────────────
@@ -146,7 +156,8 @@ class MainViewModel @Inject constructor(
     // ── Normal mode ───────────────────────────────────────────────────────────
 
     fun onKeyPress(code: String) {
-        // TODO: forward to InputAccessibilityService
+        InputAccessibilityService.instance?.injectKey(code)
+            ?: _toastMessage.tryEmit("Accessibility service not running")
     }
 
     // ── Edit mode lifecycle ───────────────────────────────────────────────────

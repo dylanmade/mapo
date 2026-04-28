@@ -1,6 +1,7 @@
 package com.pcpad
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,6 +14,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Prevent pcpad from stealing hardware-button focus from the game on the primary screen.
+        // Touch events still work normally; only hardware keyboard/gamepad focus is withheld.
+        window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         enableEdgeToEdge()
 
         // TODO: Secondary display detection for AYN Thor secondary screen.

@@ -82,6 +82,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         }
     }
 
+    val showRemapControls by viewModel.showRemapControls.collectAsState()
+    val activeProfileMappings by viewModel.activeProfileMappings.collectAsState()
+
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
@@ -126,6 +129,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         )
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -138,7 +142,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 },
                 onAddProfile = { name -> viewModel.addProfile(name) },
                 onDuplicateProfile = { profile -> viewModel.duplicateProfile(profile) },
-                onDeleteProfile = { profile -> viewModel.deleteProfile(profile) }
+                onDeleteProfile = { profile -> viewModel.deleteProfile(profile) },
+                onOpenRemapControls = {
+                    scope.launch { drawerState.close() }
+                    viewModel.openRemapControls()
+                }
             )
         }
     ) {
@@ -200,6 +208,15 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             }
         }
     }
+    if (showRemapControls) {
+        RemapControlsScreen(
+            initialMappings = activeProfileMappings,
+            onSave = { viewModel.saveRemapMappings(it) },
+            onBack = { viewModel.closeRemapControls() },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+    } // end Box
 }
 
 @Composable

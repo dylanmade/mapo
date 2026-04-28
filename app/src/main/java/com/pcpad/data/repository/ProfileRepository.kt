@@ -12,7 +12,8 @@ import javax.inject.Singleton
 @Singleton
 class ProfileRepository @Inject constructor(
     private val profileDao: ProfileDao,
-    private val layoutDao: LayoutDao
+    private val layoutDao: LayoutDao,
+    private val gamepadMappingRepo: GamepadMappingRepository
 ) {
 
     fun getAllProfiles(): Flow<List<Profile>> = profileDao.getAll()
@@ -39,6 +40,7 @@ class ProfileRepository @Inject constructor(
             layoutDao.getByProfileOnce(source.id).map { it.copy(id = 0, profileId = newId) }
         }
         layoutsToCopy.forEach { layoutDao.insert(it) }
+        gamepadMappingRepo.copyMappings(source.id, newId)
     }
 
     suspend fun deleteProfile(profile: Profile) {

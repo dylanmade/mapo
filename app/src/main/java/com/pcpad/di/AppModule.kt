@@ -2,6 +2,7 @@ package com.pcpad.di
 
 import android.content.Context
 import com.pcpad.data.db.AppDatabase
+import com.pcpad.data.db.GamepadMappingDao
 import com.pcpad.data.db.LayoutDao
 import com.pcpad.data.db.ProfileDao
 import dagger.Module
@@ -27,4 +28,8 @@ object AppModule {
     @Provides
     @Singleton
     fun provideProfileDao(db: AppDatabase): ProfileDao = db.profileDao()
+
+    @Provides
+    @Singleton
+    fun provideGamepadMappingDao(db: AppDatabase): GamepadMappingDao = db.gamepadMappingDao()
 }

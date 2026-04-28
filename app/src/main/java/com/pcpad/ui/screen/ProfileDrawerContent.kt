@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -39,7 +40,8 @@ fun ProfileDrawerContent(
     onSelectProfile: (Profile) -> Unit,
     onAddProfile: (String) -> Unit,
     onDuplicateProfile: (Profile) -> Unit,
-    onDeleteProfile: (Profile) -> Unit
+    onDeleteProfile: (Profile) -> Unit,
+    onOpenRemapControls: () -> Unit
 ) {
     var showProfileSelector by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -158,6 +160,22 @@ fun ProfileDrawerContent(
                         selected = false,
                         onClick = { showProfileSelector = true },
                         icon = { Icon(Icons.Default.Person, contentDescription = null) },
+                        badge = {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                }
+                item {
+                    NavigationDrawerItem(
+                        label = { Text("Remap Controls") },
+                        selected = false,
+                        onClick = { onOpenRemapControls() },
+                        icon = { Icon(Icons.Default.SportsEsports, contentDescription = null) },
                         badge = {
                             Icon(
                                 Icons.AutoMirrored.Filled.KeyboardArrowRight,

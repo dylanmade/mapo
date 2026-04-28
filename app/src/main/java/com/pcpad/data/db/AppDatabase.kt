@@ -5,14 +5,16 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.pcpad.data.model.GamepadMapping
 import com.pcpad.data.model.KeyLayout
 import com.pcpad.data.model.Profile
 
-@Database(entities = [KeyLayout::class, Profile::class], version = 3, exportSchema = false)
+@Database(entities = [KeyLayout::class, Profile::class, GamepadMapping::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun layoutDao(): LayoutDao
     abstract fun profileDao(): ProfileDao
+    abstract fun gamepadMappingDao(): GamepadMappingDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

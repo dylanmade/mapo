@@ -3,13 +3,16 @@ package com.pcpad.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pcpad.data.defaults.DefaultLayouts
+import com.pcpad.data.model.DeviceButton
 import com.pcpad.data.model.GridButton
 import com.pcpad.data.model.GridLayout
 import com.pcpad.data.model.Profile
+import com.pcpad.data.model.RemapTarget
 import com.pcpad.data.model.findFirstEmptyCell
 import com.pcpad.data.model.toGridLayout
 import com.pcpad.data.model.toKeyLayout
 import com.pcpad.data.model.wouldOverlap
+import com.pcpad.data.repository.GamepadMappingRepository
 import com.pcpad.data.repository.LayoutRepository
 import com.pcpad.data.repository.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,6 +27,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,7 +36,8 @@ import javax.inject.Inject
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val layoutRepository: LayoutRepository,
-    private val profileRepository: ProfileRepository
+    private val profileRepository: ProfileRepository,
+    private val gampadMappingRepository: GamepadMappingRepository
 ) : ViewModel() {
 
     private val _layouts = MutableStateFlow(DefaultLayouts.all)
@@ -58,6 +63,15 @@ class MainViewModel @Inject constructor(
 
     private val _profiles = MutableStateFlow<List<Profile>>(emptyList())
     val profiles: StateFlow<List<Profile>> = _profiles.asStateFlow()
+
+    private val _showRemapControls = MutableStateFlow(false)
+    val showRemapControls: StateFlow<Boolean> = _showRemapControls.asStateFlow()
+
+    val activeProfileMappings: StateFlow<Map<String, RemapTarget>> =
+        _activeProfile.filterNotNull()
+            .flatMapLatest { gampadMappingRepository.getMappingsForProfile(it.id) }
+            .map { list -> list.associate { it.gamepadButton to RemapTarget.decode(it.targetEncoded) } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     val displayLayout: StateFlow<GridLayout> = combine(
         _selectedIndex, _isEditMode, _editingLayout, _layouts
@@ -115,6 +129,14 @@ class MainViewModel @Inject constructor(
                 _selectedIndex.value = 0
             }
         }
+    }
+
+    fun openRemapControls() { _showRemapControls.value = true }
+    fun closeRemapControls() { _showRemapControls.value = false }
+    fun saveRemapMappings(draft: Map<DeviceButton, RemapTarget>) {
+        val profileId = _activeProfile.value?.id ?: return
+        viewModelScope.launch { gampadMappingRepository.saveMappings(profileId, draft) }
+        _showRemapControls.value = false
     }
 
     // ── Navigation ────────────────────────────────────────────────────────────

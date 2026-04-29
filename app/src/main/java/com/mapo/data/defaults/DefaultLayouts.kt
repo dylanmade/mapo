@@ -42,8 +42,7 @@ object DefaultLayouts {
     private fun k(label: String, code: String, weight: Float = 1f, topText: String = "") = KeyDef(label, code, weight, topText)
     private fun gap(weight: Float = 1f) = KeyDef("", "", weight)
 
-    // Wide-key weights are reduced toward 1f so standard letter keys get more
-    // tap-friendly width, while wider keys remain visually distinguishable.
+    // Key width tiers: standard=1.0, slightly wider=1.5, wider=2.0, space=4.0
     private val keysMainDef = LayoutDef(
         name = "Keys Main",
         rows = listOf(
@@ -69,33 +68,33 @@ object DefaultLayouts {
                 k("⌫",  "BACKSPACE", 1.5f)
             ),
             listOf(
-                k("Tab", "TAB", 1.25f),
+                k("Tab", "TAB", 1.5f),
                 k("Q", "Q"), k("W", "W"), k("E", "E"), k("R", "R"),
                 k("T", "T"), k("Y", "Y"), k("U", "U"), k("I", "I"), k("O", "O"), k("P", "P"),
                 k("[",  "LEFT_BRACKET",  topText = "{"),
                 k("]",  "RIGHT_BRACKET", topText = "}"),
-                k("\\", "BACKSLASH", 1.25f, topText = "|")
+                k("\\", "BACKSLASH", 1.5f, topText = "|")
             ),
             listOf(
-                k("Caps", "CAPS_LOCK", 1.35f),
+                k("Caps", "CAPS_LOCK", 1.5f),
                 k("A", "A"), k("S", "S"), k("D", "D"), k("F", "F"),
                 k("G", "G"), k("H", "H"), k("J", "J"), k("K", "K"), k("L", "L"),
                 k(";",  "SEMICOLON",  topText = ":"),
                 k("'",  "APOSTROPHE", topText = "\""),
-                k("↵",  "ENTER", 1.65f)
+                k("↵",  "ENTER", 2.0f)
             ),
             listOf(
-                k("Shift", "SHIFT_LEFT", 1.35f),
+                k("Shift", "SHIFT_LEFT", 2.0f),
                 k("Z", "Z"), k("X", "X"), k("C", "C"), k("V", "V"),
                 k("B", "B"), k("N", "N"), k("M", "M"),
                 k(",",  "COMMA",  topText = "<"),
                 k(".",  "PERIOD", topText = ">"),
                 k("/",  "SLASH",  topText = "?"),
-                k("Shift", "SHIFT_RIGHT", 1.35f)
+                k("Shift", "SHIFT_RIGHT", 2.0f)
             ),
             listOf(
                 k("Ctrl", "CTRL_LEFT"), k("Win", "META_LEFT"),
-                k("Alt", "ALT_LEFT"), k("Space", "SPACE", 6f),
+                k("Alt", "ALT_LEFT"), k("Space", "SPACE", 4f),
                 k("Alt", "ALT_RIGHT"), k("Menu", "MENU"),
                 k("Ctrl", "CTRL_RIGHT")
             )

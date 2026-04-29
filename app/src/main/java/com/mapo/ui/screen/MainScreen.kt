@@ -1,5 +1,9 @@
 package com.mapo.ui.screen
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -41,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,8 +68,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.wouldOverlap
+import com.mapo.service.InputAccessibilityService
 import com.mapo.ui.theme.TabAccent
 import com.mapo.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -92,6 +102,36 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+
+    val context = LocalContext.current
+    var showAccessibilityPrompt by remember { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                showAccessibilityPrompt = !isAccessibilityServiceEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    if (showAccessibilityPrompt) {
+        AlertDialog(
+            onDismissRequest = { showAccessibilityPrompt = false },
+            title = { Text("Accessibility Permission Needed") },
+            text = { Text("Mapo requires its accessibility service to remap buttons and inject inputs. Tap \"Open Settings\", find \"mapo Input Service\", and enable it.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAccessibilityPrompt = false
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }) { Text("Open Settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAccessibilityPrompt = false }) { Text("Later") }
+            }
+        )
+    }
 
     var showButtonDialog by remember { mutableStateOf(false) }
     var dialogLabel by remember { mutableStateOf("") }
@@ -545,6 +585,15 @@ private fun KeyGrid(
             }
         }
     }
+}
+
+private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+    val expected = ComponentName(context, InputAccessibilityService::class.java)
+    val enabled = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+    ) ?: return false
+    return enabled.split(':').any { ComponentName.unflattenFromString(it) == expected }
 }
 
 private fun String?.toTextAlign() = when (this) {

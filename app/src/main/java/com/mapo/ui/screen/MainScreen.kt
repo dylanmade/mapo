@@ -267,7 +267,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     Box(modifier = Modifier.fillMaxSize()) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = false,
+        gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             ProfileDrawerContent(
                 profiles = profiles,

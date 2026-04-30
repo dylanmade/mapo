@@ -68,11 +68,8 @@ class InputAccessibilityService : AccessibilityService() {
 
     // ── Cursor tracking ───────────────────────────────────────────────────────
 
-    // Tracks a virtual cursor position so clicks/gestures land where movement left off
     private var cursorX = 540f
     private var cursorY = 960f
-    private var displayWidth = 1080f
-    private var displayHeight = 1920f
 
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -83,10 +80,10 @@ class InputAccessibilityService : AccessibilityService() {
         val info = serviceInfo
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         setServiceInfo(info)
-        val cx = primaryDisplayCenter()
-        cursorX = cx.first; cursorY = cx.second
-        displayWidth = cx.first * 2f; displayHeight = cx.second * 2f
-        Log.i(TAG, "Service connected, flags=0x${serviceInfo.flags.toString(16)} cursor initialized to ($cursorX,$cursorY)")
+        val (w, h) = primaryDisplaySize()
+        cursorX = w / 2f
+        cursorY = h / 2f
+        Log.i(TAG, "Service connected — display=${w}x${h} cursor=($cursorX,$cursorY)")
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -169,8 +166,8 @@ class InputAccessibilityService : AccessibilityService() {
 
     fun injectMouseMove(dx: Float, dy: Float) {
         hasMoved = true
-        cursorX = (cursorX + dx).coerceIn(0f, displayWidth)
-        cursorY = (cursorY + dy).coerceIn(0f, displayHeight)
+        cursorX += dx
+        cursorY += dy
         if (!gestureActive) dispatchDragSegment(willContinue = true)
     }
 
@@ -235,13 +232,12 @@ class InputAccessibilityService : AccessibilityService() {
 
     fun injectMouseScroll(dx: Float, dy: Float) {
         Log.d(TAG, "injectMouseScroll dx=$dx dy=$dy")
-        val cx = primaryDisplayCenter()
         val now = SystemClock.uptimeMillis()
         val props = arrayOf(MotionEvent.PointerProperties().apply {
             id = 0; toolType = MotionEvent.TOOL_TYPE_MOUSE
         })
         val coords = arrayOf(MotionEvent.PointerCoords().apply {
-            x = cx.first; y = cx.second
+            x = cursorX; y = cursorY
             setAxisValue(MotionEvent.AXIS_VSCROLL, dy)
             setAxisValue(MotionEvent.AXIS_HSCROLL, dx)
         })
@@ -255,16 +251,14 @@ class InputAccessibilityService : AccessibilityService() {
     }
 
     @Suppress("DEPRECATION")
-    private fun primaryDisplayCenter(): Pair<Float, Float> {
+    private fun primaryDisplaySize(): Pair<Float, Float> {
         val dm = getSystemService(DISPLAY_SERVICE) as android.hardware.display.DisplayManager
         val display = dm.getDisplay(android.view.Display.DEFAULT_DISPLAY)
-            ?: return Pair(540f, 960f).also { Log.w(TAG, "primaryDisplayCenter: no default display") }
+            ?: return Pair(1080f, 1920f).also { Log.w(TAG, "primaryDisplaySize: no default display") }
         val metrics = android.util.DisplayMetrics()
         display.getRealMetrics(metrics)
-        val cx = metrics.widthPixels / 2f
-        val cy = metrics.heightPixels / 2f
-        Log.d(TAG, "primaryDisplayCenter: displayId=${display.displayId} size=${metrics.widthPixels}x${metrics.heightPixels} center=($cx,$cy)")
-        return Pair(cx, cy)
+        Log.d(TAG, "primaryDisplaySize: displayId=${display.displayId} size=${metrics.widthPixels}x${metrics.heightPixels}")
+        return Pair(metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat())
     }
 
     // ── Low-level injection ───────────────────────────────────────────────────

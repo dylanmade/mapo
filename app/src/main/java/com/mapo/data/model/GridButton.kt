@@ -15,7 +15,8 @@ data class GridButton(
     val topAlign: String? = null,    // null / "CENTER" / "LEFT" / "RIGHT"
     val bottomText: String? = null,
     val bottomAlign: String? = null,
-    val type: String? = null         // null / "key" = normal button; "trackpad" = mouse trackpad
+    val type: String? = null,        // null / "key" = normal button; "trackpad" = mouse trackpad
+    val sensitivity: Float? = null   // trackpad only; null = use app default
 )
 
 val GridButton.isTrackpad get() = type == "trackpad"

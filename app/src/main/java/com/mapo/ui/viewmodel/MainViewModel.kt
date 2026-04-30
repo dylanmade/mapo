@@ -243,7 +243,8 @@ class MainViewModel @Inject constructor(
         label: String, code: String,
         topText: String = "", topAlign: String = "CENTER",
         bottomText: String = "", bottomAlign: String = "CENTER",
-        type: String = "key"
+        type: String = "key",
+        sensitivity: Float? = null
     ) {
         val layout = _editingLayout.value ?: return
         val cell = layout.findFirstEmptyCell()
@@ -256,7 +257,8 @@ class MainViewModel @Inject constructor(
             col = cell.first, row = cell.second,
             topText = topText.ifEmpty { null }, topAlign = topAlign,
             bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
-            type = type
+            type = type,
+            sensitivity = sensitivity
         )
         _editingLayout.value = layout.copy(buttons = layout.buttons + button)
         _selectedButtonId.value = button.id
@@ -266,7 +268,8 @@ class MainViewModel @Inject constructor(
         label: String, code: String,
         topText: String, topAlign: String,
         bottomText: String, bottomAlign: String,
-        type: String = "key"
+        type: String = "key",
+        sensitivity: Float? = null
     ) {
         val id = _selectedButtonId.value ?: return
         _editingLayout.value = _editingLayout.value?.let { layout ->
@@ -275,7 +278,8 @@ class MainViewModel @Inject constructor(
                     label = label, code = code,
                     topText = topText.ifEmpty { null }, topAlign = topAlign,
                     bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
-                    type = type
+                    type = type,
+                    sensitivity = sensitivity
                 ) else btn
             })
         }

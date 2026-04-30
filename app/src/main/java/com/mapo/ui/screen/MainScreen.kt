@@ -1,5 +1,6 @@
 package com.mapo.ui.screen
 
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -145,6 +148,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     var dialogBottomAlign by remember { mutableStateOf("CENTER") }
     var dialogIsEdit by remember { mutableStateOf(false) }
     var dialogIsTrackpad by remember { mutableStateOf(false) }
+    var dialogSensitivity by remember { mutableStateOf(TRACKPAD_SENSITIVITY) }
 
     if (showButtonDialog) {
         AlertDialog(
@@ -194,6 +198,21 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         label = { Text("Label") },
                         singleLine = true
                     )
+                    if (dialogIsTrackpad) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("Sensitivity", fontSize = 13.sp, modifier = Modifier.width(80.dp))
+                            Slider(
+                                value = dialogSensitivity,
+                                onValueChange = { dialogSensitivity = it },
+                                valueRange = 0.5f..4.0f,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text("%.1f×".format(dialogSensitivity), fontSize = 12.sp, modifier = Modifier.width(34.dp))
+                        }
+                    }
                     if (!dialogIsTrackpad) {
                         OutlinedTextField(
                             value = dialogCode,
@@ -220,19 +239,20 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             confirmButton = {
                 TextButton(onClick = {
                     val type = if (dialogIsTrackpad) "trackpad" else "key"
+                    val sens = if (dialogIsTrackpad) dialogSensitivity else null
                     if (dialogIsEdit) {
                         viewModel.updateSelectedButton(
                             dialogLabel, dialogCode,
                             dialogTopText, dialogTopAlign,
                             dialogBottomText, dialogBottomAlign,
-                            type
+                            type, sens
                         )
                     } else {
                         viewModel.addButton(
                             dialogLabel, dialogCode,
                             dialogTopText, dialogTopAlign,
                             dialogBottomText, dialogBottomAlign,
-                            type
+                            type, sens
                         )
                     }
                     showButtonDialog = false
@@ -247,6 +267,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     Box(modifier = Modifier.fillMaxSize()) {
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = false,
         drawerContent = {
             ProfileDrawerContent(
                 profiles = profiles,
@@ -286,6 +307,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             dialogBottomText = ""
                             dialogBottomAlign = "CENTER"
                             dialogIsTrackpad = false
+                            dialogSensitivity = TRACKPAD_SENSITIVITY
                             dialogIsEdit = false
                             showButtonDialog = true
                         },
@@ -299,6 +321,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                                 dialogBottomText = btn.bottomText ?: ""
                                 dialogBottomAlign = btn.bottomAlign ?: "CENTER"
                                 dialogIsTrackpad = btn.isTrackpad
+                                dialogSensitivity = btn.sensitivity ?: TRACKPAD_SENSITIVITY
                                 dialogIsEdit = true
                                 showButtonDialog = true
                             }
@@ -337,6 +360,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         .fillMaxWidth()
                         .padding(4.dp)
                 )
+                BottomBar(onQuit = { (context as? Activity)?.finish() })
             }
         }
     }
@@ -528,7 +552,8 @@ private fun KeyGrid(
                                             active = false
                                         } else {
                                             val delta = change.position - prevPos
-                                            onMouseMove(delta.x * TRACKPAD_SENSITIVITY, delta.y * TRACKPAD_SENSITIVITY)
+                                            val sens = currentButton.sensitivity ?: TRACKPAD_SENSITIVITY
+                                            onMouseMove(delta.x * sens, delta.y * sens)
                                             prevPos = change.position
                                             change.consume()
                                         }
@@ -721,7 +746,26 @@ private fun KeyGrid(
     }
 }
 
-private const val TRACKPAD_SENSITIVITY = 0.8f
+private const val TRACKPAD_SENSITIVITY = 1.5f
+
+@Composable
+private fun BottomBar(onQuit: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(
+            onClick = onQuit,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+            modifier = Modifier.height(40.dp)
+        ) {
+            Text("Quit", fontSize = 12.sp)
+        }
+    }
+}
 
 private fun isAccessibilityServiceEnabled(context: Context): Boolean {
     val expected = ComponentName(context, InputAccessibilityService::class.java)

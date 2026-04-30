@@ -16,7 +16,9 @@ data class GridButton(
     val bottomText: String? = null,
     val bottomAlign: String? = null,
     val type: String? = null,        // null / "key" = normal button; "trackpad" = mouse trackpad
-    val sensitivity: Float? = null   // trackpad only; null = use app default
+    val sensitivity: Float? = null,  // trackpad only; null = use app default
+    // trackpad only; maps TrackpadGesture.name → encoded RemapTarget. null = use defaults.
+    val gestureMappings: Map<String, String>? = null
 )
 
 val GridButton.isTrackpad get() = type == "trackpad"

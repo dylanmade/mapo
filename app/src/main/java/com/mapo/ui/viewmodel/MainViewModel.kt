@@ -8,6 +8,8 @@ import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.Profile
 import com.mapo.data.model.RemapTarget
+import com.mapo.data.model.TrackpadGesture
+import com.mapo.data.model.gestureTarget
 import com.mapo.data.model.findFirstEmptyCell
 import com.mapo.data.model.toGridLayout
 import com.mapo.data.model.toKeyLayout
@@ -170,15 +172,18 @@ class MainViewModel @Inject constructor(
         val svc = InputAccessibilityService.instance
             ?: run { _toastMessage.tryEmit("Accessibility service not running"); return }
         when (code) {
-            "MOUSE_LEFT",
-            "MOUSE_MIDDLE",
-            "MOUSE_BACK",
-            "MOUSE_FORWARD" -> svc.injectMouseTap()
-            "MOUSE_RIGHT"   -> svc.injectMouseRightClick()
-            "SCROLL_UP"     -> svc.injectMouseScroll(0f, 1f)
-            "SCROLL_DOWN"   -> svc.injectMouseScroll(0f, -1f)
-            else            -> svc.injectKey(code)
+            "MOUSE_LEFT", "MOUSE_MIDDLE", "MOUSE_RIGHT", "MOUSE_BACK", "MOUSE_FORWARD",
+            "SCROLL_UP", "SCROLL_DOWN" -> svc.dispatchTargetAsClick(RemapTarget.Mouse(code))
+            else -> svc.injectKey(code)
         }
+    }
+
+    fun onTrackpadGesture(button: GridButton, gesture: TrackpadGesture) {
+        val target = button.gestureTarget(gesture)
+        android.util.Log.d("MapoInput", "onTrackpadGesture button=${button.id} gesture=$gesture target=$target")
+        val svc = InputAccessibilityService.instance
+            ?: run { _toastMessage.tryEmit("Accessibility service not running"); return }
+        svc.dispatchTargetAsClick(target)
     }
 
     fun onDragStart() {
@@ -192,16 +197,6 @@ class MainViewModel @Inject constructor(
 
     fun onDragEnd() {
         InputAccessibilityService.instance?.endMouseDrag()
-    }
-
-    fun onMouseTap() {
-        InputAccessibilityService.instance?.injectMouseTap()
-            ?: _toastMessage.tryEmit("Accessibility service not running")
-    }
-
-    fun onMouseRightClick() {
-        InputAccessibilityService.instance?.injectMouseRightClick()
-            ?: _toastMessage.tryEmit("Accessibility service not running")
     }
 
     // ── Edit mode lifecycle ───────────────────────────────────────────────────
@@ -244,7 +239,8 @@ class MainViewModel @Inject constructor(
         topText: String = "", topAlign: String = "CENTER",
         bottomText: String = "", bottomAlign: String = "CENTER",
         type: String = "key",
-        sensitivity: Float? = null
+        sensitivity: Float? = null,
+        gestureMappings: Map<String, String>? = null
     ) {
         val layout = _editingLayout.value ?: return
         val cell = layout.findFirstEmptyCell()
@@ -258,7 +254,8 @@ class MainViewModel @Inject constructor(
             topText = topText.ifEmpty { null }, topAlign = topAlign,
             bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
             type = type,
-            sensitivity = sensitivity
+            sensitivity = sensitivity,
+            gestureMappings = gestureMappings
         )
         _editingLayout.value = layout.copy(buttons = layout.buttons + button)
         _selectedButtonId.value = button.id
@@ -269,7 +266,8 @@ class MainViewModel @Inject constructor(
         topText: String, topAlign: String,
         bottomText: String, bottomAlign: String,
         type: String = "key",
-        sensitivity: Float? = null
+        sensitivity: Float? = null,
+        gestureMappings: Map<String, String>? = null
     ) {
         val id = _selectedButtonId.value ?: return
         _editingLayout.value = _editingLayout.value?.let { layout ->
@@ -279,7 +277,8 @@ class MainViewModel @Inject constructor(
                     topText = topText.ifEmpty { null }, topAlign = topAlign,
                     bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
                     type = type,
-                    sensitivity = sensitivity
+                    sensitivity = sensitivity,
+                    gestureMappings = gestureMappings
                 ) else btn
             })
         }

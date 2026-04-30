@@ -158,6 +158,37 @@ class InputAccessibilityService : AccessibilityService() {
         return true
     }
 
+    /**
+     * Dispatch a RemapTarget as a one-shot click — full down/up cycle for keyboard and gamepad
+     * targets, the appropriate single gesture for mouse targets. Used by trackpad gesture
+     * remapping and any other path that has a RemapTarget and wants to fire it as a tap.
+     */
+    fun dispatchTargetAsClick(target: RemapTarget) {
+        Log.d(TAG, "dispatchTargetAsClick target=$target")
+        when (target) {
+            is RemapTarget.Unbound -> { /* no-op */ }
+            is RemapTarget.Keyboard -> {
+                val kc = resolveKeyCode(target.code) ?: run {
+                    Log.w(TAG, "dispatchTargetAsClick: unknown keyboard code ${target.code}")
+                    return
+                }
+                injectKeyDown(kc); injectKeyUp(kc)
+            }
+            is RemapTarget.Gamepad -> {
+                val btn = DeviceButton.entries.firstOrNull { it.name == target.button } ?: return
+                val kc = DEVICE_BUTTON_TO_KEYCODE[btn] ?: return
+                injectKeyDown(kc); injectKeyUp(kc)
+            }
+            is RemapTarget.Mouse -> when (target.code) {
+                "MOUSE_LEFT", "MOUSE_MIDDLE", "MOUSE_BACK", "MOUSE_FORWARD" -> injectMouseTap()
+                "MOUSE_RIGHT" -> injectMouseRightClick()
+                "SCROLL_UP"   -> injectMouseScroll(0f, 1f)
+                "SCROLL_DOWN" -> injectMouseScroll(0f, -1f)
+                else -> Log.w(TAG, "dispatchTargetAsClick: unknown mouse code ${target.code}")
+            }
+        }
+    }
+
     // ── Mouse gesture injection (called from ViewModel for trackpad) ──────────
 
     private var isDragging = false
@@ -167,6 +198,7 @@ class InputAccessibilityService : AccessibilityService() {
     private var segEndY = 960f
 
     fun startMouseDrag() {
+        Log.d(TAG, "startMouseDrag — cursor reset to center")
         isDragging = true
         segmentActive = false
         currentStroke = null
@@ -238,15 +270,32 @@ class InputAccessibilityService : AccessibilityService() {
     fun injectMouseTap() {
         Log.d(TAG, "injectMouseTap at ($cursorX,$cursorY)")
         val path = Path().apply { moveTo(cursorX, cursorY) }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, 1L)
-        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+        // 50ms duration: long enough for DOSBox/RetroArch and other apps with stricter
+        // touch handlers to register the touch as a real tap, while still well under
+        // ViewConfiguration.getTapTimeout() (~100ms) so it doesn't read as a long press.
+        val stroke = GestureDescription.StrokeDescription(path, 0L, 50L)
+        val ok = dispatchGesture(
+            GestureDescription.Builder().addStroke(stroke).build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription) { Log.d(TAG, "injectMouseTap: completed") }
+                override fun onCancelled(g: GestureDescription) { Log.w(TAG, "injectMouseTap: cancelled") }
+            }, null
+        )
+        if (!ok) Log.w(TAG, "injectMouseTap: dispatchGesture returned false")
     }
 
     fun injectMouseRightClick() {
         Log.d(TAG, "injectMouseRightClick at ($cursorX,$cursorY)")
         val path = Path().apply { moveTo(cursorX, cursorY) }
         val stroke = GestureDescription.StrokeDescription(path, 0L, 800L)
-        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+        val ok = dispatchGesture(
+            GestureDescription.Builder().addStroke(stroke).build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription) { Log.d(TAG, "injectMouseRightClick: completed") }
+                override fun onCancelled(g: GestureDescription) { Log.w(TAG, "injectMouseRightClick: cancelled") }
+            }, null
+        )
+        if (!ok) Log.w(TAG, "injectMouseRightClick: dispatchGesture returned false")
     }
 
     fun injectMouseScroll(dx: Float, dy: Float) {

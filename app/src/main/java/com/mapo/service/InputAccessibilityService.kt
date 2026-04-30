@@ -74,10 +74,6 @@ class InputAccessibilityService : AccessibilityService() {
     private var displayWidth = 1080f
     private var displayHeight = 1920f
 
-    // Gesture dispatch state — all touched on main thread via dispatchGesture callbacks
-    private var gestureActive = false
-    private var lastDispatchedX = 540f
-    private var lastDispatchedY = 960f
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -89,7 +85,6 @@ class InputAccessibilityService : AccessibilityService() {
         setServiceInfo(info)
         val cx = primaryDisplayCenter()
         cursorX = cx.first; cursorY = cx.second
-        lastDispatchedX = cx.first; lastDispatchedY = cx.second
         displayWidth = cx.first * 2f; displayHeight = cx.second * 2f
         Log.i(TAG, "Service connected, flags=0x${serviceInfo.flags.toString(16)} cursor initialized to ($cursorX,$cursorY)")
     }
@@ -155,29 +150,71 @@ class InputAccessibilityService : AccessibilityService() {
 
     // ── Mouse gesture injection (called from ViewModel for trackpad) ──────────
 
-    fun injectMouseMove(dx: Float, dy: Float) {
-        cursorX = (cursorX + dx).coerceIn(0f, displayWidth)
-        cursorY = (cursorY + dy).coerceIn(0f, displayHeight)
-        if (!gestureActive) dispatchPendingMove()
+    private var isDragging = false
+    private var hasMoved = false
+    private var currentStroke: GestureDescription.StrokeDescription? = null
+    private var gestureActive = false
+    private var lastDispatchedX = 540f
+    private var lastDispatchedY = 960f
+
+    fun startMouseDrag() {
+        isDragging = true
+        hasMoved = false
+        currentStroke = null
+        gestureActive = false
+        lastDispatchedX = cursorX
+        lastDispatchedY = cursorY
+        Log.d(TAG, "startMouseDrag at ($cursorX,$cursorY)")
     }
 
-    private fun dispatchPendingMove() {
+    fun injectMouseMove(dx: Float, dy: Float) {
+        hasMoved = true
+        cursorX = (cursorX + dx).coerceIn(0f, displayWidth)
+        cursorY = (cursorY + dy).coerceIn(0f, displayHeight)
+        if (!gestureActive) dispatchDragSegment(willContinue = true)
+    }
+
+    fun endMouseDrag() {
+        isDragging = false
+        Log.d(TAG, "endMouseDrag hasMoved=$hasMoved gestureActive=$gestureActive currentStroke=${currentStroke != null}")
+        if (!hasMoved) return
+        if (!gestureActive && currentStroke != null) dispatchDragSegment(willContinue = false)
+    }
+
+    private fun dispatchDragSegment(willContinue: Boolean) {
         val fromX = lastDispatchedX; val fromY = lastDispatchedY
         val toX = cursorX;           val toY = cursorY
-        if (fromX == toX && fromY == toY) return
-        gestureActive = true
         lastDispatchedX = toX; lastDispatchedY = toY
-        val path = Path().apply { moveTo(fromX, fromY); lineTo(toX, toY) }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, 16L)
+        val path = Path().apply {
+            moveTo(fromX, fromY)
+            if (fromX != toX || fromY != toY) lineTo(toX, toY)
+        }
+        val stroke = if (currentStroke == null) {
+            Log.d(TAG, "dispatchGesture NEW ($fromX,$fromY)->($toX,$toY) willContinue=$willContinue")
+            GestureDescription.StrokeDescription(path, 0L, 50L, willContinue)
+        } else {
+            Log.d(TAG, "dispatchGesture CONT ($fromX,$fromY)->($toX,$toY) willContinue=$willContinue")
+            currentStroke!!.continueStroke(path, 0L, 50L, willContinue)
+        }
+        currentStroke = if (willContinue) stroke else null
+        gestureActive = true
         dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(),
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription) {
+                    Log.d(TAG, "gesture onCompleted isDragging=$isDragging cursorMoved=${cursorX != lastDispatchedX || cursorY != lastDispatchedY}")
                     gestureActive = false
-                    dispatchPendingMove()
+                    when {
+                        isDragging && (cursorX != lastDispatchedX || cursorY != lastDispatchedY) ->
+                            dispatchDragSegment(willContinue = true)
+                        !isDragging && currentStroke != null ->
+                            dispatchDragSegment(willContinue = false)
+                    }
                 }
                 override fun onCancelled(g: GestureDescription) {
+                    Log.w(TAG, "gesture onCancelled — touch sequence broken")
                     gestureActive = false
-                    lastDispatchedX = cursorX; lastDispatchedY = cursorY
+                    currentStroke = null
+                    isDragging = false
                 }
             }, null)
     }

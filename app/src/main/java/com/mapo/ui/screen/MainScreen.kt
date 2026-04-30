@@ -79,7 +79,6 @@ import com.mapo.data.model.wouldOverlap
 import com.mapo.service.InputAccessibilityService
 import com.mapo.ui.theme.TabAccent
 import com.mapo.ui.viewmodel.MainViewModel
-import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -328,7 +327,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onSelectButton = viewModel::selectButton,
                     onMoveButton = viewModel::moveButton,
                     onResizeButton = viewModel::resizeButton,
+                    onDragStart = viewModel::onDragStart,
                     onMouseMove = viewModel::onMouseMove,
+                    onDragEnd = viewModel::onDragEnd,
                     onMouseTap = viewModel::onMouseTap,
                     onMouseRightClick = viewModel::onMouseRightClick,
                     modifier = Modifier
@@ -429,7 +430,9 @@ private fun KeyGrid(
     onSelectButton: (String) -> Unit,
     onMoveButton: (String, Int, Int) -> Unit,
     onResizeButton: (String, Int, Int) -> Unit,
+    onDragStart: () -> Unit,
     onMouseMove: (Float, Float) -> Unit,
+    onDragEnd: () -> Unit,
     onMouseTap: () -> Unit,
     onMouseRightClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -502,8 +505,6 @@ private fun KeyGrid(
                         .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
                         .pointerInput(button.id + "_tp") {
-                            // Capture scope before entering @RestrictsSuspension block
-                            val outerScope = kotlinx.coroutines.CoroutineScope(coroutineContext)
                             awaitPointerEventScope {
                                 while (true) {
                                     // Wait for finger down
@@ -514,38 +515,20 @@ private fun KeyGrid(
                                             .firstOrNull { it.pressed && !it.previousPressed }
                                     }
                                     down.consume()
+                                    onDragStart()
 
                                     var prevPos = down.position
-                                    var moved = false
-                                    var rightClickFired = false
-
-                                    // launch is a plain (non-suspend) call — allowed inside restricted scope
-                                    val longPressJob = outerScope.launch {
-                                        kotlinx.coroutines.delay(500L)
-                                        rightClickFired = true
-                                        onMouseRightClick()
-                                    }
 
                                     var active = true
                                     while (active) {
                                         val event = awaitPointerEvent()
                                         val change = event.changes.firstOrNull() ?: break
                                         if (!change.pressed) {
-                                            longPressJob.cancel()
-                                            when {
-                                                rightClickFired -> { /* gesture already dispatched with its own duration */ }
-                                                !moved -> onMouseTap()
-                                            }
+                                            onDragEnd()
                                             active = false
                                         } else {
                                             val delta = change.position - prevPos
-                                            if (!moved && (kotlin.math.abs(delta.x) > 8f || kotlin.math.abs(delta.y) > 8f)) {
-                                                moved = true
-                                                longPressJob.cancel()
-                                            }
-                                            if (moved) {
-                                                onMouseMove(delta.x * TRACKPAD_SENSITIVITY, delta.y * TRACKPAD_SENSITIVITY)
-                                            }
+                                            onMouseMove(delta.x * TRACKPAD_SENSITIVITY, delta.y * TRACKPAD_SENSITIVITY)
                                             prevPos = change.position
                                             change.consume()
                                         }

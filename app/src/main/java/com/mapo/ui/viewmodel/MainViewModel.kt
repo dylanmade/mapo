@@ -181,9 +181,17 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun onDragStart() {
+        InputAccessibilityService.instance?.startMouseDrag()
+            ?: _toastMessage.tryEmit("Accessibility service not running")
+    }
+
     fun onMouseMove(dx: Float, dy: Float) {
         InputAccessibilityService.instance?.injectMouseMove(dx, dy)
-            ?: _toastMessage.tryEmit("Accessibility service not running")
+    }
+
+    fun onDragEnd() {
+        InputAccessibilityService.instance?.endMouseDrag()
     }
 
     fun onMouseTap() {

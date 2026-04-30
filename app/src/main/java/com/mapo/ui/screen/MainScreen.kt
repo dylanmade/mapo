@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -72,10 +74,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mapo.data.model.GridLayout
+import com.mapo.data.model.isTrackpad
 import com.mapo.data.model.wouldOverlap
 import com.mapo.service.InputAccessibilityService
 import com.mapo.ui.theme.TabAccent
 import com.mapo.ui.viewmodel.MainViewModel
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -141,6 +145,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     var dialogBottomText by remember { mutableStateOf("") }
     var dialogBottomAlign by remember { mutableStateOf("CENTER") }
     var dialogIsEdit by remember { mutableStateOf(false) }
+    var dialogIsTrackpad by remember { mutableStateOf(false) }
 
     if (showButtonDialog) {
         AlertDialog(
@@ -148,18 +153,41 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             title = { Text(if (dialogIsEdit) "Edit Button" else "Add Button") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = dialogTopText,
-                            onValueChange = { dialogTopText = it },
-                            label = { Text("Top text") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        AlignSelector(selected = dialogTopAlign, onSelect = { dialogTopAlign = it })
+                    // Key / Trackpad toggle
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Key" to false, "Trackpad" to true).forEach { (label, isTrackpad) ->
+                            val selected = dialogIsTrackpad == isTrackpad
+                            OutlinedButton(
+                                onClick = { dialogIsTrackpad = isTrackpad },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(
+                                    if (selected) 2.dp else 1.dp,
+                                    if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outline
+                                ),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
+                                                     else MaterialTheme.colorScheme.surface
+                                ),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) { Text(label, fontSize = 13.sp) }
+                        }
+                    }
+                    if (!dialogIsTrackpad) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = dialogTopText,
+                                onValueChange = { dialogTopText = it },
+                                label = { Text("Top text") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            AlignSelector(selected = dialogTopAlign, onSelect = { dialogTopAlign = it })
+                        }
                     }
                     OutlinedTextField(
                         value = dialogLabel,
@@ -167,40 +195,45 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         label = { Text("Label") },
                         singleLine = true
                     )
-                    OutlinedTextField(
-                        value = dialogCode,
-                        onValueChange = { dialogCode = it },
-                        label = { Text("Key Code") },
-                        singleLine = true
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    if (!dialogIsTrackpad) {
                         OutlinedTextField(
-                            value = dialogBottomText,
-                            onValueChange = { dialogBottomText = it },
-                            label = { Text("Bottom text") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
+                            value = dialogCode,
+                            onValueChange = { dialogCode = it },
+                            label = { Text("Key Code") },
+                            singleLine = true
                         )
-                        AlignSelector(selected = dialogBottomAlign, onSelect = { dialogBottomAlign = it })
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = dialogBottomText,
+                                onValueChange = { dialogBottomText = it },
+                                label = { Text("Bottom text") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            AlignSelector(selected = dialogBottomAlign, onSelect = { dialogBottomAlign = it })
+                        }
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
+                    val type = if (dialogIsTrackpad) "trackpad" else "key"
                     if (dialogIsEdit) {
                         viewModel.updateSelectedButton(
                             dialogLabel, dialogCode,
                             dialogTopText, dialogTopAlign,
-                            dialogBottomText, dialogBottomAlign
+                            dialogBottomText, dialogBottomAlign,
+                            type
                         )
                     } else {
                         viewModel.addButton(
                             dialogLabel, dialogCode,
                             dialogTopText, dialogTopAlign,
-                            dialogBottomText, dialogBottomAlign
+                            dialogBottomText, dialogBottomAlign,
+                            type
                         )
                     }
                     showButtonDialog = false
@@ -253,6 +286,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             dialogTopAlign = "CENTER"
                             dialogBottomText = ""
                             dialogBottomAlign = "CENTER"
+                            dialogIsTrackpad = false
                             dialogIsEdit = false
                             showButtonDialog = true
                         },
@@ -265,6 +299,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                                 dialogTopAlign = btn.topAlign ?: "CENTER"
                                 dialogBottomText = btn.bottomText ?: ""
                                 dialogBottomAlign = btn.bottomAlign ?: "CENTER"
+                                dialogIsTrackpad = btn.isTrackpad
                                 dialogIsEdit = true
                                 showButtonDialog = true
                             }
@@ -293,6 +328,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onSelectButton = viewModel::selectButton,
                     onMoveButton = viewModel::moveButton,
                     onResizeButton = viewModel::resizeButton,
+                    onMouseMove = viewModel::onMouseMove,
+                    onMouseTap = viewModel::onMouseTap,
+                    onMouseRightClick = viewModel::onMouseRightClick,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
@@ -391,6 +429,9 @@ private fun KeyGrid(
     onSelectButton: (String) -> Unit,
     onMoveButton: (String, Int, Int) -> Unit,
     onResizeButton: (String, Int, Int) -> Unit,
+    onMouseMove: (Float, Float) -> Unit,
+    onMouseTap: () -> Unit,
+    onMouseRightClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -452,101 +493,211 @@ private fun KeyGrid(
 
             val isSelected = button.id == selectedButtonId
 
-            // ── Button ────────────────────────────────────────────────────────
-            OutlinedButton(
-                onClick = {
-                    if (isEditMode) onSelectButton(button.id) else onKeyPress(button.code)
-                },
-                modifier = Modifier
-                    .absoluteOffset(x = bx, y = by)
-                    .size(width = bw, height = bh)
-                    .zIndex(if (isDragging) 10f else 0f)
-                    .offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }
-                    .then(
-                        if (isEditMode) Modifier.pointerInput(button.id) {
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = {
-                                    isDragging = true
-                                    draggingId = currentButton.id
-                                    dropTargetCol = currentButton.col
-                                    dropTargetRow = currentButton.row
-                                    dropIsValid = true
-                                    if (currentSelectedId != currentButton.id) {
-                                        onSelectButton(currentButton.id)
+            if (!isEditMode && button.isTrackpad) {
+                // ── Trackpad (normal mode) ────────────────────────────────────
+                Box(
+                    modifier = Modifier
+                        .absoluteOffset(x = bx, y = by)
+                        .size(width = bw, height = bh)
+                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                        .pointerInput(button.id + "_tp") {
+                            // Capture scope before entering @RestrictsSuspension block
+                            val outerScope = kotlinx.coroutines.CoroutineScope(coroutineContext)
+                            awaitPointerEventScope {
+                                while (true) {
+                                    // Wait for finger down
+                                    var down = awaitPointerEvent().changes
+                                        .firstOrNull { it.pressed && !it.previousPressed }
+                                    while (down == null) {
+                                        down = awaitPointerEvent().changes
+                                            .firstOrNull { it.pressed && !it.previousPressed }
                                     }
-                                },
-                                onDrag = { change, delta ->
-                                    change.consume()
-                                    dragOffset += delta
-                                    val rawCol = ((currentButton.col * cellWPx + dragOffset.x) / cellWPx).roundToInt()
-                                    val rawRow = ((currentButton.row * cellHPx + dragOffset.y) / cellHPx).roundToInt()
-                                    dropTargetCol = rawCol.coerceIn(0, currentLayout.columns - currentButton.colSpan)
-                                    dropTargetRow = rawRow.coerceIn(0, currentLayout.rows - currentButton.rowSpan)
-                                    dropIsValid = !currentLayout.wouldOverlap(
-                                        currentButton.id, dropTargetCol, dropTargetRow,
-                                        currentButton.colSpan, currentButton.rowSpan
-                                    )
-                                },
-                                onDragEnd = {
-                                    if (dropIsValid) {
-                                        onMoveButton(currentButton.id, dropTargetCol, dropTargetRow)
+                                    down.consume()
+
+                                    var prevPos = down.position
+                                    var moved = false
+                                    var rightClickFired = false
+
+                                    // launch is a plain (non-suspend) call — allowed inside restricted scope
+                                    val longPressJob = outerScope.launch {
+                                        kotlinx.coroutines.delay(500L)
+                                        rightClickFired = true
+                                        onMouseRightClick()
                                     }
-                                    isDragging = false
-                                    draggingId = null
-                                    dragOffset = Offset.Zero
-                                },
-                                onDragCancel = {
-                                    isDragging = false
-                                    draggingId = null
-                                    dragOffset = Offset.Zero
+
+                                    var active = true
+                                    while (active) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        if (!change.pressed) {
+                                            longPressJob.cancel()
+                                            when {
+                                                rightClickFired -> { /* gesture already dispatched with its own duration */ }
+                                                !moved -> onMouseTap()
+                                            }
+                                            active = false
+                                        } else {
+                                            val delta = change.position - prevPos
+                                            if (!moved && (kotlin.math.abs(delta.x) > 8f || kotlin.math.abs(delta.y) > 8f)) {
+                                                moved = true
+                                                longPressJob.cancel()
+                                            }
+                                            if (moved) {
+                                                onMouseMove(delta.x * TRACKPAD_SENSITIVITY, delta.y * TRACKPAD_SENSITIVITY)
+                                            }
+                                            prevPos = change.position
+                                            change.consume()
+                                        }
+                                    }
                                 }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Mouse,
+                            contentDescription = "Trackpad",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (button.label.isNotEmpty()) {
+                            Text(
+                                text = button.label,
+                                fontSize = 9.sp,
+                                lineHeight = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Clip
                             )
-                        } else Modifier
-                    ),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(
-                    if (isSelected) 2.dp else 1.dp,
-                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                ),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                contentPadding = PaddingValues(0.dp)
-            ) {
-                Box(modifier = Modifier.fillMaxSize().padding(2.dp)) {
-                    val topText = button.topText
-                    if (!topText.isNullOrEmpty()) {
-                        Text(
-                            text = topText,
-                            fontSize = 8.sp,
-                            lineHeight = 9.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Clip,
-                            textAlign = button.topAlign.toTextAlign(),
-                            modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)
-                        )
+                        }
                     }
-                    Text(
-                        text = button.label,
-                        fontSize = 11.sp,
-                        lineHeight = 13.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Clip,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().align(Alignment.Center)
-                    )
-                    val bottomText = button.bottomText
-                    if (!bottomText.isNullOrEmpty()) {
-                        Text(
-                            text = bottomText,
-                            fontSize = 8.sp,
-                            lineHeight = 9.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Clip,
-                            textAlign = button.bottomAlign.toTextAlign(),
-                            modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter)
-                        )
+                }
+            } else {
+                // ── Key button (all modes) / trackpad in edit mode ────────────
+                OutlinedButton(
+                    onClick = {
+                        if (isEditMode) onSelectButton(button.id) else onKeyPress(button.code)
+                    },
+                    modifier = Modifier
+                        .absoluteOffset(x = bx, y = by)
+                        .size(width = bw, height = bh)
+                        .zIndex(if (isDragging) 10f else 0f)
+                        .offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }
+                        .then(
+                            if (isEditMode) Modifier.pointerInput(button.id) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        isDragging = true
+                                        draggingId = currentButton.id
+                                        dropTargetCol = currentButton.col
+                                        dropTargetRow = currentButton.row
+                                        dropIsValid = true
+                                        if (currentSelectedId != currentButton.id) {
+                                            onSelectButton(currentButton.id)
+                                        }
+                                    },
+                                    onDrag = { change, delta ->
+                                        change.consume()
+                                        dragOffset += delta
+                                        val rawCol = ((currentButton.col * cellWPx + dragOffset.x) / cellWPx).roundToInt()
+                                        val rawRow = ((currentButton.row * cellHPx + dragOffset.y) / cellHPx).roundToInt()
+                                        dropTargetCol = rawCol.coerceIn(0, currentLayout.columns - currentButton.colSpan)
+                                        dropTargetRow = rawRow.coerceIn(0, currentLayout.rows - currentButton.rowSpan)
+                                        dropIsValid = !currentLayout.wouldOverlap(
+                                            currentButton.id, dropTargetCol, dropTargetRow,
+                                            currentButton.colSpan, currentButton.rowSpan
+                                        )
+                                    },
+                                    onDragEnd = {
+                                        if (dropIsValid) {
+                                            onMoveButton(currentButton.id, dropTargetCol, dropTargetRow)
+                                        }
+                                        isDragging = false
+                                        draggingId = null
+                                        dragOffset = Offset.Zero
+                                    },
+                                    onDragCancel = {
+                                        isDragging = false
+                                        draggingId = null
+                                        dragOffset = Offset.Zero
+                                    }
+                                )
+                            } else Modifier
+                        ),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(
+                        if (isSelected) 2.dp else 1.dp,
+                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    if (button.isTrackpad) {
+                        // Edit mode trackpad preview
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Mouse,
+                                    contentDescription = "Trackpad",
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = button.label.ifEmpty { "Trackpad" },
+                                    fontSize = 9.sp,
+                                    lineHeight = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Clip,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize().padding(2.dp)) {
+                            val topText = button.topText
+                            if (!topText.isNullOrEmpty()) {
+                                Text(
+                                    text = topText,
+                                    fontSize = 8.sp,
+                                    lineHeight = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Clip,
+                                    textAlign = button.topAlign.toTextAlign(),
+                                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)
+                                )
+                            }
+                            Text(
+                                text = button.label,
+                                fontSize = 11.sp,
+                                lineHeight = 13.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Clip,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().align(Alignment.Center)
+                            )
+                            val bottomText = button.bottomText
+                            if (!bottomText.isNullOrEmpty()) {
+                                Text(
+                                    text = bottomText,
+                                    fontSize = 8.sp,
+                                    lineHeight = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Clip,
+                                    textAlign = button.bottomAlign.toTextAlign(),
+                                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -586,6 +737,8 @@ private fun KeyGrid(
         }
     }
 }
+
+private const val TRACKPAD_SENSITIVITY = 0.8f
 
 private fun isAccessibilityServiceEnabled(context: Context): Boolean {
     val expected = ComponentName(context, InputAccessibilityService::class.java)

@@ -2,10 +2,14 @@ package com.mapo.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.graphics.Path
 import android.os.SystemClock
 import android.util.Log
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.accessibility.AccessibilityEvent
 import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.RemapTarget
@@ -62,6 +66,19 @@ class InputAccessibilityService : AccessibilityService() {
         private const val TAG = "InputAccessibilityService"
     }
 
+    // ── Cursor tracking ───────────────────────────────────────────────────────
+
+    // Tracks a virtual cursor position so clicks/gestures land where movement left off
+    private var cursorX = 540f
+    private var cursorY = 960f
+    private var displayWidth = 1080f
+    private var displayHeight = 1920f
+
+    // Gesture dispatch state — all touched on main thread via dispatchGesture callbacks
+    private var gestureActive = false
+    private var lastDispatchedX = 540f
+    private var lastDispatchedY = 960f
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onServiceConnected() {
@@ -70,7 +87,11 @@ class InputAccessibilityService : AccessibilityService() {
         val info = serviceInfo
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         setServiceInfo(info)
-        Log.i(TAG, "Service connected, flags=0x${serviceInfo.flags.toString(16)} capabilities=0x${serviceInfo.capabilities.toString(16)}")
+        val cx = primaryDisplayCenter()
+        cursorX = cx.first; cursorY = cx.second
+        lastDispatchedX = cx.first; lastDispatchedY = cx.second
+        displayWidth = cx.first * 2f; displayHeight = cx.second * 2f
+        Log.i(TAG, "Service connected, flags=0x${serviceInfo.flags.toString(16)} cursor initialized to ($cursorX,$cursorY)")
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -132,6 +153,83 @@ class InputAccessibilityService : AccessibilityService() {
         return true
     }
 
+    // ── Mouse gesture injection (called from ViewModel for trackpad) ──────────
+
+    fun injectMouseMove(dx: Float, dy: Float) {
+        cursorX = (cursorX + dx).coerceIn(0f, displayWidth)
+        cursorY = (cursorY + dy).coerceIn(0f, displayHeight)
+        if (!gestureActive) dispatchPendingMove()
+    }
+
+    private fun dispatchPendingMove() {
+        val fromX = lastDispatchedX; val fromY = lastDispatchedY
+        val toX = cursorX;           val toY = cursorY
+        if (fromX == toX && fromY == toY) return
+        gestureActive = true
+        lastDispatchedX = toX; lastDispatchedY = toY
+        val path = Path().apply { moveTo(fromX, fromY); lineTo(toX, toY) }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, 16L)
+        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription) {
+                    gestureActive = false
+                    dispatchPendingMove()
+                }
+                override fun onCancelled(g: GestureDescription) {
+                    gestureActive = false
+                    lastDispatchedX = cursorX; lastDispatchedY = cursorY
+                }
+            }, null)
+    }
+
+    fun injectMouseTap() {
+        Log.d(TAG, "injectMouseTap at ($cursorX,$cursorY)")
+        val path = Path().apply { moveTo(cursorX, cursorY) }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, 50L)
+        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+    }
+
+    fun injectMouseRightClick() {
+        Log.d(TAG, "injectMouseRightClick at ($cursorX,$cursorY)")
+        val path = Path().apply { moveTo(cursorX, cursorY) }
+        val stroke = GestureDescription.StrokeDescription(path, 0L, 800L)
+        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+    }
+
+    fun injectMouseScroll(dx: Float, dy: Float) {
+        Log.d(TAG, "injectMouseScroll dx=$dx dy=$dy")
+        val cx = primaryDisplayCenter()
+        val now = SystemClock.uptimeMillis()
+        val props = arrayOf(MotionEvent.PointerProperties().apply {
+            id = 0; toolType = MotionEvent.TOOL_TYPE_MOUSE
+        })
+        val coords = arrayOf(MotionEvent.PointerCoords().apply {
+            x = cx.first; y = cx.second
+            setAxisValue(MotionEvent.AXIS_VSCROLL, dy)
+            setAxisValue(MotionEvent.AXIS_HSCROLL, dx)
+        })
+        val event = MotionEvent.obtain(
+            now, now, MotionEvent.ACTION_SCROLL,
+            1, props, coords,
+            0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0
+        )
+        injectInputEvent(event)
+        event.recycle()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun primaryDisplayCenter(): Pair<Float, Float> {
+        val dm = getSystemService(DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+        val display = dm.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+            ?: return Pair(540f, 960f).also { Log.w(TAG, "primaryDisplayCenter: no default display") }
+        val metrics = android.util.DisplayMetrics()
+        display.getRealMetrics(metrics)
+        val cx = metrics.widthPixels / 2f
+        val cy = metrics.heightPixels / 2f
+        Log.d(TAG, "primaryDisplayCenter: displayId=${display.displayId} size=${metrics.widthPixels}x${metrics.heightPixels} center=($cx,$cy)")
+        return Pair(cx, cy)
+    }
+
     // ── Low-level injection ───────────────────────────────────────────────────
 
     @SuppressLint("PrivateApi")
@@ -146,16 +244,22 @@ class InputAccessibilityService : AccessibilityService() {
 
     @SuppressLint("PrivateApi")
     private fun injectRawKeyEvent(event: KeyEvent) {
+        injectInputEvent(event)
+    }
+
+    @SuppressLint("PrivateApi")
+    private fun injectInputEvent(event: android.view.InputEvent) {
         try {
             val imClass = Class.forName("android.hardware.input.InputManager")
             val im = imClass.getDeclaredMethod("getInstance").invoke(null)
-            imClass.getDeclaredMethod(
+            val result = imClass.getDeclaredMethod(
                 "injectInputEvent",
                 android.view.InputEvent::class.java,
                 Int::class.javaPrimitiveType
-            ).invoke(im, event, 0) // 0 = INJECT_INPUT_EVENT_MODE_ASYNC
+            ).invoke(im, event, 0) as? Boolean ?: false // 0 = INJECT_INPUT_EVENT_MODE_ASYNC
+            Log.d(TAG, "injectInputEvent result=$result type=${event.javaClass.simpleName} source=0x${event.source.toString(16)}")
         } catch (e: Exception) {
-            Log.e(TAG, "injectRawKeyEvent failed: keyCode=${event.keyCode} action=${event.action}", e)
+            Log.e(TAG, "injectInputEvent failed: $event", e)
         }
     }
 }

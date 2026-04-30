@@ -167,7 +167,32 @@ class MainViewModel @Inject constructor(
     // ── Normal mode ───────────────────────────────────────────────────────────
 
     fun onKeyPress(code: String) {
-        InputAccessibilityService.instance?.injectKey(code)
+        val svc = InputAccessibilityService.instance
+            ?: run { _toastMessage.tryEmit("Accessibility service not running"); return }
+        when (code) {
+            "MOUSE_LEFT",
+            "MOUSE_MIDDLE",
+            "MOUSE_BACK",
+            "MOUSE_FORWARD" -> svc.injectMouseTap()
+            "MOUSE_RIGHT"   -> svc.injectMouseRightClick()
+            "SCROLL_UP"     -> svc.injectMouseScroll(0f, 1f)
+            "SCROLL_DOWN"   -> svc.injectMouseScroll(0f, -1f)
+            else            -> svc.injectKey(code)
+        }
+    }
+
+    fun onMouseMove(dx: Float, dy: Float) {
+        InputAccessibilityService.instance?.injectMouseMove(dx, dy)
+            ?: _toastMessage.tryEmit("Accessibility service not running")
+    }
+
+    fun onMouseTap() {
+        InputAccessibilityService.instance?.injectMouseTap()
+            ?: _toastMessage.tryEmit("Accessibility service not running")
+    }
+
+    fun onMouseRightClick() {
+        InputAccessibilityService.instance?.injectMouseRightClick()
             ?: _toastMessage.tryEmit("Accessibility service not running")
     }
 
@@ -209,7 +234,8 @@ class MainViewModel @Inject constructor(
     fun addButton(
         label: String, code: String,
         topText: String = "", topAlign: String = "CENTER",
-        bottomText: String = "", bottomAlign: String = "CENTER"
+        bottomText: String = "", bottomAlign: String = "CENTER",
+        type: String = "key"
     ) {
         val layout = _editingLayout.value ?: return
         val cell = layout.findFirstEmptyCell()
@@ -221,7 +247,8 @@ class MainViewModel @Inject constructor(
             label = label, code = code,
             col = cell.first, row = cell.second,
             topText = topText.ifEmpty { null }, topAlign = topAlign,
-            bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign
+            bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
+            type = type
         )
         _editingLayout.value = layout.copy(buttons = layout.buttons + button)
         _selectedButtonId.value = button.id
@@ -230,7 +257,8 @@ class MainViewModel @Inject constructor(
     fun updateSelectedButton(
         label: String, code: String,
         topText: String, topAlign: String,
-        bottomText: String, bottomAlign: String
+        bottomText: String, bottomAlign: String,
+        type: String = "key"
     ) {
         val id = _selectedButtonId.value ?: return
         _editingLayout.value = _editingLayout.value?.let { layout ->
@@ -238,7 +266,8 @@ class MainViewModel @Inject constructor(
                 if (btn.id == id) btn.copy(
                     label = label, code = code,
                     topText = topText.ifEmpty { null }, topAlign = topAlign,
-                    bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign
+                    bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
+                    type = type
                 ) else btn
             })
         }

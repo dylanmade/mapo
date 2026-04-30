@@ -68,8 +68,15 @@ class InputAccessibilityService : AccessibilityService() {
 
     // ── Cursor tracking ───────────────────────────────────────────────────────
 
+    // Virtual gesture anchor — NOT the visible system cursor position.
+    // Gesture paths must stay within the safe zone to avoid system gesture zones
+    // (back gesture on left/right edges, home gesture at bottom, notifications at top).
     private var cursorX = 540f
     private var cursorY = 960f
+    private var safeL = 100f
+    private var safeT = 80f
+    private var safeR = 980f
+    private var safeB = 1670f
 
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -81,9 +88,15 @@ class InputAccessibilityService : AccessibilityService() {
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         setServiceInfo(info)
         val (w, h) = primaryDisplaySize()
+        // Keep gesture paths well away from system gesture zones.
+        // Left/right: ~100px avoids the back-gesture swipe zone.
+        // Top: ~80px avoids notification pull-down.
+        // Bottom: ~250px avoids home/recents swipe zone.
+        safeL = 100f;       safeT = 80f
+        safeR = w - 100f;   safeB = h - 250f
         cursorX = w / 2f
         cursorY = h / 2f
-        Log.i(TAG, "Service connected — display=${w}x${h} cursor=($cursorX,$cursorY)")
+        Log.i(TAG, "Service connected — display=${w}x${h} safeZone=[$safeL,$safeT,$safeR,$safeB]")
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -148,78 +161,84 @@ class InputAccessibilityService : AccessibilityService() {
     // ── Mouse gesture injection (called from ViewModel for trackpad) ──────────
 
     private var isDragging = false
-    private var hasMoved = false
     private var currentStroke: GestureDescription.StrokeDescription? = null
-    private var gestureActive = false
-    private var lastDispatchedX = 540f
-    private var lastDispatchedY = 960f
+    private var segmentActive = false
+    private var segEndX = 540f
+    private var segEndY = 960f
 
     fun startMouseDrag() {
         isDragging = true
-        hasMoved = false
+        segmentActive = false
         currentStroke = null
-        gestureActive = false
-        lastDispatchedX = cursorX
-        lastDispatchedY = cursorY
-        Log.d(TAG, "startMouseDrag at ($cursorX,$cursorY)")
+        // Reset to safe-zone center on every new finger-touch so the virtual anchor
+        // always has maximum headroom before approaching any system gesture zone.
+        cursorX = (safeL + safeR) / 2f
+        cursorY = (safeT + safeB) / 2f
+        segEndX = cursorX
+        segEndY = cursorY
     }
 
     fun injectMouseMove(dx: Float, dy: Float) {
-        hasMoved = true
-        cursorX += dx
-        cursorY += dy
-        if (!gestureActive) dispatchDragSegment(willContinue = true)
+        cursorX = (cursorX + dx).coerceIn(safeL, safeR)
+        cursorY = (cursorY + dy).coerceIn(safeT, safeB)
+        if (!segmentActive) dispatchMoveSegment(willContinue = true)
     }
 
     fun endMouseDrag() {
         isDragging = false
-        Log.d(TAG, "endMouseDrag hasMoved=$hasMoved gestureActive=$gestureActive currentStroke=${currentStroke != null}")
-        if (!hasMoved) return
-        if (!gestureActive && currentStroke != null) dispatchDragSegment(willContinue = false)
+        if (!segmentActive && currentStroke != null) dispatchMoveSegment(willContinue = false)
     }
 
-    private fun dispatchDragSegment(willContinue: Boolean) {
-        val fromX = lastDispatchedX; val fromY = lastDispatchedY
-        val toX = cursorX;           val toY = cursorY
-        lastDispatchedX = toX; lastDispatchedY = toY
+    private fun dispatchMoveSegment(willContinue: Boolean) {
+        val fromX = segEndX; val fromY = segEndY
+        val toX = cursorX;   val toY = cursorY
         val path = Path().apply {
             moveTo(fromX, fromY)
             if (fromX != toX || fromY != toY) lineTo(toX, toY)
         }
         val stroke = if (currentStroke == null) {
-            Log.d(TAG, "dispatchGesture NEW ($fromX,$fromY)->($toX,$toY) willContinue=$willContinue")
-            GestureDescription.StrokeDescription(path, 0L, 50L, willContinue)
+            GestureDescription.StrokeDescription(path, 0L, 1L, willContinue)
         } else {
-            Log.d(TAG, "dispatchGesture CONT ($fromX,$fromY)->($toX,$toY) willContinue=$willContinue")
-            currentStroke!!.continueStroke(path, 0L, 50L, willContinue)
+            currentStroke!!.continueStroke(path, 0L, 1L, willContinue)
         }
         currentStroke = if (willContinue) stroke else null
-        gestureActive = true
-        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(),
+        val ok = dispatchGesture(
+            GestureDescription.Builder().addStroke(stroke).build(),
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription) {
-                    Log.d(TAG, "gesture onCompleted isDragging=$isDragging cursorMoved=${cursorX != lastDispatchedX || cursorY != lastDispatchedY}")
-                    gestureActive = false
+                    segmentActive = false
                     when {
-                        isDragging && (cursorX != lastDispatchedX || cursorY != lastDispatchedY) ->
-                            dispatchDragSegment(willContinue = true)
+                        isDragging && (cursorX != segEndX || cursorY != segEndY) ->
+                            dispatchMoveSegment(willContinue = true)
                         !isDragging && currentStroke != null ->
-                            dispatchDragSegment(willContinue = false)
+                            dispatchMoveSegment(willContinue = false)
                     }
                 }
                 override fun onCancelled(g: GestureDescription) {
-                    Log.w(TAG, "gesture onCancelled — touch sequence broken")
-                    gestureActive = false
+                    Log.w(TAG, "gesture cancelled — resetting segment, will retry on next move")
+                    segmentActive = false
                     currentStroke = null
-                    isDragging = false
+                    // Don't touch isDragging: finger is still down. Reset segEnd to current
+                    // position so the next move starts a fresh gesture from here rather than
+                    // trying to jump across the gap since the last dispatched segment.
+                    segEndX = cursorX
+                    segEndY = cursorY
                 }
-            }, null)
+            }, null
+        )
+        if (ok) {
+            segmentActive = true
+            segEndX = toX
+            segEndY = toY
+        } else {
+            Log.w(TAG, "dispatchGesture returned false — skipping segment")
+        }
     }
 
     fun injectMouseTap() {
         Log.d(TAG, "injectMouseTap at ($cursorX,$cursorY)")
         val path = Path().apply { moveTo(cursorX, cursorY) }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, 50L)
+        val stroke = GestureDescription.StrokeDescription(path, 0L, 1L)
         dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
     }
 

@@ -89,7 +89,6 @@ import com.mapo.data.model.wouldOverlap
 import com.mapo.service.InputAccessibilityService
 import com.mapo.ui.theme.TabAccent
 import com.mapo.ui.viewmodel.MainViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -158,17 +157,17 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     var dialogIsTrackpad by remember { mutableStateOf(false) }
     var dialogSensitivity by remember { mutableStateOf(TRACKPAD_SENSITIVITY) }
     var dialogTapTarget by remember { mutableStateOf<RemapTarget>(TrackpadGesture.TAP.defaultTarget()) }
-    var dialogLongPressTarget by remember { mutableStateOf<RemapTarget>(TrackpadGesture.LONG_PRESS.defaultTarget()) }
+    var dialogDoubleTapTarget by remember { mutableStateOf<RemapTarget>(TrackpadGesture.DOUBLE_TAP.defaultTarget()) }
     var editingGesture by remember { mutableStateOf<TrackpadGesture?>(null) }
 
     if (editingGesture != null) {
-        val current = if (editingGesture == TrackpadGesture.TAP) dialogTapTarget else dialogLongPressTarget
+        val current = if (editingGesture == TrackpadGesture.TAP) dialogTapTarget else dialogDoubleTapTarget
         RemapTargetPickerDialog(
             title = editingGesture!!.displayName,
             current = current,
             onSelect = { target ->
                 if (editingGesture == TrackpadGesture.TAP) dialogTapTarget = target
-                else dialogLongPressTarget = target
+                else dialogDoubleTapTarget = target
                 editingGesture = null
             },
             onDismiss = { editingGesture = null }
@@ -243,9 +242,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             onClick = { editingGesture = TrackpadGesture.TAP }
                         )
                         GestureMappingRow(
-                            label = TrackpadGesture.LONG_PRESS.displayName,
-                            target = dialogLongPressTarget,
-                            onClick = { editingGesture = TrackpadGesture.LONG_PRESS }
+                            label = TrackpadGesture.DOUBLE_TAP.displayName,
+                            target = dialogDoubleTapTarget,
+                            onClick = { editingGesture = TrackpadGesture.DOUBLE_TAP }
                         )
                     }
                     if (!dialogIsTrackpad) {
@@ -277,7 +276,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     val sens = if (dialogIsTrackpad) dialogSensitivity else null
                     val gestureMappings = if (dialogIsTrackpad) mapOf(
                         TrackpadGesture.TAP.name to dialogTapTarget.encode(),
-                        TrackpadGesture.LONG_PRESS.name to dialogLongPressTarget.encode()
+                        TrackpadGesture.DOUBLE_TAP.name to dialogDoubleTapTarget.encode()
                     ) else null
                     if (dialogIsEdit) {
                         viewModel.updateSelectedButton(
@@ -348,7 +347,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             dialogIsTrackpad = false
                             dialogSensitivity = TRACKPAD_SENSITIVITY
                             dialogTapTarget = TrackpadGesture.TAP.defaultTarget()
-                            dialogLongPressTarget = TrackpadGesture.LONG_PRESS.defaultTarget()
+                            dialogDoubleTapTarget = TrackpadGesture.DOUBLE_TAP.defaultTarget()
                             dialogIsEdit = false
                             showButtonDialog = true
                         },
@@ -364,7 +363,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                                 dialogIsTrackpad = btn.isTrackpad
                                 dialogSensitivity = btn.sensitivity ?: TRACKPAD_SENSITIVITY
                                 dialogTapTarget = btn.gestureTarget(TrackpadGesture.TAP)
-                                dialogLongPressTarget = btn.gestureTarget(TrackpadGesture.LONG_PRESS)
+                                dialogDoubleTapTarget = btn.gestureTarget(TrackpadGesture.DOUBLE_TAP)
                                 dialogIsEdit = true
                                 showButtonDialog = true
                             }
@@ -571,6 +570,7 @@ private fun KeyGrid(
                         .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
                         .pointerInput(button.id + "_tp") {
+                            var lastTapTimeMs = 0L
                             awaitPointerEventScope {
                                 while (true) {
                                     // Wait for finger down
@@ -586,24 +586,26 @@ private fun KeyGrid(
                                     var prevPos = down.position
                                     var hasMoved = false
                                     var dragStarted = false
-                                    var rightClickFired = false
-                                    val longPressJob = gridScope.launch {
-                                        delay(LONG_PRESS_DURATION_MS)
-                                        Log.d(TAG, "trackpad: long press fired → ${currentButton.gestureTarget(TrackpadGesture.LONG_PRESS)}")
-                                        rightClickFired = true
-                                        onTrackpadGesture(currentButton, TrackpadGesture.LONG_PRESS)
-                                    }
 
                                     var active = true
                                     while (active) {
                                         val event = awaitPointerEvent()
                                         val change = event.changes.firstOrNull() ?: break
                                         if (!change.pressed) {
-                                            longPressJob.cancel()
                                             if (dragStarted) onDragEnd()
-                                            if (!hasMoved && !rightClickFired) {
-                                                Log.d(TAG, "trackpad: tap detected → ${currentButton.gestureTarget(TrackpadGesture.TAP)}")
+                                            if (!hasMoved) {
+                                                val now = System.currentTimeMillis()
+                                                // Always fire single tap immediately. If this turns out
+                                                // to be the second of a double tap, also fire double tap.
+                                                Log.d(TAG, "trackpad: tap → ${currentButton.gestureTarget(TrackpadGesture.TAP)}")
                                                 onTrackpadGesture(currentButton, TrackpadGesture.TAP)
+                                                if (lastTapTimeMs > 0L && (now - lastTapTimeMs) <= DOUBLE_TAP_INTERVAL_MS) {
+                                                    Log.d(TAG, "trackpad: double tap → ${currentButton.gestureTarget(TrackpadGesture.DOUBLE_TAP)}")
+                                                    onTrackpadGesture(currentButton, TrackpadGesture.DOUBLE_TAP)
+                                                    lastTapTimeMs = 0L
+                                                } else {
+                                                    lastTapTimeMs = now
+                                                }
                                             }
                                             active = false
                                         } else {
@@ -611,7 +613,6 @@ private fun KeyGrid(
                                             val distSq = totalDelta.x * totalDelta.x + totalDelta.y * totalDelta.y
                                             if (!hasMoved && distSq > TAP_MOVEMENT_THRESHOLD_PX * TAP_MOVEMENT_THRESHOLD_PX) {
                                                 Log.d(TAG, "trackpad: movement threshold crossed → drag start")
-                                                longPressJob.cancel()
                                                 hasMoved = true
                                                 dragStarted = true
                                                 prevPos = change.position
@@ -817,7 +818,7 @@ private fun KeyGrid(
 private const val TAG = "MapoInput"
 private const val TRACKPAD_SENSITIVITY = 1.5f
 private const val TAP_MOVEMENT_THRESHOLD_PX = 12f
-private const val LONG_PRESS_DURATION_MS = 500L
+private const val DOUBLE_TAP_INTERVAL_MS = 250L
 
 @Composable
 private fun GestureMappingRow(

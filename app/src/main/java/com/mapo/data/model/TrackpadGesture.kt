@@ -2,13 +2,13 @@ package com.mapo.data.model
 
 enum class TrackpadGesture(val displayName: String) {
     TAP("On Tap"),
-    LONG_PRESS("On Long Press");
+    DOUBLE_TAP("On Double Tap");
 }
 
 /** Default RemapTarget for a gesture when no explicit mapping is set. */
 fun TrackpadGesture.defaultTarget(): RemapTarget = when (this) {
     TrackpadGesture.TAP        -> RemapTarget.Mouse("MOUSE_LEFT")
-    TrackpadGesture.LONG_PRESS -> RemapTarget.Mouse("MOUSE_RIGHT")
+    TrackpadGesture.DOUBLE_TAP -> RemapTarget.Mouse("MOUSE_RIGHT")
 }
 
 /** Resolves the effective target for a trackpad button's gesture, falling back to defaults. */

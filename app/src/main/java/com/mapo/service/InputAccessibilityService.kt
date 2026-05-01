@@ -7,9 +7,7 @@ import android.annotation.SuppressLint
 import android.graphics.Path
 import android.os.SystemClock
 import android.util.Log
-import android.view.InputDevice
 import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.accessibility.AccessibilityEvent
 import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.RemapTarget
@@ -139,7 +137,11 @@ class InputAccessibilityService : AccessibilityService() {
                 val kc = DEVICE_BUTTON_TO_KEYCODE[btn] ?: return
                 if (isDown) injectKeyDown(kc) else injectKeyUp(kc)
             }
-            is RemapTarget.Mouse   -> { /* TODO: dispatchGesture */ }
+            is RemapTarget.Mouse -> {
+                // Mouse targets are inherently click-on-press (no separate down/up at the
+                // accessibility-gesture layer). Fire on the down edge and ignore the up.
+                if (isDown) dispatchTargetAsClick(target)
+            }
             is RemapTarget.Unbound -> { /* unreachable */ }
         }
     }
@@ -180,10 +182,13 @@ class InputAccessibilityService : AccessibilityService() {
                 injectKeyDown(kc); injectKeyUp(kc)
             }
             is RemapTarget.Mouse -> when (target.code) {
-                "MOUSE_LEFT", "MOUSE_MIDDLE", "MOUSE_BACK", "MOUSE_FORWARD" -> injectMouseTap()
-                "MOUSE_RIGHT" -> injectMouseRightClick()
-                "SCROLL_UP"   -> injectMouseScroll(0f, 1f)
-                "SCROLL_DOWN" -> injectMouseScroll(0f, -1f)
+                "MOUSE_LEFT"    -> injectMouseTap()
+                "MOUSE_RIGHT"   -> injectMouseRightClick()
+                "MOUSE_MIDDLE"  -> injectMouseMiddleClick()
+                "MOUSE_BACK"    -> injectMouseBackClick()
+                "MOUSE_FORWARD" -> injectMouseForwardClick()
+                "SCROLL_UP"     -> injectMouseScroll(0f, 1f)
+                "SCROLL_DOWN"   -> injectMouseScroll(0f, -1f)
                 else -> Log.w(TAG, "dispatchTargetAsClick: unknown mouse code ${target.code}")
             }
         }
@@ -284,38 +289,76 @@ class InputAccessibilityService : AccessibilityService() {
         if (!ok) Log.w(TAG, "injectMouseTap: dispatchGesture returned false")
     }
 
-    fun injectMouseRightClick() {
-        Log.d(TAG, "injectMouseRightClick at ($cursorX,$cursorY)")
-        val path = Path().apply { moveTo(cursorX, cursorY) }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, 800L)
+    /**
+     * Multi-finger tap gestures. Wine (and many touch-to-mouse layers) natively interpret
+     * 2-finger tap as right-click and 3-finger tap as middle-click. Single-finger tap stays
+     * as injectMouseTap for left-click.
+     *
+     * Implemented via dispatchGesture with multiple simultaneous strokes — public API, no
+     * reflection, no INJECT_EVENTS permission required. Same technique used by DS Keyboard.
+     */
+    private fun dispatchMultiFingerTap(fingerCount: Int, label: String) {
+        Log.d(TAG, "$label at ($cursorX,$cursorY) — $fingerCount-finger tap")
+        val spacing = 30f  // px between fingers
+        val builder = GestureDescription.Builder()
+        // Lay fingers symmetrically around the cursor anchor.
+        val totalSpan = spacing * (fingerCount - 1)
+        val startX = cursorX - totalSpan / 2f
+        for (i in 0 until fingerCount) {
+            val x = startX + i * spacing
+            val path = Path().apply { moveTo(x, cursorY) }
+            builder.addStroke(GestureDescription.StrokeDescription(path, 0L, 50L))
+        }
         val ok = dispatchGesture(
-            GestureDescription.Builder().addStroke(stroke).build(),
+            builder.build(),
             object : GestureResultCallback() {
-                override fun onCompleted(g: GestureDescription) { Log.d(TAG, "injectMouseRightClick: completed") }
-                override fun onCancelled(g: GestureDescription) { Log.w(TAG, "injectMouseRightClick: cancelled") }
+                override fun onCompleted(g: GestureDescription) { Log.d(TAG, "$label: completed") }
+                override fun onCancelled(g: GestureDescription) { Log.w(TAG, "$label: cancelled") }
             }, null
         )
-        if (!ok) Log.w(TAG, "injectMouseRightClick: dispatchGesture returned false")
+        if (!ok) Log.w(TAG, "$label: dispatchGesture returned false")
     }
 
+    fun injectMouseRightClick()  = dispatchMultiFingerTap(2, "injectMouseRightClick")
+    fun injectMouseMiddleClick() = dispatchMultiFingerTap(3, "injectMouseMiddleClick")
+
+    /**
+     * Two-finger vertical drag. Wine/touch-to-mouse layers translate this into scroll wheel
+     * events. dy > 0 → scroll up (fingers drag down, Android natural scroll convention).
+     */
     fun injectMouseScroll(dx: Float, dy: Float) {
-        Log.d(TAG, "injectMouseScroll dx=$dx dy=$dy")
-        val now = SystemClock.uptimeMillis()
-        val props = arrayOf(MotionEvent.PointerProperties().apply {
-            id = 0; toolType = MotionEvent.TOOL_TYPE_MOUSE
-        })
-        val coords = arrayOf(MotionEvent.PointerCoords().apply {
-            x = cursorX; y = cursorY
-            setAxisValue(MotionEvent.AXIS_VSCROLL, dy)
-            setAxisValue(MotionEvent.AXIS_HSCROLL, dx)
-        })
-        val event = MotionEvent.obtain(
-            now, now, MotionEvent.ACTION_SCROLL,
-            1, props, coords,
-            0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0
+        Log.d(TAG, "injectMouseScroll dx=$dx dy=$dy — two-finger drag")
+        val spacing = 30f
+        val dragDistance = 200f
+        // dy>0 means scroll up → fingers move down (positive Y in screen coords).
+        val deltaY = if (dy > 0f) dragDistance else -dragDistance
+        val deltaX = if (dx != 0f) (if (dx > 0f) dragDistance else -dragDistance) else 0f
+        val builder = GestureDescription.Builder()
+        listOf(-spacing / 2f, spacing / 2f).forEach { offsetX ->
+            val path = Path().apply {
+                moveTo(cursorX + offsetX, cursorY)
+                lineTo(cursorX + offsetX + deltaX, cursorY + deltaY)
+            }
+            builder.addStroke(GestureDescription.StrokeDescription(path, 0L, 200L))
+        }
+        val ok = dispatchGesture(
+            builder.build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription) { Log.d(TAG, "injectMouseScroll: completed") }
+                override fun onCancelled(g: GestureDescription) { Log.w(TAG, "injectMouseScroll: cancelled") }
+            }, null
         )
-        injectInputEvent(event)
-        event.recycle()
+        if (!ok) Log.w(TAG, "injectMouseScroll: dispatchGesture returned false")
+    }
+
+    // No-op placeholders kept so dispatchTargetAsClick's match remains exhaustive and the picker
+    // can still expose MOUSE_BACK/MOUSE_FORWARD even though no reliable cross-app injection
+    // mechanism exists for them via accessibility gestures.
+    fun injectMouseBackClick() {
+        Log.w(TAG, "injectMouseBackClick: no reliable cross-app touch gesture exists for this — noop")
+    }
+    fun injectMouseForwardClick() {
+        Log.w(TAG, "injectMouseForwardClick: no reliable cross-app touch gesture exists for this — noop")
     }
 
     @Suppress("DEPRECATION")

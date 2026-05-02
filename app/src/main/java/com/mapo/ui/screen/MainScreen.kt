@@ -80,6 +80,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import com.mapo.R
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
@@ -132,20 +133,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 }
             }
         }
-    }
-    pendingPrompt?.let { prompt ->
-        AutoSwitchCreatePromptDialog(
-            appLabel = prompt.appLabel,
-            onYes = {
-                viewModel.acceptCreateProfilePrompt(prompt.pkg, prompt.appLabel)
-                pendingPrompt = null
-            },
-            onNo = { pendingPrompt = null },
-            onNever = {
-                viewModel.ignorePackageForever(prompt.pkg)
-                pendingPrompt = null
-            }
-        )
     }
 
     val showRemapControls by viewModel.showRemapControls.collectAsState()
@@ -388,13 +375,50 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     ) {
         Scaffold(
             snackbarHost = {
-                SnackbarHost(snackbarHostState) { data ->
+                val prompt = pendingPrompt
+                if (prompt != null) {
                     Snackbar(
-                        snackbarData = data,
+                        modifier = Modifier.padding(12.dp),
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurface,
-                        actionColor = MaterialTheme.colorScheme.primary
-                    )
+                        actionOnNewLine = true,
+                        action = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(
+                                    onClick = {
+                                        viewModel.ignorePackageForever(prompt.pkg)
+                                        pendingPrompt = null
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.error
+                                    )
+                                ) { Text(stringResource(R.string.auto_switch_prompt_never)) }
+                                TextButton(
+                                    onClick = { pendingPrompt = null },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                ) { Text(stringResource(R.string.auto_switch_prompt_no)) }
+                                TextButton(
+                                    onClick = {
+                                        viewModel.acceptCreateProfilePrompt(prompt.pkg, prompt.appLabel)
+                                        pendingPrompt = null
+                                    }
+                                ) { Text(stringResource(R.string.auto_switch_prompt_yes)) }
+                            }
+                        }
+                    ) {
+                        Text(stringResource(R.string.auto_switch_prompt_title, prompt.appLabel))
+                    }
+                } else {
+                    SnackbarHost(snackbarHostState) { data ->
+                        Snackbar(
+                            snackbarData = data,
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                            actionColor = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             },
             containerColor = MaterialTheme.colorScheme.background,

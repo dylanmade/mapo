@@ -14,7 +14,6 @@
     <string name="auto_switch_unknown_profile">(missing profile)</string>
     <string name="auto_switch_snackbar_switched">Loaded profile “%1$s” for %2$s</string>
     <string name="auto_switch_prompt_title">Create profile for %1$s?</string>
-    <string name="auto_switch_prompt_message">Mapo can create a new profile for this app and switch to it whenever you launch it.</string>
     <string name="auto_switch_prompt_yes">Yes</string>
     <string name="auto_switch_prompt_no">No</string>
     <string name="auto_switch_prompt_never">Never for this app</string>

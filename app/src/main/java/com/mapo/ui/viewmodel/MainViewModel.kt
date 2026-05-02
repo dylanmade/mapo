@@ -83,6 +83,8 @@ class MainViewModel @Inject constructor(
 
     val autoSwitchEnabled: StateFlow<Boolean> = autoSwitchSettings.autoSwitchEnabled
 
+    val ignoredPackages: StateFlow<Set<String>> = autoSwitchSettings.ignoredPackages
+
     val appProfileBindings: StateFlow<List<AppProfileBinding>> =
         appProfileBindingRepository.getAll()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -178,6 +180,10 @@ class MainViewModel @Inject constructor(
 
     fun ignorePackageForever(pkg: String) {
         autoSwitcher.ignorePackage(pkg)
+    }
+
+    fun unignorePackage(pkg: String) {
+        autoSwitchSettings.removeIgnoredPackage(pkg)
     }
 
     fun deleteBinding(packageName: String, subId: String = "") {

@@ -131,22 +131,27 @@ class OverlayManager @Inject constructor(
     }
 
     private fun layoutParams(focusable: Boolean): WindowManager.LayoutParams {
-        var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        // FLAG_NOT_TOUCH_MODAL on both surfaces lets touches outside the visible
+        // snackbar/prompt content pass through to the underlying app. Toast also
+        // adds FLAG_NOT_FOCUSABLE + FLAG_NOT_TOUCHABLE so it's purely passive.
+        var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
         if (!focusable) {
-            // Non-focusable + non-touch-modal so input passes through to the underlying
-            // app for the toast case.
             flags = flags or
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         }
+        // MATCH_PARENT width gives Compose a definite bounded width to lay out
+        // against, which prevents WRAP_CONTENT-induced layout surprises (e.g.
+        // FlowRow wrapping when content would have fit).
         return WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             flags,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.BOTTOM
             y = 64
         }
     }

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -45,7 +46,8 @@ fun ProfileDrawerContent(
     onDuplicateProfile: (Profile) -> Unit,
     onDeleteProfile: (Profile) -> Unit,
     onOpenRemapControls: () -> Unit,
-    onOpenAutoSwitch: () -> Unit
+    onOpenAutoSwitch: () -> Unit,
+    onOpenBlocklist: () -> Unit
 ) {
     var showProfileSelector by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -196,6 +198,22 @@ fun ProfileDrawerContent(
                         selected = false,
                         onClick = { onOpenAutoSwitch() },
                         icon = { Icon(Icons.Default.SwapHoriz, contentDescription = null) },
+                        badge = {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                }
+                item {
+                    NavigationDrawerItem(
+                        label = { Text(stringResource(R.string.blocklist_drawer_label)) },
+                        selected = false,
+                        onClick = { onOpenBlocklist() },
+                        icon = { Icon(Icons.Default.Block, contentDescription = null) },
                         badge = {
                             Icon(
                                 Icons.AutoMirrored.Filled.KeyboardArrowRight,

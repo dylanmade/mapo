@@ -118,6 +118,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     }
     LaunchedEffect(Unit) {
         viewModel.autoSwitchEvents.collect { event ->
+            // Defensive fallback only: when the overlay permission is granted, the
+            // OverlayCoordinator renders these on the primary screen and we don't
+            // want a second copy on Mapo's screen.
+            if (isOverlayPermissionGranted(context)) return@collect
             when (event) {
                 is ProfileAutoSwitcher.UiEvent.Switched -> {
                     snackbarHostState.showSnackbar(
@@ -138,6 +142,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showAutoSwitch by remember { mutableStateOf(false) }
+    var showBlocklist by remember { mutableStateOf(false) }
 
     var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted(context)) }
@@ -357,6 +362,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 onOpenAutoSwitch = {
                     scope.launch { drawerState.close() }
                     showAutoSwitch = true
+                },
+                onOpenBlocklist = {
+                    scope.launch { drawerState.close() }
+                    showBlocklist = true
                 }
             )
         }
@@ -501,6 +510,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     if (showAutoSwitch) {
         AutoSwitchScreen(
             onBack = { showAutoSwitch = false }
+        )
+    }
+    if (showBlocklist) {
+        BlocklistScreen(
+            onBack = { showBlocklist = false }
         )
     }
     } // end Box

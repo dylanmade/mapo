@@ -26,4 +26,10 @@
     <string name="auto_switch_prompt_yes">Yes</string>
     <string name="auto_switch_prompt_no">No</string>
     <string name="auto_switch_prompt_never">Never for this app</string>
+
+    <string name="blocklist_drawer_label">Edit blocklist</string>
+    <string name="blocklist_screen_title">Blocklist</string>
+    <string name="blocklist_header">Apps Mapo will never prompt you about</string>
+    <string name="blocklist_empty">No apps blocked. When you tap “Never for this app” on a prompt, the app will appear here.</string>
+    <string name="blocklist_remove">Remove from blocklist</string>
 </resources>

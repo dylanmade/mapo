@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">mapo</string>
-    <string name="accessibility_service_label">mapo Input Service</string>
+    <string name="accessibility_service_label">Mapo</string>
     <string name="accessibility_service_description">Injects keyboard and mouse input events for PC games running via FEX emulation on the secondary screen.</string>
+
+    <string name="permissions_required_title">Permissions Required</string>
+    <string name="permissions_required_intro">Mapo needs the following permissions to function:</string>
+    <string name="permission_accessibility_label">Accessibility</string>
+    <string name="permission_accessibility_description">Required to remap physical buttons and inject input events.</string>
+    <string name="permission_overlay_label">Display over other apps</string>
+    <string name="permission_overlay_description">Required to show profile prompts on the active screen instead of Mapo\'s screen.</string>
+    <string name="permission_grant_button">Open Settings</string>
+    <string name="permission_granted_indicator">Granted</string>
 
     <string name="auto_switch_drawer_label">Auto-switch</string>
     <string name="auto_switch_screen_title">Auto-switch</string>

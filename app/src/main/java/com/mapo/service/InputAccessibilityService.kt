@@ -30,6 +30,11 @@ class InputAccessibilityService : AccessibilityService() {
         // Remapping on/off toggle — updated by MainViewModel.
         @Volatile var remapEnabled: Boolean = false
 
+        // True while a focusable Mapo overlay is on screen (e.g. the create-profile
+        // prompt). When set, gamepad A becomes ENTER and B becomes BACK so the user
+        // can drive the overlay from a controller, regardless of remap state.
+        @Volatile var overlayFocused: Boolean = false
+
         // Physical gamepad keycodes → DeviceButton enum
         private val GAMEPAD_KEYCODE_MAP: Map<Int, DeviceButton> = mapOf(
             KeyEvent.KEYCODE_BUTTON_A      to DeviceButton.BUTTON_A,
@@ -120,6 +125,23 @@ class InputAccessibilityService : AccessibilityService() {
     // ── Physical button interception (remap) ──────────────────────────────────
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (overlayFocused) {
+            // Translate gamepad A/B into ENTER/BACK so DPAD-navigated overlay buttons
+            // can be activated. DPAD events pass through unchanged so Compose's focus
+            // traversal handles left/right/up/down naturally.
+            val isDown = event.action == KeyEvent.ACTION_DOWN
+            return when (event.keyCode) {
+                KeyEvent.KEYCODE_BUTTON_A -> {
+                    if (isDown) injectKeyDown(KeyEvent.KEYCODE_ENTER) else injectKeyUp(KeyEvent.KEYCODE_ENTER)
+                    true
+                }
+                KeyEvent.KEYCODE_BUTTON_B -> {
+                    if (isDown) injectKeyDown(KeyEvent.KEYCODE_BACK) else injectKeyUp(KeyEvent.KEYCODE_BACK)
+                    true
+                }
+                else -> false
+            }
+        }
         if (!remapEnabled) return false
         Log.d(TAG, "onKeyEvent: keyCode=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} mappings=${currentMappings.size}")
 

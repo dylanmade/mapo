@@ -2,10 +2,6 @@ package com.mapo.ui.screen
 
 import android.app.Activity
 import android.util.Log
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
@@ -143,32 +139,24 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val scope = rememberCoroutineScope()
     var showAutoSwitch by remember { mutableStateOf(false) }
 
-    var showAccessibilityPrompt by remember { mutableStateOf(false) }
+    var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
+    var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted(context)) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                showAccessibilityPrompt = !isAccessibilityServiceEnabled(context)
+                accessibilityGranted = isAccessibilityServiceEnabled(context)
+                overlayGranted = isOverlayPermissionGranted(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    if (showAccessibilityPrompt) {
-        AlertDialog(
-            onDismissRequest = { showAccessibilityPrompt = false },
-            title = { Text("Accessibility Permission Needed") },
-            text = { Text("Mapo requires its accessibility service to remap buttons and inject inputs. Tap \"Open Settings\", find \"mapo Input Service\", and enable it.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showAccessibilityPrompt = false
-                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                }) { Text("Open Settings") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAccessibilityPrompt = false }) { Text("Later") }
-            }
+    if (!accessibilityGranted || !overlayGranted) {
+        PermissionsRequiredDialog(
+            accessibilityGranted = accessibilityGranted,
+            overlayGranted = overlayGranted
         )
     }
 
@@ -976,15 +964,6 @@ private fun BottomBar(onQuit: () -> Unit) {
             Text("Quit", fontSize = 12.sp)
         }
     }
-}
-
-private fun isAccessibilityServiceEnabled(context: Context): Boolean {
-    val expected = ComponentName(context, InputAccessibilityService::class.java)
-    val enabled = Settings.Secure.getString(
-        context.contentResolver,
-        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-    ) ?: return false
-    return enabled.split(':').any { ComponentName.unflattenFromString(it) == expected }
 }
 
 private fun String?.toTextAlign() = when (this) {

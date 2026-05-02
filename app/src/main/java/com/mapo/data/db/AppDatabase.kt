@@ -5,16 +5,22 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.mapo.data.model.AppProfileBinding
 import com.mapo.data.model.GamepadMapping
 import com.mapo.data.model.KeyLayout
 import com.mapo.data.model.Profile
 
-@Database(entities = [KeyLayout::class, Profile::class, GamepadMapping::class], version = 4, exportSchema = false)
+@Database(
+    entities = [KeyLayout::class, Profile::class, GamepadMapping::class, AppProfileBinding::class],
+    version = 5,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun layoutDao(): LayoutDao
     abstract fun profileDao(): ProfileDao
     abstract fun gamepadMappingDao(): GamepadMappingDao
+    abstract fun appProfileBindingDao(): AppProfileBindingDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

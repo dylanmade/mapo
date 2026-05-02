@@ -45,8 +45,10 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -79,6 +81,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.mapo.R
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.RemapTarget
@@ -89,6 +92,7 @@ import com.mapo.data.model.isTrackpad
 import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
 import com.mapo.service.InputAccessibilityService
+import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.ui.theme.TabAccent
 import com.mapo.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.Job
@@ -112,6 +116,28 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             snackbarHostState.showSnackbar(message)
         }
     }
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        viewModel.autoSwitchEvents.collect { event ->
+            when (event) {
+                is ProfileAutoSwitcher.UiEvent.Switched -> {
+                    snackbarHostState.showSnackbar(
+                        context.getString(R.string.auto_switch_snackbar_switched, event.profileName, event.appLabel)
+                    )
+                }
+                is ProfileAutoSwitcher.UiEvent.PromptCreate -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message = context.getString(R.string.auto_switch_snackbar_prompt, event.appLabel),
+                        actionLabel = context.getString(R.string.auto_switch_snackbar_action_create),
+                        duration = SnackbarDuration.Long
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        viewModel.acceptCreateProfilePrompt(event.pkg, event.appLabel)
+                    }
+                }
+            }
+        }
+    }
 
     val showRemapControls by viewModel.showRemapControls.collectAsState()
     val activeProfileMappings by viewModel.activeProfileMappings.collectAsState()
@@ -119,8 +145,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var showAutoSwitch by remember { mutableStateOf(false) }
 
-    val context = LocalContext.current
     var showAccessibilityPrompt by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -343,6 +369,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 onOpenRemapControls = {
                     scope.launch { drawerState.close() }
                     viewModel.openRemapControls()
+                },
+                onOpenAutoSwitch = {
+                    scope.launch { drawerState.close() }
+                    showAutoSwitch = true
                 }
             )
         }
@@ -436,6 +466,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             onSave = { viewModel.saveRemapMappings(it) },
             onBack = { viewModel.closeRemapControls() },
             modifier = Modifier.fillMaxSize()
+        )
+    }
+    if (showAutoSwitch) {
+        AutoSwitchScreen(
+            onBack = { showAutoSwitch = false }
         )
     }
     } // end Box

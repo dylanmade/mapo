@@ -3,6 +3,7 @@ package com.mapo.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapo.data.defaults.DefaultLayouts
+import com.mapo.data.model.AppProfileBinding
 import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
@@ -14,10 +15,14 @@ import com.mapo.data.model.findFirstEmptyCell
 import com.mapo.data.model.toGridLayout
 import com.mapo.data.model.toKeyLayout
 import com.mapo.data.model.wouldOverlap
+import com.mapo.data.repository.AppProfileBindingRepository
 import com.mapo.data.repository.GamepadMappingRepository
-import com.mapo.service.InputAccessibilityService
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
+import com.mapo.data.settings.AutoSwitchSettings
+import com.mapo.service.InputAccessibilityService
+import com.mapo.service.autoswitch.ProfileAutoSwitcher
+import com.mapo.service.foreground.ForegroundAppFilter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,7 +45,11 @@ import javax.inject.Inject
 class MainViewModel @Inject constructor(
     private val layoutRepository: LayoutRepository,
     private val profileRepository: ProfileRepository,
-    private val gampadMappingRepository: GamepadMappingRepository
+    private val gampadMappingRepository: GamepadMappingRepository,
+    private val appProfileBindingRepository: AppProfileBindingRepository,
+    private val autoSwitchSettings: AutoSwitchSettings,
+    private val autoSwitcher: ProfileAutoSwitcher,
+    private val foregroundAppFilter: ForegroundAppFilter
 ) : ViewModel() {
 
     private val _layouts = MutableStateFlow(DefaultLayouts.all)
@@ -61,8 +70,7 @@ class MainViewModel @Inject constructor(
     private val _toastMessage = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val toastMessage: SharedFlow<String> = _toastMessage.asSharedFlow()
 
-    private val _activeProfile = MutableStateFlow<Profile?>(null)
-    val activeProfile: StateFlow<Profile?> = _activeProfile.asStateFlow()
+    val activeProfile: StateFlow<Profile?> = profileRepository.activeProfile
 
     private val _profiles = MutableStateFlow<List<Profile>>(emptyList())
     val profiles: StateFlow<List<Profile>> = _profiles.asStateFlow()
@@ -73,8 +81,16 @@ class MainViewModel @Inject constructor(
     private val _showRemapControls = MutableStateFlow(false)
     val showRemapControls: StateFlow<Boolean> = _showRemapControls.asStateFlow()
 
+    val autoSwitchEnabled: StateFlow<Boolean> = autoSwitchSettings.autoSwitchEnabled
+
+    val appProfileBindings: StateFlow<List<AppProfileBinding>> =
+        appProfileBindingRepository.getAll()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val autoSwitchEvents: SharedFlow<ProfileAutoSwitcher.UiEvent> = autoSwitcher.events
+
     val activeProfileMappings: StateFlow<Map<String, RemapTarget>> =
-        _activeProfile.filterNotNull()
+        activeProfile.filterNotNull()
             .flatMapLatest { gampadMappingRepository.getMappingsForProfile(it.id) }
             .map { list -> list.associate { it.gamepadButton to RemapTarget.decode(it.targetEncoded) } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
@@ -90,14 +106,7 @@ class MainViewModel @Inject constructor(
             profileRepository.getAllProfiles().collect { _profiles.value = it }
         }
         viewModelScope.launch {
-            profileRepository.getDefaultProfile().collect { profile ->
-                if (_activeProfile.value == null && profile != null) {
-                    _activeProfile.value = profile
-                }
-            }
-        }
-        viewModelScope.launch {
-            _activeProfile.filterNotNull().flatMapLatest { profile ->
+            activeProfile.filterNotNull().flatMapLatest { profile ->
                 layoutRepository.getLayoutsByProfile(profile.id)
             }.collect { roomLayouts ->
                 val persisted = roomLayouts.map { it.toGridLayout() }
@@ -123,7 +132,7 @@ class MainViewModel @Inject constructor(
     // ── Profile ───────────────────────────────────────────────────────────────
 
     fun selectProfile(profile: Profile) {
-        _activeProfile.value = profile
+        profileRepository.setActiveProfile(profile)
         _selectedIndex.value = 0
     }
 
@@ -141,8 +150,8 @@ class MainViewModel @Inject constructor(
         val defaultProfile = _profiles.value.firstOrNull { it.isDefault }
         viewModelScope.launch {
             profileRepository.deleteProfile(profile)
-            if (_activeProfile.value?.id == profile.id && defaultProfile != null) {
-                _activeProfile.value = defaultProfile
+            if (activeProfile.value?.id == profile.id && defaultProfile != null) {
+                profileRepository.setActiveProfile(defaultProfile)
                 _selectedIndex.value = 0
             }
         }
@@ -156,8 +165,25 @@ class MainViewModel @Inject constructor(
 
     fun openRemapControls() { _showRemapControls.value = true }
     fun closeRemapControls() { _showRemapControls.value = false }
+
+    // ── Auto-switch ───────────────────────────────────────────────────────────
+
+    fun setAutoSwitchEnabled(enabled: Boolean) {
+        autoSwitchSettings.setAutoSwitchEnabled(enabled)
+    }
+
+    fun acceptCreateProfilePrompt(pkg: String, appLabel: String) {
+        viewModelScope.launch { autoSwitcher.createProfileAndBind(pkg, appLabel) }
+    }
+
+    fun deleteBinding(packageName: String, subId: String = "") {
+        viewModelScope.launch { appProfileBindingRepository.unbind(packageName, subId) }
+    }
+
+    fun appLabelFor(pkg: String): String = foregroundAppFilter.appLabel(pkg)
+
     fun saveRemapMappings(draft: Map<DeviceButton, RemapTarget>) {
-        val profileId = _activeProfile.value?.id ?: return
+        val profileId = activeProfile.value?.id ?: return
         viewModelScope.launch { gampadMappingRepository.saveMappings(profileId, draft) }
         _showRemapControls.value = false
     }
@@ -215,7 +241,7 @@ class MainViewModel @Inject constructor(
 
     fun saveEdits() {
         val layout = _editingLayout.value ?: return
-        val profileId = _activeProfile.value?.id ?: return
+        val profileId = activeProfile.value?.id ?: return
         viewModelScope.launch { layoutRepository.saveLayout(layout.toKeyLayout(profileId)) }
         val updated = _layouts.value.toMutableList()
         val existingIdx = updated.indexOfFirst { it.name == layout.name }

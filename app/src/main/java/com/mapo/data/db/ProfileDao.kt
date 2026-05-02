@@ -17,6 +17,9 @@ interface ProfileDao {
     @Query("SELECT * FROM profiles WHERE isDefault = 1 LIMIT 1")
     fun getDefault(): Flow<Profile?>
 
+    @Query("SELECT * FROM profiles WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): Profile?
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(profile: Profile): Long
 

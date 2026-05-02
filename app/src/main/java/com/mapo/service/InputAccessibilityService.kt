@@ -11,8 +11,14 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.RemapTarget
+import com.mapo.service.foreground.ForegroundAppMonitor
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class InputAccessibilityService : AccessibilityService() {
+
+    @Inject lateinit var foregroundAppMonitor: ForegroundAppMonitor
 
     companion object {
         @Volatile var instance: InputAccessibilityService? = null
@@ -102,7 +108,13 @@ class InputAccessibilityService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val pkg = event.packageName?.toString() ?: return
+        Log.d(TAG, "window state changed → pkg=$pkg className=${event.className}")
+        foregroundAppMonitor.reportForegroundPackage(pkg)
+    }
+
     override fun onInterrupt() = Unit
 
     // ── Physical button interception (remap) ──────────────────────────────────

@@ -3,4 +3,16 @@
     <string name="app_name">mapo</string>
     <string name="accessibility_service_label">mapo Input Service</string>
     <string name="accessibility_service_description">Injects keyboard and mouse input events for PC games running via FEX emulation on the secondary screen.</string>
+
+    <string name="auto_switch_drawer_label">Auto-switch</string>
+    <string name="auto_switch_screen_title">Auto-switch</string>
+    <string name="auto_switch_setting_label">Auto-switch profiles based on foreground app</string>
+    <string name="auto_switch_bindings_header">App → Profile bindings</string>
+    <string name="auto_switch_bindings_empty">No bindings yet. Launch an app and tap “Create” when prompted to bind it to a new profile.</string>
+    <string name="auto_switch_back">Back</string>
+    <string name="auto_switch_delete_binding">Delete binding</string>
+    <string name="auto_switch_unknown_profile">(missing profile)</string>
+    <string name="auto_switch_snackbar_switched">Loaded profile “%1$s” for %2$s</string>
+    <string name="auto_switch_snackbar_prompt">Create profile for %1$s?</string>
+    <string name="auto_switch_snackbar_action_create">Create</string>
 </resources>

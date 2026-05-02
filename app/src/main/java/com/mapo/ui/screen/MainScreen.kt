@@ -45,10 +45,9 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -117,6 +116,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         }
     }
     val context = LocalContext.current
+    var pendingPrompt by remember {
+        mutableStateOf<ProfileAutoSwitcher.UiEvent.PromptCreate?>(null)
+    }
     LaunchedEffect(Unit) {
         viewModel.autoSwitchEvents.collect { event ->
             when (event) {
@@ -126,17 +128,24 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     )
                 }
                 is ProfileAutoSwitcher.UiEvent.PromptCreate -> {
-                    val result = snackbarHostState.showSnackbar(
-                        message = context.getString(R.string.auto_switch_snackbar_prompt, event.appLabel),
-                        actionLabel = context.getString(R.string.auto_switch_snackbar_action_create),
-                        duration = SnackbarDuration.Long
-                    )
-                    if (result == SnackbarResult.ActionPerformed) {
-                        viewModel.acceptCreateProfilePrompt(event.pkg, event.appLabel)
-                    }
+                    pendingPrompt = event
                 }
             }
         }
+    }
+    pendingPrompt?.let { prompt ->
+        AutoSwitchCreatePromptDialog(
+            appLabel = prompt.appLabel,
+            onYes = {
+                viewModel.acceptCreateProfilePrompt(prompt.pkg, prompt.appLabel)
+                pendingPrompt = null
+            },
+            onNo = { pendingPrompt = null },
+            onNever = {
+                viewModel.ignorePackageForever(prompt.pkg)
+                pendingPrompt = null
+            }
+        )
     }
 
     val showRemapControls by viewModel.showRemapControls.collectAsState()
@@ -378,7 +387,16 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         }
     ) {
         Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            snackbarHost = {
+                SnackbarHost(snackbarHostState) { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        actionColor = MaterialTheme.colorScheme.primary
+                    )
+                }
+            },
             containerColor = MaterialTheme.colorScheme.background,
             contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
         ) { _ ->

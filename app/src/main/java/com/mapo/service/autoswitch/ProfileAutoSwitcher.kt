@@ -62,6 +62,10 @@ class ProfileAutoSwitcher @Inject constructor(
         if (!filter.isInteresting(pkg)) return
 
         val binding = bindingRepo.getForPackageOnce(pkg)
+        if (binding == null && pkg in settings.ignoredPackages.value) {
+            Log.d(TAG, "$pkg is in ignored list; skipping prompt")
+            return
+        }
         if (binding != null) {
             val current = profileRepo.activeProfile.value
             if (current?.id == binding.profileId) {
@@ -94,6 +98,11 @@ class ProfileAutoSwitcher @Inject constructor(
         bindingRepo.bind(packageName = pkg, profileId = newId)
         profileRepo.setActiveProfileById(newId)
         Log.i(TAG, "created profile '$appLabel' (id=$newId) bound to $pkg")
+    }
+
+    fun ignorePackage(pkg: String) {
+        settings.addIgnoredPackage(pkg)
+        Log.i(TAG, "added $pkg to ignored list")
     }
 
     companion object {

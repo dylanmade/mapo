@@ -26,9 +26,18 @@ class AutoSwitchSettings @Inject constructor(
     )
     val autoSwitchEnabled: StateFlow<Boolean> = _autoSwitchEnabled.asStateFlow()
 
+    private val _ignoredPackages = MutableStateFlow(
+        prefs.getStringSet(KEY_IGNORED_PACKAGES, emptySet())?.toSet() ?: emptySet()
+    )
+    val ignoredPackages: StateFlow<Set<String>> = _ignoredPackages.asStateFlow()
+
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
-        if (key == KEY_AUTO_SWITCH_ENABLED) {
-            _autoSwitchEnabled.value = sp.getBoolean(KEY_AUTO_SWITCH_ENABLED, true)
+        when (key) {
+            KEY_AUTO_SWITCH_ENABLED ->
+                _autoSwitchEnabled.value = sp.getBoolean(KEY_AUTO_SWITCH_ENABLED, true)
+            KEY_IGNORED_PACKAGES ->
+                _ignoredPackages.value =
+                    sp.getStringSet(KEY_IGNORED_PACKAGES, emptySet())?.toSet() ?: emptySet()
         }
     }
 
@@ -40,8 +49,19 @@ class AutoSwitchSettings @Inject constructor(
         prefs.edit().putBoolean(KEY_AUTO_SWITCH_ENABLED, enabled).apply()
     }
 
+    fun addIgnoredPackage(pkg: String) {
+        val updated = _ignoredPackages.value + pkg
+        prefs.edit().putStringSet(KEY_IGNORED_PACKAGES, updated).apply()
+    }
+
+    fun removeIgnoredPackage(pkg: String) {
+        val updated = _ignoredPackages.value - pkg
+        prefs.edit().putStringSet(KEY_IGNORED_PACKAGES, updated).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "mapo_settings"
         private const val KEY_AUTO_SWITCH_ENABLED = "auto_switch_enabled"
+        private const val KEY_IGNORED_PACKAGES = "ignored_packages"
     }
 }

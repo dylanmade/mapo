@@ -176,6 +176,10 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch { autoSwitcher.createProfileAndBind(pkg, appLabel) }
     }
 
+    fun ignorePackageForever(pkg: String) {
+        autoSwitcher.ignorePackage(pkg)
+    }
+
     fun deleteBinding(packageName: String, subId: String = "") {
         viewModelScope.launch { appProfileBindingRepository.unbind(packageName, subId) }
     }

@@ -92,6 +92,10 @@ class OverlayManager @Inject constructor(
             setViewTreeLifecycleOwner(owner)
             setViewTreeViewModelStoreOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
+            // Suppress the Android-level system focus highlight on this view —
+            // Material 3 button focus states are the intended visual indicator and
+            // the system rectangle would render on top of them.
+            defaultFocusHighlightEnabled = false
             setContent {
                 MapoTheme {
                     content { dismiss() }

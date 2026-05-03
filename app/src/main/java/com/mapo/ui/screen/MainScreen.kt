@@ -89,7 +89,6 @@ import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
 import com.mapo.service.InputAccessibilityService
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
-import com.mapo.ui.theme.TabAccent
 import com.mapo.ui.viewmodel.MainViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -558,7 +557,7 @@ private fun NormalModeBar(
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
             modifier = Modifier.height(40.dp)
         ) {
-            Text("Edit", color = TabAccent, fontSize = 12.sp)
+            Text("Edit", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
         }
     }
 }

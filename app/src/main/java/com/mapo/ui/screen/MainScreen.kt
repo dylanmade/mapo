@@ -193,6 +193,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val scope = rememberCoroutineScope()
     var showAutoSwitch by remember { mutableStateOf(false) }
     var showBlocklist by remember { mutableStateOf(false) }
+    var showThemeStudio by remember { mutableStateOf(false) }
 
     var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted(context)) }
@@ -434,6 +435,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 onOpenBlocklist = {
                     scope.launch { drawerState.close() }
                     showBlocklist = true
+                },
+                onOpenThemeStudio = {
+                    scope.launch { drawerState.close() }
+                    showThemeStudio = true
                 }
             )
         }
@@ -509,25 +514,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     dialogIsEdit = false
                     showButtonDialog = true
                 }
-                val onOpenEditButton: () -> Unit = {
-                    val btn = displayLayout.buttons.find { it.id == selectedButtonId }
-                    if (btn != null) {
-                        dialogLabel = btn.label
-                        dialogCode = btn.code
-                        dialogTopText = btn.topText ?: ""
-                        dialogTopAlign = btn.topAlign ?: "CENTER"
-                        dialogBottomText = btn.bottomText ?: ""
-                        dialogBottomAlign = btn.bottomAlign ?: "CENTER"
-                        dialogIsTrackpad = btn.isTrackpad
-                        dialogSensitivity = btn.sensitivity ?: TRACKPAD_SENSITIVITY
-                        dialogTapTarget = btn.gestureTarget(TrackpadGesture.TAP)
-                        dialogDoubleTapTarget = btn.gestureTarget(TrackpadGesture.DOUBLE_TAP)
-                        dialogLongPressTarget = btn.gestureTarget(TrackpadGesture.LONG_PRESS)
-                        dialogIsEdit = true
-                        showButtonDialog = true
-                    }
-                }
-
                 KeyboardTopBar(
                     layouts = layouts,
                     selectedIndex = selectedIndex,
@@ -576,10 +562,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onOpenDrawer = { scope.launch { drawerState.open() } },
                     onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser },
                     onAddButton = onOpenAddButton,
-                    onEditButton = onOpenEditButton,
-                    onDeleteButton = { viewModel.deleteSelectedButton() },
-                    onSaveEdits = { viewModel.saveEdits() },
-                    onCancelEdits = { viewModel.cancelEdits() }
+                    onDeleteButton = { viewModel.deleteSelectedButton() }
                 )
 
                 KeyGrid(
@@ -670,6 +653,15 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             onBack = { showBlocklist = false }
         )
     }
+    if (showThemeStudio) {
+        com.themestudio.ui.ThemeStudioScreen(
+            onClose = { showThemeStudio = false },
+            previewContent = {
+                com.themestudio.preview.ColorRoleSwatches()
+                com.themestudio.preview.MaterialComponentGallery()
+            },
+        )
+    }
 
     TabActionDialogHost(
         state = tabActionDialog,
@@ -725,34 +717,24 @@ private fun KeyboardTopBar(
     onOpenDrawer: () -> Unit,
     onAddKeyboard: () -> Unit,
     onAddButton: () -> Unit,
-    onEditButton: () -> Unit,
-    onDeleteButton: () -> Unit,
-    onSaveEdits: () -> Unit,
-    onCancelEdits: () -> Unit
+    onDeleteButton: () -> Unit
 ) {
+    // Tab bar layout is identical in normal and edit modes — no slide-to-left, no
+    // hidden siblings. Edit-mode-only controls (Add / Delete) sit between the tab
+    // bar and the Add Keyboard button. Save/Cancel/Edit are gone: every button
+    // edit persists immediately.
     val btnPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.height(40.dp)
     ) {
-        if (!isEditMode) {
-            IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Default.Menu, contentDescription = "Open menu", modifier = Modifier.size(20.dp))
-            }
+        IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
+            Icon(Icons.Default.Menu, contentDescription = "Open menu", modifier = Modifier.size(20.dp))
         }
 
-        // In edit mode, show only the editing tab on the left. animateItem handles the
-        // slide-out / slide-back of the other tabs as the underlying list shrinks/grows.
-        val displayedLayouts = if (isEditMode) {
-            layouts.filterIndexed { i, _ -> i == selectedIndex }
-        } else layouts
-        val displayedSelectedIdx = if (isEditMode) 0 else selectedIndex
-        val tabBarModifier = if (isEditMode) Modifier else Modifier.weight(1f)
-
         KeyboardTabBar(
-            layouts = displayedLayouts,
-            selectedIndex = displayedSelectedIdx,
-            isEditMode = isEditMode,
+            layouts = layouts,
+            selectedIndex = selectedIndex,
             tabContextMenuFor = tabContextMenuFor,
             onSelectIndex = onSelectIndex,
             onLongPressMenu = onLongPressMenu,
@@ -763,28 +745,21 @@ private fun KeyboardTopBar(
             onMenuDuplicate = onMenuDuplicate,
             onMenuRemove = onMenuRemove,
             onMenuSaveTemplate = onMenuSaveTemplate,
-            modifier = tabBarModifier
+            modifier = Modifier.weight(1f)
         )
 
         if (isEditMode) {
             TextButton(onClick = onAddButton, contentPadding = btnPadding) { Text("Add", fontSize = 12.sp) }
-            TextButton(onClick = onEditButton, enabled = hasSelectedButton, contentPadding = btnPadding) {
-                Text("Edit", fontSize = 12.sp)
-            }
             TextButton(onClick = onDeleteButton, enabled = hasSelectedButton, contentPadding = btnPadding) {
                 Text("Delete", fontSize = 12.sp)
             }
-            Spacer(modifier = Modifier.weight(1f))
-            TextButton(onClick = onSaveEdits, contentPadding = btnPadding) { Text("Save", fontSize = 12.sp) }
-            TextButton(onClick = onCancelEdits, contentPadding = btnPadding) { Text("Cancel", fontSize = 12.sp) }
-        } else {
-            IconButton(onClick = onAddKeyboard, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = "Add keyboard",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+        }
+        IconButton(onClick = onAddKeyboard, modifier = Modifier.size(40.dp)) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = "Add keyboard",
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }

@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -47,7 +48,8 @@ fun ProfileDrawerContent(
     onDeleteProfile: (Profile) -> Unit,
     onOpenRemapControls: () -> Unit,
     onOpenAutoSwitch: () -> Unit,
-    onOpenBlocklist: () -> Unit
+    onOpenBlocklist: () -> Unit,
+    onOpenThemeStudio: () -> Unit
 ) {
     var showProfileSelector by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -214,6 +216,22 @@ fun ProfileDrawerContent(
                         selected = false,
                         onClick = { onOpenBlocklist() },
                         icon = { Icon(Icons.Default.Block, contentDescription = null) },
+                        badge = {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                }
+                item {
+                    NavigationDrawerItem(
+                        label = { Text(stringResource(R.string.theme_studio_drawer_label)) },
+                        selected = false,
+                        onClick = { onOpenThemeStudio() },
+                        icon = { Icon(Icons.Default.Palette, contentDescription = null) },
                         badge = {
                             Icon(
                                 Icons.AutoMirrored.Filled.KeyboardArrowRight,

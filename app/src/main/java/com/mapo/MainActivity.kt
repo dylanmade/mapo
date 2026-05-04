@@ -7,6 +7,9 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.remember
+import com.themestudio.core.ThemeStudioProvider
+import com.themestudio.persistence.SharedPrefsThemeOverridesStorage
 import dagger.hilt.android.AndroidEntryPoint
 import com.mapo.ui.screen.MainScreen
 import com.mapo.ui.theme.MapoTheme
@@ -36,8 +39,11 @@ class MainActivity : ComponentActivity() {
         // presentationDisplays.firstOrNull()?.let { display -> /* launch on secondary */ }
 
         setContent {
-            MapoTheme {
-                MainScreen()
+            val themeStorage = remember { SharedPrefsThemeOverridesStorage(applicationContext) }
+            ThemeStudioProvider(storage = themeStorage) {
+                MapoTheme {
+                    MainScreen()
+                }
             }
         }
     }

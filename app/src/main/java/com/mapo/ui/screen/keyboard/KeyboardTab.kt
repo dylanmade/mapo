@@ -79,7 +79,6 @@ import kotlinx.coroutines.withTimeout
 fun KeyboardTabBar(
     layouts: List<GridLayout>,
     selectedIndex: Int,
-    isEditMode: Boolean,
     tabContextMenuFor: Long?,
     onSelectIndex: (Int) -> Unit,
     onLongPressMenu: (Long) -> Unit,
@@ -110,28 +109,23 @@ fun KeyboardTabBar(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (!isEditMode) {
-            IconButton(
-                onClick = {
-                    coroutineScope.launch {
-                        listState.animateScrollBy(-CHEVRON_SCROLL_PX)
-                    }
-                },
-                enabled = listState.canScrollBackward,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                    contentDescription = "Scroll tabs left",
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+        IconButton(
+            onClick = {
+                coroutineScope.launch {
+                    listState.animateScrollBy(-CHEVRON_SCROLL_PX)
+                }
+            },
+            enabled = listState.canScrollBackward,
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = "Scroll tabs left",
+                modifier = Modifier.size(18.dp)
+            )
         }
         LazyRow(
-            // In edit mode there's only one tab and we DON'T want the row to grab all
-            // remaining width — otherwise the Add/Edit/Delete/Save/Cancel buttons get
-            // pushed offscreen.
-            modifier = if (isEditMode) Modifier else Modifier.weight(1f),
+            modifier = Modifier.weight(1f),
             state = listState,
             horizontalArrangement = Arrangement.Start
         ) {
@@ -170,17 +164,21 @@ fun KeyboardTabBar(
                         .onGloballyPositioned { coords ->
                             tabBounds[layout.id] = coords.boundsInParent()
                         }
-                        .pointerInput(layout.id, isEditMode) {
+                        .pointerInput(layout.id) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
-                                if (isEditMode) return@awaitEachGesture
 
                                 // Focus the tab on touch-down — feels more responsive, and
                                 // means a long-press menu action (e.g. "Edit buttons") starts
-                                // with the right tab's content already visible.
+                                // with the right tab's content already visible. Visiting a
+                                // different tab also auto-exits edit mode (handled in VM).
                                 onSelectIndex(currentIndex)
 
                                 val touchSlop = viewConfiguration.touchSlop
+                                // Reorder needs a meatier movement threshold than touchSlop —
+                                // otherwise small wiggles while holding the contextual menu
+                                // open accidentally tip into reorder.
+                                val reorderSlop = touchSlop * REORDER_DRAG_SLOP_MULTIPLIER
                                 val longPressMs = viewConfiguration.longPressTimeoutMillis
                                 val downPos = down.position
 
@@ -233,7 +231,7 @@ fun KeyboardTabBar(
                                         break
                                     }
                                     val totalMoved = (change.position - downPos).getDistance()
-                                    if (!dragStarted && totalMoved > touchSlop) {
+                                    if (!dragStarted && totalMoved > reorderSlop) {
                                         dragStarted = true
                                         onCloseMenu()
                                         val r = tabBounds[layout.id]
@@ -337,22 +335,20 @@ fun KeyboardTabBar(
                 }
             }
         }
-        if (!isEditMode) {
-            IconButton(
-                onClick = {
-                    coroutineScope.launch {
-                        listState.animateScrollBy(CHEVRON_SCROLL_PX)
-                    }
-                },
-                enabled = listState.canScrollForward,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Scroll tabs right",
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+        IconButton(
+            onClick = {
+                coroutineScope.launch {
+                    listState.animateScrollBy(CHEVRON_SCROLL_PX)
+                }
+            },
+            enabled = listState.canScrollForward,
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Scroll tabs right",
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
@@ -418,3 +414,9 @@ private fun computeTargetIndex(
 }
 
 private const val CHEVRON_SCROLL_PX = 240f
+
+// Reorder activates only after the finger travels this many touch-slops past its
+// origin. With 1.0 (just touchSlop) tiny tremors while holding the contextual
+// menu open kept dismissing it; 2.5 keeps the menu stable while still feeling
+// snappy once the user actually intends to drag.
+private const val REORDER_DRAG_SLOP_MULTIPLIER = 2.5f

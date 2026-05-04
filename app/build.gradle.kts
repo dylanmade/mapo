@@ -71,4 +71,8 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+
+    // Theme Studio (in-tree dev tool; will move to debugImplementation once
+    // release builds need slimming, or extract to a standalone repo)
+    implementation(project(":themestudio"))
 }

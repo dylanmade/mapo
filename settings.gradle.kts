@@ -18,3 +18,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "mapo"
 include(":app")
+include(":themestudio")

@@ -91,11 +91,14 @@ class MainViewModel @Inject constructor(
     private val _selectedIndex = MutableStateFlow(0)
     val selectedIndex: StateFlow<Int> = _selectedIndex.asStateFlow()
 
-    private val _isEditMode = MutableStateFlow(false)
-    val isEditMode: StateFlow<Boolean> = _isEditMode.asStateFlow()
-
-    private val _editingLayout = MutableStateFlow<GridLayout?>(null)
-    val editingLayout: StateFlow<GridLayout?> = _editingLayout.asStateFlow()
+    // Single source of truth for "is some tab being edited?". Replaces the previous
+    // (_isEditMode, _editingLayout) pair: there's no buffered draft anymore — every
+    // edit op writes through to _layouts and the DB immediately. `null` = not editing.
+    private val _editingLayoutId = MutableStateFlow<Long?>(null)
+    val editingLayoutId: StateFlow<Long?> = _editingLayoutId.asStateFlow()
+    val isEditMode: StateFlow<Boolean> = _editingLayoutId
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _selectedButtonId = MutableStateFlow<String?>(null)
     val selectedButtonId: StateFlow<String?> = _selectedButtonId.asStateFlow()
@@ -151,10 +154,9 @@ class MainViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), keyboardTemplateRepository.builtIns)
 
     val displayLayout: StateFlow<GridLayout> = combine(
-        _selectedIndex, _isEditMode, _editingLayout, _layouts
-    ) { index, editMode, editLayout, layouts ->
-        if (editMode && editLayout != null) editLayout
-        else layouts.getOrNull(index) ?: layouts.firstOrNull() ?: DefaultLayouts.all[0]
+        _selectedIndex, _layouts
+    ) { index, layouts ->
+        layouts.getOrNull(index) ?: layouts.firstOrNull() ?: DefaultLayouts.all[0]
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DefaultLayouts.all[0])
 
     init {
@@ -263,7 +265,15 @@ class MainViewModel @Inject constructor(
 
     // ── Navigation ────────────────────────────────────────────────────────────
 
-    fun selectLayout(index: Int) { _selectedIndex.value = index }
+    fun selectLayout(index: Int) {
+        // Visiting any tab exits edit mode for the previously-edited tab. Per design,
+        // only one tab can be in edit mode at a time and tab navigation is always free.
+        _selectedIndex.value = index
+        if (_editingLayoutId.value != null && _layouts.value.getOrNull(index)?.id != _editingLayoutId.value) {
+            _editingLayoutId.value = null
+            _selectedButtonId.value = null
+        }
+    }
 
     // ── Normal mode ───────────────────────────────────────────────────────────
 
@@ -301,7 +311,7 @@ class MainViewModel @Inject constructor(
     // ── Tab context menu ──────────────────────────────────────────────────────
 
     fun openTabMenu(layoutId: Long) {
-        if (_isEditMode.value) return
+        // Tab gestures are unrestricted in edit mode — long-press still opens the menu.
         _tabContextMenuFor.value = layoutId
     }
 
@@ -311,46 +321,17 @@ class MainViewModel @Inject constructor(
 
     // ── Edit mode lifecycle ───────────────────────────────────────────────────
 
-    fun enterEditMode(layoutId: Long? = null) {
-        // Allow entering edit mode for an explicit tab id (when invoked from the long-press menu)
-        // or default to the currently selected tab (when invoked from the legacy Edit button).
-        val targetIdx = layoutId?.let { id ->
-            _layouts.value.indexOfFirst { it.id == id }.takeIf { it >= 0 }
-        } ?: _selectedIndex.value
-        val target = _layouts.value.getOrNull(targetIdx) ?: return
+    fun enterEditMode(layoutId: Long) {
+        val targetIdx = _layouts.value.indexOfFirst { it.id == layoutId }
+        if (targetIdx < 0) return
         _selectedIndex.value = targetIdx
-        _editingLayout.value = target.copy()
         _selectedButtonId.value = null
-        _isEditMode.value = true
+        _editingLayoutId.value = layoutId
         _tabContextMenuFor.value = null
     }
 
-    fun cancelEdits() {
-        _isEditMode.value = false
-        _editingLayout.value = null
-        _selectedButtonId.value = null
-    }
-
-    fun saveEdits() {
-        val layout = _editingLayout.value ?: return
-        val profileId = activeProfile.value?.id ?: return
-        viewModelScope.launch {
-            val existing = layoutRepository.getById(layout.id)
-            layoutRepository.saveLayout(
-                layout.toKeyLayout(
-                    profileId = profileId,
-                    position = existing?.position ?: 0,
-                    originalSnapshotJson = existing?.originalSnapshotJson
-                )
-            )
-        }
-        // Optimistic UI: update the in-memory list by id (not name — Configure-rename breaks name match).
-        val updated = _layouts.value.toMutableList()
-        val existingIdx = updated.indexOfFirst { it.id == layout.id }
-        if (existingIdx >= 0) updated[existingIdx] = layout else updated.add(layout)
-        _layouts.value = updated
-        _isEditMode.value = false
-        _editingLayout.value = null
+    fun exitEditMode() {
+        _editingLayoutId.value = null
         _selectedButtonId.value = null
     }
 
@@ -366,6 +347,17 @@ class MainViewModel @Inject constructor(
     }
 
     // ── Button CRUD ───────────────────────────────────────────────────────────
+    //
+    // All button mutations write through to the DB via persistLayoutFields. Edits are
+    // permanent the moment they're made — there is no draft/Save/Cancel layer.
+
+    private inline fun mutateEditingLayout(transform: (GridLayout) -> GridLayout?) {
+        val id = _editingLayoutId.value ?: return
+        val profileId = activeProfile.value?.id ?: return
+        val current = _layouts.value.find { it.id == id } ?: return
+        val updated = transform(current) ?: return
+        persistLayoutFields(updated, profileId)
+    }
 
     fun addButton(
         label: String, code: String,
@@ -375,23 +367,24 @@ class MainViewModel @Inject constructor(
         sensitivity: Float? = null,
         gestureMappings: Map<String, String>? = null
     ) {
-        val layout = _editingLayout.value ?: return
-        val cell = layout.findFirstEmptyCell()
-        if (cell == null) {
-            emitError("No empty space available in this layout")
-            return
+        mutateEditingLayout { layout ->
+            val cell = layout.findFirstEmptyCell()
+            if (cell == null) {
+                emitError("No empty space available in this layout")
+                return@mutateEditingLayout null
+            }
+            val button = GridButton(
+                label = label, code = code,
+                col = cell.first, row = cell.second,
+                topText = topText.ifEmpty { null }, topAlign = topAlign,
+                bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
+                type = type,
+                sensitivity = sensitivity,
+                gestureMappings = gestureMappings
+            )
+            _selectedButtonId.value = button.id
+            layout.copy(buttons = layout.buttons + button)
         }
-        val button = GridButton(
-            label = label, code = code,
-            col = cell.first, row = cell.second,
-            topText = topText.ifEmpty { null }, topAlign = topAlign,
-            bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
-            type = type,
-            sensitivity = sensitivity,
-            gestureMappings = gestureMappings
-        )
-        _editingLayout.value = layout.copy(buttons = layout.buttons + button)
-        _selectedButtonId.value = button.id
     }
 
     fun updateSelectedButton(
@@ -403,7 +396,7 @@ class MainViewModel @Inject constructor(
         gestureMappings: Map<String, String>? = null
     ) {
         val id = _selectedButtonId.value ?: return
-        _editingLayout.value = _editingLayout.value?.let { layout ->
+        mutateEditingLayout { layout ->
             layout.copy(buttons = layout.buttons.map { btn ->
                 if (btn.id == id) btn.copy(
                     label = label, code = code,
@@ -419,36 +412,38 @@ class MainViewModel @Inject constructor(
 
     fun deleteSelectedButton() {
         val id = _selectedButtonId.value ?: return
-        _editingLayout.value = _editingLayout.value?.let { layout ->
+        mutateEditingLayout { layout ->
+            _selectedButtonId.value = null
             layout.copy(buttons = layout.buttons.filter { it.id != id })
         }
-        _selectedButtonId.value = null
     }
 
     fun deleteButton(id: String) {
-        _editingLayout.value = _editingLayout.value?.let { layout ->
+        mutateEditingLayout { layout ->
+            if (_selectedButtonId.value == id) _selectedButtonId.value = null
             layout.copy(buttons = layout.buttons.filter { it.id != id })
         }
-        if (_selectedButtonId.value == id) _selectedButtonId.value = null
     }
 
     fun duplicateButton(id: String) {
-        val layout = _editingLayout.value ?: return
-        val source = layout.buttons.find { it.id == id } ?: return
-        val cell = layout.findFirstEmptyCell()
-        if (cell == null) {
-            emitError("No empty space available in this layout")
-            return
+        mutateEditingLayout { layout ->
+            val source = layout.buttons.find { it.id == id }
+                ?: return@mutateEditingLayout null
+            val cell = layout.findFirstEmptyCell()
+            if (cell == null) {
+                emitError("No empty space available in this layout")
+                return@mutateEditingLayout null
+            }
+            val copy = source.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                col = cell.first,
+                row = cell.second,
+                colSpan = 1,
+                rowSpan = 1
+            )
+            _selectedButtonId.value = copy.id
+            layout.copy(buttons = layout.buttons + copy)
         }
-        val copy = source.copy(
-            id = java.util.UUID.randomUUID().toString(),
-            col = cell.first,
-            row = cell.second,
-            colSpan = 1,
-            rowSpan = 1
-        )
-        _editingLayout.value = layout.copy(buttons = layout.buttons + copy)
-        _selectedButtonId.value = copy.id
     }
 
     fun addButtonAt(
@@ -460,52 +455,65 @@ class MainViewModel @Inject constructor(
         sensitivity: Float? = null,
         gestureMappings: Map<String, String>? = null
     ) {
-        val layout = _editingLayout.value ?: return
-        if (col !in 0 until layout.columns || row !in 0 until layout.rows) return
-        if (layout.wouldOverlap("__new__", col, row, 1, 1)) {
-            emitError("Cell already occupied")
-            return
+        mutateEditingLayout { layout ->
+            if (col !in 0 until layout.columns || row !in 0 until layout.rows) {
+                return@mutateEditingLayout null
+            }
+            if (layout.wouldOverlap("__new__", col, row, 1, 1)) {
+                emitError("Cell already occupied")
+                return@mutateEditingLayout null
+            }
+            val button = GridButton(
+                label = label, code = code,
+                col = col, row = row,
+                topText = topText.ifEmpty { null }, topAlign = topAlign,
+                bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
+                type = type,
+                sensitivity = sensitivity,
+                gestureMappings = gestureMappings
+            )
+            _selectedButtonId.value = button.id
+            layout.copy(buttons = layout.buttons + button)
         }
-        val button = GridButton(
-            label = label, code = code,
-            col = col, row = row,
-            topText = topText.ifEmpty { null }, topAlign = topAlign,
-            bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
-            type = type,
-            sensitivity = sensitivity,
-            gestureMappings = gestureMappings
-        )
-        _editingLayout.value = layout.copy(buttons = layout.buttons + button)
-        _selectedButtonId.value = button.id
     }
 
     // ── Drag to move ──────────────────────────────────────────────────────────
 
     fun moveButton(buttonId: String, newCol: Int, newRow: Int) {
-        val layout = _editingLayout.value ?: return
-        val button = layout.buttons.find { it.id == buttonId } ?: return
-        val col = newCol.coerceIn(0, layout.columns - button.colSpan)
-        val row = newRow.coerceIn(0, layout.rows - button.rowSpan)
-        if (layout.wouldOverlap(buttonId, col, row, button.colSpan, button.rowSpan)) return
-        _editingLayout.value = layout.copy(
-            buttons = layout.buttons.map { if (it.id == buttonId) it.copy(col = col, row = row) else it }
-        )
+        mutateEditingLayout { layout ->
+            val button = layout.buttons.find { it.id == buttonId }
+                ?: return@mutateEditingLayout null
+            val col = newCol.coerceIn(0, layout.columns - button.colSpan)
+            val row = newRow.coerceIn(0, layout.rows - button.rowSpan)
+            if (layout.wouldOverlap(buttonId, col, row, button.colSpan, button.rowSpan)) {
+                return@mutateEditingLayout null
+            }
+            layout.copy(
+                buttons = layout.buttons.map {
+                    if (it.id == buttonId) it.copy(col = col, row = row) else it
+                }
+            )
+        }
     }
 
     // ── Resize ────────────────────────────────────────────────────────────────
 
     fun resizeButton(buttonId: String, newColSpan: Int, newRowSpan: Int) {
-        val layout = _editingLayout.value ?: return
-        val button = layout.buttons.find { it.id == buttonId } ?: return
-        val colSpan = newColSpan.coerceIn(1, layout.columns - button.col)
-        val rowSpan = newRowSpan.coerceIn(1, layout.rows - button.row)
-        if (layout.wouldOverlap(buttonId, button.col, button.row, colSpan, rowSpan)) {
-            emitError("Cannot resize: overlaps another button")
-            return
+        mutateEditingLayout { layout ->
+            val button = layout.buttons.find { it.id == buttonId }
+                ?: return@mutateEditingLayout null
+            val colSpan = newColSpan.coerceIn(1, layout.columns - button.col)
+            val rowSpan = newRowSpan.coerceIn(1, layout.rows - button.row)
+            if (layout.wouldOverlap(buttonId, button.col, button.row, colSpan, rowSpan)) {
+                emitError("Cannot resize: overlaps another button")
+                return@mutateEditingLayout null
+            }
+            layout.copy(
+                buttons = layout.buttons.map {
+                    if (it.id == buttonId) it.copy(colSpan = colSpan, rowSpan = rowSpan) else it
+                }
+            )
         }
-        _editingLayout.value = layout.copy(
-            buttons = layout.buttons.map { if (it.id == buttonId) it.copy(colSpan = colSpan, rowSpan = rowSpan) else it }
-        )
     }
 
     // ── Tab actions ───────────────────────────────────────────────────────────

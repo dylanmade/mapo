@@ -1,6 +1,6 @@
 package com.mapo.ui.screen.keyboard
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -32,11 +33,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,6 +101,10 @@ fun KeyboardTabBar(
     var draggingFromIndex by remember { mutableStateOf(-1) }
     var draggingTargetIndex by remember { mutableStateOf(-1) }
     var draggingPointerX by remember { mutableStateOf(0f) }
+    // Captured ONCE at drag start to keep translation math stable. Re-reading tabBounds during
+    // the drag would oscillate translationX whenever boundsInParent re-emits.
+    var draggingNaturalCenter by remember { mutableStateOf(0f) }
+    var draggingTabWidth by remember { mutableStateOf(0f) }
 
     Row(
         modifier = modifier,
@@ -127,34 +134,36 @@ fun KeyboardTabBar(
         ) {
             itemsIndexed(layouts, key = { _, l -> l.id }) { index, layout ->
                 val isDragging = draggingId == layout.id
-                val draggedWidth = draggingId?.let { tabBounds[it]?.width } ?: 0f
+                // Always-fresh `index` for the gesture coroutine, which is launched ONCE per
+                // pointerInput key set and would otherwise capture a stale index after reorders.
+                val currentIndex by rememberUpdatedState(index)
                 val targetDisplacement: Float = when {
                     draggingId == null || isDragging -> 0f
                     draggingFromIndex < draggingTargetIndex &&
-                            index in (draggingFromIndex + 1)..draggingTargetIndex -> -draggedWidth
+                            index in (draggingFromIndex + 1)..draggingTargetIndex -> -draggingTabWidth
                     draggingFromIndex > draggingTargetIndex &&
-                            index in draggingTargetIndex until draggingFromIndex -> draggedWidth
+                            index in draggingTargetIndex until draggingFromIndex -> draggingTabWidth
                     else -> 0f
                 }
-                val animatedDisplacement by animateFloatAsState(
-                    targetValue = targetDisplacement,
-                    label = "tab-displacement"
-                )
+                val displacementAnim = remember(layout.id) { Animatable(0f) }
+                LaunchedEffect(targetDisplacement, draggingId) {
+                    if (draggingId == null) {
+                        displacementAnim.snapTo(0f)
+                    } else if (displacementAnim.value != targetDisplacement) {
+                        displacementAnim.animateTo(targetDisplacement)
+                    }
+                }
 
+                // OUTER box: natural layout slot. Hosts pointerInput + bounds capture. Crucially
+                // NO graphicsLayer here — pointerInput's local coords are post-graphicsLayer, so
+                // putting the transform on the same node creates a feedback loop where the tab
+                // chases the finger but the finger appears stationary in tab-local coords.
                 Box(
                     modifier = Modifier
                         .height(40.dp)
                         .widthIn(min = 80.dp)
                         .zIndex(if (isDragging) 1f else 0f)
-                        .graphicsLayer {
-                            translationX = if (isDragging) {
-                                val natural = tabBounds[layout.id]?.center?.x ?: 0f
-                                draggingPointerX - natural
-                            } else animatedDisplacement
-                        }
                         .onGloballyPositioned { coords ->
-                            // boundsInParent reflects layout-time placement, NOT graphicsLayer
-                            // translations — so the dragged tab's natural slot stays stable.
                             tabBounds[layout.id] = coords.boundsInParent()
                         }
                         .pointerInput(layout.id, isEditMode) {
@@ -166,7 +175,6 @@ fun KeyboardTabBar(
                                 val longPressMs = viewConfiguration.longPressTimeoutMillis
                                 val downPos = down.position
 
-                                // Phase 1: race long-press timer vs. up vs. drag-before-timer.
                                 val longPressed: Boolean = try {
                                     withTimeout(longPressMs) {
                                         while (true) {
@@ -175,12 +183,11 @@ fun KeyboardTabBar(
                                                 ?: continue
                                             if (!change.pressed) {
                                                 change.consume()
-                                                onSelectIndex(index)
+                                                onSelectIndex(currentIndex)
                                                 return@withTimeout false
                                             }
                                             val moved = (change.position - downPos).getDistance()
                                             if (moved > touchSlop) {
-                                                // Don't consume — let LazyRow scroll handle it.
                                                 return@withTimeout false
                                             }
                                         }
@@ -195,12 +202,12 @@ fun KeyboardTabBar(
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onLongPressMenu(layout.id)
 
-                                // Phase 2: lifted — wait for drag or release. Menu is open.
                                 var dragStarted = false
                                 while (true) {
                                     val event = awaitPointerEvent()
                                     val change = event.changes.firstOrNull { it.id == down.id }
                                         ?: continue
+                                    change.consume()
                                     if (!change.pressed) {
                                         if (dragStarted) {
                                             val from = draggingFromIndex
@@ -209,45 +216,58 @@ fun KeyboardTabBar(
                                             draggingFromIndex = -1
                                             draggingTargetIndex = -1
                                             draggingPointerX = 0f
+                                            draggingNaturalCenter = 0f
+                                            draggingTabWidth = 0f
                                             if (from >= 0 && to >= 0 && from != to) {
                                                 onReorder(from, to)
                                             }
                                         }
-                                        // If !dragStarted: pointer released after long-press
-                                        // without movement → menu stays open until tap-outside.
-                                        change.consume()
                                         break
                                     }
                                     val totalMoved = (change.position - downPos).getDistance()
                                     if (!dragStarted && totalMoved > touchSlop) {
                                         dragStarted = true
-                                        // Close the menu the moment drag begins.
                                         onCloseMenu()
+                                        val r = tabBounds[layout.id]
+                                        if (r != null) {
+                                            draggingNaturalCenter = r.center.x
+                                            draggingTabWidth = r.width
+                                        }
                                         draggingId = layout.id
-                                        draggingFromIndex = index
-                                        draggingTargetIndex = index
+                                        draggingFromIndex = currentIndex
+                                        draggingTargetIndex = currentIndex
                                     }
                                     if (dragStarted) {
-                                        val natural = tabBounds[layout.id]?.center?.x ?: 0f
-                                        draggingPointerX = natural + (change.position.x - downPos.x)
+                                        val deltaSinceDown = change.position.x - downPos.x
+                                        draggingPointerX = draggingNaturalCenter + deltaSinceDown
                                         val newTarget = computeTargetIndex(
                                             pointerX = draggingPointerX,
                                             layouts = layouts,
                                             bounds = tabBounds,
-                                            fallback = draggingTargetIndex.coerceAtLeast(index)
+                                            fallback = draggingTargetIndex.coerceAtLeast(currentIndex)
                                         )
                                         if (newTarget >= 0) draggingTargetIndex = newTarget
-                                        change.consume()
                                     }
                                 }
                             }
                         }
                 ) {
-                    TabSurface(
-                        label = layout.name,
-                        selected = index == selectedIndex,
-                        backgroundOverride = layout.backgroundColorArgb?.let { Color(it) }
-                    )
+                    // INNER box: visual transform only. Decoupled from gesture detection.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                translationX = if (isDragging) {
+                                    draggingPointerX - draggingNaturalCenter
+                                } else displacementAnim.value
+                            }
+                    ) {
+                        TabSurface(
+                            label = layout.name,
+                            selected = index == selectedIndex,
+                            backgroundOverride = layout.backgroundColorArgb?.let { Color(it) }
+                        )
+                    }
 
                     DropdownMenu(
                         expanded = tabContextMenuFor == layout.id,

@@ -1,6 +1,7 @@
 package com.mapo.ui.screen.keyboard
 
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -33,7 +34,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -145,14 +145,17 @@ fun KeyboardTabBar(
                             index in draggingTargetIndex until draggingFromIndex -> draggingTabWidth
                     else -> 0f
                 }
-                val displacementAnim = remember(layout.id) { Animatable(0f) }
-                LaunchedEffect(targetDisplacement, draggingId) {
-                    if (draggingId == null) {
-                        displacementAnim.snapTo(0f)
-                    } else if (displacementAnim.value != targetDisplacement) {
-                        displacementAnim.animateTo(targetDisplacement)
-                    }
-                }
+                // Animate the displacement during a drag (smooth slide-aside). animateFloatAsState
+                // is itself coroutine-driven, so its value is only used *while* a drag is active.
+                // The moment draggingId becomes null the graphicsLayer reads 0f directly, which
+                // is synchronous with the recomposition that mutates _layouts and avoids any
+                // inter-frame lingering of stale displacement (the source of the post-drop
+                // "gap" you've been seeing).
+                val animatedDisplacement by animateFloatAsState(
+                    targetValue = targetDisplacement,
+                    animationSpec = tween(durationMillis = 200),
+                    label = "tab-displacement"
+                )
 
                 // OUTER box: natural layout slot. Hosts pointerInput + bounds capture. Crucially
                 // NO graphicsLayer here — pointerInput's local coords are post-graphicsLayer, so
@@ -240,13 +243,12 @@ fun KeyboardTabBar(
                                     if (dragStarted) {
                                         val deltaSinceDown = change.position.x - downPos.x
                                         draggingPointerX = draggingNaturalCenter + deltaSinceDown
-                                        val newTarget = computeTargetIndex(
-                                            pointerX = draggingPointerX,
+                                        draggingTargetIndex = computeTargetIndex(
+                                            draggedCenter = draggingPointerX,
+                                            from = currentIndex,
                                             layouts = layouts,
-                                            bounds = tabBounds,
-                                            fallback = draggingTargetIndex.coerceAtLeast(currentIndex)
+                                            bounds = tabBounds
                                         )
-                                        if (newTarget >= 0) draggingTargetIndex = newTarget
                                     }
                                 }
                             }
@@ -257,9 +259,11 @@ fun KeyboardTabBar(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
-                                translationX = if (isDragging) {
-                                    draggingPointerX - draggingNaturalCenter
-                                } else displacementAnim.value
+                                translationX = when {
+                                    isDragging -> draggingPointerX - draggingNaturalCenter
+                                    draggingId == null -> 0f
+                                    else -> animatedDisplacement
+                                }
                             }
                     ) {
                         TabSurface(
@@ -387,23 +391,25 @@ private fun TabSurface(
     }
 }
 
+/**
+ * Target index = how many non-dragged tabs sit (by natural center) to the left of the dragged
+ * tab's current center. The user has to drag past a tab's midpoint for it to "pass" — exactly
+ * the convention Material drag-reorder lists use. Deterministic, no boundary oscillation, and
+ * indifferent to per-tab width variation.
+ */
 private fun computeTargetIndex(
-    pointerX: Float,
+    draggedCenter: Float,
+    from: Int,
     layouts: List<GridLayout>,
-    bounds: Map<Long, Rect>,
-    fallback: Int
+    bounds: Map<Long, Rect>
 ): Int {
+    var target = 0
     layouts.forEachIndexed { i, l ->
-        val r = bounds[l.id] ?: return@forEachIndexed
-        if (pointerX in r.left..r.right) return i
+        if (i == from) return@forEachIndexed
+        val center = bounds[l.id]?.center?.x ?: return@forEachIndexed
+        if (draggedCenter > center) target++
     }
-    val firstBounds = layouts.firstOrNull()?.let { bounds[it.id] }
-    val lastBounds = layouts.lastOrNull()?.let { bounds[it.id] }
-    return when {
-        firstBounds != null && pointerX < firstBounds.left -> 0
-        lastBounds != null && pointerX > lastBounds.right -> layouts.lastIndex
-        else -> fallback
-    }
+    return target
 }
 
 private const val CHEVRON_SCROLL_PX = 240f

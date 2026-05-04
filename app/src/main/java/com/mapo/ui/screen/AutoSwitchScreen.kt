@@ -44,6 +44,7 @@ fun AutoSwitchScreen(
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val enabled by viewModel.autoSwitchEnabled.collectAsState()
+    val autoCreateEnabled by viewModel.autoCreateProfilesEnabled.collectAsState()
     val bindings by viewModel.appProfileBindings.collectAsState()
     val profiles by viewModel.profiles.collectAsState()
     val profilesById = profiles.associateBy { it.id }
@@ -93,6 +94,27 @@ fun AutoSwitchScreen(
             Switch(
                 checked = enabled,
                 onCheckedChange = { viewModel.setAutoSwitchEnabled(it) }
+            )
+        }
+        HorizontalDivider()
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.auto_create_profiles_setting_label),
+                fontSize = 14.sp,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            Switch(
+                enabled = enabled,
+                checked = autoCreateEnabled,
+                onCheckedChange = { viewModel.setAutoCreateProfilesEnabled(it) }
             )
         }
         HorizontalDivider()

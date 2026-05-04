@@ -10,8 +10,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Persistent settings for the auto-switch feature. Single toggle gates both
- * profile auto-switching and the create-profile-for-unbound-app prompt.
+ * Persistent settings for the auto-switch feature. The primary toggle gates both
+ * profile auto-switching and the create-profile-for-unbound-app prompt. The
+ * auto-create toggle, when enabled, replaces that prompt with silent
+ * create-and-bind for any package not on the blocklist.
  */
 @Singleton
 class AutoSwitchSettings @Inject constructor(
@@ -26,6 +28,11 @@ class AutoSwitchSettings @Inject constructor(
     )
     val autoSwitchEnabled: StateFlow<Boolean> = _autoSwitchEnabled.asStateFlow()
 
+    private val _autoCreateProfilesEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, false)
+    )
+    val autoCreateProfilesEnabled: StateFlow<Boolean> = _autoCreateProfilesEnabled.asStateFlow()
+
     private val _ignoredPackages = MutableStateFlow(
         prefs.getStringSet(KEY_IGNORED_PACKAGES, emptySet())?.toSet() ?: emptySet()
     )
@@ -35,6 +42,9 @@ class AutoSwitchSettings @Inject constructor(
         when (key) {
             KEY_AUTO_SWITCH_ENABLED ->
                 _autoSwitchEnabled.value = sp.getBoolean(KEY_AUTO_SWITCH_ENABLED, true)
+            KEY_AUTO_CREATE_PROFILES_ENABLED ->
+                _autoCreateProfilesEnabled.value =
+                    sp.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, false)
             KEY_IGNORED_PACKAGES ->
                 _ignoredPackages.value =
                     sp.getStringSet(KEY_IGNORED_PACKAGES, emptySet())?.toSet() ?: emptySet()
@@ -47,6 +57,10 @@ class AutoSwitchSettings @Inject constructor(
 
     fun setAutoSwitchEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_SWITCH_ENABLED, enabled).apply()
+    }
+
+    fun setAutoCreateProfilesEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, enabled).apply()
     }
 
     fun addIgnoredPackage(pkg: String) {
@@ -62,6 +76,7 @@ class AutoSwitchSettings @Inject constructor(
     companion object {
         private const val PREFS_NAME = "mapo_settings"
         private const val KEY_AUTO_SWITCH_ENABLED = "auto_switch_enabled"
+        private const val KEY_AUTO_CREATE_PROFILES_ENABLED = "auto_create_profiles_enabled"
         private const val KEY_IGNORED_PACKAGES = "ignored_packages"
     }
 }

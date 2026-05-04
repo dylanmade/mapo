@@ -16,6 +16,7 @@
     <string name="auto_switch_drawer_label">Auto-switch</string>
     <string name="auto_switch_screen_title">Auto-switch</string>
     <string name="auto_switch_setting_label">Auto-switch profiles based on foreground app</string>
+    <string name="auto_create_profiles_setting_label">Auto-create profiles for new apps (skip prompt)</string>
     <string name="auto_switch_bindings_header">App → Profile bindings</string>
     <string name="auto_switch_bindings_empty">No bindings yet. Launch an app and tap “Create” when prompted to bind it to a new profile.</string>
     <string name="auto_switch_back">Back</string>

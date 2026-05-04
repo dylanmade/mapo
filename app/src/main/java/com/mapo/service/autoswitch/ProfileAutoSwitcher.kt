@@ -82,6 +82,15 @@ class ProfileAutoSwitcher @Inject constructor(
             return
         }
 
+        val appLabel = filter.appLabel(pkg)
+
+        if (settings.autoCreateProfilesEnabled.value) {
+            Log.d(TAG, "no binding for $pkg → auto-creating profile (auto-create enabled)")
+            createProfileAndBind(pkg, appLabel)
+            _events.tryEmit(UiEvent.Switched(pkg, appLabel, appLabel))
+            return
+        }
+
         val now = System.currentTimeMillis()
         val last = lastPromptedAt[pkg] ?: 0L
         if (now - last < PROMPT_THROTTLE_MS) {
@@ -90,7 +99,7 @@ class ProfileAutoSwitcher @Inject constructor(
         }
         lastPromptedAt[pkg] = now
         Log.d(TAG, "no binding for $pkg → emitting create-profile prompt")
-        _events.tryEmit(UiEvent.PromptCreate(pkg, filter.appLabel(pkg)))
+        _events.tryEmit(UiEvent.PromptCreate(pkg, appLabel))
     }
 
     suspend fun createProfileAndBind(pkg: String, appLabel: String) {

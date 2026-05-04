@@ -131,6 +131,8 @@ class MainViewModel @Inject constructor(
 
     val autoSwitchEnabled: StateFlow<Boolean> = autoSwitchSettings.autoSwitchEnabled
 
+    val autoCreateProfilesEnabled: StateFlow<Boolean> = autoSwitchSettings.autoCreateProfilesEnabled
+
     val ignoredPackages: StateFlow<Set<String>> = autoSwitchSettings.ignoredPackages
 
     val appProfileBindings: StateFlow<List<AppProfileBinding>> =
@@ -229,6 +231,10 @@ class MainViewModel @Inject constructor(
 
     fun setAutoSwitchEnabled(enabled: Boolean) {
         autoSwitchSettings.setAutoSwitchEnabled(enabled)
+    }
+
+    fun setAutoCreateProfilesEnabled(enabled: Boolean) {
+        autoSwitchSettings.setAutoCreateProfilesEnabled(enabled)
     }
 
     fun acceptCreateProfilePrompt(pkg: String, appLabel: String) {

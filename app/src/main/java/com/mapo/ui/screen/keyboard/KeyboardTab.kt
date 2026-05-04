@@ -128,7 +128,10 @@ fun KeyboardTabBar(
             }
         }
         LazyRow(
-            modifier = Modifier.weight(1f),
+            // In edit mode there's only one tab and we DON'T want the row to grab all
+            // remaining width — otherwise the Add/Edit/Delete/Save/Cancel buttons get
+            // pushed offscreen.
+            modifier = if (isEditMode) Modifier else Modifier.weight(1f),
             state = listState,
             horizontalArrangement = Arrangement.Start
         ) {
@@ -172,6 +175,11 @@ fun KeyboardTabBar(
                                 val down = awaitFirstDown(requireUnconsumed = false)
                                 if (isEditMode) return@awaitEachGesture
 
+                                // Focus the tab on touch-down — feels more responsive, and
+                                // means a long-press menu action (e.g. "Edit buttons") starts
+                                // with the right tab's content already visible.
+                                onSelectIndex(currentIndex)
+
                                 val touchSlop = viewConfiguration.touchSlop
                                 val longPressMs = viewConfiguration.longPressTimeoutMillis
                                 val downPos = down.position
@@ -184,7 +192,6 @@ fun KeyboardTabBar(
                                                 ?: continue
                                             if (!change.pressed) {
                                                 change.consume()
-                                                onSelectIndex(currentIndex)
                                                 return@withTimeout false
                                             }
                                             val moved = (change.position - downPos).getDistance()

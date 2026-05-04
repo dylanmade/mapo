@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.SportsEsports
@@ -546,7 +547,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     },
                     onOpenDrawer = { scope.launch { drawerState.open() } },
                     onToggleRemap = { viewModel.toggleRemap() },
-                    onEnterEditMode = { viewModel.enterEditMode() },
+                    onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser },
                     onAddButton = onOpenAddButton,
                     onEditButton = onOpenEditButton,
                     onDeleteButton = { viewModel.deleteSelectedButton() },
@@ -598,6 +599,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         state = tabActionDialog,
         profileName = activeProfile?.name ?: "",
         userTemplates = userTemplates,
+        allTemplates = templates,
+        profiles = profiles,
+        activeProfileId = activeProfile?.id,
         onStateChange = { tabActionDialog = it },
         onApplyConfigure = { id, name, cols, rows, bgColor ->
             viewModel.configureKeyboard(id, name, cols, rows, bgColor)
@@ -616,7 +620,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         onTemplateSaveCanceled = {
             tabActionDialog = null
             viewModel.emitToast("Keyboard template save cancelled")
-        }
+        },
+        onAddBlankKeyboard = { viewModel.addBlankKeyboard() },
+        onAddFromTemplate = { template -> viewModel.addKeyboardFromTemplate(template) },
+        onAddFromProfile = { sourceLayoutId -> viewModel.addKeyboardFromProfile(sourceLayoutId) },
+        fetchProfileLayouts = { profileId -> viewModel.layoutsForProfile(profileId) }
     )
     } // end Box
 }
@@ -640,7 +648,7 @@ private fun KeyboardTopBar(
     onMenuSaveTemplate: (Long) -> Unit,
     onOpenDrawer: () -> Unit,
     onToggleRemap: () -> Unit,
-    onEnterEditMode: () -> Unit,
+    onAddKeyboard: () -> Unit,
     onAddButton: () -> Unit,
     onEditButton: () -> Unit,
     onDeleteButton: () -> Unit,
@@ -704,12 +712,12 @@ private fun KeyboardTopBar(
             TextButton(onClick = onSaveEdits, contentPadding = btnPadding) { Text("Save", fontSize = 12.sp) }
             TextButton(onClick = onCancelEdits, contentPadding = btnPadding) { Text("Cancel", fontSize = 12.sp) }
         } else {
-            TextButton(
-                onClick = onEnterEditMode,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                modifier = Modifier.height(40.dp)
-            ) {
-                Text("Edit", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+            IconButton(onClick = onAddKeyboard, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "Add keyboard",
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }

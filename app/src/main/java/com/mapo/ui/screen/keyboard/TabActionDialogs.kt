@@ -15,8 +15,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -35,9 +37,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.mapo.data.model.GridLayout
+import com.mapo.data.model.Profile
 import com.mapo.data.model.TemplateRef
 import com.mapo.ui.components.ColorSwatchPicker
 import com.mapo.ui.components.SteppedSliderWithNumberInput
+import androidx.compose.runtime.LaunchedEffect
 
 /**
  * Top-level dispatcher for the keyboard tab action dialog tree. MainScreen passes the current
@@ -48,6 +53,9 @@ fun TabActionDialogHost(
     state: TabActionDialog?,
     profileName: String,
     userTemplates: List<TemplateRef.User>,
+    allTemplates: List<TemplateRef>,
+    profiles: List<Profile>,
+    activeProfileId: Long?,
     onStateChange: (TabActionDialog?) -> Unit,
     onApplyConfigure: (layoutId: Long, name: String, cols: Int, rows: Int, bgColor: Int?) -> Unit,
     onApplyAutoResize: (layoutId: Long, name: String, cols: Int, rows: Int, bgColor: Int?) -> Unit,
@@ -55,7 +63,11 @@ fun TabActionDialogHost(
     onConfirmRemove: (layoutId: Long) -> Unit,
     onSaveAsNewTemplate: (layoutId: Long, templateName: String) -> Unit,
     onUpdateExistingTemplate: (layoutId: Long, target: TemplateRef.User) -> Unit,
-    onTemplateSaveCanceled: () -> Unit
+    onTemplateSaveCanceled: () -> Unit,
+    onAddBlankKeyboard: () -> Unit,
+    onAddFromTemplate: (TemplateRef) -> Unit,
+    onAddFromProfile: (sourceLayoutId: Long) -> Unit,
+    fetchProfileLayouts: suspend (profileId: Long) -> List<GridLayout>
 ) {
     when (val s = state) {
         null -> Unit
@@ -403,7 +415,199 @@ fun TabActionDialogHost(
                 }
             )
         }
+        is TabActionDialog.AddKeyboardChooser -> AlertDialog(
+            onDismissRequest = { onStateChange(null) },
+            title = { Text("Add keyboard") },
+            text = {
+                Column {
+                    ListItem(
+                        headlineContent = { Text("Add a blank keyboard") },
+                        leadingContent = { Icon(Icons.Default.Add, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.fillMaxWidth().clickableListItem {
+                            onAddBlankKeyboard()
+                            onStateChange(null)
+                        }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Copy a keyboard from templates") },
+                        leadingContent = { Icon(Icons.Default.Bookmark, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.fillMaxWidth().clickableListItem {
+                            onStateChange(TabActionDialog.AddFromTemplate)
+                        }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Copy a keyboard from another profile") },
+                        leadingContent = { Icon(Icons.Default.Person, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.fillMaxWidth().clickableListItem {
+                            onStateChange(TabActionDialog.AddFromProfile)
+                        }
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(
+                    onClick = { onStateChange(null) },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) { Text("Cancel") }
+            }
+        )
+        is TabActionDialog.AddFromTemplate -> {
+            var filter by remember { mutableStateOf("") }
+            val matches = remember(filter, allTemplates) {
+                if (filter.isBlank()) allTemplates
+                else allTemplates.filter { it.name.contains(filter, ignoreCase = true) }
+            }
+            AlertDialog(
+                onDismissRequest = { onStateChange(null) },
+                title = { Text("Add from template") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = filter,
+                            onValueChange = { filter = it },
+                            label = { Text("Filter") },
+                            singleLine = true,
+                            trailingIcon = {
+                                if (filter.isNotEmpty()) {
+                                    IconButton(onClick = { filter = "" }) {
+                                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        if (matches.isEmpty()) {
+                            Text(
+                                if (allTemplates.isEmpty()) "No templates available."
+                                else "No templates match \"$filter\".",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
+                                items(matches, key = { templateKey(it) }) { template ->
+                                    ListItem(
+                                        headlineContent = { Text(template.name) },
+                                        supportingContent = {
+                                            Text("${template.columns}×${template.rows}, ${template.buttons.size} buttons")
+                                        },
+                                        modifier = Modifier.fillMaxWidth().clickableListItem {
+                                            onAddFromTemplate(template)
+                                            onStateChange(null)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(
+                        onClick = { onStateChange(null) },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) { Text("Cancel") }
+                }
+            )
+        }
+        is TabActionDialog.AddFromProfile -> {
+            val otherProfiles = remember(profiles, activeProfileId) {
+                profiles.filter { it.id != activeProfileId }
+            }
+            AlertDialog(
+                onDismissRequest = { onStateChange(null) },
+                title = { Text("Pick a profile") },
+                text = {
+                    if (otherProfiles.isEmpty()) {
+                        Text(
+                            "No other profiles available.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
+                            items(otherProfiles, key = { it.id }) { profile ->
+                                ListItem(
+                                    headlineContent = { Text(profile.name) },
+                                    modifier = Modifier.fillMaxWidth().clickableListItem {
+                                        onStateChange(
+                                            TabActionDialog.AddFromProfileLayout(
+                                                profileId = profile.id,
+                                                profileName = profile.name
+                                            )
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(
+                        onClick = { onStateChange(null) },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) { Text("Cancel") }
+                }
+            )
+        }
+        is TabActionDialog.AddFromProfileLayout -> {
+            var profileLayouts by remember(s.profileId) { mutableStateOf<List<GridLayout>>(emptyList()) }
+            LaunchedEffect(s.profileId) {
+                profileLayouts = fetchProfileLayouts(s.profileId)
+            }
+            AlertDialog(
+                onDismissRequest = { onStateChange(null) },
+                title = { Text("Pick a keyboard from \"${s.profileName}\"") },
+                text = {
+                    if (profileLayouts.isEmpty()) {
+                        Text(
+                            "No keyboards in this profile.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
+                            items(profileLayouts, key = { it.id }) { layout ->
+                                ListItem(
+                                    headlineContent = { Text(layout.name) },
+                                    supportingContent = {
+                                        Text("${layout.columns}×${layout.rows}, ${layout.buttons.size} buttons")
+                                    },
+                                    modifier = Modifier.fillMaxWidth().clickableListItem {
+                                        onAddFromProfile(layout.id)
+                                        onStateChange(null)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(
+                        onClick = { onStateChange(TabActionDialog.AddFromProfile) },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) { Text("Back") }
+                }
+            )
+        }
     }
+}
+
+private fun templateKey(ref: TemplateRef): String = when (ref) {
+    is TemplateRef.BuiltIn -> "builtin:${ref.key}"
+    is TemplateRef.User -> "user:${ref.id}"
 }
 
 @Composable

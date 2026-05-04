@@ -665,6 +665,69 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun addBlankKeyboard() {
+        val profileId = activeProfile.value?.id ?: return
+        val name = nextNumberedName("New Keyboard", _layouts.value.map { it.name }.toSet())
+        val draft = GridLayout(name = name, columns = 6, rows = 4, buttons = emptyList())
+        appendNewLayout(draft, profileId)
+    }
+
+    fun addKeyboardFromTemplate(template: TemplateRef) {
+        val profileId = activeProfile.value?.id ?: return
+        val existing = _layouts.value.map { it.name }.toSet()
+        val name = if (template.name in existing)
+            nextNumberedName(template.name, existing)
+        else template.name
+        val draft = GridLayout(
+            name = name,
+            columns = template.columns,
+            rows = template.rows,
+            buttons = template.buttons,
+            backgroundColorArgb = template.backgroundColorArgb
+        )
+        appendNewLayout(draft, profileId)
+    }
+
+    fun addKeyboardFromProfile(sourceLayoutId: Long) {
+        val profileId = activeProfile.value?.id ?: return
+        viewModelScope.launch {
+            val sourceRow = layoutRepository.getById(sourceLayoutId) ?: return@launch
+            val sourceGrid = sourceRow.toGridLayout()
+            val existing = _layouts.value.map { it.name }.toSet()
+            val name = if (sourceGrid.name in existing)
+                nextNumberedName(sourceGrid.name, existing)
+            else sourceGrid.name
+            val draft = sourceGrid.copy(name = name, id = 0L)
+            appendNewLayoutSuspending(draft, profileId)
+        }
+    }
+
+    suspend fun layoutsForProfile(profileId: Long): List<GridLayout> =
+        layoutRepository.getLayoutsByProfileOnce(profileId).map { it.toGridLayout() }
+
+    private fun nextNumberedName(base: String, existing: Set<String>): String {
+        if (base !in existing) return base
+        var i = 2
+        while ("$base $i" in existing) i++
+        return "$base $i"
+    }
+
+    private fun appendNewLayout(draft: GridLayout, profileId: Long) {
+        viewModelScope.launch { appendNewLayoutSuspending(draft, profileId) }
+    }
+
+    private suspend fun appendNewLayoutSuspending(draft: GridLayout, profileId: Long) {
+        val current = layoutRepository.getLayoutsByProfileOnce(profileId)
+        val newPosition = current.size
+        val snapshotJson = draft.toSnapshot().toJson()
+        val newRow = draft.copy(id = 0L).toKeyLayout(profileId, newPosition, snapshotJson)
+        layoutRepository.saveLayout(newRow)
+        val refreshed = layoutRepository.getLayoutsByProfileOnce(profileId)
+        val newIdx = refreshed.indexOfFirst { it.position == newPosition && it.name == draft.name }
+        if (newIdx >= 0) _selectedIndex.value = newIdx
+        emitToast("\"${draft.name}\" added")
+    }
+
     fun emitToast(message: String) {
         _toastMessage.tryEmit(message)
     }

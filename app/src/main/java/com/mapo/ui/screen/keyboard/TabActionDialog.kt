@@ -67,4 +67,15 @@ sealed class TabActionDialog {
         val templateName: String,
         val existing: TemplateRef
     ) : TabActionDialog()
+
+    object AddKeyboardChooser : TabActionDialog()
+
+    object AddFromTemplate : TabActionDialog()
+
+    object AddFromProfile : TabActionDialog()
+
+    data class AddFromProfileLayout(
+        val profileId: Long,
+        val profileName: String
+    ) : TabActionDialog()
 }

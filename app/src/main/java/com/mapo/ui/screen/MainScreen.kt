@@ -5,8 +5,10 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.absoluteOffset
@@ -28,12 +30,17 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +52,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
@@ -62,12 +70,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -212,6 +223,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     var dialogBottomText by remember { mutableStateOf("") }
     var dialogBottomAlign by remember { mutableStateOf("CENTER") }
     var dialogIsEdit by remember { mutableStateOf(false) }
+    // When non-null, the button-config dialog's OK handler will create a button at this exact
+    // (col, row) instead of at the next first-empty cell. Set by the in-grid + icons.
+    var newButtonCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var dialogIsTrackpad by remember { mutableStateOf(false) }
     var dialogSensitivity by remember { mutableStateOf(TRACKPAD_SENSITIVITY) }
     var dialogTapTarget by remember { mutableStateOf<RemapTarget>(TrackpadGesture.TAP.defaultTarget()) }
@@ -363,18 +377,33 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             type, sens, gestureMappings
                         )
                     } else {
-                        viewModel.addButton(
-                            dialogLabel, dialogCode,
-                            dialogTopText, dialogTopAlign,
-                            dialogBottomText, dialogBottomAlign,
-                            type, sens, gestureMappings
-                        )
+                        val cell = newButtonCell
+                        if (cell != null) {
+                            viewModel.addButtonAt(
+                                cell.first, cell.second,
+                                dialogLabel, dialogCode,
+                                dialogTopText, dialogTopAlign,
+                                dialogBottomText, dialogBottomAlign,
+                                type, sens, gestureMappings
+                            )
+                        } else {
+                            viewModel.addButton(
+                                dialogLabel, dialogCode,
+                                dialogTopText, dialogTopAlign,
+                                dialogBottomText, dialogBottomAlign,
+                                type, sens, gestureMappings
+                            )
+                        }
+                        newButtonCell = null
                     }
                     showButtonDialog = false
                 }) { Text("OK") }
             },
             dismissButton = {
-                TextButton(onClick = { showButtonDialog = false }) { Text("Cancel") }
+                TextButton(onClick = {
+                    showButtonDialog = false
+                    newButtonCell = null
+                }) { Text("Cancel") }
             }
         )
     }
@@ -505,7 +534,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     isEditMode = isEditMode,
                     hasSelectedButton = selectedButtonId != null,
                     tabContextMenuFor = tabContextMenuFor,
-                    remapEnabled = remapEnabled,
                     onSelectIndex = { viewModel.selectLayout(it) },
                     onLongPressMenu = { id -> viewModel.openTabMenu(id) },
                     onReorder = { from, to -> viewModel.reorderTabs(from, to) },
@@ -546,7 +574,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         }
                     },
                     onOpenDrawer = { scope.launch { drawerState.open() } },
-                    onToggleRemap = { viewModel.toggleRemap() },
                     onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser },
                     onAddButton = onOpenAddButton,
                     onEditButton = onOpenEditButton,
@@ -567,12 +594,61 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onMouseMove = viewModel::onMouseMove,
                     onDragEnd = viewModel::onDragEnd,
                     onTrackpadGesture = viewModel::onTrackpadGesture,
+                    onConfigureButton = { id ->
+                        val btn = displayLayout.buttons.find { it.id == id }
+                        if (btn != null) {
+                            dialogLabel = btn.label
+                            dialogCode = btn.code
+                            dialogTopText = btn.topText ?: ""
+                            dialogTopAlign = btn.topAlign ?: "CENTER"
+                            dialogBottomText = btn.bottomText ?: ""
+                            dialogBottomAlign = btn.bottomAlign ?: "CENTER"
+                            dialogIsTrackpad = btn.isTrackpad
+                            dialogSensitivity = btn.sensitivity ?: TRACKPAD_SENSITIVITY
+                            dialogTapTarget = btn.gestureTarget(TrackpadGesture.TAP)
+                            dialogDoubleTapTarget = btn.gestureTarget(TrackpadGesture.DOUBLE_TAP)
+                            dialogLongPressTarget = btn.gestureTarget(TrackpadGesture.LONG_PRESS)
+                            dialogIsEdit = true
+                            viewModel.selectButtonOnly(id)
+                            showButtonDialog = true
+                        }
+                    },
+                    onDuplicateButton = { id -> viewModel.duplicateButton(id) },
+                    onRemoveButton = { id ->
+                        val btn = displayLayout.buttons.find { it.id == id }
+                        if (btn != null) {
+                            tabActionDialog = TabActionDialog.RemoveButtonConfirm(
+                                buttonId = id,
+                                buttonLabel = btn.label
+                            )
+                        }
+                    },
+                    onAddAtCell = { col, row ->
+                        newButtonCell = col to row
+                        dialogLabel = ""
+                        dialogCode = ""
+                        dialogTopText = ""
+                        dialogTopAlign = "CENTER"
+                        dialogBottomText = ""
+                        dialogBottomAlign = "CENTER"
+                        dialogIsTrackpad = false
+                        dialogSensitivity = TRACKPAD_SENSITIVITY
+                        dialogTapTarget = TrackpadGesture.TAP.defaultTarget()
+                        dialogDoubleTapTarget = TrackpadGesture.DOUBLE_TAP.defaultTarget()
+                        dialogLongPressTarget = TrackpadGesture.LONG_PRESS.defaultTarget()
+                        dialogIsEdit = false
+                        showButtonDialog = true
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(4.dp)
                 )
-                BottomBar(onQuit = { (context as? Activity)?.finish() })
+                BottomBar(
+                    remapEnabled = remapEnabled,
+                    onToggleRemap = { viewModel.toggleRemap() },
+                    onQuit = { (context as? Activity)?.finish() }
+                )
             }
         }
     }
@@ -624,7 +700,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         onAddBlankKeyboard = { viewModel.addBlankKeyboard() },
         onAddFromTemplate = { template -> viewModel.addKeyboardFromTemplate(template) },
         onAddFromProfile = { sourceLayoutId -> viewModel.addKeyboardFromProfile(sourceLayoutId) },
-        fetchProfileLayouts = { profileId -> viewModel.layoutsForProfile(profileId) }
+        fetchProfileLayouts = { profileId -> viewModel.layoutsForProfile(profileId) },
+        onConfirmDeleteButton = { id -> viewModel.deleteButton(id) }
     )
     } // end Box
 }
@@ -636,7 +713,6 @@ private fun KeyboardTopBar(
     isEditMode: Boolean,
     hasSelectedButton: Boolean,
     tabContextMenuFor: Long?,
-    remapEnabled: Boolean,
     onSelectIndex: (Int) -> Unit,
     onLongPressMenu: (Long) -> Unit,
     onReorder: (Int, Int) -> Unit,
@@ -647,7 +723,6 @@ private fun KeyboardTopBar(
     onMenuRemove: (Long) -> Unit,
     onMenuSaveTemplate: (Long) -> Unit,
     onOpenDrawer: () -> Unit,
-    onToggleRemap: () -> Unit,
     onAddKeyboard: () -> Unit,
     onAddButton: () -> Unit,
     onEditButton: () -> Unit,
@@ -663,15 +738,6 @@ private fun KeyboardTopBar(
         if (!isEditMode) {
             IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Default.Menu, contentDescription = "Open menu", modifier = Modifier.size(20.dp))
-            }
-            IconButton(onClick = onToggleRemap, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    Icons.Default.SportsEsports,
-                    contentDescription = if (remapEnabled) "Disable remapping" else "Enable remapping",
-                    modifier = Modifier.size(20.dp),
-                    tint = if (remapEnabled) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
 
@@ -736,10 +802,15 @@ private fun KeyGrid(
     onMouseMove: (Float, Float) -> Unit,
     onDragEnd: () -> Unit,
     onTrackpadGesture: (GridButton, TrackpadGesture) -> Unit,
+    onConfigureButton: (String) -> Unit,
+    onDuplicateButton: (String) -> Unit,
+    onRemoveButton: (String) -> Unit,
+    onAddAtCell: (Int, Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
     val gridScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     val handleSize = 20.dp
     val gap = 3.dp
     val currentSelectedId by rememberUpdatedState(selectedButtonId)
@@ -748,6 +819,8 @@ private fun KeyGrid(
     var dropTargetCol by remember { mutableStateOf(0) }
     var dropTargetRow by remember { mutableStateOf(0) }
     var dropIsValid by remember { mutableStateOf(true) }
+    // Per-button long-press contextual menu — local UI state, mirrors the tab-bar pattern.
+    var buttonContextMenuFor by remember { mutableStateOf<String?>(null) }
 
     BoxWithConstraints(modifier = modifier) {
         val cellW = maxWidth / layout.columns
@@ -906,67 +979,115 @@ private fun KeyGrid(
                 }
             } else {
                 // ── Key button (all modes) / trackpad in edit mode ────────────
-                OutlinedButton(
-                    onClick = {
-                        if (isEditMode) onSelectButton(button.id) else onKeyPress(button.code)
-                    },
+                // OUTER Box: natural layout slot. Hosts pointerInput WITHOUT graphicsLayer,
+                // so pointer-event coordinates stay in a stable frame during drag. The
+                // INNER OutlinedButton applies the graphicsLayer drag translation — which
+                // affects drawing only, not the gesture-coord frame.
+                Box(
                     modifier = Modifier
                         .absoluteOffset(x = bx, y = by)
                         .size(width = bw, height = bh)
                         .zIndex(if (isDragging) 10f else 0f)
-                        .offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }
                         .then(
                             if (isEditMode) Modifier.pointerInput(button.id) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = {
-                                        isDragging = true
-                                        draggingId = currentButton.id
-                                        dropTargetCol = currentButton.col
-                                        dropTargetRow = currentButton.row
-                                        dropIsValid = true
-                                        if (currentSelectedId != currentButton.id) {
-                                            onSelectButton(currentButton.id)
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    val touchSlop = viewConfiguration.touchSlop
+                                    val longPressMs = viewConfiguration.longPressTimeoutMillis
+                                    val downPos = down.position
+
+                                    // Phase 1: race long-press timer vs. up vs. drag-before-timer.
+                                    // Crucially we do NOT consume on tap — we let OutlinedButton's
+                                    // onClick handle the tap (preserves ripple + select behavior).
+                                    val longPressed: Boolean = try {
+                                        withTimeout(longPressMs) {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id }
+                                                    ?: continue
+                                                if (!change.pressed) return@withTimeout false
+                                                val moved = (change.position - downPos).getDistance()
+                                                if (moved > touchSlop) return@withTimeout false
+                                            }
+                                            @Suppress("UNREACHABLE_CODE") false
                                         }
-                                    },
-                                    onDrag = { change, delta ->
-                                        change.consume()
-                                        dragOffset += delta
-                                        val rawCol = ((currentButton.col * cellWPx + dragOffset.x) / cellWPx).roundToInt()
-                                        val rawRow = ((currentButton.row * cellHPx + dragOffset.y) / cellHPx).roundToInt()
-                                        dropTargetCol = rawCol.coerceIn(0, currentLayout.columns - currentButton.colSpan)
-                                        dropTargetRow = rawRow.coerceIn(0, currentLayout.rows - currentButton.rowSpan)
-                                        dropIsValid = !currentLayout.wouldOverlap(
-                                            currentButton.id, dropTargetCol, dropTargetRow,
-                                            currentButton.colSpan, currentButton.rowSpan
-                                        )
-                                    },
-                                    onDragEnd = {
-                                        if (dropIsValid) {
-                                            onMoveButton(currentButton.id, dropTargetCol, dropTargetRow)
-                                        }
-                                        isDragging = false
-                                        draggingId = null
-                                        dragOffset = Offset.Zero
-                                    },
-                                    onDragCancel = {
-                                        isDragging = false
-                                        draggingId = null
-                                        dragOffset = Offset.Zero
+                                    } catch (_: PointerEventTimeoutCancellationException) {
+                                        true
                                     }
-                                )
+
+                                    if (!longPressed) return@awaitEachGesture
+
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    buttonContextMenuFor = currentButton.id
+                                    if (currentSelectedId != currentButton.id) {
+                                        onSelectButton(currentButton.id)
+                                    }
+
+                                    // Phase 2: lifted — drag becomes a move; release w/o drag keeps menu open.
+                                    var dragStarted = false
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                            ?: continue
+                                        change.consume()
+                                        if (!change.pressed) {
+                                            if (dragStarted) {
+                                                if (dropIsValid) {
+                                                    onMoveButton(currentButton.id, dropTargetCol, dropTargetRow)
+                                                }
+                                                isDragging = false
+                                                draggingId = null
+                                                dragOffset = Offset.Zero
+                                            }
+                                            break
+                                        }
+                                        val totalMoved = (change.position - downPos).getDistance()
+                                        if (!dragStarted && totalMoved > touchSlop) {
+                                            dragStarted = true
+                                            buttonContextMenuFor = null  // close menu when drag begins
+                                            isDragging = true
+                                            draggingId = currentButton.id
+                                            dropTargetCol = currentButton.col
+                                            dropTargetRow = currentButton.row
+                                            dropIsValid = true
+                                        }
+                                        if (dragStarted) {
+                                            dragOffset = change.position - downPos
+                                            val rawCol = ((currentButton.col * cellWPx + dragOffset.x) / cellWPx).roundToInt()
+                                            val rawRow = ((currentButton.row * cellHPx + dragOffset.y) / cellHPx).roundToInt()
+                                            dropTargetCol = rawCol.coerceIn(0, currentLayout.columns - currentButton.colSpan)
+                                            dropTargetRow = rawRow.coerceIn(0, currentLayout.rows - currentButton.rowSpan)
+                                            dropIsValid = !currentLayout.wouldOverlap(
+                                                currentButton.id, dropTargetCol, dropTargetRow,
+                                                currentButton.colSpan, currentButton.rowSpan
+                                            )
+                                        }
+                                    }
+                                }
                             } else Modifier
-                        ),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(
-                        if (isSelected) 2.dp else 1.dp,
-                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                    ),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    ),
-                    contentPadding = PaddingValues(0.dp)
+                        )
                 ) {
+                    OutlinedButton(
+                        onClick = {
+                            if (isEditMode) onSelectButton(button.id) else onKeyPress(button.code)
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                translationX = dragOffset.x
+                                translationY = dragOffset.y
+                            },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(
+                            if (isSelected) 2.dp else 1.dp,
+                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
                     if (button.isTrackpad) {
                         // Edit mode trackpad preview
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1026,6 +1147,7 @@ private fun KeyGrid(
                             }
                         }
                     }
+                    }
                 }
             }
 
@@ -1061,6 +1183,93 @@ private fun KeyGrid(
                         }
                 )
             }
+
+            // ── Long-press contextual menu (anchored at the button's slot) ────
+            if (isEditMode) {
+                Box(
+                    modifier = Modifier
+                        .absoluteOffset(x = bx, y = by)
+                        .size(width = bw.coerceAtLeast(1.dp), height = bh.coerceAtLeast(1.dp))
+                        .zIndex(30f)
+                ) {
+                    DropdownMenu(
+                        expanded = buttonContextMenuFor == button.id,
+                        onDismissRequest = { buttonContextMenuFor = null }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Configure button") },
+                            leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) },
+                            onClick = {
+                                buttonContextMenuFor = null
+                                onConfigureButton(currentButton.id)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Duplicate button") },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                            onClick = {
+                                buttonContextMenuFor = null
+                                onDuplicateButton(currentButton.id)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    "Delete button",
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            },
+                            onClick = {
+                                buttonContextMenuFor = null
+                                onRemoveButton(currentButton.id)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Plus icons in unoccupied 1x1 cells (edit mode, when cells are big enough) ─
+        if (isEditMode && cellW >= 24.dp && cellH >= 24.dp) {
+            val occupied = remember(layout.buttons) {
+                buildSet {
+                    for (btn in layout.buttons) {
+                        for (r in btn.row until btn.row + btn.rowSpan) {
+                            for (c in btn.col until btn.col + btn.colSpan) {
+                                add(c to r)
+                            }
+                        }
+                    }
+                }
+            }
+            for (r in 0 until layout.rows) {
+                for (c in 0 until layout.columns) {
+                    if ((c to r) in occupied) continue
+                    val ix = cellW * c
+                    val iy = cellH * r
+                    Box(
+                        modifier = Modifier
+                            .absoluteOffset(x = ix, y = iy)
+                            .size(width = cellW - gap, height = cellH - gap)
+                            .clickable { onAddAtCell(c, r) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Add button at $c, $r",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1095,7 +1304,11 @@ private fun GestureMappingRow(
 }
 
 @Composable
-private fun BottomBar(onQuit: () -> Unit) {
+private fun BottomBar(
+    remapEnabled: Boolean,
+    onToggleRemap: () -> Unit,
+    onQuit: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1110,6 +1323,20 @@ private fun BottomBar(onQuit: () -> Unit) {
         ) {
             Text("Quit", fontSize = 12.sp)
         }
+        Spacer(modifier = Modifier.weight(1f))
+        Icon(
+            Icons.Default.SportsEsports,
+            contentDescription = if (remapEnabled) "Remapping enabled" else "Remapping disabled",
+            modifier = Modifier.size(20.dp),
+            tint = if (remapEnabled) MaterialTheme.colorScheme.primary
+                   else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Switch(
+            checked = remapEnabled,
+            onCheckedChange = { onToggleRemap() },
+            modifier = Modifier.padding(end = 4.dp)
+        )
     }
 }
 

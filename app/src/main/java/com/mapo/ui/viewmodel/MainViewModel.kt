@@ -354,6 +354,11 @@ class MainViewModel @Inject constructor(
         _selectedButtonId.value = if (_selectedButtonId.value == id) null else id
     }
 
+    /** Force-select [id] (no toggle). Used by the long-press menu's "Configure" action. */
+    fun selectButtonOnly(id: String) {
+        _selectedButtonId.value = id
+    }
+
     // ── Button CRUD ───────────────────────────────────────────────────────────
 
     fun addButton(
@@ -412,6 +417,60 @@ class MainViewModel @Inject constructor(
             layout.copy(buttons = layout.buttons.filter { it.id != id })
         }
         _selectedButtonId.value = null
+    }
+
+    fun deleteButton(id: String) {
+        _editingLayout.value = _editingLayout.value?.let { layout ->
+            layout.copy(buttons = layout.buttons.filter { it.id != id })
+        }
+        if (_selectedButtonId.value == id) _selectedButtonId.value = null
+    }
+
+    fun duplicateButton(id: String) {
+        val layout = _editingLayout.value ?: return
+        val source = layout.buttons.find { it.id == id } ?: return
+        val cell = layout.findFirstEmptyCell()
+        if (cell == null) {
+            emitError("No empty space available in this layout")
+            return
+        }
+        val copy = source.copy(
+            id = java.util.UUID.randomUUID().toString(),
+            col = cell.first,
+            row = cell.second,
+            colSpan = 1,
+            rowSpan = 1
+        )
+        _editingLayout.value = layout.copy(buttons = layout.buttons + copy)
+        _selectedButtonId.value = copy.id
+    }
+
+    fun addButtonAt(
+        col: Int, row: Int,
+        label: String, code: String,
+        topText: String = "", topAlign: String = "CENTER",
+        bottomText: String = "", bottomAlign: String = "CENTER",
+        type: String = "key",
+        sensitivity: Float? = null,
+        gestureMappings: Map<String, String>? = null
+    ) {
+        val layout = _editingLayout.value ?: return
+        if (col !in 0 until layout.columns || row !in 0 until layout.rows) return
+        if (layout.wouldOverlap("__new__", col, row, 1, 1)) {
+            emitError("Cell already occupied")
+            return
+        }
+        val button = GridButton(
+            label = label, code = code,
+            col = col, row = row,
+            topText = topText.ifEmpty { null }, topAlign = topAlign,
+            bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
+            type = type,
+            sensitivity = sensitivity,
+            gestureMappings = gestureMappings
+        )
+        _editingLayout.value = layout.copy(buttons = layout.buttons + button)
+        _selectedButtonId.value = button.id
     }
 
     // ── Drag to move ──────────────────────────────────────────────────────────

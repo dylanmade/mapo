@@ -78,4 +78,9 @@ sealed class TabActionDialog {
         val profileId: Long,
         val profileName: String
     ) : TabActionDialog()
+
+    data class RemoveButtonConfirm(
+        val buttonId: String,
+        val buttonLabel: String
+    ) : TabActionDialog()
 }

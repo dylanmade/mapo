@@ -385,7 +385,7 @@ private fun TabSurface(
                     )
                 }
             }
-            .padding(horizontal = 12.dp)
+            .padding(horizontal = 14.dp)
     ) {
         Text(
             text = label,

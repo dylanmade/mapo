@@ -67,7 +67,8 @@ fun TabActionDialogHost(
     onAddBlankKeyboard: () -> Unit,
     onAddFromTemplate: (TemplateRef) -> Unit,
     onAddFromProfile: (sourceLayoutId: Long) -> Unit,
-    fetchProfileLayouts: suspend (profileId: Long) -> List<GridLayout>
+    fetchProfileLayouts: suspend (profileId: Long) -> List<GridLayout>,
+    onConfirmDeleteButton: (buttonId: String) -> Unit
 ) {
     when (val s = state) {
         null -> Unit
@@ -560,6 +561,33 @@ fun TabActionDialogHost(
                 }
             )
         }
+        is TabActionDialog.RemoveButtonConfirm -> AlertDialog(
+            onDismissRequest = { onStateChange(null) },
+            title = { Text("Delete button?") },
+            text = {
+                val label = s.buttonLabel.ifBlank { "this button" }
+                Text("\"$label\" will be removed from this keyboard. This cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onConfirmDeleteButton(s.buttonId)
+                        onStateChange(null)
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { onStateChange(null) },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) { Text("Cancel") }
+            }
+        )
         is TabActionDialog.AddFromProfileLayout -> {
             var profileLayouts by remember(s.profileId) { mutableStateOf<List<GridLayout>>(emptyList()) }
             LaunchedEffect(s.profileId) {

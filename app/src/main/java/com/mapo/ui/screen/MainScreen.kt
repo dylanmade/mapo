@@ -44,8 +44,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
@@ -87,9 +85,14 @@ import com.mapo.data.model.gestureTarget
 import com.mapo.data.model.isTrackpad
 import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
+import com.mapo.data.model.TemplateRef
 import com.mapo.service.InputAccessibilityService
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
+import com.mapo.ui.screen.keyboard.KeyboardTabBar
+import com.mapo.ui.screen.keyboard.TabActionDialog
+import com.mapo.ui.screen.keyboard.TabActionDialogHost
 import com.mapo.ui.viewmodel.MainViewModel
+import com.mapo.ui.viewmodel.TabUiEvent
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -104,6 +107,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val selectedButtonId by viewModel.selectedButtonId.collectAsState()
     val activeProfile by viewModel.activeProfile.collectAsState()
     val profiles by viewModel.profiles.collectAsState()
+    val tabContextMenuFor by viewModel.tabContextMenuFor.collectAsState()
+    val templates by viewModel.templates.collectAsState()
+    val userTemplates = remember(templates) { templates.filterIsInstance<TemplateRef.User>() }
+
+    var tabActionDialog by remember { mutableStateOf<TabActionDialog?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
@@ -129,6 +137,37 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 }
                 is ProfileAutoSwitcher.UiEvent.PromptCreate -> {
                     pendingPrompt = event
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.tabUiEvents.collect { event ->
+            when (event) {
+                is TabUiEvent.ConfigureConflict -> {
+                    val draft = TabActionDialog.Configure(
+                        layoutId = event.layoutId,
+                        name = event.name,
+                        cols = event.cols,
+                        rows = event.rows,
+                        bgColor = event.bgColor,
+                        originalName = (tabActionDialog as? TabActionDialog.Configure)?.originalName
+                    )
+                    tabActionDialog = TabActionDialog.ResizeConflict(
+                        layoutId = event.layoutId,
+                        draft = draft,
+                        offendingLabels = event.offendingLabels
+                    )
+                }
+                is TabUiEvent.TemplateNameConflict -> {
+                    tabActionDialog = TabActionDialog.TemplateNameConflict(
+                        layoutId = event.layoutId,
+                        keyboardName = (tabActionDialog as? TabActionDialog.SaveAsNewTemplate)
+                            ?.keyboardName ?: "",
+                        templateName = event.templateName,
+                        existing = event.existing
+                    )
                 }
             }
         }
@@ -425,57 +464,95 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     .fillMaxSize()
                     .statusBarsPadding()
             ) {
-                if (isEditMode) {
-                    EditModeBar(
-                        hasSelection = selectedButtonId != null,
-                        onAdd = {
-                            dialogLabel = ""
-                            dialogCode = ""
-                            dialogTopText = ""
-                            dialogTopAlign = "CENTER"
-                            dialogBottomText = ""
-                            dialogBottomAlign = "CENTER"
-                            dialogIsTrackpad = false
-                            dialogSensitivity = TRACKPAD_SENSITIVITY
-                            dialogTapTarget = TrackpadGesture.TAP.defaultTarget()
-                            dialogDoubleTapTarget = TrackpadGesture.DOUBLE_TAP.defaultTarget()
-                            dialogLongPressTarget = TrackpadGesture.LONG_PRESS.defaultTarget()
-                            dialogIsEdit = false
-                            showButtonDialog = true
-                        },
-                        onEdit = {
-                            val btn = displayLayout.buttons.find { it.id == selectedButtonId }
-                            if (btn != null) {
-                                dialogLabel = btn.label
-                                dialogCode = btn.code
-                                dialogTopText = btn.topText ?: ""
-                                dialogTopAlign = btn.topAlign ?: "CENTER"
-                                dialogBottomText = btn.bottomText ?: ""
-                                dialogBottomAlign = btn.bottomAlign ?: "CENTER"
-                                dialogIsTrackpad = btn.isTrackpad
-                                dialogSensitivity = btn.sensitivity ?: TRACKPAD_SENSITIVITY
-                                dialogTapTarget = btn.gestureTarget(TrackpadGesture.TAP)
-                                dialogDoubleTapTarget = btn.gestureTarget(TrackpadGesture.DOUBLE_TAP)
-                                dialogLongPressTarget = btn.gestureTarget(TrackpadGesture.LONG_PRESS)
-                                dialogIsEdit = true
-                                showButtonDialog = true
-                            }
-                        },
-                        onDelete = { viewModel.deleteSelectedButton() },
-                        onSave = { viewModel.saveEdits() },
-                        onCancel = { viewModel.cancelEdits() }
-                    )
-                } else {
-                    NormalModeBar(
-                        layouts = layouts,
-                        selectedIndex = selectedIndex,
-                        remapEnabled = remapEnabled,
-                        onSelectLayout = { viewModel.selectLayout(it) },
-                        onEnterEditMode = { viewModel.enterEditMode() },
-                        onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onToggleRemap = { viewModel.toggleRemap() }
-                    )
+                val onOpenAddButton: () -> Unit = {
+                    dialogLabel = ""
+                    dialogCode = ""
+                    dialogTopText = ""
+                    dialogTopAlign = "CENTER"
+                    dialogBottomText = ""
+                    dialogBottomAlign = "CENTER"
+                    dialogIsTrackpad = false
+                    dialogSensitivity = TRACKPAD_SENSITIVITY
+                    dialogTapTarget = TrackpadGesture.TAP.defaultTarget()
+                    dialogDoubleTapTarget = TrackpadGesture.DOUBLE_TAP.defaultTarget()
+                    dialogLongPressTarget = TrackpadGesture.LONG_PRESS.defaultTarget()
+                    dialogIsEdit = false
+                    showButtonDialog = true
                 }
+                val onOpenEditButton: () -> Unit = {
+                    val btn = displayLayout.buttons.find { it.id == selectedButtonId }
+                    if (btn != null) {
+                        dialogLabel = btn.label
+                        dialogCode = btn.code
+                        dialogTopText = btn.topText ?: ""
+                        dialogTopAlign = btn.topAlign ?: "CENTER"
+                        dialogBottomText = btn.bottomText ?: ""
+                        dialogBottomAlign = btn.bottomAlign ?: "CENTER"
+                        dialogIsTrackpad = btn.isTrackpad
+                        dialogSensitivity = btn.sensitivity ?: TRACKPAD_SENSITIVITY
+                        dialogTapTarget = btn.gestureTarget(TrackpadGesture.TAP)
+                        dialogDoubleTapTarget = btn.gestureTarget(TrackpadGesture.DOUBLE_TAP)
+                        dialogLongPressTarget = btn.gestureTarget(TrackpadGesture.LONG_PRESS)
+                        dialogIsEdit = true
+                        showButtonDialog = true
+                    }
+                }
+
+                KeyboardTopBar(
+                    layouts = layouts,
+                    selectedIndex = selectedIndex,
+                    isEditMode = isEditMode,
+                    hasSelectedButton = selectedButtonId != null,
+                    tabContextMenuFor = tabContextMenuFor,
+                    remapEnabled = remapEnabled,
+                    onSelectIndex = { viewModel.selectLayout(it) },
+                    onLongPressMenu = { id -> viewModel.openTabMenu(id) },
+                    onReorder = { from, to -> viewModel.reorderTabs(from, to) },
+                    onCloseMenu = { viewModel.closeTabMenu() },
+                    onMenuEditButtons = { id -> viewModel.enterEditMode(id) },
+                    onMenuConfigure = { id ->
+                        val layout = layouts.find { it.id == id }
+                        if (layout != null) {
+                            tabActionDialog = TabActionDialog.Configure(
+                                layoutId = id,
+                                name = layout.name,
+                                cols = layout.columns,
+                                rows = layout.rows,
+                                bgColor = layout.backgroundColorArgb,
+                                originalName = viewModel.originalNames.value[id]
+                            )
+                        }
+                    },
+                    onMenuDuplicate = { id -> viewModel.duplicateKeyboard(id) },
+                    onMenuRemove = { id ->
+                        val layout = layouts.find { it.id == id }
+                        val profileName = activeProfile?.name ?: ""
+                        if (layout != null) {
+                            tabActionDialog = TabActionDialog.RemoveConfirm(
+                                layoutId = id,
+                                name = layout.name,
+                                profileName = profileName
+                            )
+                        }
+                    },
+                    onMenuSaveTemplate = { id ->
+                        val layout = layouts.find { it.id == id }
+                        if (layout != null) {
+                            tabActionDialog = TabActionDialog.SaveTemplateChooser(
+                                layoutId = id,
+                                keyboardName = layout.name
+                            )
+                        }
+                    },
+                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onToggleRemap = { viewModel.toggleRemap() },
+                    onEnterEditMode = { viewModel.enterEditMode() },
+                    onAddButton = onOpenAddButton,
+                    onEditButton = onOpenEditButton,
+                    onDeleteButton = { viewModel.deleteSelectedButton() },
+                    onSaveEdits = { viewModel.saveEdits() },
+                    onCancelEdits = { viewModel.cancelEdits() }
+                )
 
                 KeyGrid(
                     layout = displayLayout,
@@ -516,76 +593,125 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             onBack = { showBlocklist = false }
         )
     }
+
+    TabActionDialogHost(
+        state = tabActionDialog,
+        profileName = activeProfile?.name ?: "",
+        userTemplates = userTemplates,
+        onStateChange = { tabActionDialog = it },
+        onApplyConfigure = { id, name, cols, rows, bgColor ->
+            viewModel.configureKeyboard(id, name, cols, rows, bgColor)
+        },
+        onApplyAutoResize = { id, name, cols, rows, bgColor ->
+            viewModel.applyConfigureWithAutoResize(id, name, cols, rows, bgColor)
+        },
+        onConfirmReset = { id -> viewModel.resetKeyboard(id) },
+        onConfirmRemove = { id -> viewModel.removeKeyboard(id) },
+        onSaveAsNewTemplate = { id, templateName ->
+            viewModel.saveAsNewTemplate(id, templateName)
+        },
+        onUpdateExistingTemplate = { id, target ->
+            viewModel.updateExistingTemplate(id, target)
+        },
+        onTemplateSaveCanceled = {
+            tabActionDialog = null
+            viewModel.emitToast("Keyboard template save cancelled")
+        }
+    )
     } // end Box
 }
 
 @Composable
-private fun NormalModeBar(
+private fun KeyboardTopBar(
     layouts: List<GridLayout>,
     selectedIndex: Int,
+    isEditMode: Boolean,
+    hasSelectedButton: Boolean,
+    tabContextMenuFor: Long?,
     remapEnabled: Boolean,
-    onSelectLayout: (Int) -> Unit,
-    onEnterEditMode: () -> Unit,
+    onSelectIndex: (Int) -> Unit,
+    onLongPressMenu: (Long) -> Unit,
+    onReorder: (Int, Int) -> Unit,
+    onCloseMenu: () -> Unit,
+    onMenuEditButtons: (Long) -> Unit,
+    onMenuConfigure: (Long) -> Unit,
+    onMenuDuplicate: (Long) -> Unit,
+    onMenuRemove: (Long) -> Unit,
+    onMenuSaveTemplate: (Long) -> Unit,
     onOpenDrawer: () -> Unit,
-    onToggleRemap: () -> Unit
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
-            Icon(Icons.Default.Menu, contentDescription = "Open menu", modifier = Modifier.size(20.dp))
-        }
-        IconButton(onClick = onToggleRemap, modifier = Modifier.size(40.dp)) {
-            Icon(
-                Icons.Default.SportsEsports,
-                contentDescription = if (remapEnabled) "Disable remapping" else "Enable remapping",
-                modifier = Modifier.size(20.dp),
-                tint = if (remapEnabled) MaterialTheme.colorScheme.primary
-                       else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        TabRow(selectedTabIndex = selectedIndex, modifier = Modifier.weight(1f)) {
-            layouts.forEachIndexed { index, layout ->
-                Tab(
-                    selected = index == selectedIndex,
-                    onClick = { onSelectLayout(index) },
-                    modifier = Modifier.height(40.dp),
-                    text = { Text(layout.name, fontSize = 12.sp) }
-                )
-            }
-        }
-        TextButton(
-            onClick = onEnterEditMode,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            modifier = Modifier.height(40.dp)
-        ) {
-            Text("Edit", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
-        }
-    }
-}
-
-@Composable
-private fun EditModeBar(
-    hasSelection: Boolean,
-    onAdd: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onSave: () -> Unit,
-    onCancel: () -> Unit
+    onToggleRemap: () -> Unit,
+    onEnterEditMode: () -> Unit,
+    onAddButton: () -> Unit,
+    onEditButton: () -> Unit,
+    onDeleteButton: () -> Unit,
+    onSaveEdits: () -> Unit,
+    onCancelEdits: () -> Unit
 ) {
     val btnPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(40.dp)
-            .padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.height(40.dp)
     ) {
-        TextButton(onClick = onAdd, contentPadding = btnPadding) { Text("Add", fontSize = 12.sp) }
-        TextButton(onClick = onEdit, enabled = hasSelection, contentPadding = btnPadding) { Text("Edit", fontSize = 12.sp) }
-        TextButton(onClick = onDelete, enabled = hasSelection, contentPadding = btnPadding) { Text("Delete", fontSize = 12.sp) }
-        Spacer(modifier = Modifier.weight(1f))
-        TextButton(onClick = onSave, contentPadding = btnPadding) { Text("Save", fontSize = 12.sp) }
-        TextButton(onClick = onCancel, contentPadding = btnPadding) { Text("Cancel", fontSize = 12.sp) }
+        if (!isEditMode) {
+            IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.Menu, contentDescription = "Open menu", modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = onToggleRemap, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.Default.SportsEsports,
+                    contentDescription = if (remapEnabled) "Disable remapping" else "Enable remapping",
+                    modifier = Modifier.size(20.dp),
+                    tint = if (remapEnabled) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // In edit mode, show only the editing tab on the left. animateItem handles the
+        // slide-out / slide-back of the other tabs as the underlying list shrinks/grows.
+        val displayedLayouts = if (isEditMode) {
+            layouts.filterIndexed { i, _ -> i == selectedIndex }
+        } else layouts
+        val displayedSelectedIdx = if (isEditMode) 0 else selectedIndex
+        val tabBarModifier = if (isEditMode) Modifier else Modifier.weight(1f)
+
+        KeyboardTabBar(
+            layouts = displayedLayouts,
+            selectedIndex = displayedSelectedIdx,
+            isEditMode = isEditMode,
+            tabContextMenuFor = tabContextMenuFor,
+            onSelectIndex = onSelectIndex,
+            onLongPressMenu = onLongPressMenu,
+            onReorder = onReorder,
+            onCloseMenu = onCloseMenu,
+            onMenuEditButtons = onMenuEditButtons,
+            onMenuConfigure = onMenuConfigure,
+            onMenuDuplicate = onMenuDuplicate,
+            onMenuRemove = onMenuRemove,
+            onMenuSaveTemplate = onMenuSaveTemplate,
+            modifier = tabBarModifier
+        )
+
+        if (isEditMode) {
+            TextButton(onClick = onAddButton, contentPadding = btnPadding) { Text("Add", fontSize = 12.sp) }
+            TextButton(onClick = onEditButton, enabled = hasSelectedButton, contentPadding = btnPadding) {
+                Text("Edit", fontSize = 12.sp)
+            }
+            TextButton(onClick = onDeleteButton, enabled = hasSelectedButton, contentPadding = btnPadding) {
+                Text("Delete", fontSize = 12.sp)
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            TextButton(onClick = onSaveEdits, contentPadding = btnPadding) { Text("Save", fontSize = 12.sp) }
+            TextButton(onClick = onCancelEdits, contentPadding = btnPadding) { Text("Cancel", fontSize = 12.sp) }
+        } else {
+            TextButton(
+                onClick = onEnterEditMode,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                modifier = Modifier.height(40.dp)
+            ) {
+                Text("Edit", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+            }
+        }
     }
 }
 

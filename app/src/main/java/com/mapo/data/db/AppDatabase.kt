@@ -8,11 +8,18 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.mapo.data.model.AppProfileBinding
 import com.mapo.data.model.GamepadMapping
 import com.mapo.data.model.KeyLayout
+import com.mapo.data.model.KeyboardTemplate
 import com.mapo.data.model.Profile
 
 @Database(
-    entities = [KeyLayout::class, Profile::class, GamepadMapping::class, AppProfileBinding::class],
-    version = 5,
+    entities = [
+        KeyLayout::class,
+        Profile::class,
+        GamepadMapping::class,
+        AppProfileBinding::class,
+        KeyboardTemplate::class
+    ],
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -21,6 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun profileDao(): ProfileDao
     abstract fun gamepadMappingDao(): GamepadMappingDao
     abstract fun appProfileBindingDao(): AppProfileBindingDao
+    abstract fun keyboardTemplateDao(): KeyboardTemplateDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

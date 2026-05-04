@@ -23,24 +23,39 @@ data class KeyLayout(
     val name: String,
     val columns: Int,
     val rows: Int,
-    val buttonsJson: String
+    val buttonsJson: String,
+    val position: Int = 0,
+    val backgroundColorArgb: Int? = null,
+    val originalSnapshotJson: String? = null
 )
 
 private val gson = Gson()
+private val buttonsType = object : TypeToken<List<GridButton>>() {}.type
 
 fun KeyLayout.toGridLayout(): GridLayout = GridLayout(
     id = id,
     name = name,
     columns = columns,
     rows = rows,
-    buttons = gson.fromJson(buttonsJson, object : TypeToken<List<GridButton>>() {}.type)
+    buttons = gson.fromJson(buttonsJson, buttonsType),
+    backgroundColorArgb = backgroundColorArgb
 )
 
-fun GridLayout.toKeyLayout(profileId: Long): KeyLayout = KeyLayout(
+fun GridLayout.toKeyLayout(
+    profileId: Long,
+    position: Int = 0,
+    originalSnapshotJson: String? = null
+): KeyLayout = KeyLayout(
     id = id,
     profileId = profileId,
     name = name,
     columns = columns,
     rows = rows,
-    buttonsJson = gson.toJson(buttons)
+    buttonsJson = gson.toJson(buttons),
+    position = position,
+    backgroundColorArgb = backgroundColorArgb,
+    originalSnapshotJson = originalSnapshotJson
 )
+
+fun KeyLayout.parseOriginalSnapshot(): LayoutSnapshot? =
+    originalSnapshotJson?.let { gson.fromJson(it, LayoutSnapshot::class.java) }

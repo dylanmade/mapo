@@ -5,7 +5,8 @@ data class GridLayout(
     val name: String,
     val columns: Int,
     val rows: Int,
-    val buttons: List<GridButton>
+    val buttons: List<GridButton>,
+    val backgroundColorArgb: Int? = null
 )
 
 // Returns (col, row) of the first unoccupied 1×1 cell, or null if the grid is full.
@@ -52,3 +53,10 @@ fun GridLayout.wouldOverlap(
         proposed.intersect(btnCells).isNotEmpty()
     }
 }
+
+// Buttons whose extent (col + colSpan, row + rowSpan) does not fit within the given grid size.
+fun GridLayout.buttonsExceeding(cols: Int, rows: Int): List<GridButton> =
+    buttons.filter { it.col + it.colSpan > cols || it.row + it.rowSpan > rows }
+
+fun GridLayout.fitsWithin(cols: Int, rows: Int): Boolean =
+    buttonsExceeding(cols, rows).isEmpty()

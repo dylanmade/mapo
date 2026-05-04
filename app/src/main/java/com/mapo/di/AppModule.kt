@@ -4,6 +4,7 @@ import android.content.Context
 import com.mapo.data.db.AppDatabase
 import com.mapo.data.db.AppProfileBindingDao
 import com.mapo.data.db.GamepadMappingDao
+import com.mapo.data.db.KeyboardTemplateDao
 import com.mapo.data.db.LayoutDao
 import com.mapo.data.db.ProfileDao
 import dagger.Module
@@ -37,4 +38,8 @@ object AppModule {
     @Provides
     @Singleton
     fun provideAppProfileBindingDao(db: AppDatabase): AppProfileBindingDao = db.appProfileBindingDao()
+
+    @Provides
+    @Singleton
+    fun provideKeyboardTemplateDao(db: AppDatabase): KeyboardTemplateDao = db.keyboardTemplateDao()
 }

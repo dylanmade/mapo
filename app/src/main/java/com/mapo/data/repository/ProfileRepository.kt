@@ -2,9 +2,7 @@ package com.mapo.data.repository
 
 import com.mapo.data.db.LayoutDao
 import com.mapo.data.db.ProfileDao
-import com.mapo.data.defaults.DefaultLayouts
 import com.mapo.data.model.Profile
-import com.mapo.data.model.toKeyLayout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +18,7 @@ import javax.inject.Singleton
 class ProfileRepository @Inject constructor(
     private val profileDao: ProfileDao,
     private val layoutDao: LayoutDao,
+    private val layoutRepository: LayoutRepository,
     private val gamepadMappingRepo: GamepadMappingRepository
 ) {
 
@@ -54,25 +53,22 @@ class ProfileRepository @Inject constructor(
 
     suspend fun addProfile(name: String): Long {
         val newId = profileDao.insert(Profile(name = name))
-        DefaultLayouts.all.forEach { layout ->
-            layoutDao.insert(layout.toKeyLayout(newId))
-        }
+        layoutRepository.seedDefaults(newId)
         return newId
     }
 
     suspend fun duplicateProfile(source: Profile, newName: String) {
         val newId = profileDao.insert(Profile(name = newName))
-        val layoutsToCopy = if (source.isDefault) {
-            val persisted = layoutDao.getByProfileOnce(source.id)
-            val overrideMap = persisted.associateBy { it.name }
-            DefaultLayouts.all.map { defaultLayout ->
-                overrideMap[defaultLayout.name]?.copy(id = 0, profileId = newId)
-                    ?: defaultLayout.toKeyLayout(newId)
-            }
+        val sourceLayouts = layoutDao.getByProfileOnce(source.id)
+        if (sourceLayouts.isEmpty()) {
+            // The Default profile may have been created via the SQL seed callback before any
+            // layouts were persisted; fall back to seeding so the duplicate isn't blank.
+            layoutRepository.seedDefaults(newId)
         } else {
-            layoutDao.getByProfileOnce(source.id).map { it.copy(id = 0, profileId = newId) }
+            sourceLayouts.forEach { layout ->
+                layoutDao.insert(layout.copy(id = 0, profileId = newId))
+            }
         }
-        layoutsToCopy.forEach { layoutDao.insert(it) }
         gamepadMappingRepo.copyMappings(source.id, newId)
     }
 

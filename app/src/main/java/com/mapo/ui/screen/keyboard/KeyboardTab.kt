@@ -1,6 +1,6 @@
 package com.mapo.ui.screen.keyboard
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -34,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -145,17 +145,16 @@ fun KeyboardTabBar(
                             index in draggingTargetIndex until draggingFromIndex -> draggingTabWidth
                     else -> 0f
                 }
-                // Animate the displacement during a drag (smooth slide-aside). animateFloatAsState
-                // is itself coroutine-driven, so its value is only used *while* a drag is active.
-                // The moment draggingId becomes null the graphicsLayer reads 0f directly, which
-                // is synchronous with the recomposition that mutates _layouts and avoids any
-                // inter-frame lingering of stale displacement (the source of the post-drop
-                // "gap" you've been seeing).
-                val animatedDisplacement by animateFloatAsState(
-                    targetValue = targetDisplacement,
-                    animationSpec = tween(durationMillis = 200),
-                    label = "tab-displacement"
-                )
+                // Animatable is keyed on draggingId so EACH drag gets a fresh instance starting
+                // at 0. This kills the residual-animation problem where the previous drag's
+                // 200ms tween-to-0 was still in flight when the next drag began, leaving tabs
+                // with non-zero displacement values that didn't belong to the current drag.
+                val displacement = remember(draggingId, layout.id) { Animatable(0f) }
+                LaunchedEffect(draggingId, targetDisplacement) {
+                    if (draggingId != null) {
+                        displacement.animateTo(targetDisplacement, tween(durationMillis = 200))
+                    }
+                }
 
                 // OUTER box: natural layout slot. Hosts pointerInput + bounds capture. Crucially
                 // NO graphicsLayer here — pointerInput's local coords are post-graphicsLayer, so
@@ -164,7 +163,6 @@ fun KeyboardTabBar(
                 Box(
                     modifier = Modifier
                         .height(40.dp)
-                        .widthIn(min = 80.dp)
                         .zIndex(if (isDragging) 1f else 0f)
                         .onGloballyPositioned { coords ->
                             tabBounds[layout.id] = coords.boundsInParent()
@@ -262,7 +260,7 @@ fun KeyboardTabBar(
                                 translationX = when {
                                     isDragging -> draggingPointerX - draggingNaturalCenter
                                     draggingId == null -> 0f
-                                    else -> animatedDisplacement
+                                    else -> displacement.value
                                 }
                             }
                     ) {

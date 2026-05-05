@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,17 +20,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,32 +50,43 @@ import com.themestudio.core.LocalThemeStudioVariantOverride
 
 /**
  * Top-level editor screen. Renders:
- *  - top bar with back/light-dark toggle/export/reset
+ *  - top bar with back / variant toggle / export / reset
  *  - sticky preview canvas (consumer-provided)
- *  - scrollable role list with inline color pickers
+ *  - scrollable role list
+ *  - modal bottom sheet for editing a tapped role
  *
- * The screen MUST be hosted *inside* the consumer's theme function (so the
- * consumer's theme picks up the override changes). Wrap the call site like:
+ * Tap any role in the role list, or tap/long-press a swatch in the preview
+ * (when the consumer wires its [com.themestudio.preview.ColorRoleSwatches]
+ * with `onPickRole`), to open the picker sheet. Live updates flow through
+ * the controller as the user drags sliders or types hex.
+ *
+ * The screen MUST be hosted inside the consumer's theme function. Wrap the
+ * call site like:
  * ```
  * MapoTheme {
- *     ThemeStudioScreen(onClose = { ... }) { /* preview content */ }
+ *     ThemeStudioScreen(onClose = { ... }) {
+ *         // Wrap previewContent in your theme too — that's what lets the
+ *         // editor preview the *opposite* variant from the device's
+ *         // current setting.
+ *         MapoTheme {
+ *             ColorRoleSwatches(onPickRole = ...)
+ *             MaterialComponentGallery()
+ *         }
+ *     }
  * }
  * ```
- *
- * The screen overrides [LocalThemeStudioVariantOverride] internally to force
- * the preview canvas (and its surrounding theme) to match the variant being
- * edited, so light/dark can be tweaked independent of the device setting.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThemeStudioScreen(
     onClose: () -> Unit,
-    previewContent: @Composable () -> Unit,
+    previewContent: @Composable (onPickRole: (String) -> Unit) -> Unit,
 ) {
     val controller = LocalThemeStudioController.current
     val overrides = controller.overrides
 
     var editingDark by remember { mutableStateOf(false) }
-    var expandedRole by remember { mutableStateOf<String?>(null) }
+    var pickerRole by remember { mutableStateOf<String?>(null) }
     var showExport by remember { mutableStateOf(false) }
 
     Column(
@@ -88,16 +100,13 @@ fun ThemeStudioScreen(
             editingDark = editingDark,
             onVariantChange = { editingDark = it },
             onExport = { showExport = true },
-            onReset = {
-                controller.reset()
-                expandedRole = null
-            },
+            onReset = { controller.reset() },
         )
         HorizontalDivider()
 
-        // The preview canvas is wrapped so its surrounding theme resolves to
-        // the variant being edited — this is what lets the dev preview dark
-        // mode while their device is in light mode.
+        // Preview pane — consumer supplies the content; we set the variant
+        // override CL so the consumer's theme function (re-invoked inside the
+        // preview block) resolves to the variant being edited.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -111,20 +120,66 @@ fun ThemeStudioScreen(
                         .verticalScroll(rememberScrollState())
                         .padding(8.dp),
                 ) {
-                    previewContent()
+                    previewContent { role -> pickerRole = role }
                 }
             }
         }
         HorizontalDivider()
 
+        Text(
+            "Tap any role to edit · long-press swatches above",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+        HorizontalDivider()
+
         RoleList(
             variant = if (editingDark) overrides.dark else overrides.light,
-            editingDark = editingDark,
-            expandedRole = expandedRole,
-            onToggleExpand = { name ->
-                expandedRole = if (expandedRole == name) null else name
-            },
+            onPickRole = { name -> pickerRole = name },
+            modifier = Modifier.weight(1f),
         )
+    }
+
+    pickerRole?.let { roleName ->
+        val role = remember(roleName) { ColorRoles.all.first { it.name == roleName } }
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            sheetState = sheetState,
+            onDismissRequest = { pickerRole = null },
+        ) {
+            // Resolve the effective color via the same logic the role list
+            // uses so what you see in the sheet matches the "before" state.
+            val variant = if (editingDark) overrides.dark else overrides.light
+            val effective = role.readOverride(variant) ?: role.read(MaterialTheme.colorScheme)
+            val isOverridden = role.readOverride(variant) != null
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Text(
+                    text = role.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                Text(
+                    text = if (editingDark) "Editing: dark variant" else "Editing: light variant",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                ColorPicker(
+                    color = effective,
+                    onChange = { c ->
+                        if (editingDark) controller.setDarkRole(role, c)
+                        else controller.setLightRole(role, c)
+                    },
+                    onClearOverride = if (isOverridden) {
+                        {
+                            if (editingDark) controller.setDarkRole(role, null)
+                            else controller.setLightRole(role, null)
+                        }
+                    } else null,
+                )
+            }
+        }
     }
 
     if (showExport) {
@@ -183,42 +238,22 @@ private fun TopBar(
 @Composable
 private fun RoleList(
     variant: ColorOverrides,
-    editingDark: Boolean,
-    expandedRole: String?,
-    onToggleExpand: (String) -> Unit,
+    onPickRole: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val controller = LocalThemeStudioController.current
     val scheme = MaterialTheme.colorScheme
-
     LazyColumn(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(vertical = 4.dp),
     ) {
         items(ColorRoles.all, key = { it.name }) { role ->
             val effective: Color = role.readOverride(variant) ?: role.read(scheme)
             val isOverridden = role.readOverride(variant) != null
-            val isExpanded = expandedRole == role.name
             RoleRow(
                 name = role.name,
                 effectiveColor = effective,
                 isOverridden = isOverridden,
-                expanded = isExpanded,
-                onToggleExpand = { onToggleExpand(role.name) },
-                pickerContent = {
-                    ColorPicker(
-                        color = effective,
-                        onChange = { c ->
-                            if (editingDark) controller.setDarkRole(role, c)
-                            else controller.setLightRole(role, c)
-                        },
-                        onClearOverride = if (isOverridden) {
-                            {
-                                if (editingDark) controller.setDarkRole(role, null)
-                                else controller.setLightRole(role, null)
-                            }
-                        } else null,
-                    )
-                },
+                onClick = { onPickRole(role.name) },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }

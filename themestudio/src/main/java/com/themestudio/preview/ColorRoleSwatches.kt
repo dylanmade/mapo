@@ -1,15 +1,16 @@
 package com.themestudio.preview
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -23,37 +24,53 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Grid of all Material 3 color roles in the active scheme. For each role, we
- * pair the role color with its semantic on-color when present (e.g. primary +
- * onPrimary) so contrast is visible. Drop this into a [ThemeStudioScreen]'s
- * preview slot to see every token's current value at a glance.
+ * Wrapping grid of all Material 3 color roles in the active scheme. Each chip
+ * pairs the role color with its semantic on-color (e.g. primary + onPrimary)
+ * so contrast is visible.
+ *
+ * Uses [FlowRow] (not [androidx.compose.foundation.lazy.grid.LazyVerticalGrid])
+ * specifically so the helper composes safely inside parents that use
+ * `Modifier.verticalScroll` — the [com.themestudio.ui.ThemeStudioScreen]'s
+ * preview pane is one such parent.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ColorRoleSwatches(modifier: Modifier = Modifier) {
+fun ColorRoleSwatches(
+    modifier: Modifier = Modifier,
+    onPickRole: ((roleName: String) -> Unit)? = null,
+) {
     val scheme = MaterialTheme.colorScheme
     val pairs = remember(scheme) { buildPairs(scheme) }
 
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 110.dp),
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+    FlowRow(
+        modifier = modifier.fillMaxWidth().padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        items(pairs, key = { it.name }) { pair ->
-            SwatchChip(pair)
+        for (pair in pairs) {
+            SwatchChip(pair, onPickRole)
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SwatchChip(pair: SwatchPair) {
+private fun SwatchChip(pair: SwatchPair, onPickRole: ((String) -> Unit)?) {
     val outline = MaterialTheme.colorScheme.outline
+    val baseModifier = Modifier
+        .width(110.dp)
+        .background(pair.background, RoundedCornerShape(6.dp))
+        .border(1.dp, outline, RoundedCornerShape(6.dp))
+    val interactiveModifier = if (onPickRole != null) {
+        baseModifier.combinedClickable(
+            onClick = { onPickRole(pair.name) },
+            onLongClick = { onPickRole(pair.name) },
+        )
+    } else {
+        baseModifier
+    }
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(pair.background, RoundedCornerShape(6.dp))
-            .border(1.dp, outline, RoundedCornerShape(6.dp))
+        modifier = interactiveModifier
             .padding(horizontal = 6.dp, vertical = 6.dp),
     ) {
         Text(

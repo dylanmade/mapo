@@ -14,6 +14,7 @@ import com.mapo.data.model.TemplateRef
 import com.mapo.data.model.TrackpadGesture
 import com.mapo.data.model.buttonsExceeding
 import com.mapo.data.model.gestureTarget
+import com.mapo.data.model.findFirstEmptyArea
 import com.mapo.data.model.findFirstEmptyCell
 import com.mapo.data.model.parseOriginalSnapshot
 import com.mapo.data.model.toGridLayout
@@ -429,22 +430,33 @@ class MainViewModel @Inject constructor(
         mutateEditingLayout { layout ->
             val source = layout.buttons.find { it.id == id }
                 ?: return@mutateEditingLayout null
-            val cell = layout.findFirstEmptyCell()
-            if (cell == null) {
-                emitError("No empty space available in this layout")
-                return@mutateEditingLayout null
+            // Try the source's original size first; only downscale if no empty area
+            // that big exists. Falling all the way to 1×1 (always last attempt) is
+            // better than refusing the duplicate when only smaller gaps remain.
+            val originalFit = layout.findFirstEmptyArea(source.colSpan, source.rowSpan)
+            val (col, row, cs, rs) = if (originalFit != null) {
+                Placement(originalFit.first, originalFit.second, source.colSpan, source.rowSpan)
+            } else {
+                val small = layout.findFirstEmptyCell()
+                if (small == null) {
+                    emitError("No empty space available in this layout")
+                    return@mutateEditingLayout null
+                }
+                Placement(small.first, small.second, 1, 1)
             }
             val copy = source.copy(
                 id = java.util.UUID.randomUUID().toString(),
-                col = cell.first,
-                row = cell.second,
-                colSpan = 1,
-                rowSpan = 1
+                col = col,
+                row = row,
+                colSpan = cs,
+                rowSpan = rs
             )
             _selectedButtonId.value = copy.id
             layout.copy(buttons = layout.buttons + copy)
         }
     }
+
+    private data class Placement(val col: Int, val row: Int, val colSpan: Int, val rowSpan: Int)
 
     fun addButtonAt(
         col: Int, row: Int,
@@ -798,6 +810,9 @@ class MainViewModel @Inject constructor(
         val refreshed = layoutRepository.getLayoutsByProfileOnce(profileId)
         val newIdx = refreshed.indexOfFirst { it.position == newPosition && it.name == draft.name }
         if (newIdx >= 0) _selectedIndex.value = newIdx
+        // Committing to add a new keyboard ends the edit context. Cancel/dismiss paths
+        // never reach this funnel, so they correctly leave edit mode untouched.
+        exitEditMode()
         emitToast("\"${draft.name}\" added")
     }
 

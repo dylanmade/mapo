@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.mapo.data.model.GridLayout
+import com.mapo.ui.MapoGesture
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
@@ -175,10 +176,7 @@ fun KeyboardTabBar(
                                 onSelectIndex(currentIndex)
 
                                 val touchSlop = viewConfiguration.touchSlop
-                                // Reorder needs a meatier movement threshold than touchSlop —
-                                // otherwise small wiggles while holding the contextual menu
-                                // open accidentally tip into reorder.
-                                val reorderSlop = touchSlop * REORDER_DRAG_SLOP_MULTIPLIER
+                                val reorderSlop = MapoGesture.reorderSlopPx(viewConfiguration)
                                 val longPressMs = viewConfiguration.longPressTimeoutMillis
                                 val downPos = down.position
 
@@ -414,9 +412,3 @@ private fun computeTargetIndex(
 }
 
 private const val CHEVRON_SCROLL_PX = 240f
-
-// Reorder activates only after the finger travels this many touch-slops past its
-// origin. With 1.0 (just touchSlop) tiny tremors while holding the contextual
-// menu open kept dismissing it; 2.5 keeps the menu stable while still feeling
-// snappy once the user actually intends to drag.
-private const val REORDER_DRAG_SLOP_MULTIPLIER = 2.5f

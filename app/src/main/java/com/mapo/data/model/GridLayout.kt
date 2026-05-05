@@ -10,7 +10,17 @@ data class GridLayout(
 )
 
 // Returns (col, row) of the first unoccupied 1×1 cell, or null if the grid is full.
-fun GridLayout.findFirstEmptyCell(): Pair<Int, Int>? {
+fun GridLayout.findFirstEmptyCell(): Pair<Int, Int>? = findFirstEmptyArea(1, 1)
+
+/**
+ * Returns (col, row) of the first row-major position where a [colSpan] × [rowSpan]
+ * block fits without overlapping existing buttons or the grid edges. Returns null
+ * if no such position exists. Used by duplicate-at-original-size: callers try the
+ * source button's full size first, then fall back to a smaller area.
+ */
+fun GridLayout.findFirstEmptyArea(colSpan: Int, rowSpan: Int): Pair<Int, Int>? {
+    if (colSpan < 1 || rowSpan < 1) return null
+    if (colSpan > columns || rowSpan > rows) return null
     val occupied = buildSet {
         for (btn in buttons) {
             for (r in btn.row until btn.row + btn.rowSpan) {
@@ -20,9 +30,18 @@ fun GridLayout.findFirstEmptyCell(): Pair<Int, Int>? {
             }
         }
     }
-    for (r in 0 until rows) {
-        for (c in 0 until columns) {
-            if ((c to r) !in occupied) return c to r
+    for (r in 0..(rows - rowSpan)) {
+        for (c in 0..(columns - colSpan)) {
+            var fits = true
+            outer@ for (rr in r until r + rowSpan) {
+                for (cc in c until c + colSpan) {
+                    if ((cc to rr) in occupied) {
+                        fits = false
+                        break@outer
+                    }
+                }
+            }
+            if (fits) return c to r
         }
     }
     return null

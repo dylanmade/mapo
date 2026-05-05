@@ -99,6 +99,7 @@ import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
 import com.mapo.data.model.TemplateRef
 import com.mapo.service.InputAccessibilityService
+import com.mapo.ui.MapoGesture
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.ui.screen.keyboard.KeyboardTabBar
 import com.mapo.ui.screen.keyboard.TabActionDialog
@@ -499,26 +500,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     .fillMaxSize()
                     .statusBarsPadding()
             ) {
-                val onOpenAddButton: () -> Unit = {
-                    dialogLabel = ""
-                    dialogCode = ""
-                    dialogTopText = ""
-                    dialogTopAlign = "CENTER"
-                    dialogBottomText = ""
-                    dialogBottomAlign = "CENTER"
-                    dialogIsTrackpad = false
-                    dialogSensitivity = TRACKPAD_SENSITIVITY
-                    dialogTapTarget = TrackpadGesture.TAP.defaultTarget()
-                    dialogDoubleTapTarget = TrackpadGesture.DOUBLE_TAP.defaultTarget()
-                    dialogLongPressTarget = TrackpadGesture.LONG_PRESS.defaultTarget()
-                    dialogIsEdit = false
-                    showButtonDialog = true
-                }
                 KeyboardTopBar(
                     layouts = layouts,
                     selectedIndex = selectedIndex,
-                    isEditMode = isEditMode,
-                    hasSelectedButton = selectedButtonId != null,
                     tabContextMenuFor = tabContextMenuFor,
                     onSelectIndex = { viewModel.selectLayout(it) },
                     onLongPressMenu = { id -> viewModel.openTabMenu(id) },
@@ -559,17 +543,21 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             )
                         }
                     },
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
-                    onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser },
-                    onAddButton = onOpenAddButton,
-                    onDeleteButton = { viewModel.deleteSelectedButton() }
+                    onOpenDrawer = {
+                        // Drawer surfaces global navigation; opening it ends any per-tab
+                        // edit context. Add-keyboard cancellation, by contrast, leaves
+                        // edit mode intact (handled in the VM funnel).
+                        viewModel.exitEditMode()
+                        scope.launch { drawerState.open() }
+                    },
+                    onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser }
                 )
 
                 KeyGrid(
                     layout = displayLayout,
                     isEditMode = isEditMode,
                     selectedButtonId = selectedButtonId,
-                    onKeyPress = viewModel::onKeyPress,
+                    onKeyPress = viewModel::onKeyPress,x
                     onSelectButton = viewModel::selectButton,
                     onMoveButton = viewModel::moveButton,
                     onResizeButton = viewModel::resizeButton,
@@ -622,6 +610,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         dialogIsEdit = false
                         showButtonDialog = true
                     },
+                    onLongPressEmptyArea = { viewModel.enterEditMode(displayLayout.id) },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
@@ -656,9 +645,15 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     if (showThemeStudio) {
         com.themestudio.ui.ThemeStudioScreen(
             onClose = { showThemeStudio = false },
-            previewContent = {
-                com.themestudio.preview.ColorRoleSwatches()
-                com.themestudio.preview.MaterialComponentGallery()
+            previewContent = { onPickRole ->
+                // Re-invoke MapoTheme inside the preview pane so it picks up
+                // LocalThemeStudioVariantOverride — this is what makes the
+                // "Light/Dark" toggle reflect the variant being edited
+                // independent of the device's current theme.
+                com.mapo.ui.theme.MapoTheme {
+                    com.themestudio.preview.ColorRoleSwatches(onPickRole = onPickRole)
+                    com.themestudio.preview.MaterialComponentGallery()
+                }
             },
         )
     }
@@ -702,8 +697,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 private fun KeyboardTopBar(
     layouts: List<GridLayout>,
     selectedIndex: Int,
-    isEditMode: Boolean,
-    hasSelectedButton: Boolean,
     tabContextMenuFor: Long?,
     onSelectIndex: (Int) -> Unit,
     onLongPressMenu: (Long) -> Unit,
@@ -715,15 +708,11 @@ private fun KeyboardTopBar(
     onMenuRemove: (Long) -> Unit,
     onMenuSaveTemplate: (Long) -> Unit,
     onOpenDrawer: () -> Unit,
-    onAddKeyboard: () -> Unit,
-    onAddButton: () -> Unit,
-    onDeleteButton: () -> Unit
+    onAddKeyboard: () -> Unit
 ) {
-    // Tab bar layout is identical in normal and edit modes — no slide-to-left, no
-    // hidden siblings. Edit-mode-only controls (Add / Delete) sit between the tab
-    // bar and the Add Keyboard button. Save/Cancel/Edit are gone: every button
-    // edit persists immediately.
-    val btnPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+    // Top bar is identical in normal and edit modes. All button-level CRUD now
+    // routes through the per-button long-press menu and the +icons in empty cells,
+    // so the edit-mode-only Add / Delete / Edit / Save / Cancel toolbar is gone.
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.height(40.dp)
@@ -731,7 +720,6 @@ private fun KeyboardTopBar(
         IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
             Icon(Icons.Default.Menu, contentDescription = "Open menu", modifier = Modifier.size(20.dp))
         }
-
         KeyboardTabBar(
             layouts = layouts,
             selectedIndex = selectedIndex,
@@ -747,13 +735,6 @@ private fun KeyboardTopBar(
             onMenuSaveTemplate = onMenuSaveTemplate,
             modifier = Modifier.weight(1f)
         )
-
-        if (isEditMode) {
-            TextButton(onClick = onAddButton, contentPadding = btnPadding) { Text("Add", fontSize = 12.sp) }
-            TextButton(onClick = onDeleteButton, enabled = hasSelectedButton, contentPadding = btnPadding) {
-                Text("Delete", fontSize = 12.sp)
-            }
-        }
         IconButton(onClick = onAddKeyboard, modifier = Modifier.size(40.dp)) {
             Icon(
                 Icons.Default.Add,
@@ -781,6 +762,7 @@ private fun KeyGrid(
     onDuplicateButton: (String) -> Unit,
     onRemoveButton: (String) -> Unit,
     onAddAtCell: (Int, Int) -> Unit,
+    onLongPressEmptyArea: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -797,7 +779,39 @@ private fun KeyGrid(
     // Per-button long-press contextual menu — local UI state, mirrors the tab-bar pattern.
     var buttonContextMenuFor by remember { mutableStateOf<String?>(null) }
 
-    BoxWithConstraints(modifier = modifier) {
+    BoxWithConstraints(
+        modifier = modifier
+            // Background long-press = shortcut into edit mode. Children (buttons, +icons)
+            // consume their own pointer events, so this only fires when the press lands
+            // on truly empty grid space. Skipped while already in edit mode — there's
+            // nothing to enter, and we don't want a re-haptic mid-edit.
+            .then(
+                if (!isEditMode) Modifier.pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = true)
+                        val touchSlop = viewConfiguration.touchSlop
+                        val longPressMs = viewConfiguration.longPressTimeoutMillis
+                        val downPos = down.position
+                        try {
+                            withTimeout(longPressMs) {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: continue
+                                    if (!change.pressed) return@withTimeout
+                                    if ((change.position - downPos).getDistance() > touchSlop) {
+                                        return@withTimeout
+                                    }
+                                }
+                            }
+                        } catch (_: PointerEventTimeoutCancellationException) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongPressEmptyArea()
+                        }
+                    }
+                } else Modifier
+            )
+    ) {
         val cellW = maxWidth / layout.columns
         val cellH = maxHeight / layout.rows
         val cellWPx = with(density) { cellW.toPx() }
@@ -968,6 +982,7 @@ private fun KeyGrid(
                                 awaitEachGesture {
                                     val down = awaitFirstDown(requireUnconsumed = false)
                                     val touchSlop = viewConfiguration.touchSlop
+                                    val reorderSlop = MapoGesture.reorderSlopPx(viewConfiguration)
                                     val longPressMs = viewConfiguration.longPressTimeoutMillis
                                     val downPos = down.position
 
@@ -1017,7 +1032,7 @@ private fun KeyGrid(
                                             break
                                         }
                                         val totalMoved = (change.position - downPos).getDistance()
-                                        if (!dragStarted && totalMoved > touchSlop) {
+                                        if (!dragStarted && totalMoved > reorderSlop) {
                                             dragStarted = true
                                             buttonContextMenuFor = null  // close menu when drag begins
                                             isDragging = true

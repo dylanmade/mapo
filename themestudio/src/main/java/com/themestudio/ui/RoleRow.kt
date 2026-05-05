@@ -4,11 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,60 +22,45 @@ import androidx.compose.ui.unit.sp
 
 /**
  * Single role row: name on the left, current effective color swatch on the
- * right, dot indicator if the role currently has an override. Tap to expand
- * the inline picker.
+ * right, dot indicator if the role currently has an override. Tapping
+ * anywhere on the row opens the bottom-sheet picker.
  */
 @Composable
 internal fun RoleRow(
     name: String,
     effectiveColor: Color,
     isOverridden: Boolean,
-    expanded: Boolean,
-    onToggleExpand: () -> Unit,
-    pickerContent: @Composable () -> Unit,
+    onClick: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onToggleExpand)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-        ) {
+                .size(28.dp)
+                .background(effectiveColor, RoundedCornerShape(4.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = name,
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        if (isOverridden) {
             Box(
                 modifier = Modifier
-                    .size(28.dp)
-                    .background(effectiveColor, RoundedCornerShape(4.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
+                    .size(8.dp)
+                    .background(
+                        MaterialTheme.colorScheme.primary,
+                        RoundedCornerShape(4.dp),
+                    ),
             )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = name,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            if (isOverridden) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .background(
-                            MaterialTheme.colorScheme.primary,
-                            RoundedCornerShape(4.dp),
-                        ),
-                )
-                Spacer(Modifier.width(8.dp))
-            }
-            Text(
-                text = if (expanded) "▾" else "▸",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (expanded) {
-            pickerContent()
         }
     }
 }

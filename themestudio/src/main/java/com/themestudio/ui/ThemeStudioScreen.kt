@@ -1,6 +1,6 @@
 package com.themestudio.ui
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,26 +8,25 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -106,60 +105,77 @@ fun ThemeStudioScreen(
     var pickerTypoRole by remember { mutableStateOf<String?>(null) }
     var pickerShapeRole by remember { mutableStateOf<String?>(null) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding(),
-    ) {
-        TopBar(
-            onClose = onClose,
-            editingDark = editingDark,
-            onVariantChange = { editingDark = it },
-            onExport = { showExport = true },
-            onReset = { controller.reset() },
-        )
-        HorizontalDivider()
-
-        PrimaryTabRow(selectedTabIndex = tabIndex) {
-            StudioTab.values().forEachIndexed { i, tab ->
-                Tab(
-                    selected = tabIndex == i,
-                    onClick = { tabIndex = i },
-                    text = { Text(tab.label, fontSize = 12.sp) },
+    Scaffold(
+        topBar = {
+            // TopAppBar + tab row are stacked together so the tabs sit
+            // directly under the chrome and scroll with neither — Scaffold
+            // treats this whole Column as the top-bar slot.
+            Column {
+                TopAppBar(
+                    title = { Text("Theme Studio") },
+                    navigationIcon = {
+                        IconButton(onClick = onClose) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
+                    },
+                    actions = {
+                        SingleChoiceSegmentedButtonRow {
+                            SegmentedButton(
+                                selected = !editingDark,
+                                onClick = { editingDark = false },
+                                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                            ) { Text("Light", fontSize = 11.sp) }
+                            SegmentedButton(
+                                selected = editingDark,
+                                onClick = { editingDark = true },
+                                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                            ) { Text("Dark", fontSize = 11.sp) }
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        TextButton(onClick = { showExport = true }) {
+                            Text("Export", fontSize = 12.sp)
+                        }
+                        TextButton(onClick = { controller.reset() }) {
+                            Text("Reset", fontSize = 12.sp)
+                        }
+                    },
                 )
+                PrimaryTabRow(selectedTabIndex = tabIndex) {
+                    StudioTab.values().forEachIndexed { i, tab ->
+                        Tab(
+                            selected = tabIndex == i,
+                            onClick = { tabIndex = i },
+                            text = { Text(tab.label, fontSize = 12.sp) },
+                        )
+                    }
+                }
             }
-        }
-
+        },
+    ) { contentPadding ->
         // Preview pane wraps in the consumer's theme so overrides + variant
-        // override propagate to children. We use Surface (not just a tinted
-        // Box) because Surface is what actually propagates LocalContentColor
-        // downward — without it, IconButton/Text inside default to
-        // Color.Black via the Compose static default for LocalContentColor,
-        // even under MaterialTheme. Surface gives us containerColor + the
-        // matching contentColorFor() in one shot.
+        // override propagate to children. Scaffold is itself a Surface, so
+        // LocalContentColor is already set correctly inside the content slot.
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
+                .padding(contentPadding)
+                .fillMaxSize(),
         ) {
             CompositionLocalProvider(LocalThemeStudioVariantOverride provides editingDark) {
                 theme {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.surface,
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(8.dp),
-                        ) {
-                            when (StudioTab.values()[tabIndex]) {
-                                StudioTab.Colors -> colorsPreview { name -> pickerColorRole = name }
-                                StudioTab.Typography -> typographyPreview { name -> pickerTypoRole = name }
-                                StudioTab.Shapes -> shapesPreview { name -> pickerShapeRole = name }
-                            }
+                        when (StudioTab.values()[tabIndex]) {
+                            StudioTab.Colors -> colorsPreview { name -> pickerColorRole = name }
+                            StudioTab.Typography -> typographyPreview { name -> pickerTypoRole = name }
+                            StudioTab.Shapes -> shapesPreview { name -> pickerShapeRole = name }
                         }
                     }
                 }
@@ -269,52 +285,3 @@ private fun SheetHeader(title: String, subtitle: String) {
         )
     }
 }
-
-@Composable
-private fun TopBar(
-    onClose: () -> Unit,
-    editingDark: Boolean,
-    onVariantChange: (Boolean) -> Unit,
-    onExport: () -> Unit,
-    onReset: () -> Unit,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-    ) {
-        TextButton(onClick = onClose) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(4.dp))
-            Text("Back", fontSize = 13.sp)
-        }
-        Spacer(Modifier.width(4.dp))
-        Text(
-            "Theme Studio",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
-        SingleChoiceSegmentedButtonRow {
-            SegmentedButton(
-                selected = !editingDark,
-                onClick = { onVariantChange(false) },
-                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-            ) { Text("Light", fontSize = 11.sp) }
-            SegmentedButton(
-                selected = editingDark,
-                onClick = { onVariantChange(true) },
-                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-            ) { Text("Dark", fontSize = 11.sp) }
-        }
-        Spacer(Modifier.width(4.dp))
-        TextButton(onClick = onExport) { Text("Export", fontSize = 12.sp) }
-        TextButton(onClick = onReset) { Text("Reset", fontSize = 12.sp) }
-    }
-}
-

@@ -29,15 +29,20 @@ import androidx.compose.ui.unit.sp
 import com.themestudio.core.ColorOverrides
 import com.themestudio.core.ColorRole
 import com.themestudio.core.ColorRoles
+import com.themestudio.core.ShapeOverrides
+import com.themestudio.core.ShapeRoles
 import com.themestudio.core.ThemeOverrides
+import com.themestudio.core.TypographyOverrides
+import com.themestudio.core.TypographyRoles
 
 /**
- * Modal dialog showing the current overrides as copy-pasteable Kotlin —
- * formatted as `lightColorScheme(...) {}` / `darkColorScheme(...) {}` snippets
- * with only overridden roles emitted.
+ * Modal dialog showing the current overrides as copy-pasteable Kotlin
+ * snippets. Emits separate blocks for color schemes, typography, and shapes
+ * — only including roles that have at least one override.
  *
  * The clipboard action is the primary intent: tweak in the editor, hit
- * "Copy", paste into your `Color.kt` / `Theme.kt` to commit the values.
+ * "Copy", paste into your `Color.kt` / `Theme.kt` / `Type.kt` / `Shape.kt`
+ * to commit the values.
  */
 @Composable
 internal fun ExportDialog(
@@ -53,7 +58,7 @@ internal fun ExportDialog(
         text = {
             Column {
                 Text(
-                    "Only roles you've changed appear below. Paste into your theme file.",
+                    "Only the roles you've changed appear below. Paste into your theme files.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -61,7 +66,7 @@ internal fun ExportDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 80.dp, max = 320.dp)
+                        .heightIn(min = 80.dp, max = 360.dp)
                         .background(
                             MaterialTheme.colorScheme.surfaceContainerHighest,
                             RoundedCornerShape(6.dp),
@@ -90,29 +95,58 @@ internal fun ExportDialog(
 }
 
 private fun buildSnippet(overrides: ThemeOverrides): String {
-    val light = renderVariant("light", "lightColorScheme", overrides.light)
-    val dark = renderVariant("dark", "darkColorScheme", overrides.dark)
-    return when {
-        light == null && dark == null -> "// No overrides yet — tweak some colors first."
-        light != null && dark != null -> "$light\n\n$dark"
-        light != null -> light
-        else -> dark!!
-    }
+    val parts = listOfNotNull(
+        renderColorScheme("light", "lightColorScheme", overrides.colors.light),
+        renderColorScheme("dark", "darkColorScheme", overrides.colors.dark),
+        renderTypography(overrides.typography),
+        renderShapes(overrides.shapes),
+    )
+    return if (parts.isEmpty()) "// No overrides yet — tweak some values first."
+    else parts.joinToString("\n\n")
 }
 
-private fun renderVariant(
-    label: String,
-    fnName: String,
-    variant: ColorOverrides,
-): String? {
+private fun renderColorScheme(label: String, fnName: String, variant: ColorOverrides): String? {
     val rows = ColorRoles.all.mapNotNull { role: ColorRole ->
         val v: Color? = role.readOverride(variant)
         v?.let { "    ${role.name} = ${it.toKotlinLiteral()}," }
     }
     if (rows.isEmpty()) return null
     return buildString {
-        append("// $label overrides\n")
+        append("// $label color overrides\n")
         append("$fnName(\n")
+        rows.forEach { append(it).append('\n') }
+        append(")")
+    }
+}
+
+private fun renderTypography(typo: TypographyOverrides): String? {
+    val rows = TypographyRoles.all.mapNotNull { role ->
+        val o = role.readOverride(typo)
+        if (o.fontSize == null && o.fontWeight == null && o.letterSpacing == null) return@mapNotNull null
+        val fields = mutableListOf<String>()
+        o.fontSize?.let { fields += "fontSize = ${it.value.toInt()}.sp" }
+        o.fontWeight?.let { fields += "fontWeight = FontWeight(${it.weight})" }
+        o.letterSpacing?.let { fields += "letterSpacing = %.2f.sp".format(it.value) }
+        "    ${role.name} = ${role.name}.copy(${fields.joinToString(", ")}),"
+    }
+    if (rows.isEmpty()) return null
+    return buildString {
+        append("// typography overrides\n")
+        append("Typography(\n")
+        rows.forEach { append(it).append('\n') }
+        append(")")
+    }
+}
+
+private fun renderShapes(shapes: ShapeOverrides): String? {
+    val rows = ShapeRoles.all.mapNotNull { role ->
+        val v = role.readOverride(shapes)
+        v?.let { "    ${role.name} = RoundedCornerShape(${it.value.toInt()}.dp)," }
+    }
+    if (rows.isEmpty()) return null
+    return buildString {
+        append("// shape overrides\n")
+        append("Shapes(\n")
         rows.forEach { append(it).append('\n') }
         append(")")
     }

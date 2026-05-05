@@ -7,6 +7,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -123,19 +124,23 @@ fun MapoTheme(
     content: @Composable () -> Unit,
 ) {
     // Theme Studio integration: when the editor forces a variant, honor it;
-    // when it has overrides, merge them onto the chosen base scheme.
+    // when it has overrides, merge them onto the chosen base scheme/typography/shapes.
     val variantOverride = LocalThemeStudioVariantOverride.current
     val effectiveDark = variantOverride ?: darkTheme
     val baseScheme = if (effectiveDark) highContrastDarkColorScheme else highContrastLightColorScheme
     val controller = LocalThemeStudioController.current
-    val variantOverrides =
-        if (effectiveDark) controller.overrides.dark else controller.overrides.light
-    val colorScheme = baseScheme.applyOverrides(variantOverrides)
+    val overrides = controller.overrides
+    val variantColors =
+        if (effectiveDark) overrides.colors.dark else overrides.colors.light
+    val colorScheme = baseScheme.applyOverrides(variantColors)
+    val typography = Typography.applyOverrides(overrides.typography)
+    val shapes = Shapes().applyOverrides(overrides.shapes)
 
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
         motionScheme = MotionScheme.expressive(),
-        typography = Typography,
+        typography = typography,
+        shapes = shapes,
         content = content,
     )
 }

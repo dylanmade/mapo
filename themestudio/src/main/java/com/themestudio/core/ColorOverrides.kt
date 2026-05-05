@@ -48,6 +48,18 @@ data class ColorOverrides(
     val surfaceContainerLow: Color? = null,
     val surfaceContainerLowest: Color? = null,
     val surfaceDim: Color? = null,
+    val primaryFixed: Color? = null,
+    val primaryFixedDim: Color? = null,
+    val onPrimaryFixed: Color? = null,
+    val onPrimaryFixedVariant: Color? = null,
+    val secondaryFixed: Color? = null,
+    val secondaryFixedDim: Color? = null,
+    val onSecondaryFixed: Color? = null,
+    val onSecondaryFixedVariant: Color? = null,
+    val tertiaryFixed: Color? = null,
+    val tertiaryFixedDim: Color? = null,
+    val onTertiaryFixed: Color? = null,
+    val onTertiaryFixedVariant: Color? = null,
 )
 
 /** Returns a copy of [this] with any non-null override fields replacing the base value. */
@@ -88,6 +100,18 @@ fun ColorScheme.applyOverrides(o: ColorOverrides): ColorScheme = copy(
     surfaceContainerLow = o.surfaceContainerLow ?: surfaceContainerLow,
     surfaceContainerLowest = o.surfaceContainerLowest ?: surfaceContainerLowest,
     surfaceDim = o.surfaceDim ?: surfaceDim,
+    primaryFixed = o.primaryFixed ?: primaryFixed,
+    primaryFixedDim = o.primaryFixedDim ?: primaryFixedDim,
+    onPrimaryFixed = o.onPrimaryFixed ?: onPrimaryFixed,
+    onPrimaryFixedVariant = o.onPrimaryFixedVariant ?: onPrimaryFixedVariant,
+    secondaryFixed = o.secondaryFixed ?: secondaryFixed,
+    secondaryFixedDim = o.secondaryFixedDim ?: secondaryFixedDim,
+    onSecondaryFixed = o.onSecondaryFixed ?: onSecondaryFixed,
+    onSecondaryFixedVariant = o.onSecondaryFixedVariant ?: onSecondaryFixedVariant,
+    tertiaryFixed = o.tertiaryFixed ?: tertiaryFixed,
+    tertiaryFixedDim = o.tertiaryFixedDim ?: tertiaryFixedDim,
+    onTertiaryFixed = o.onTertiaryFixed ?: onTertiaryFixed,
+    onTertiaryFixedVariant = o.onTertiaryFixedVariant ?: onTertiaryFixedVariant,
 )
 
 /**
@@ -141,5 +165,17 @@ object ColorRoles {
         ColorRole("surfaceContainerLow", { it.surfaceContainerLow }, { it.surfaceContainerLow }, { o, c -> o.copy(surfaceContainerLow = c) }),
         ColorRole("surfaceContainerLowest", { it.surfaceContainerLowest }, { it.surfaceContainerLowest }, { o, c -> o.copy(surfaceContainerLowest = c) }),
         ColorRole("surfaceDim", { it.surfaceDim }, { it.surfaceDim }, { o, c -> o.copy(surfaceDim = c) }),
+        ColorRole("primaryFixed", { it.primaryFixed }, { it.primaryFixed }, { o, c -> o.copy(primaryFixed = c) }),
+        ColorRole("primaryFixedDim", { it.primaryFixedDim }, { it.primaryFixedDim }, { o, c -> o.copy(primaryFixedDim = c) }),
+        ColorRole("onPrimaryFixed", { it.onPrimaryFixed }, { it.onPrimaryFixed }, { o, c -> o.copy(onPrimaryFixed = c) }),
+        ColorRole("onPrimaryFixedVariant", { it.onPrimaryFixedVariant }, { it.onPrimaryFixedVariant }, { o, c -> o.copy(onPrimaryFixedVariant = c) }),
+        ColorRole("secondaryFixed", { it.secondaryFixed }, { it.secondaryFixed }, { o, c -> o.copy(secondaryFixed = c) }),
+        ColorRole("secondaryFixedDim", { it.secondaryFixedDim }, { it.secondaryFixedDim }, { o, c -> o.copy(secondaryFixedDim = c) }),
+        ColorRole("onSecondaryFixed", { it.onSecondaryFixed }, { it.onSecondaryFixed }, { o, c -> o.copy(onSecondaryFixed = c) }),
+        ColorRole("onSecondaryFixedVariant", { it.onSecondaryFixedVariant }, { it.onSecondaryFixedVariant }, { o, c -> o.copy(onSecondaryFixedVariant = c) }),
+        ColorRole("tertiaryFixed", { it.tertiaryFixed }, { it.tertiaryFixed }, { o, c -> o.copy(tertiaryFixed = c) }),
+        ColorRole("tertiaryFixedDim", { it.tertiaryFixedDim }, { it.tertiaryFixedDim }, { o, c -> o.copy(tertiaryFixedDim = c) }),
+        ColorRole("onTertiaryFixed", { it.onTertiaryFixed }, { it.onTertiaryFixed }, { o, c -> o.copy(onTertiaryFixed = c) }),
+        ColorRole("onTertiaryFixedVariant", { it.onTertiaryFixedVariant }, { it.onTertiaryFixedVariant }, { o, c -> o.copy(onTertiaryFixedVariant = c) }),
     )
 }

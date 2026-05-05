@@ -1,21 +1,16 @@
 package com.themestudio.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,69 +20,90 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.themestudio.core.ColorOverrides
-import com.themestudio.core.ColorRole
 import com.themestudio.core.ColorRoles
 import com.themestudio.core.LocalThemeStudioController
 import com.themestudio.core.LocalThemeStudioVariantOverride
+import com.themestudio.core.ShapeRoles
+import com.themestudio.core.TypographyRoles
+import com.themestudio.preview.ColorRoleSwatches
+import com.themestudio.preview.MaterialComponentGallery
+import com.themestudio.preview.ShapeSpecimen
+import com.themestudio.preview.TypographySpecimen
+
+private enum class StudioTab(val label: String) {
+    Colors("Colors"),
+    Typography("Typography"),
+    Shapes("Shapes"),
+}
 
 /**
- * Top-level editor screen. Renders:
- *  - top bar with back / variant toggle / export / reset
- *  - sticky preview canvas (consumer-provided)
- *  - scrollable role list
- *  - modal bottom sheet for editing a tapped role
+ * Top-level editor screen. Hosts three tabs (Colors, Typography, Shapes),
+ * each pairing a tappable specimen with a sticky preview gallery so changes
+ * flow through to real components live.
  *
- * Tap any role in the role list, or tap/long-press a swatch in the preview
- * (when the consumer wires its [com.themestudio.preview.ColorRoleSwatches]
- * with `onPickRole`), to open the picker sheet. Live updates flow through
- * the controller as the user drags sliders or types hex.
+ * The screen wraps each tab's preview content in [theme] so the consumer's
+ * theme function picks up [LocalThemeStudioVariantOverride] (and any color
+ * overrides) — this is what lets the dev preview the *opposite* variant
+ * from the device's current setting and see edits applied to every
+ * component.
  *
- * The screen MUST be hosted inside the consumer's theme function. Wrap the
- * call site like:
+ * Defaults wire up library-provided specimens + [MaterialComponentGallery];
+ * consumers can swap in app-specific previews per tab if they want.
+ *
+ * Typical wiring:
  * ```
- * MapoTheme {
- *     ThemeStudioScreen(onClose = { ... }) {
- *         // Wrap previewContent in your theme too — that's what lets the
- *         // editor preview the *opposite* variant from the device's
- *         // current setting.
- *         MapoTheme {
- *             ColorRoleSwatches(onPickRole = ...)
- *             MaterialComponentGallery()
- *         }
- *     }
- * }
+ * ThemeStudioScreen(
+ *     onClose = { ... },
+ *     theme = { content -> MapoTheme { content() } },
+ * )
  * ```
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThemeStudioScreen(
     onClose: () -> Unit,
-    previewContent: @Composable (onPickRole: (String) -> Unit) -> Unit,
+    theme: @Composable (content: @Composable () -> Unit) -> Unit,
+    colorsPreview: @Composable (onPickRole: (String) -> Unit) -> Unit = { onPick ->
+        ColorRoleSwatches(onPickRole = onPick)
+        MaterialComponentGallery()
+    },
+    typographyPreview: @Composable (onPickRole: (String) -> Unit) -> Unit = { onPick ->
+        TypographySpecimen(onPickRole = onPick)
+        MaterialComponentGallery()
+    },
+    shapesPreview: @Composable (onPickRole: (String) -> Unit) -> Unit = { onPick ->
+        ShapeSpecimen(onPickRole = onPick)
+        MaterialComponentGallery()
+    },
 ) {
     val controller = LocalThemeStudioController.current
     val overrides = controller.overrides
 
     var editingDark by remember { mutableStateOf(false) }
-    var pickerRole by remember { mutableStateOf<String?>(null) }
+    var tabIndex by remember { mutableIntStateOf(0) }
     var showExport by remember { mutableStateOf(false) }
+    var pickerColorRole by remember { mutableStateOf<String?>(null) }
+    var pickerTypoRole by remember { mutableStateOf<String?>(null) }
+    var pickerShapeRole by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -104,67 +120,56 @@ fun ThemeStudioScreen(
         )
         HorizontalDivider()
 
-        // Preview pane — consumer supplies the content; we set the variant
-        // override CL so the consumer's theme function (re-invoked inside the
-        // preview block) resolves to the variant being edited.
+        PrimaryTabRow(selectedTabIndex = tabIndex) {
+            StudioTab.values().forEachIndexed { i, tab ->
+                Tab(
+                    selected = tabIndex == i,
+                    onClick = { tabIndex = i },
+                    text = { Text(tab.label, fontSize = 12.sp) },
+                )
+            }
+        }
+
+        // Preview pane wraps in the consumer's theme so overrides + variant
+        // override propagate to children. Takes all remaining height.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 160.dp, max = 320.dp)
+                .weight(1f)
                 .background(MaterialTheme.colorScheme.surfaceContainerLow),
         ) {
             CompositionLocalProvider(LocalThemeStudioVariantOverride provides editingDark) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(8.dp),
-                ) {
-                    previewContent { role -> pickerRole = role }
+                theme {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(8.dp),
+                    ) {
+                        when (StudioTab.values()[tabIndex]) {
+                            StudioTab.Colors -> colorsPreview { name -> pickerColorRole = name }
+                            StudioTab.Typography -> typographyPreview { name -> pickerTypoRole = name }
+                            StudioTab.Shapes -> shapesPreview { name -> pickerShapeRole = name }
+                        }
+                    }
                 }
             }
         }
-        HorizontalDivider()
-
-        Text(
-            "Tap any role to edit · long-press swatches above",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-        )
-        HorizontalDivider()
-
-        RoleList(
-            variant = if (editingDark) overrides.dark else overrides.light,
-            onPickRole = { name -> pickerRole = name },
-            modifier = Modifier.weight(1f),
-        )
     }
 
-    pickerRole?.let { roleName ->
+    // ── Color picker sheet ────────────────────────────────────────────────
+    pickerColorRole?.let { roleName ->
         val role = remember(roleName) { ColorRoles.all.first { it.name == roleName } }
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             sheetState = sheetState,
-            onDismissRequest = { pickerRole = null },
+            onDismissRequest = { pickerColorRole = null },
         ) {
-            // Resolve the effective color via the same logic the role list
-            // uses so what you see in the sheet matches the "before" state.
-            val variant = if (editingDark) overrides.dark else overrides.light
-            val effective = role.readOverride(variant) ?: role.read(MaterialTheme.colorScheme)
-            val isOverridden = role.readOverride(variant) != null
             Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
-                Text(
-                    text = role.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-                Text(
-                    text = if (editingDark) "Editing: dark variant" else "Editing: light variant",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
+                SheetHeader(title = role.name, subtitle = if (editingDark) "Editing: dark" else "Editing: light")
+                val variant = if (editingDark) overrides.colors.dark else overrides.colors.light
+                val effective = role.readOverride(variant) ?: role.read(MaterialTheme.colorScheme)
+                val isOverridden = role.readOverride(variant) != null
                 ColorPicker(
                     color = effective,
                     onChange = { c ->
@@ -182,8 +187,75 @@ fun ThemeStudioScreen(
         }
     }
 
+    // ── Typography picker sheet ───────────────────────────────────────────
+    pickerTypoRole?.let { roleName ->
+        val role = remember(roleName) { TypographyRoles.all.first { it.name == roleName } }
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            sheetState = sheetState,
+            onDismissRequest = { pickerTypoRole = null },
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                SheetHeader(title = role.name, subtitle = "Typography")
+                val baseStyle = role.read(MaterialTheme.typography)
+                val current = role.readOverride(overrides.typography)
+                TypographyPicker(
+                    role = role,
+                    baseStyle = baseStyle,
+                    current = current,
+                    onChange = { v -> controller.setTypographyRole(role, v) },
+                    onClear = { controller.setTypographyRole(role, com.themestudio.core.TextStyleOverride()) },
+                )
+            }
+        }
+    }
+
+    // ── Shape picker sheet ────────────────────────────────────────────────
+    pickerShapeRole?.let { roleName ->
+        val role = remember(roleName) { ShapeRoles.all.first { it.name == roleName } }
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            sheetState = sheetState,
+            onDismissRequest = { pickerShapeRole = null },
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                SheetHeader(title = role.name, subtitle = "Shape (corner radius)")
+                val current = role.readOverride(overrides.shapes)
+                val baseRadius = defaultShapeRadius(roleName)
+                ShapePicker(
+                    baseRadius = baseRadius,
+                    current = current,
+                    onChange = { dp -> controller.setShapeRole(role, dp) },
+                    onClear = { controller.setShapeRole(role, null) },
+                )
+            }
+        }
+    }
+
     if (showExport) {
         ExportDialog(overrides = overrides, onDismiss = { showExport = false })
+    }
+}
+
+/** M3 default corner radii — used to seed the shape picker when no override is set. */
+private fun defaultShapeRadius(name: String): androidx.compose.ui.unit.Dp = when (name) {
+    "extraSmall" -> 4.dp
+    "small" -> 8.dp
+    "medium" -> 12.dp
+    "large" -> 16.dp
+    "extraLarge" -> 28.dp
+    else -> 0.dp
+}
+
+@Composable
+private fun SheetHeader(title: String, subtitle: String) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = subtitle,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -235,27 +307,3 @@ private fun TopBar(
     }
 }
 
-@Composable
-private fun RoleList(
-    variant: ColorOverrides,
-    onPickRole: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val scheme = MaterialTheme.colorScheme
-    LazyColumn(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(vertical = 4.dp),
-    ) {
-        items(ColorRoles.all, key = { it.name }) { role ->
-            val effective: Color = role.readOverride(variant) ?: role.read(scheme)
-            val isOverridden = role.readOverride(variant) != null
-            RoleRow(
-                name = role.name,
-                effectiveColor = effective,
-                isOverridden = isOverridden,
-                onClick = { onPickRole(role.name) },
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        }
-    }
-}

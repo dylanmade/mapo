@@ -6,11 +6,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -20,96 +21,150 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Wrapping grid of all Material 3 color roles in the active scheme. Each chip
- * pairs the role color with its semantic on-color (e.g. primary + onPrimary)
- * so contrast is visible.
+ * Comprehensive grid of every Material 3 color role in the active scheme.
  *
- * Uses [FlowRow] (not [androidx.compose.foundation.lazy.grid.LazyVerticalGrid])
- * specifically so the helper composes safely inside parents that use
- * `Modifier.verticalScroll` — the [com.themestudio.ui.ThemeStudioScreen]'s
- * preview pane is one such parent.
+ * Each "group" is rendered as a stack: the role color as a chip background
+ * with its `on*` color as the chip text. Both halves are independently
+ * interactive — tap the chip to edit the role; tap the small "label area"
+ * to edit the on-color counterpart. The result: every one of the ~48 M3
+ * color roles is reachable from this grid.
+ *
+ * Lays out as a 2-column non-lazy grid that fills the available width, so
+ * chip text doesn't wrap and the helper composes safely inside parents
+ * using `Modifier.verticalScroll`.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ColorRoleSwatches(
     modifier: Modifier = Modifier,
     onPickRole: ((roleName: String) -> Unit)? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val pairs = remember(scheme) { buildPairs(scheme) }
+    val groups = remember(scheme) { buildGroups(scheme) }
 
-    FlowRow(
+    Column(
         modifier = modifier.fillMaxWidth().padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        for (pair in pairs) {
-            SwatchChip(pair, onPickRole)
+        for (rowChunk in groups.chunked(4)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                rowChunk.forEach { group ->
+                    SwatchChip(group, onPickRole, modifier = Modifier.weight(1f))
+                }
+                if (rowChunk.size == 1) Spacer(Modifier.weight(1f))
+            }
         }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SwatchChip(pair: SwatchPair, onPickRole: ((String) -> Unit)?) {
+private fun SwatchChip(
+    group: SwatchGroup,
+    onPickRole: ((String) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
     val outline = MaterialTheme.colorScheme.outline
-    val baseModifier = Modifier
-        .width(110.dp)
-        .background(pair.background, RoundedCornerShape(6.dp))
-        .border(1.dp, outline, RoundedCornerShape(6.dp))
-    val interactiveModifier = if (onPickRole != null) {
-        baseModifier.combinedClickable(
-            onClick = { onPickRole(pair.name) },
-            onLongClick = { onPickRole(pair.name) },
-        )
-    } else {
-        baseModifier
-    }
-    Box(
-        modifier = interactiveModifier
-            .padding(horizontal = 6.dp, vertical = 6.dp),
+    val onTapMain: (() -> Unit)? = onPickRole?.let { { it(group.mainName) } }
+    val onTapOn: (() -> Unit)? = group.onName?.let { name -> onPickRole?.let { { it(name) } } }
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(group.background, RoundedCornerShape(6.dp))
+            .border(1.dp, outline, RoundedCornerShape(6.dp)),
     ) {
-        Text(
-            text = pair.name,
-            color = pair.foreground,
-            fontSize = 10.sp,
-        )
+        // Top half: main role label, taps edit main color
+        Box(
+            modifier = (if (onTapMain != null)
+                Modifier.combinedClickable(
+                    onClick = onTapMain,
+                    onLongClick = onTapMain,
+                ) else Modifier)
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+        ) {
+            Text(
+                text = group.mainName,
+                color = group.foreground,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // Bottom half (only if on-color exists): on-role label on a thin
+        // strip of the on-color, taps edit on-color
+        if (group.onName != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(group.foreground)
+                    .let { base ->
+                        if (onTapOn != null)
+                            base.combinedClickable(
+                                onClick = onTapOn,
+                                onLongClick = onTapOn,
+                            )
+                        else base
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = group.onName,
+                    color = group.background,
+                    fontSize = 9.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
-private data class SwatchPair(
-    val name: String,
+private data class SwatchGroup(
+    val mainName: String,
     val background: Color,
+    val onName: String?,
     val foreground: Color,
 )
 
-private fun buildPairs(s: ColorScheme): List<SwatchPair> = listOf(
-    SwatchPair("primary", s.primary, s.onPrimary),
-    SwatchPair("primaryContainer", s.primaryContainer, s.onPrimaryContainer),
-    SwatchPair("secondary", s.secondary, s.onSecondary),
-    SwatchPair("secondaryContainer", s.secondaryContainer, s.onSecondaryContainer),
-    SwatchPair("tertiary", s.tertiary, s.onTertiary),
-    SwatchPair("tertiaryContainer", s.tertiaryContainer, s.onTertiaryContainer),
-    SwatchPair("background", s.background, s.onBackground),
-    SwatchPair("surface", s.surface, s.onSurface),
-    SwatchPair("surfaceVariant", s.surfaceVariant, s.onSurfaceVariant),
-    SwatchPair("surfaceContainerLowest", s.surfaceContainerLowest, s.onSurface),
-    SwatchPair("surfaceContainerLow", s.surfaceContainerLow, s.onSurface),
-    SwatchPair("surfaceContainer", s.surfaceContainer, s.onSurface),
-    SwatchPair("surfaceContainerHigh", s.surfaceContainerHigh, s.onSurface),
-    SwatchPair("surfaceContainerHighest", s.surfaceContainerHighest, s.onSurface),
-    SwatchPair("surfaceBright", s.surfaceBright, s.onSurface),
-    SwatchPair("surfaceDim", s.surfaceDim, s.onSurface),
-    SwatchPair("error", s.error, s.onError),
-    SwatchPair("errorContainer", s.errorContainer, s.onErrorContainer),
-    SwatchPair("inverseSurface", s.inverseSurface, s.inverseOnSurface),
-    SwatchPair("outline", s.outline, autoForeground(s.outline)),
-    SwatchPair("outlineVariant", s.outlineVariant, autoForeground(s.outlineVariant)),
-    SwatchPair("scrim", s.scrim, autoForeground(s.scrim)),
+private fun buildGroups(s: ColorScheme): List<SwatchGroup> = listOf(
+    SwatchGroup("primary", s.primary, "onPrimary", s.onPrimary),
+    SwatchGroup("primaryContainer", s.primaryContainer, "onPrimaryContainer", s.onPrimaryContainer),
+    SwatchGroup("secondary", s.secondary, "onSecondary", s.onSecondary),
+    SwatchGroup("secondaryContainer", s.secondaryContainer, "onSecondaryContainer", s.onSecondaryContainer),
+    SwatchGroup("tertiary", s.tertiary, "onTertiary", s.onTertiary),
+    SwatchGroup("tertiaryContainer", s.tertiaryContainer, "onTertiaryContainer", s.onTertiaryContainer),
+    SwatchGroup("background", s.background, "onBackground", s.onBackground),
+    SwatchGroup("surface", s.surface, "onSurface", s.onSurface),
+    SwatchGroup("surfaceVariant", s.surfaceVariant, "onSurfaceVariant", s.onSurfaceVariant),
+    SwatchGroup("surfaceContainerLowest", s.surfaceContainerLowest, null, s.onSurface),
+    SwatchGroup("surfaceContainerLow", s.surfaceContainerLow, null, s.onSurface),
+    SwatchGroup("surfaceContainer", s.surfaceContainer, null, s.onSurface),
+    SwatchGroup("surfaceContainerHigh", s.surfaceContainerHigh, null, s.onSurface),
+    SwatchGroup("surfaceContainerHighest", s.surfaceContainerHighest, null, s.onSurface),
+    SwatchGroup("surfaceBright", s.surfaceBright, null, s.onSurface),
+    SwatchGroup("surfaceDim", s.surfaceDim, null, s.onSurface),
+    SwatchGroup("surfaceTint", s.surfaceTint, null, autoForeground(s.surfaceTint)),
+    SwatchGroup("inverseSurface", s.inverseSurface, "inverseOnSurface", s.inverseOnSurface),
+    SwatchGroup("inversePrimary", s.inversePrimary, null, autoForeground(s.inversePrimary)),
+    SwatchGroup("error", s.error, "onError", s.onError),
+    SwatchGroup("errorContainer", s.errorContainer, "onErrorContainer", s.onErrorContainer),
+    SwatchGroup("outline", s.outline, null, autoForeground(s.outline)),
+    SwatchGroup("outlineVariant", s.outlineVariant, null, autoForeground(s.outlineVariant)),
+    SwatchGroup("scrim", s.scrim, null, autoForeground(s.scrim)),
+    SwatchGroup("primaryFixed", s.primaryFixed, "onPrimaryFixed", s.onPrimaryFixed),
+    SwatchGroup("primaryFixedDim", s.primaryFixedDim, "onPrimaryFixedVariant", s.onPrimaryFixedVariant),
+    SwatchGroup("secondaryFixed", s.secondaryFixed, "onSecondaryFixed", s.onSecondaryFixed),
+    SwatchGroup("secondaryFixedDim", s.secondaryFixedDim, "onSecondaryFixedVariant", s.onSecondaryFixedVariant),
+    SwatchGroup("tertiaryFixed", s.tertiaryFixed, "onTertiaryFixed", s.onTertiaryFixed),
+    SwatchGroup("tertiaryFixedDim", s.tertiaryFixedDim, "onTertiaryFixedVariant", s.onTertiaryFixedVariant),
 )
 
 private fun autoForeground(bg: Color): Color =

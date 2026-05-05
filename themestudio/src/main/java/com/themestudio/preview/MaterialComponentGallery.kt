@@ -1,91 +1,399 @@
 package com.themestudio.preview
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.LargeFloatingActionButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RangeSlider
+import androidx.compose.material3.RichTooltip
+import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 /**
- * Compact gallery of common Material 3 components. Drop into a
- * [ThemeStudioScreen] preview slot to see how button/chip/control colors
- * resolve under the active overrides.
+ * Comprehensive gallery of Material 3 components rendered under the active
+ * theme. Covers the standard component surface (buttons, FABs, chips, cards,
+ * selection controls, sliders, progress, text fields, list items, app bars,
+ * navigation, tabs, badges, dividers) and interactive overlays via trigger
+ * buttons (dialog, bottom sheet, snackbar, dropdown menu, tooltips).
+ *
+ * Components I deliberately leave out (out-of-scope for theme review): date
+ * picker, time picker, search bar, modal navigation drawer, scaffold —
+ * these have heavy state/structure that doesn't add color/shape signal
+ * beyond what's already shown by simpler primitives.
  */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun MaterialComponentGallery(modifier: Modifier = Modifier) {
+    var showDialog by remember { mutableStateOf(false) }
+    var showSheet by remember { mutableStateOf(false) }
+    var showSnackbar by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier.fillMaxWidth().padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Buttons", style = MaterialTheme.typography.labelMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // ── Buttons ────────────────────────────────────────────────────────
+        SectionHeader("Buttons")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(onClick = {}) { Text("Filled") }
             FilledTonalButton(onClick = {}) { Text("Tonal") }
-            ElevatedButton(onClick = {}) { Text("Elev") }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ElevatedButton(onClick = {}) { Text("Elevated") }
             OutlinedButton(onClick = {}) { Text("Outlined") }
             TextButton(onClick = {}) { Text("Text") }
-            AssistChip(onClick = {}, label = { Text("Chip") })
         }
 
-        HorizontalDivider()
-        Text("Controls", style = MaterialTheme.typography.labelMedium)
-        var switched by remember { mutableStateOf(true) }
-        var checked by remember { mutableStateOf(false) }
-        var radioed by remember { mutableStateOf(true) }
-        var sliderValue by remember { mutableStateOf(0.5f) }
+        // ── Icon Buttons ───────────────────────────────────────────────────
+        SectionHeader("Icon buttons")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Switch(checked = switched, onCheckedChange = { switched = it })
-            Checkbox(checked = checked, onCheckedChange = { checked = it })
-            RadioButton(selected = radioed, onClick = { radioed = !radioed })
+            IconButton(onClick = {}) { Icon(Icons.Default.Favorite, null) }
+            FilledIconButton(onClick = {}) { Icon(Icons.Default.Star, null) }
+            FilledTonalIconButton(onClick = {}) { Icon(Icons.Default.Edit, null) }
+            OutlinedIconButton(onClick = {}) { Icon(Icons.Default.Settings, null) }
         }
-        Slider(value = sliderValue, onValueChange = { sliderValue = it })
-        LinearProgressIndicator(
-            progress = { 0.6f },
-            modifier = Modifier.fillMaxWidth().height(4.dp),
-        )
 
-        HorizontalDivider()
-        Text("Surfaces", style = MaterialTheme.typography.labelMedium)
-        var fieldValue by remember { mutableStateOf("Sample text") }
-        OutlinedTextField(
-            value = fieldValue,
-            onValueChange = { fieldValue = it },
-            label = { Text("Field") },
+        // ── FABs ──────────────────────────────────────────────────────────
+        SectionHeader("Floating action buttons")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            SmallFloatingActionButton(onClick = {}) { Icon(Icons.Default.Add, null) }
+            FloatingActionButton(onClick = {}) { Icon(Icons.Default.Add, null) }
+            LargeFloatingActionButton(onClick = {}) { Icon(Icons.Default.Add, null) }
+            ExtendedFloatingActionButton(onClick = {}, icon = { Icon(Icons.Default.Add, null) }, text = { Text("Extended") })
+        }
+
+        // ── Chips ─────────────────────────────────────────────────────────
+        SectionHeader("Chips")
+        var filterChecked by remember { mutableStateOf(true) }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            AssistChip(onClick = {}, label = { Text("Assist") })
+            FilterChip(selected = filterChecked, onClick = { filterChecked = !filterChecked }, label = { Text("Filter") })
+            InputChip(selected = false, onClick = {}, label = { Text("Input") })
+            SuggestionChip(onClick = {}, label = { Text("Suggestion") })
+        }
+
+        // ── Cards ─────────────────────────────────────────────────────────
+        SectionHeader("Cards")
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("Filled card", style = MaterialTheme.typography.titleSmall)
+                    Text("On surfaceContainerHighest by default.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("Elevated card", style = MaterialTheme.typography.titleSmall)
+                    Text("Tonal elevation lifts it visually.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("Outlined card", style = MaterialTheme.typography.titleSmall)
+                    Text("Bordered with the outline color.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        // ── Selection controls ────────────────────────────────────────────
+        SectionHeader("Selection controls")
+        var sw by remember { mutableStateOf(true) }
+        var ck by remember { mutableStateOf(true) }
+        var ck2 by remember { mutableStateOf(false) }
+        var rb by remember { mutableStateOf(true) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Switch(checked = sw, onCheckedChange = { sw = it })
+            Switch(checked = !sw, onCheckedChange = { sw = !it })
+            Checkbox(checked = ck, onCheckedChange = { ck = it })
+            Checkbox(checked = ck2, onCheckedChange = { ck2 = it })
+            RadioButton(selected = rb, onClick = { rb = !rb })
+            RadioButton(selected = !rb, onClick = { rb = !rb })
+        }
+
+        // ── Sliders ───────────────────────────────────────────────────────
+        SectionHeader("Sliders")
+        var sliderValue by remember { mutableStateOf(0.4f) }
+        var rangeValue by remember { mutableStateOf(0.2f..0.7f) }
+        Slider(value = sliderValue, onValueChange = { sliderValue = it })
+        RangeSlider(value = rangeValue, onValueChange = { rangeValue = it })
+
+        // ── Progress ──────────────────────────────────────────────────────
+        SectionHeader("Progress")
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            CircularProgressIndicator()
+            CircularProgressIndicator(progress = { 0.65f })
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                LinearProgressIndicator(progress = { 0.65f }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+
+        // ── Text fields ───────────────────────────────────────────────────
+        SectionHeader("Text fields")
+        var f1 by remember { mutableStateOf("Filled value") }
+        var f2 by remember { mutableStateOf("Outlined value") }
+        TextField(
+            value = f1,
+            onValueChange = { f1 = it },
+            label = { Text("Filled label") },
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(2.dp))
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text("Card title", style = MaterialTheme.typography.titleSmall)
-                Text("Body content on a card surface.", style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(
+            value = f2,
+            onValueChange = { f2 = it },
+            label = { Text("Outlined label") },
+            leadingIcon = { Icon(Icons.Default.Search, null) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        // ── List items ────────────────────────────────────────────────────
+        SectionHeader("List items")
+        Column(modifier = Modifier.fillMaxWidth()) {
+            ListItem(
+                headlineContent = { Text("One-line") },
+                leadingContent = { Icon(Icons.Default.Person, null) },
+            )
+            HorizontalDivider()
+            ListItem(
+                headlineContent = { Text("Two-line") },
+                supportingContent = { Text("Supporting text") },
+                leadingContent = { Icon(Icons.Default.Person, null) },
+                trailingContent = { Text("meta") },
+            )
+            HorizontalDivider()
+            ListItem(
+                headlineContent = { Text("Three-line") },
+                overlineContent = { Text("OVERLINE") },
+                supportingContent = { Text("Supporting text wrapping to a second line if needed.") },
+                leadingContent = { Icon(Icons.Default.Person, null) },
+            )
+        }
+
+        // ── App bars ──────────────────────────────────────────────────────
+        SectionHeader("Top app bars")
+        TopAppBar(
+            title = { Text("Small") },
+            navigationIcon = { IconButton(onClick = {}) { Icon(Icons.Default.Home, null) } },
+            actions = { IconButton(onClick = {}) { Icon(Icons.Default.Search, null) } },
+        )
+        CenterAlignedTopAppBar(
+            title = { Text("Center aligned") },
+            navigationIcon = { IconButton(onClick = {}) { Icon(Icons.Default.Home, null) } },
+            actions = { IconButton(onClick = {}) { Icon(Icons.Default.Search, null) } },
+        )
+        SectionHeader("Bottom app bar")
+        BottomAppBar(
+            actions = {
+                IconButton(onClick = {}) { Icon(Icons.Default.Edit, null) }
+                IconButton(onClick = {}) { Icon(Icons.Default.Favorite, null) }
+            },
+            floatingActionButton = {
+                FloatingActionButton(onClick = {}) { Icon(Icons.Default.Add, null) }
+            },
+        )
+
+        // ── Navigation bar ────────────────────────────────────────────────
+        SectionHeader("Navigation bar")
+        var navIdx by remember { mutableIntStateOf(0) }
+        NavigationBar {
+            listOf("Home" to Icons.Default.Home, "Search" to Icons.Default.Search,
+                "Profile" to Icons.Default.Person, "Settings" to Icons.Default.Settings,
+            ).forEachIndexed { i, (label, icon) ->
+                NavigationBarItem(
+                    selected = navIdx == i,
+                    onClick = { navIdx = i },
+                    icon = { Icon(icon, null) },
+                    label = { Text(label) },
+                )
+            }
+        }
+
+        // ── Tabs ──────────────────────────────────────────────────────────
+        SectionHeader("Tabs")
+        var primaryIdx by remember { mutableIntStateOf(0) }
+        PrimaryTabRow(selectedTabIndex = primaryIdx) {
+            listOf("Primary", "Tabs", "Demo").forEachIndexed { i, label ->
+                Tab(selected = primaryIdx == i, onClick = { primaryIdx = i }, text = { Text(label) })
+            }
+        }
+        var secIdx by remember { mutableIntStateOf(0) }
+        SecondaryTabRow(selectedTabIndex = secIdx) {
+            listOf("Secondary", "Tabs", "Here").forEachIndexed { i, label ->
+                Tab(selected = secIdx == i, onClick = { secIdx = i }, text = { Text(label) })
+            }
+        }
+
+        // ── Badges + dividers ─────────────────────────────────────────────
+        SectionHeader("Badges + dividers")
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            BadgedBox(badge = { Badge { Text("8") } }) {
+                Icon(Icons.Default.Favorite, null)
+            }
+            BadgedBox(badge = { Badge() }) {
+                Icon(Icons.Default.Info, null)
+            }
+            VerticalDivider(modifier = Modifier.height(24.dp))
+            HorizontalDivider(modifier = Modifier.fillMaxWidth(0.4f))
+        }
+
+        // ── Tooltips ──────────────────────────────────────────────────────
+        SectionHeader("Tooltips (long-press the icons)")
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                tooltip = { PlainTooltip { Text("Plain tooltip") } },
+                state = rememberTooltipState(),
+            ) {
+                Icon(Icons.Default.Info, null)
+            }
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberRichTooltipPositionProvider(),
+                tooltip = {
+                    RichTooltip(
+                        title = { Text("Rich tooltip") },
+                        text = { Text("Has a title and supporting text.") },
+                    )
+                },
+                state = rememberTooltipState(isPersistent = true),
+            ) {
+                Icon(Icons.Default.Info, null)
+            }
+        }
+
+        // ── Overlay triggers (dialog, sheet, snackbar, menu) ─────────────
+        SectionHeader("Overlays (tap to open)")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Button(onClick = { showDialog = true }) { Text("Dialog") }
+            Button(onClick = { showSheet = true }) { Text("Bottom sheet") }
+            Button(onClick = { showSnackbar = true }) { Text("Snackbar") }
+            Box {
+                Button(onClick = { menuOpen = true }) { Text("Dropdown menu") }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    listOf("Item one", "Item two", "Item three").forEach { label ->
+                        DropdownMenuItem(text = { Text(label) }, onClick = { menuOpen = false })
+                    }
+                }
+            }
+        }
+
+        if (showSnackbar) {
+            // Inline snackbar specimen (live; standard usage is via SnackbarHost,
+            // but this lets the user see the surface and contrast directly).
+            Snackbar(
+                action = { TextButton(onClick = { showSnackbar = false }) { Text("Dismiss") } },
+                modifier = Modifier.padding(top = 4.dp),
+            ) { Text("This is a snackbar message.") }
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Alert dialog") },
+            text = { Text("Body content for an alert dialog. Shows containerColor and surface tint.") },
+            confirmButton = { TextButton(onClick = { showDialog = false }) { Text("Confirm") } },
+            dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Dismiss") } },
+        )
+    }
+
+    if (showSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(sheetState = sheetState, onDismissRequest = { showSheet = false }) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Modal bottom sheet", style = MaterialTheme.typography.titleMedium)
+                Text("Renders on the surfaceContainerLow surface by default.")
+                Spacer(Modifier.height(80.dp))
             }
         }
     }
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }

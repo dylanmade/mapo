@@ -29,7 +29,7 @@ class AutoSwitchSettings @Inject constructor(
     val autoSwitchEnabled: StateFlow<Boolean> = _autoSwitchEnabled.asStateFlow()
 
     private val _autoCreateProfilesEnabled = MutableStateFlow(
-        prefs.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, false)
+        prefs.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, true)
     )
     val autoCreateProfilesEnabled: StateFlow<Boolean> = _autoCreateProfilesEnabled.asStateFlow()
 
@@ -44,7 +44,7 @@ class AutoSwitchSettings @Inject constructor(
                 _autoSwitchEnabled.value = sp.getBoolean(KEY_AUTO_SWITCH_ENABLED, true)
             KEY_AUTO_CREATE_PROFILES_ENABLED ->
                 _autoCreateProfilesEnabled.value =
-                    sp.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, false)
+                    sp.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, true)
             KEY_IGNORED_PACKAGES ->
                 _ignoredPackages.value =
                     sp.getStringSet(KEY_IGNORED_PACKAGES, emptySet())?.toSet() ?: emptySet()

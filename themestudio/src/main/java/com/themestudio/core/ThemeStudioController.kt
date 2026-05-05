@@ -5,16 +5,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 
 /**
  * Observable state holder for the active [ThemeOverrides]. Reads from
  * [storage] on construction; writes through to [storage] on every mutation.
  *
- * The controller is exposed to the rest of the app via [LocalThemeStudioController]
- * (set up by [ThemeStudioProvider]). Consumers that just want to *read* the
- * current overrides — like the consumer's `MapoTheme` — should observe
+ * Exposed via [LocalThemeStudioController]. Consumers that just want to
+ * *read* the current overrides — like the consumer's `MapoTheme` — observe
  * [overrides] as Compose state. Consumers that want to *mutate* — like the
- * editor screen — call the setters.
+ * editor — call the setters.
  */
 @Stable
 class ThemeStudioController(
@@ -23,18 +23,45 @@ class ThemeStudioController(
 
     private var _overrides by mutableStateOf(storage.load())
 
-    /** Current overrides. Snapshots cleanly through Compose. */
     val overrides: ThemeOverrides get() = _overrides
 
+    // ── Colors ────────────────────────────────────────────────────────────
+
     fun setLightRole(role: ColorRole, color: Color?) {
-        _overrides = _overrides.copy(light = role.withOverride(_overrides.light, color))
+        val newColors = _overrides.colors.copy(
+            light = role.withOverride(_overrides.colors.light, color)
+        )
+        _overrides = _overrides.copy(colors = newColors)
         storage.save(_overrides)
     }
 
     fun setDarkRole(role: ColorRole, color: Color?) {
-        _overrides = _overrides.copy(dark = role.withOverride(_overrides.dark, color))
+        val newColors = _overrides.colors.copy(
+            dark = role.withOverride(_overrides.colors.dark, color)
+        )
+        _overrides = _overrides.copy(colors = newColors)
         storage.save(_overrides)
     }
+
+    // ── Typography ────────────────────────────────────────────────────────
+
+    fun setTypographyRole(role: TypographyRole, value: TextStyleOverride) {
+        _overrides = _overrides.copy(
+            typography = role.withOverride(_overrides.typography, value)
+        )
+        storage.save(_overrides)
+    }
+
+    // ── Shapes ────────────────────────────────────────────────────────────
+
+    fun setShapeRole(role: ShapeRole, radius: Dp?) {
+        _overrides = _overrides.copy(
+            shapes = role.withOverride(_overrides.shapes, radius)
+        )
+        storage.save(_overrides)
+    }
+
+    // ── Bulk ──────────────────────────────────────────────────────────────
 
     fun setOverrides(next: ThemeOverrides) {
         _overrides = next
@@ -54,9 +81,8 @@ private object InMemoryNoOpStorage : ThemeOverridesStorage {
 /**
  * Sentinel "no provider in scope" controller. Reading [overrides] returns
  * [ThemeOverrides.EMPTY]; mutators harmlessly write to in-memory no-op
- * storage. This keeps the consumer's theme function safe to call from
- * `@Preview` blocks and unit tests where no [ThemeStudioProvider] wraps
- * the content.
+ * storage. Keeps the consumer's theme function safe under `@Preview` and
+ * unit tests where no [ThemeStudioProvider] wraps the content.
  */
 internal val NoOpThemeStudioController: ThemeStudioController =
     ThemeStudioController(InMemoryNoOpStorage)

@@ -557,7 +557,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     layout = displayLayout,
                     isEditMode = isEditMode,
                     selectedButtonId = selectedButtonId,
-                    onKeyPress = viewModel::onKeyPress,x
+                    onKeyPress = viewModel::onKeyPress,
                     onSelectButton = viewModel::selectButton,
                     onMoveButton = viewModel::moveButton,
                     onResizeButton = viewModel::resizeButton,
@@ -645,16 +645,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     if (showThemeStudio) {
         com.themestudio.ui.ThemeStudioScreen(
             onClose = { showThemeStudio = false },
-            previewContent = { onPickRole ->
-                // Re-invoke MapoTheme inside the preview pane so it picks up
-                // LocalThemeStudioVariantOverride — this is what makes the
-                // "Light/Dark" toggle reflect the variant being edited
-                // independent of the device's current theme.
-                com.mapo.ui.theme.MapoTheme {
-                    com.themestudio.preview.ColorRoleSwatches(onPickRole = onPickRole)
-                    com.themestudio.preview.MaterialComponentGallery()
-                }
-            },
+            theme = { content -> com.mapo.ui.theme.MapoTheme { content() } },
         )
     }
 

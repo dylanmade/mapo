@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -496,9 +495,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
         ) { _ ->
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
+                // No statusBarsPadding here on purpose: Mapo runs on the AYN Thor's
+                // bottom bezel-only screen, which has no status bar. The padding was
+                // a holdover and was causing an intermittent first-frame bug where
+                // a stale non-zero inset shifted content down and clipped the bottom.
+                modifier = Modifier.fillMaxSize()
             ) {
                 KeyboardTopBar(
                     layouts = layouts,

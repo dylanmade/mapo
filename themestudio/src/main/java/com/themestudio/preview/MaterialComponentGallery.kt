@@ -27,15 +27,18 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonGroup
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledIconButton
@@ -50,6 +53,7 @@ import androidx.compose.material3.InputChip
 import androidx.compose.material3.LargeFloatingActionButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
@@ -67,6 +71,8 @@ import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SplitButtonDefaults
+import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -103,7 +109,11 @@ import kotlinx.coroutines.launch
  * these have heavy state/structure that doesn't add color/shape signal
  * beyond what's already shown by simpler primitives.
  */
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(
+    ExperimentalLayoutApi::class,
+    ExperimentalMaterial3Api::class,
+    ExperimentalMaterial3ExpressiveApi::class,
+)
 @Composable
 fun MaterialComponentGallery(modifier: Modifier = Modifier) {
     var showDialog by remember { mutableStateOf(false) }
@@ -133,6 +143,33 @@ fun MaterialComponentGallery(modifier: Modifier = Modifier) {
             FilledTonalIconButton(onClick = {}) { Icon(Icons.Default.Edit, null) }
             OutlinedIconButton(onClick = {}) { Icon(Icons.Default.Settings, null) }
         }
+
+        // ── Expressive button group ───────────────────────────────────────
+        SectionHeader("Button group (Expressive)")
+        ButtonGroup(modifier = Modifier.fillMaxWidth()) {
+            listOf("One", "Two", "Three").forEach { label ->
+                Button(onClick = {}) { Text(label) }
+            }
+        }
+
+        // ── Expressive split button ───────────────────────────────────────
+        SectionHeader("Split button (Expressive)")
+        var splitChecked by remember { mutableStateOf(false) }
+        SplitButtonLayout(
+            leadingButton = {
+                SplitButtonDefaults.LeadingButton(onClick = {}) {
+                    Text("Action")
+                }
+            },
+            trailingButton = {
+                SplitButtonDefaults.TrailingButton(
+                    checked = splitChecked,
+                    onCheckedChange = { splitChecked = it },
+                ) {
+                    Icon(Icons.Default.Add, null)
+                }
+            },
+        )
 
         // ── FABs ──────────────────────────────────────────────────────────
         SectionHeader("Floating action buttons")
@@ -207,6 +244,11 @@ fun MaterialComponentGallery(modifier: Modifier = Modifier) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 LinearProgressIndicator(progress = { 0.65f }, modifier = Modifier.fillMaxWidth())
             }
+        }
+        SectionHeader("Loading indicator (Expressive)")
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            LoadingIndicator()
+            ContainedLoadingIndicator()
         }
 
         // ── Text fields ───────────────────────────────────────────────────

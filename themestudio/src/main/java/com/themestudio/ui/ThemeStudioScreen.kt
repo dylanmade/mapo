@@ -182,6 +182,7 @@ fun ThemeStudioScreen(
                             else controller.setLightRole(role, null)
                         }
                     } else null,
+                    pickerKey = "$roleName.${if (editingDark) "dark" else "light"}",
                 )
             }
         }

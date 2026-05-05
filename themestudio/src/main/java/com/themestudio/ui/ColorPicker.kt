@@ -56,24 +56,44 @@ private enum class PickerMode { HSL, RGB }
  * goes desaturated→saturated; L goes black→current hue→white. Alpha goes
  * fully transparent → fully opaque, against a grey backdrop so the
  * transition is visible.
+ *
+ * **HSL drift cache.** During HSL interaction we cache the user's
+ * *intended* (h, s, l) locally because the round-trip HSL → RGB → HSL is
+ * lossy: deriving HSL from the just-emitted Color drifts h/s/l by ±1 every
+ * frame, which manifests as "moving the S slider also nudges L and vice
+ * versa". The cache is cleared whenever the user touches RGB or hex, since
+ * those interactions redefine the canonical color and we want HSL to
+ * resync.
+ *
+ * @param pickerKey stable identifier for the role being edited; used to
+ *   reset local state when the editor reopens for a different role.
  */
 @Composable
 internal fun ColorPicker(
     color: Color,
     onChange: (Color) -> Unit,
     onClearOverride: (() -> Unit)?,
+    pickerKey: Any,
     modifier: Modifier = Modifier,
 ) {
-    var mode by remember { mutableStateOf(PickerMode.HSL) }
+    var mode by remember(pickerKey) { mutableStateOf(PickerMode.HSL) }
 
     val argb = color.toArgb()
     val a = (argb ushr 24) and 0xFF
     val r = (argb shr 16) and 0xFF
     val g = (argb shr 8) and 0xFF
     val b = argb and 0xFF
-    val (hRaw, sRaw, lRaw) = rgbToHsl(r / 255f, g / 255f, b / 255f)
 
-    var hexInput by remember(argb) { mutableStateOf(argb.toHex(includeAlpha = a != 255)) }
+    // HSL cache — null until the user starts editing in HSL mode. While set,
+    // it overrides the derived HSL so the slider positions match the user's
+    // intent rather than drift-affected re-derivation.
+    var hslCache by remember(pickerKey) { mutableStateOf<Triple<Float, Float, Float>?>(null) }
+    val (derivedH, derivedS, derivedL) = rgbToHsl(r / 255f, g / 255f, b / 255f)
+    val displayH = hslCache?.first ?: derivedH
+    val displayS = hslCache?.second ?: derivedS
+    val displayL = hslCache?.third ?: derivedL
+
+    var hexInput by remember(pickerKey) { mutableStateOf(argb.toHex(includeAlpha = a != 255)) }
     LaunchedEffect(argb) { hexInput = argb.toHex(includeAlpha = a != 255) }
 
     Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -97,7 +117,10 @@ internal fun ColorPicker(
                 value = hexInput,
                 onValueChange = { typed ->
                     hexInput = typed
-                    parseHex(typed)?.let { parsed -> onChange(Color(parsed)) }
+                    parseHex(typed)?.let { parsed ->
+                        hslCache = null  // hex redefines color; let HSL re-derive
+                        onChange(Color(parsed))
+                    }
                 },
                 label = { Text("Hex", fontSize = 11.sp) },
                 singleLine = true,
@@ -132,7 +155,10 @@ internal fun ColorPicker(
                         listOf(rgb(0, g, b, a), rgb(255, g, b, a))
                     ),
                     valueLabel = r.toString(),
-                    onChange = { onChange(rgb(it, g, b, a)) },
+                    onChange = {
+                        hslCache = null
+                        onChange(rgb(it, g, b, a))
+                    },
                 )
                 GradientSlider(
                     label = "G",
@@ -142,7 +168,10 @@ internal fun ColorPicker(
                         listOf(rgb(r, 0, b, a), rgb(r, 255, b, a))
                     ),
                     valueLabel = g.toString(),
-                    onChange = { onChange(rgb(r, it, b, a)) },
+                    onChange = {
+                        hslCache = null
+                        onChange(rgb(r, it, b, a))
+                    },
                 )
                 GradientSlider(
                     label = "B",
@@ -152,51 +181,67 @@ internal fun ColorPicker(
                         listOf(rgb(r, g, 0, a), rgb(r, g, 255, a))
                     ),
                     valueLabel = b.toString(),
-                    onChange = { onChange(rgb(r, g, it, a)) },
+                    onChange = {
+                        hslCache = null
+                        onChange(rgb(r, g, it, a))
+                    },
                 )
             }
             PickerMode.HSL -> {
-                // Hue: full rainbow at the current S/L
-                val rainbow = remember(sRaw, lRaw) {
+                // Hue: full rainbow at the current S/L (always shows full
+                // saturation so the rainbow is recognizable even when the
+                // current color is desaturated).
+                val rainbow = remember {
                     Brush.horizontalGradient(
                         listOf(0, 60, 120, 180, 240, 300, 360).map { h ->
-                            hsl(h.toFloat(), sRaw.coerceAtLeast(0.0001f), lRaw.coerceIn(0.05f, 0.95f), a)
+                            hsl(h.toFloat(), 1f, 0.5f, 255)
                         }
                     )
                 }
                 GradientSlider(
                     label = "H",
-                    value = hRaw.toInt().coerceIn(0, 360),
+                    value = displayH.toInt().coerceIn(0, 360),
                     valueRange = 0..360,
                     gradient = rainbow,
-                    valueLabel = "${hRaw.toInt()}°",
-                    onChange = { onChange(hsl(it.toFloat(), sRaw, lRaw, a)) },
+                    valueLabel = "${displayH.toInt()}°",
+                    onChange = { newH ->
+                        hslCache = Triple(newH.toFloat(), displayS, displayL)
+                        onChange(hsl(newH.toFloat(), displayS, displayL, a))
+                    },
                 )
                 // Saturation: grey → saturated at current H/L
                 GradientSlider(
                     label = "S",
-                    value = (sRaw * 100f).toInt(),
+                    value = (displayS * 100f).toInt(),
                     valueRange = 0..100,
                     gradient = Brush.horizontalGradient(
-                        listOf(hsl(hRaw, 0f, lRaw, a), hsl(hRaw, 1f, lRaw, a))
+                        listOf(hsl(displayH, 0f, displayL, a), hsl(displayH, 1f, displayL, a))
                     ),
-                    valueLabel = "${(sRaw * 100f).toInt()}%",
-                    onChange = { onChange(hsl(hRaw, it / 100f, lRaw, a)) },
+                    valueLabel = "${(displayS * 100f).toInt()}%",
+                    onChange = { newS ->
+                        val s = newS / 100f
+                        hslCache = Triple(displayH, s, displayL)
+                        onChange(hsl(displayH, s, displayL, a))
+                    },
                 )
                 // Lightness: black → current hue → white
                 GradientSlider(
                     label = "L",
-                    value = (lRaw * 100f).toInt(),
+                    value = (displayL * 100f).toInt(),
                     valueRange = 0..100,
                     gradient = Brush.horizontalGradient(
                         listOf(
-                            hsl(hRaw, sRaw, 0f, a),
-                            hsl(hRaw, sRaw, 0.5f, a),
-                            hsl(hRaw, sRaw, 1f, a),
+                            hsl(displayH, displayS, 0f, a),
+                            hsl(displayH, displayS, 0.5f, a),
+                            hsl(displayH, displayS, 1f, a),
                         )
                     ),
-                    valueLabel = "${(lRaw * 100f).toInt()}%",
-                    onChange = { onChange(hsl(hRaw, sRaw, it / 100f, a)) },
+                    valueLabel = "${(displayL * 100f).toInt()}%",
+                    onChange = { newL ->
+                        val l = newL / 100f
+                        hslCache = Triple(displayH, displayS, l)
+                        onChange(hsl(displayH, displayS, l, a))
+                    },
                 )
             }
         }

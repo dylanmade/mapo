@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -368,7 +369,7 @@ private fun TabSurface(
         modifier = Modifier
             .fillMaxHeight()
             .fillMaxWidth()
-            .background(container)
+            .background(container, RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
             .drawBehind {
                 if (selected) {
                     val strokePx = 3.dp.toPx()

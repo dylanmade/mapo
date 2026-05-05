@@ -1,5 +1,6 @@
 package com.themestudio.preview
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalFloatingToolbar
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
@@ -28,6 +34,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonGroup
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -95,6 +102,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
 /**
@@ -118,7 +126,6 @@ import kotlinx.coroutines.launch
 fun MaterialComponentGallery(modifier: Modifier = Modifier) {
     var showDialog by remember { mutableStateOf(false) }
     var showSheet by remember { mutableStateOf(false) }
-    var showSnackbar by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
 
     Column(
@@ -127,29 +134,62 @@ fun MaterialComponentGallery(modifier: Modifier = Modifier) {
     ) {
         // ── Buttons ────────────────────────────────────────────────────────
         SectionHeader("Buttons")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Button(onClick = {}) { Text("Filled") }
-            FilledTonalButton(onClick = {}) { Text("Tonal") }
-            ElevatedButton(onClick = {}) { Text("Elevated") }
-            OutlinedButton(onClick = {}) { Text("Outlined") }
-            TextButton(onClick = {}) { Text("Text") }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LabeledComponent(roles = "primary · onPrimary") {
+                Button(onClick = {}) { Text("Filled") }
+            }
+            LabeledComponent(roles = "secondaryContainer · onSecondaryContainer") {
+                FilledTonalButton(onClick = {}) { Text("Tonal") }
+            }
+            LabeledComponent(roles = "surfaceContainerLow · primary · surfaceTint") {
+                ElevatedButton(onClick = {}) { Text("Elevated") }
+            }
+            LabeledComponent(roles = "outline · primary") {
+                OutlinedButton(onClick = {}) { Text("Outlined") }
+            }
+            LabeledComponent(roles = "primary") {
+                TextButton(onClick = {}) { Text("Text") }
+            }
         }
 
         // ── Icon Buttons ───────────────────────────────────────────────────
+        // The default IconButton and OutlinedIconButton resolve content color
+        // via LocalContentColor, which is set by the enclosing Surface (the
+        // gallery's preview pane wraps everything in Surface(surface), so
+        // LocalContentColor = onSurface here).
         SectionHeader("Icon buttons")
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            IconButton(onClick = {}) { Icon(Icons.Default.Favorite, null) }
-            FilledIconButton(onClick = {}) { Icon(Icons.Default.Star, null) }
-            FilledTonalIconButton(onClick = {}) { Icon(Icons.Default.Edit, null) }
-            OutlinedIconButton(onClick = {}) { Icon(Icons.Default.Settings, null) }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LabeledComponent(roles = "LocalContentColor (onSurface here)") {
+                IconButton(onClick = {}) { Icon(Icons.Default.Favorite, null) }
+            }
+            LabeledComponent(roles = "primary · onPrimary") {
+                FilledIconButton(onClick = {}) { Icon(Icons.Default.Star, null) }
+            }
+            LabeledComponent(roles = "secondaryContainer · onSecondaryContainer") {
+                FilledTonalIconButton(onClick = {}) { Icon(Icons.Default.Edit, null) }
+            }
+            LabeledComponent(roles = "outline · LocalContentColor") {
+                OutlinedIconButton(onClick = {}) { Icon(Icons.Default.Settings, null) }
+            }
         }
 
         // ── Expressive button group ───────────────────────────────────────
-        SectionHeader("Button group (Expressive)")
-        ButtonGroup(modifier = Modifier.fillMaxWidth()) {
-            listOf("One", "Two", "Three").forEach { label ->
-                Button(onClick = {}) { Text(label) }
-            }
+        // The ButtonGroupScope provides clickableItem/toggleableItem which
+        // are pre-wired to participate in the press-expand animation. The
+        // older approach of building children manually with `animateWidth`
+        // is the deprecated overload — overflowIndicator is required on the
+        // current API.
+        SectionHeader("Button group (Expressive) — press a button to expand it")
+        ButtonGroup(
+            overflowIndicator = { state ->
+                ButtonGroupDefaults.OverflowIndicator(menuState = state)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            clickableItem(onClick = {}, label = "One")
+            clickableItem(onClick = {}, label = "Two")
+            clickableItem(onClick = {}, label = "Three")
         }
 
         // ── Expressive split button ───────────────────────────────────────
@@ -383,12 +423,25 @@ fun MaterialComponentGallery(modifier: Modifier = Modifier) {
             }
         }
 
-        // ── Overlay triggers (dialog, sheet, snackbar, menu) ─────────────
+        // ── Snackbars (rendered inline, all variants) ────────────────────
+        SectionHeader("Snackbars (inverseSurface · inverseOnSurface · inversePrimary)")
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Snackbar { Text("Single line message.") }
+            Snackbar(
+                action = { TextButton(onClick = {}) { Text("Action") } },
+            ) { Text("With action button.") }
+            Snackbar(
+                action = { TextButton(onClick = {}) { Text("Retry") } },
+                dismissAction = { TextButton(onClick = {}) { Text("Dismiss") } },
+                actionOnNewLine = true,
+            ) { Text("Wraps to two lines because the message is longer than will fit on one.") }
+        }
+
+        // ── Overlay triggers (dialog, sheet, menu) ───────────────────────
         SectionHeader("Overlays (tap to open)")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(onClick = { showDialog = true }) { Text("Dialog") }
             Button(onClick = { showSheet = true }) { Text("Bottom sheet") }
-            Button(onClick = { showSnackbar = true }) { Text("Snackbar") }
             Box {
                 Button(onClick = { menuOpen = true }) { Text("Dropdown menu") }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -399,13 +452,45 @@ fun MaterialComponentGallery(modifier: Modifier = Modifier) {
             }
         }
 
-        if (showSnackbar) {
-            // Inline snackbar specimen (live; standard usage is via SnackbarHost,
-            // but this lets the user see the surface and contrast directly).
-            Snackbar(
-                action = { TextButton(onClick = { showSnackbar = false }) { Text("Dismiss") } },
-                modifier = Modifier.padding(top = 4.dp),
-            ) { Text("This is a snackbar message.") }
+        // ── Floating toolbar (Expressive) ────────────────────────────────
+        SectionHeader("Floating toolbar (Expressive)")
+        HorizontalFloatingToolbar(expanded = true) {
+            IconButton(onClick = {}) { Icon(Icons.Default.Edit, null) }
+            IconButton(onClick = {}) { Icon(Icons.Default.Favorite, null) }
+            IconButton(onClick = {}) { Icon(Icons.Default.Star, null) }
+            IconButton(onClick = {}) { Icon(Icons.Default.Settings, null) }
+        }
+
+        // ── Carousel (Expressive) ────────────────────────────────────────
+        SectionHeader("Carousel (Expressive) — swipe horizontally")
+        val carouselItems = remember {
+            listOf(
+                MaterialThemeColorRef.Primary,
+                MaterialThemeColorRef.Secondary,
+                MaterialThemeColorRef.Tertiary,
+                MaterialThemeColorRef.PrimaryContainer,
+                MaterialThemeColorRef.SecondaryContainer,
+                MaterialThemeColorRef.TertiaryContainer,
+            )
+        }
+        val carouselState = rememberCarouselState(itemCount = { carouselItems.size })
+        HorizontalMultiBrowseCarousel(
+            state = carouselState,
+            preferredItemWidth = 120.dp,
+            itemSpacing = 6.dp,
+            modifier = Modifier.fillMaxWidth().height(120.dp),
+        ) { i ->
+            val ref = carouselItems[i]
+            val (bg, fg, label) = ref.resolve()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+                    .background(bg, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, color = fg, style = MaterialTheme.typography.titleSmall)
+            }
         }
     }
 
@@ -438,4 +523,37 @@ private fun SectionHeader(text: String) {
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/** Wraps a component with a small label below it naming the color roles it uses. */
+@Composable
+private fun LabeledComponent(roles: String, content: @Composable () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        content()
+        Text(
+            text = roles,
+            fontSize = 9.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+/**
+ * Carousel demo content. Each item references a primary container role from
+ * the active scheme so the carousel visually tracks edits to those roles.
+ */
+private enum class MaterialThemeColorRef { Primary, Secondary, Tertiary, PrimaryContainer, SecondaryContainer, TertiaryContainer }
+
+@Composable
+private fun MaterialThemeColorRef.resolve(): Triple<androidx.compose.ui.graphics.Color, androidx.compose.ui.graphics.Color, String> {
+    val s = MaterialTheme.colorScheme
+    return when (this) {
+        MaterialThemeColorRef.Primary -> Triple(s.primary, s.onPrimary, "primary")
+        MaterialThemeColorRef.Secondary -> Triple(s.secondary, s.onSecondary, "secondary")
+        MaterialThemeColorRef.Tertiary -> Triple(s.tertiary, s.onTertiary, "tertiary")
+        MaterialThemeColorRef.PrimaryContainer -> Triple(s.primaryContainer, s.onPrimaryContainer, "primaryContainer")
+        MaterialThemeColorRef.SecondaryContainer -> Triple(s.secondaryContainer, s.onSecondaryContainer, "secondaryContainer")
+        MaterialThemeColorRef.TertiaryContainer -> Triple(s.tertiaryContainer, s.onTertiaryContainer, "tertiaryContainer")
+    }
 }

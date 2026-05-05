@@ -138,7 +138,10 @@ fun MapoTheme(
 
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
-        motionScheme = MotionScheme.expressive(),
+        // Standard (critically-damped) springs instead of expressive (bouncy):
+        // expressive's intentional overshoot caused the drawer to slide past its
+        // open anchor and snap back, looking like a glitch. Switch back any time.
+        motionScheme = MotionScheme.standard(),
         typography = typography,
         shapes = shapes,
         content = content,

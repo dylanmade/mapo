@@ -24,6 +24,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -131,25 +132,34 @@ fun ThemeStudioScreen(
         }
 
         // Preview pane wraps in the consumer's theme so overrides + variant
-        // override propagate to children. Takes all remaining height.
+        // override propagate to children. We use Surface (not just a tinted
+        // Box) because Surface is what actually propagates LocalContentColor
+        // downward — without it, IconButton/Text inside default to
+        // Color.Black via the Compose static default for LocalContentColor,
+        // even under MaterialTheme. Surface gives us containerColor + the
+        // matching contentColorFor() in one shot.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                .weight(1f),
         ) {
             CompositionLocalProvider(LocalThemeStudioVariantOverride provides editingDark) {
                 theme {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(8.dp),
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.surface,
                     ) {
-                        when (StudioTab.values()[tabIndex]) {
-                            StudioTab.Colors -> colorsPreview { name -> pickerColorRole = name }
-                            StudioTab.Typography -> typographyPreview { name -> pickerTypoRole = name }
-                            StudioTab.Shapes -> shapesPreview { name -> pickerShapeRole = name }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(8.dp),
+                        ) {
+                            when (StudioTab.values()[tabIndex]) {
+                                StudioTab.Colors -> colorsPreview { name -> pickerColorRole = name }
+                                StudioTab.Typography -> typographyPreview { name -> pickerTypoRole = name }
+                                StudioTab.Shapes -> shapesPreview { name -> pickerShapeRole = name }
+                            }
                         }
                     }
                 }

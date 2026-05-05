@@ -15,6 +15,7 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "com.mapo.HiltTestRunner"
     }
 
     buildTypes {
@@ -34,6 +35,24 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+        }
+    }
+
+    packaging {
+        resources {
+            excludes += listOf(
+                "META-INF/LICENSE.md",
+                "META-INF/LICENSE-notice.md",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1",
+            )
+        }
     }
 }
 
@@ -75,4 +94,37 @@ dependencies {
     // Theme Studio (in-tree dev tool; will move to debugImplementation once
     // release builds need slimming, or extract to a standalone repo)
     implementation(project(":themestudio"))
+
+    // JVM unit tests
+    testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    testImplementation(libs.turbine)
+    testImplementation(libs.kotlinx.coroutines.test)
+
+    // Compose UI tests on JVM via Robolectric (the AYN Thor's dual-display
+    // behavior immediately backgrounds test-launched activities, so on-device
+    // Compose UI tests don't work; Robolectric sidesteps this entirely).
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // Instrumented tests (Room, Compose UI, Hilt)
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core.ktx)
+    androidTestImplementation(libs.androidx.test.espresso.core)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
+    // mockk-android intentionally not on androidTest classpath: its JVM TI
+    // agent (libmockkjvmtiagent.so) interferes with Compose's UI test
+    // instrumentation. Add back per-test if instrumented mocking is ever needed.
+    androidTestImplementation(libs.androidx.room.testing)
+
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    androidTestImplementation(libs.hilt.android.testing)
+    kspAndroidTest(libs.hilt.compiler)
 }

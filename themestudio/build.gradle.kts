@@ -33,4 +33,8 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
+
+    // JVM unit tests
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

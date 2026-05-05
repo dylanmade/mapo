@@ -771,6 +771,10 @@ private fun KeyGrid(
     var dropIsValid by remember { mutableStateOf(true) }
     // Per-button long-press contextual menu — local UI state, mirrors the tab-bar pattern.
     var buttonContextMenuFor by remember { mutableStateOf<String?>(null) }
+    // Hoisted out of the per-button loop so the empty-cell "+" affordances can hide
+    // while any button is being resized — otherwise the resize drag passes over them
+    // and a stray tap adds an unwanted button.
+    var isAnyResizing by remember { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -1147,6 +1151,7 @@ private fun KeyGrid(
                         .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))
                         .pointerInput(button.id + "_resize") {
                             detectDragGestures(
+                                onDragStart = { isAnyResizing = true },
                                 onDragEnd = {
                                     val dCols = (resizeDragPx.x / cellWPx).roundToInt()
                                     val dRows = (resizeDragPx.y / cellHPx).roundToInt()
@@ -1156,8 +1161,12 @@ private fun KeyGrid(
                                         currentButton.rowSpan + dRows
                                     )
                                     resizeDragPx = Offset.Zero
+                                    isAnyResizing = false
                                 },
-                                onDragCancel = { resizeDragPx = Offset.Zero },
+                                onDragCancel = {
+                                    resizeDragPx = Offset.Zero
+                                    isAnyResizing = false
+                                },
                                 onDrag = { change, delta ->
                                     change.consume()
                                     resizeDragPx += delta
@@ -1220,7 +1229,7 @@ private fun KeyGrid(
         }
 
         // ── Plus icons in unoccupied 1x1 cells (edit mode, when cells are big enough) ─
-        if (isEditMode && cellW >= 24.dp && cellH >= 24.dp) {
+        if (isEditMode && !isAnyResizing && cellW >= 24.dp && cellH >= 24.dp) {
             val occupied = remember(layout.buttons) {
                 buildSet {
                     for (btn in layout.buttons) {

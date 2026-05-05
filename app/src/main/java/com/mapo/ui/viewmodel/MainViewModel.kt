@@ -603,7 +603,7 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    private fun autoFitButtons(buttons: List<GridButton>, cols: Int, rows: Int): List<GridButton> {
+    internal fun autoFitButtons(buttons: List<GridButton>, cols: Int, rows: Int): List<GridButton> {
         if (cols < 1 || rows < 1) return emptyList()
         val placed = mutableListOf<GridButton>()
         for (b in buttons) {
@@ -687,7 +687,7 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    private fun nextCopyName(base: String, existing: Set<String>): String {
+    internal fun nextCopyName(base: String, existing: Set<String>): String {
         val first = "$base Copy"
         if (first !in existing) return first
         var i = 2
@@ -790,7 +790,7 @@ class MainViewModel @Inject constructor(
     suspend fun layoutsForProfile(profileId: Long): List<GridLayout> =
         layoutRepository.getLayoutsByProfileOnce(profileId).map { it.toGridLayout() }
 
-    private fun nextNumberedName(base: String, existing: Set<String>): String {
+    internal fun nextNumberedName(base: String, existing: Set<String>): String {
         if (base !in existing) return base
         var i = 2
         while ("$base $i" in existing) i++

@@ -4,12 +4,11 @@ import android.util.Log
 import com.mapo.data.repository.AppProfileBindingRepository
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.data.settings.AutoSwitchSettings
+import com.mapo.di.ApplicationScope
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.foreground.ForegroundAppMonitor
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -29,15 +28,14 @@ class ProfileAutoSwitcher @Inject constructor(
     private val bindingRepo: AppProfileBindingRepository,
     private val profileRepo: ProfileRepository,
     private val settings: AutoSwitchSettings,
-    private val filter: ForegroundAppFilter
+    private val filter: ForegroundAppFilter,
+    @ApplicationScope private val scope: CoroutineScope,
 ) {
 
     sealed class UiEvent {
         data class Switched(val pkg: String, val appLabel: String, val profileName: String) : UiEvent()
         data class PromptCreate(val pkg: String, val appLabel: String) : UiEvent()
     }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 8)
     val events: SharedFlow<UiEvent> = _events.asSharedFlow()
@@ -57,7 +55,7 @@ class ProfileAutoSwitcher @Inject constructor(
         Log.i(TAG, "ProfileAutoSwitcher started")
     }
 
-    private suspend fun handleForegroundChange(pkg: String) {
+    internal suspend fun handleForegroundChange(pkg: String) {
         if (!settings.autoSwitchEnabled.value) return
         if (!filter.isInteresting(pkg)) return
 

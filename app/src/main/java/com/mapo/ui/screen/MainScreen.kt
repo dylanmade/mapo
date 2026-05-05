@@ -495,10 +495,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
         ) { _ ->
             Column(
-                // No statusBarsPadding here on purpose: Mapo runs on the AYN Thor's
-                // bottom bezel-only screen, which has no status bar. The padding was
-                // a holdover and was causing an intermittent first-frame bug where
-                // a stale non-zero inset shifted content down and clipped the bottom.
+                // No manual inset padding: MainActivity does NOT call enableEdgeToEdge,
+                // so the OS sizes the activity window below the status bar where one
+                // exists (phone, Thor primary screen) and leaves it alone where one
+                // doesn't (Thor bottom bezel screen). Adding statusBarsPadding here
+                // would double-reserve and reintroduce the stale-inset shift bug.
                 modifier = Modifier.fillMaxSize()
             ) {
                 KeyboardTopBar(

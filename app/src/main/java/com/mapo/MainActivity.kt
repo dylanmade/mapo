@@ -6,7 +6,6 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.remember
 import com.themestudio.core.ThemeStudioProvider
 import com.themestudio.persistence.SharedPrefsThemeOverridesStorage
@@ -22,7 +21,12 @@ class MainActivity : ComponentActivity() {
         // Prevent mapo from stealing hardware-button focus from the game on the primary screen.
         // Touch events still work normally; only hardware keyboard/gamepad focus is withheld.
         window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
-        enableEdgeToEdge()
+        // No enableEdgeToEdge() on purpose: we want the OS to size the window below the
+        // status bar where one exists (phone, Thor primary screen) and to leave the window
+        // alone where one doesn't (Thor bottom bezel screen). enableEdgeToEdge + reactive
+        // statusBarsPadding had an intermittent first-frame stale-inset bug that shifted
+        // content down on the bezel screen. Letting decorFitsSystemWindows stay at its
+        // default (true) sidesteps the inset race entirely — no per-screen padding needed.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.decorView.viewTreeObserver.addOnGlobalLayoutListener {
                 val dv = window.decorView

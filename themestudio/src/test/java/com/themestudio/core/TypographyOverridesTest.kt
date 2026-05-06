@@ -85,4 +85,27 @@ class TypographyOverridesTest {
         )
         assertNotEquals(base, base.applyOverrides(overrides))
     }
+
+    @Test
+    fun applyOverrides_displayFamily_appliesToDisplayHeadlineTitle_only() {
+        val base = Typography()
+        val merged = base.applyOverrides(TypographyOverrides(displayFontFamilyName = "Roboto"))
+        // display/headline/title should pick up the swapped family
+        assertNotEquals(base.displayLarge.fontFamily, merged.displayLarge.fontFamily)
+        assertNotEquals(base.headlineMedium.fontFamily, merged.headlineMedium.fontFamily)
+        assertNotEquals(base.titleSmall.fontFamily, merged.titleSmall.fontFamily)
+        // body/label should remain untouched
+        assertEquals(base.bodyLarge.fontFamily, merged.bodyLarge.fontFamily)
+        assertEquals(base.labelMedium.fontFamily, merged.labelMedium.fontFamily)
+    }
+
+    @Test
+    fun applyOverrides_bodyFamily_appliesToBodyLabel_only() {
+        val base = Typography()
+        val merged = base.applyOverrides(TypographyOverrides(bodyFontFamilyName = "Inter"))
+        assertNotEquals(base.bodyLarge.fontFamily, merged.bodyLarge.fontFamily)
+        assertNotEquals(base.labelSmall.fontFamily, merged.labelSmall.fontFamily)
+        assertEquals(base.displayLarge.fontFamily, merged.displayLarge.fontFamily)
+        assertEquals(base.headlineLarge.fontFamily, merged.headlineLarge.fontFamily)
+    }
 }

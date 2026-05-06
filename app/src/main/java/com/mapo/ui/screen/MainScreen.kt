@@ -91,8 +91,11 @@ import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.RemapTarget
 import com.mapo.data.model.TrackpadGesture
-import com.mapo.data.model.defaultTarget
+import com.mapo.data.model.ButtonRegion
+import com.mapo.data.model.RegionPosition
 import com.mapo.data.model.gestureTarget
+import com.mapo.data.model.onTapTarget
+import com.mapo.ui.component.MapoIcons
 import com.mapo.data.model.isTrackpad
 import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
@@ -225,196 +228,31 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         )
     }
 
-    var showButtonDialog by remember { mutableStateOf(false) }
-    var dialogLabel by remember { mutableStateOf("") }
-    var dialogCode by remember { mutableStateOf("") }
-    var dialogTopText by remember { mutableStateOf("") }
-    var dialogTopAlign by remember { mutableStateOf("CENTER") }
-    var dialogBottomText by remember { mutableStateOf("") }
-    var dialogBottomAlign by remember { mutableStateOf("CENTER") }
-    var dialogIsEdit by remember { mutableStateOf(false) }
-    // When non-null, the button-config dialog's OK handler will create a button at this exact
-    // (col, row) instead of at the next first-empty cell. Set by the in-grid + icons.
+    var configureDraft by remember { mutableStateOf<GridButton?>(null) }
+    var configureIsEdit by remember { mutableStateOf(false) }
+    // When non-null, the dialog's OK handler creates a button at this exact (col, row)
+    // instead of at the next first-empty cell. Set by the in-grid + icons.
     var newButtonCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    var dialogIsTrackpad by remember { mutableStateOf(false) }
-    var dialogSensitivity by remember { mutableStateOf(TRACKPAD_SENSITIVITY) }
-    var dialogTapTarget by remember { mutableStateOf<RemapTarget>(TrackpadGesture.TAP.defaultTarget()) }
-    var dialogDoubleTapTarget by remember { mutableStateOf<RemapTarget>(TrackpadGesture.DOUBLE_TAP.defaultTarget()) }
-    var dialogLongPressTarget by remember { mutableStateOf<RemapTarget>(TrackpadGesture.LONG_PRESS.defaultTarget()) }
-    var editingGesture by remember { mutableStateOf<TrackpadGesture?>(null) }
 
-    if (editingGesture != null) {
-        val current = when (editingGesture) {
-            TrackpadGesture.TAP        -> dialogTapTarget
-            TrackpadGesture.DOUBLE_TAP -> dialogDoubleTapTarget
-            TrackpadGesture.LONG_PRESS -> dialogLongPressTarget
-            null -> RemapTarget.Unbound
-        }
-        RemapTargetPickerDialog(
-            title = editingGesture!!.displayName,
-            current = current,
-            onSelect = { target ->
-                when (editingGesture) {
-                    TrackpadGesture.TAP        -> dialogTapTarget = target
-                    TrackpadGesture.DOUBLE_TAP -> dialogDoubleTapTarget = target
-                    TrackpadGesture.LONG_PRESS -> dialogLongPressTarget = target
-                    null -> {}
-                }
-                editingGesture = null
-            },
-            onDismiss = { editingGesture = null }
-        )
-    }
-
-    if (showButtonDialog) {
-        AlertDialog(
-            onDismissRequest = { showButtonDialog = false },
-            title = { Text(if (dialogIsEdit) "Edit Button" else "Add Button") },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.verticalScroll(rememberScrollState())
-                ) {
-                    // Key / Trackpad toggle
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Key" to false, "Trackpad" to true).forEach { (label, isTrackpad) ->
-                            val selected = dialogIsTrackpad == isTrackpad
-                            OutlinedButton(
-                                onClick = { dialogIsTrackpad = isTrackpad },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(6.dp),
-                                border = BorderStroke(
-                                    if (selected) 2.dp else 1.dp,
-                                    if (selected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.outline
-                                ),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
-                                                     else MaterialTheme.colorScheme.surface
-                                ),
-                                contentPadding = PaddingValues(vertical = 8.dp)
-                            ) { Text(label, fontSize = 13.sp) }
-                        }
-                    }
-                    if (!dialogIsTrackpad) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = dialogTopText,
-                                onValueChange = { dialogTopText = it },
-                                label = { Text("Top text") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f)
-                            )
-                            AlignSelector(selected = dialogTopAlign, onSelect = { dialogTopAlign = it })
-                        }
-                    }
-                    OutlinedTextField(
-                        value = dialogLabel,
-                        onValueChange = { dialogLabel = it },
-                        label = { Text("Label") },
-                        singleLine = true
-                    )
-                    if (dialogIsTrackpad) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text("Sensitivity", fontSize = 13.sp, modifier = Modifier.width(80.dp))
-                            Slider(
-                                value = dialogSensitivity,
-                                onValueChange = { dialogSensitivity = it },
-                                valueRange = 0.5f..4.0f,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text("%.1f×".format(dialogSensitivity), fontSize = 12.sp, modifier = Modifier.width(34.dp))
-                        }
-                        GestureMappingRow(
-                            label = TrackpadGesture.TAP.displayName,
-                            target = dialogTapTarget,
-                            onClick = { editingGesture = TrackpadGesture.TAP }
-                        )
-                        GestureMappingRow(
-                            label = TrackpadGesture.DOUBLE_TAP.displayName,
-                            target = dialogDoubleTapTarget,
-                            onClick = { editingGesture = TrackpadGesture.DOUBLE_TAP }
-                        )
-                        GestureMappingRow(
-                            label = TrackpadGesture.LONG_PRESS.displayName,
-                            target = dialogLongPressTarget,
-                            onClick = { editingGesture = TrackpadGesture.LONG_PRESS }
-                        )
-                    }
-                    if (!dialogIsTrackpad) {
-                        OutlinedTextField(
-                            value = dialogCode,
-                            onValueChange = { dialogCode = it },
-                            label = { Text("Key Code") },
-                            singleLine = true
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = dialogBottomText,
-                                onValueChange = { dialogBottomText = it },
-                                label = { Text("Bottom text") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f)
-                            )
-                            AlignSelector(selected = dialogBottomAlign, onSelect = { dialogBottomAlign = it })
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val type = if (dialogIsTrackpad) "trackpad" else "key"
-                    val sens = if (dialogIsTrackpad) dialogSensitivity else null
-                    val gestureMappings = if (dialogIsTrackpad) mapOf(
-                        TrackpadGesture.TAP.name to dialogTapTarget.encode(),
-                        TrackpadGesture.DOUBLE_TAP.name to dialogDoubleTapTarget.encode(),
-                        TrackpadGesture.LONG_PRESS.name to dialogLongPressTarget.encode()
-                    ) else null
-                    if (dialogIsEdit) {
-                        viewModel.updateSelectedButton(
-                            dialogLabel, dialogCode,
-                            dialogTopText, dialogTopAlign,
-                            dialogBottomText, dialogBottomAlign,
-                            type, sens, gestureMappings
-                        )
-                    } else {
-                        val cell = newButtonCell
-                        if (cell != null) {
-                            viewModel.addButtonAt(
-                                cell.first, cell.second,
-                                dialogLabel, dialogCode,
-                                dialogTopText, dialogTopAlign,
-                                dialogBottomText, dialogBottomAlign,
-                                type, sens, gestureMappings
-                            )
-                        } else {
-                            viewModel.addButton(
-                                dialogLabel, dialogCode,
-                                dialogTopText, dialogTopAlign,
-                                dialogBottomText, dialogBottomAlign,
-                                type, sens, gestureMappings
-                            )
-                        }
-                        newButtonCell = null
-                    }
-                    showButtonDialog = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showButtonDialog = false
+    val draftSnapshot = configureDraft
+    if (draftSnapshot != null) {
+        ConfigureButtonDialog(
+            initial = draftSnapshot,
+            isEdit = configureIsEdit,
+            onConfirm = { result ->
+                if (configureIsEdit) {
+                    viewModel.updateSelectedButton(result)
+                } else {
+                    val cell = newButtonCell
+                    if (cell != null) viewModel.addButtonAt(cell.first, cell.second, result)
+                    else viewModel.addButton(result)
                     newButtonCell = null
-                }) { Text("Cancel") }
-            }
+                }
+            },
+            onDismiss = {
+                configureDraft = null
+                newButtonCell = null
+            },
         )
     }
 
@@ -568,7 +406,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     layout = displayLayout,
                     isEditMode = isEditMode,
                     selectedButtonId = selectedButtonId,
-                    onKeyPress = viewModel::onKeyPress,
+                    onButtonTap = viewModel::onButtonTap,
                     onSelectButton = viewModel::selectButton,
                     onMoveButton = viewModel::moveButton,
                     onResizeButton = viewModel::resizeButton,
@@ -579,20 +417,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onConfigureButton = { id ->
                         val btn = displayLayout.buttons.find { it.id == id }
                         if (btn != null) {
-                            dialogLabel = btn.label
-                            dialogCode = btn.code
-                            dialogTopText = btn.topText ?: ""
-                            dialogTopAlign = btn.topAlign ?: "CENTER"
-                            dialogBottomText = btn.bottomText ?: ""
-                            dialogBottomAlign = btn.bottomAlign ?: "CENTER"
-                            dialogIsTrackpad = btn.isTrackpad
-                            dialogSensitivity = btn.sensitivity ?: TRACKPAD_SENSITIVITY
-                            dialogTapTarget = btn.gestureTarget(TrackpadGesture.TAP)
-                            dialogDoubleTapTarget = btn.gestureTarget(TrackpadGesture.DOUBLE_TAP)
-                            dialogLongPressTarget = btn.gestureTarget(TrackpadGesture.LONG_PRESS)
-                            dialogIsEdit = true
+                            configureDraft = btn
+                            configureIsEdit = true
                             viewModel.selectButtonOnly(id)
-                            showButtonDialog = true
                         }
                     },
                     onDuplicateButton = { id -> viewModel.duplicateButton(id) },
@@ -607,19 +434,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     },
                     onAddAtCell = { col, row ->
                         newButtonCell = col to row
-                        dialogLabel = ""
-                        dialogCode = ""
-                        dialogTopText = ""
-                        dialogTopAlign = "CENTER"
-                        dialogBottomText = ""
-                        dialogBottomAlign = "CENTER"
-                        dialogIsTrackpad = false
-                        dialogSensitivity = TRACKPAD_SENSITIVITY
-                        dialogTapTarget = TrackpadGesture.TAP.defaultTarget()
-                        dialogDoubleTapTarget = TrackpadGesture.DOUBLE_TAP.defaultTarget()
-                        dialogLongPressTarget = TrackpadGesture.LONG_PRESS.defaultTarget()
-                        dialogIsEdit = false
-                        showButtonDialog = true
+                        configureDraft = GridButton(col = col, row = row, type = "key")
+                        configureIsEdit = false
                     },
                     onLongPressEmptyArea = { viewModel.enterEditMode(displayLayout.id) },
                     modifier = Modifier
@@ -752,7 +568,7 @@ private fun KeyGrid(
     layout: GridLayout,
     isEditMode: Boolean,
     selectedButtonId: String?,
-    onKeyPress: (String) -> Unit,
+    onButtonTap: (GridButton) -> Unit,
     onSelectButton: (String) -> Unit,
     onMoveButton: (String, Int, Int) -> Unit,
     onResizeButton: (String, Int, Int) -> Unit,
@@ -1072,9 +888,13 @@ private fun KeyGrid(
                             } else Modifier
                         )
                 ) {
+                    val fillColor = button.fillColorArgb?.let { Color(it) }
+                        ?: MaterialTheme.colorScheme.surface
+                    val outlineColor = button.outlineColorArgb?.let { Color(it) }
+                        ?: MaterialTheme.colorScheme.outline
                     OutlinedButton(
                         onClick = {
-                            if (isEditMode) onSelectButton(button.id) else onKeyPress(button.code)
+                            if (isEditMode) onSelectButton(button.id) else onButtonTap(button)
                         },
                         modifier = Modifier
                             .fillMaxSize()
@@ -1085,73 +905,15 @@ private fun KeyGrid(
                         shape = RoundedCornerShape(8.dp),
                         border = BorderStroke(
                             if (isSelected) 2.dp else 1.dp,
-                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            if (isSelected) MaterialTheme.colorScheme.primary else outlineColor
                         ),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surface,
+                            containerColor = fillColor,
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
                         contentPadding = PaddingValues(0.dp)
                     ) {
-                    if (button.isTrackpad) {
-                        // Edit mode trackpad preview
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Mouse,
-                                    contentDescription = "Trackpad",
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = button.label.ifEmpty { "Trackpad" },
-                                    fontSize = 9.sp,
-                                    lineHeight = 10.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Clip,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    } else {
-                        Box(modifier = Modifier.fillMaxSize().padding(2.dp)) {
-                            val topText = button.topText
-                            if (!topText.isNullOrEmpty()) {
-                                Text(
-                                    text = topText,
-                                    fontSize = 8.sp,
-                                    lineHeight = 9.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Clip,
-                                    textAlign = button.topAlign.toTextAlign(),
-                                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)
-                                )
-                            }
-                            Text(
-                                text = button.label,
-                                fontSize = 11.sp,
-                                lineHeight = 13.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Clip,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().align(Alignment.Center)
-                            )
-                            val bottomText = button.bottomText
-                            if (!bottomText.isNullOrEmpty()) {
-                                Text(
-                                    text = bottomText,
-                                    fontSize = 8.sp,
-                                    lineHeight = 9.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Clip,
-                                    textAlign = button.bottomAlign.toTextAlign(),
-                                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter)
-                                )
-                            }
-                        }
-                    }
+                        ButtonContent(button = button, modifier = Modifier.fillMaxSize())
                     }
                 }
             }
@@ -1290,27 +1052,85 @@ private const val TAP_MOVEMENT_THRESHOLD_PX = 12f
 private const val DOUBLE_TAP_INTERVAL_MS = 250L
 private const val LONG_PRESS_DURATION_MS = 500L
 
+/**
+ * Renders a button's nine drawable regions. CENTER falls back to [GridButton.label]
+ * when no explicit CENTER region is set, so a freshly-created button still shows its
+ * canonical name. Each region's label falls back to the onTap target string when the
+ * region exists but its label is null.
+ */
 @Composable
-private fun GestureMappingRow(
-    label: String,
-    target: RemapTarget,
-    onClick: () -> Unit
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(label, fontSize = 13.sp, modifier = Modifier.width(110.dp))
-        OutlinedButton(
-            onClick = onClick,
-            shape = RoundedCornerShape(6.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            Text(target.displayLabel(), fontSize = 12.sp)
+private fun ButtonContent(button: GridButton, modifier: Modifier = Modifier) {
+    val onTapPreview = remember(button.onTap, button.label) {
+        when (val t = button.onTapTarget) {
+            is RemapTarget.Unbound  -> button.label
+            is RemapTarget.Gamepad  -> t.button
+            is RemapTarget.Keyboard -> t.code
+            is RemapTarget.Mouse    -> t.code
         }
     }
+    Box(modifier = modifier.padding(2.dp)) {
+        RegionPosition.values().forEach { pos ->
+            val region = button.regions[pos.name]
+                ?: if (pos == RegionPosition.CENTER && button.label.isNotEmpty()) {
+                    ButtonRegion(label = button.label, sizeSp = 11f)
+                } else null
+            if (region != null) {
+                RegionView(
+                    region = region,
+                    fallbackLabel = onTapPreview,
+                    modifier = Modifier.align(pos.alignment()),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RegionView(
+    region: ButtonRegion,
+    fallbackLabel: String,
+    modifier: Modifier = Modifier,
+) {
+    val text = region.label ?: fallbackLabel
+    val labelColor = region.labelColorArgb?.let { Color(it) } ?: Color.Unspecified
+    val iconColor = region.iconColorArgb?.let { Color(it) } ?: Color.Unspecified
+    val iconVec = MapoIcons.resolve(region.icon)
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        if (iconVec != null) {
+            Icon(
+                iconVec,
+                contentDescription = null,
+                tint = iconColor,
+                modifier = Modifier.size((region.sizeSp * 1.2f).dp),
+            )
+        }
+        if (text.isNotEmpty()) {
+            Text(
+                text = text,
+                fontSize = region.sizeSp.sp,
+                lineHeight = (region.sizeSp + 2f).sp,
+                color = labelColor,
+                maxLines = 2,
+                overflow = TextOverflow.Clip,
+            )
+        }
+    }
+}
+
+private fun RegionPosition.alignment(): Alignment = when (this) {
+    RegionPosition.CENTER        -> Alignment.Center
+    RegionPosition.TOP_LEFT      -> Alignment.TopStart
+    RegionPosition.TOP_CENTER    -> Alignment.TopCenter
+    RegionPosition.TOP_RIGHT     -> Alignment.TopEnd
+    RegionPosition.CENTER_LEFT   -> Alignment.CenterStart
+    RegionPosition.CENTER_RIGHT  -> Alignment.CenterEnd
+    RegionPosition.BOTTOM_LEFT   -> Alignment.BottomStart
+    RegionPosition.BOTTOM_CENTER -> Alignment.BottomCenter
+    RegionPosition.BOTTOM_RIGHT  -> Alignment.BottomEnd
 }
 
 @Composable
@@ -1350,33 +1170,3 @@ private fun BottomBar(
     }
 }
 
-private fun String?.toTextAlign() = when (this) {
-    "LEFT"  -> TextAlign.Left
-    "RIGHT" -> TextAlign.Right
-    else    -> TextAlign.Center
-}
-
-@Composable
-private fun AlignSelector(selected: String, onSelect: (String) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        listOf("LEFT" to "L", "CENTER" to "C", "RIGHT" to "R").forEach { (align, label) ->
-            val isSelected = align == selected
-            OutlinedButton(
-                onClick = { onSelect(align) },
-                modifier = Modifier.size(32.dp),
-                contentPadding = PaddingValues(0.dp),
-                shape = RoundedCornerShape(4.dp),
-                border = BorderStroke(
-                    if (isSelected) 2.dp else 1.dp,
-                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                ),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                     else MaterialTheme.colorScheme.surface
-                )
-            ) {
-                Text(label, fontSize = 12.sp)
-            }
-        }
-    }
-}

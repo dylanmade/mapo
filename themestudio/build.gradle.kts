@@ -33,6 +33,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
+    // Google Fonts (downloadable) — consumed by the typography editor's
+    // family pickers. Bundled here so themestudio is self-contained when
+    // extracted; the cert array resource ships in this module's res too.
+    implementation(libs.androidx.compose.ui.text.google.fonts)
 
     // JVM unit tests
     testImplementation(libs.junit)

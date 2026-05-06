@@ -30,6 +30,8 @@ import com.themestudio.core.TypographyRoles
  *   type.<role>.fontSize         Float (sp)
  *   type.<role>.fontWeight       Int (100..900)
  *   type.<role>.letterSpacing    Float (sp)
+ *   type.displayFontFamilyName   String (Google Font name)
+ *   type.bodyFontFamilyName      String (Google Font name)
  *   shape.<role>                 Float (dp)
  */
 class SharedPrefsThemeOverridesStorage(
@@ -82,7 +84,10 @@ class SharedPrefsThemeOverridesStorage(
     // ── Typography ────────────────────────────────────────────────────────
 
     private fun readTypography(): TypographyOverrides {
-        var result = TypographyOverrides()
+        var result = TypographyOverrides(
+            displayFontFamilyName = prefs.getString(TYPE_DISPLAY_FAMILY_KEY, null),
+            bodyFontFamilyName = prefs.getString(TYPE_BODY_FAMILY_KEY, null),
+        )
         for (role in TypographyRoles.all) {
             val sizeKey = "$TYPE_PREFIX${role.name}.fontSize"
             val weightKey = "$TYPE_PREFIX${role.name}.fontWeight"
@@ -98,6 +103,10 @@ class SharedPrefsThemeOverridesStorage(
     }
 
     private fun writeTypography(edit: SharedPreferences.Editor, overrides: TypographyOverrides) {
+        if (overrides.displayFontFamilyName != null) edit.putString(TYPE_DISPLAY_FAMILY_KEY, overrides.displayFontFamilyName)
+        else edit.remove(TYPE_DISPLAY_FAMILY_KEY)
+        if (overrides.bodyFontFamilyName != null) edit.putString(TYPE_BODY_FAMILY_KEY, overrides.bodyFontFamilyName)
+        else edit.remove(TYPE_BODY_FAMILY_KEY)
         for (role in TypographyRoles.all) {
             val o = role.readOverride(overrides)
             val sizeKey = "$TYPE_PREFIX${role.name}.fontSize"
@@ -135,6 +144,8 @@ class SharedPrefsThemeOverridesStorage(
         private const val COLOR_LIGHT_PREFIX = "color.light."
         private const val COLOR_DARK_PREFIX = "color.dark."
         private const val TYPE_PREFIX = "type."
+        private const val TYPE_DISPLAY_FAMILY_KEY = "type.displayFontFamilyName"
+        private const val TYPE_BODY_FAMILY_KEY = "type.bodyFontFamilyName"
         private const val SHAPE_PREFIX = "shape."
     }
 }

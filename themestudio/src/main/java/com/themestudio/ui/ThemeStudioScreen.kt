@@ -55,6 +55,11 @@ private enum class StudioTab(val label: String) {
     Shapes("Shapes"),
 }
 
+private enum class FontFamilyKind(val title: String) {
+    Display("Display family"),
+    Body("Body family"),
+}
+
 /**
  * Top-level editor screen. Hosts three tabs (Colors, Typography, Shapes),
  * each pairing a tappable specimen with a sticky preview gallery so changes
@@ -104,6 +109,7 @@ fun ThemeStudioScreen(
     var pickerColorRole by remember { mutableStateOf<String?>(null) }
     var pickerTypoRole by remember { mutableStateOf<String?>(null) }
     var pickerShapeRole by remember { mutableStateOf<String?>(null) }
+    var pickerFontFamilyKind by remember { mutableStateOf<FontFamilyKind?>(null) }
 
     Scaffold(
         topBar = {
@@ -174,7 +180,24 @@ fun ThemeStudioScreen(
                     ) {
                         when (StudioTab.values()[tabIndex]) {
                             StudioTab.Colors -> colorsPreview { name -> pickerColorRole = name }
-                            StudioTab.Typography -> typographyPreview { name -> pickerTypoRole = name }
+                            StudioTab.Typography -> {
+                                // Family chooser cards sit above the per-role specimen so swapping
+                                // the Display or Body family is the most discoverable action — the
+                                // specimen below then re-renders in the chosen fonts immediately.
+                                FamilyChooserCard(
+                                    label = "Display family (display / headline / title)",
+                                    currentName = overrides.typography.displayFontFamilyName,
+                                    defaultLabel = "(theme default)",
+                                    onTap = { pickerFontFamilyKind = FontFamilyKind.Display },
+                                )
+                                FamilyChooserCard(
+                                    label = "Body family (body / label)",
+                                    currentName = overrides.typography.bodyFontFamilyName,
+                                    defaultLabel = "(theme default)",
+                                    onTap = { pickerFontFamilyKind = FontFamilyKind.Body },
+                                )
+                                typographyPreview { name -> pickerTypoRole = name }
+                            }
                             StudioTab.Shapes -> shapesPreview { name -> pickerShapeRole = name }
                         }
                     }
@@ -256,6 +279,38 @@ fun ThemeStudioScreen(
                     onClear = { controller.setShapeRole(role, null) },
                 )
             }
+        }
+    }
+
+    // ── Font-family picker sheet ──────────────────────────────────────────
+    pickerFontFamilyKind?.let { kind ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val current = when (kind) {
+            FontFamilyKind.Display -> overrides.typography.displayFontFamilyName
+            FontFamilyKind.Body -> overrides.typography.bodyFontFamilyName
+        }
+        ModalBottomSheet(
+            sheetState = sheetState,
+            onDismissRequest = { pickerFontFamilyKind = null },
+        ) {
+            FontFamilyPickerSheet(
+                title = kind.title,
+                currentName = current,
+                onApply = { name ->
+                    when (kind) {
+                        FontFamilyKind.Display -> controller.setDisplayFontFamilyName(name)
+                        FontFamilyKind.Body -> controller.setBodyFontFamilyName(name)
+                    }
+                    pickerFontFamilyKind = null
+                },
+                onClear = {
+                    when (kind) {
+                        FontFamilyKind.Display -> controller.setDisplayFontFamilyName(null)
+                        FontFamilyKind.Body -> controller.setBodyFontFamilyName(null)
+                    }
+                    pickerFontFamilyKind = null
+                },
+            )
         }
     }
 

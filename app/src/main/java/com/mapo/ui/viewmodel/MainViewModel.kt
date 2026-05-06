@@ -14,6 +14,7 @@ import com.mapo.data.model.TemplateRef
 import com.mapo.data.model.TrackpadGesture
 import com.mapo.data.model.buttonsExceeding
 import com.mapo.data.model.gestureTarget
+import com.mapo.data.model.onTapTarget
 import com.mapo.data.model.findFirstEmptyArea
 import com.mapo.data.model.findFirstEmptyCell
 import com.mapo.data.model.parseOriginalSnapshot
@@ -315,15 +316,16 @@ class MainViewModel @Inject constructor(
 
     // ── Normal mode ───────────────────────────────────────────────────────────
 
-    fun onKeyPress(code: String) {
+    fun onButtonTap(button: GridButton) {
         if (!inputDispatcher.isReady) {
             _toastMessage.tryEmit("Accessibility service not running")
             return
         }
-        when (code) {
-            "MOUSE_LEFT", "MOUSE_MIDDLE", "MOUSE_RIGHT", "MOUSE_BACK", "MOUSE_FORWARD",
-            "SCROLL_UP", "SCROLL_DOWN" -> inputDispatcher.dispatchTargetAsClick(RemapTarget.Mouse(code))
-            else -> inputDispatcher.injectKey(code)
+        when (val target = button.onTapTarget) {
+            is RemapTarget.Unbound -> Unit
+            is RemapTarget.Keyboard -> inputDispatcher.injectKey(target.code)
+            is RemapTarget.Mouse, is RemapTarget.Gamepad ->
+                inputDispatcher.dispatchTargetAsClick(target)
         }
     }
 
@@ -404,53 +406,33 @@ class MainViewModel @Inject constructor(
         persistLayoutFields(updated, profileId)
     }
 
-    fun addButton(
-        label: String, code: String,
-        topText: String = "", topAlign: String = "CENTER",
-        bottomText: String = "", bottomAlign: String = "CENTER",
-        type: String = "key",
-        sensitivity: Float? = null,
-        gestureMappings: Map<String, String>? = null
-    ) {
+    /**
+     * Add [spec] to the editing layout at the first available cell. The spec's
+     * `id`, `col`, and `row` are overwritten with a fresh UUID and the chosen cell.
+     */
+    fun addButton(spec: GridButton) {
         mutateEditingLayout { layout ->
             val cell = layout.findFirstEmptyCell()
             if (cell == null) {
                 emitError("No empty space available in this layout")
                 return@mutateEditingLayout null
             }
-            val button = GridButton(
-                label = label, code = code,
-                col = cell.first, row = cell.second,
-                topText = topText.ifEmpty { null }, topAlign = topAlign,
-                bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
-                type = type,
-                sensitivity = sensitivity,
-                gestureMappings = gestureMappings
+            val placed = spec.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                col = cell.first,
+                row = cell.second,
             )
-            _selectedButtonId.value = button.id
-            layout.copy(buttons = layout.buttons + button)
+            _selectedButtonId.value = placed.id
+            layout.copy(buttons = layout.buttons + placed)
         }
     }
 
-    fun updateSelectedButton(
-        label: String, code: String,
-        topText: String, topAlign: String,
-        bottomText: String, bottomAlign: String,
-        type: String = "key",
-        sensitivity: Float? = null,
-        gestureMappings: Map<String, String>? = null
-    ) {
+    /** Replace the currently-selected button with [updated]. The button's id must match. */
+    fun updateSelectedButton(updated: GridButton) {
         val id = _selectedButtonId.value ?: return
         mutateEditingLayout { layout ->
             layout.copy(buttons = layout.buttons.map { btn ->
-                if (btn.id == id) btn.copy(
-                    label = label, code = code,
-                    topText = topText.ifEmpty { null }, topAlign = topAlign,
-                    bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
-                    type = type,
-                    sensitivity = sensitivity,
-                    gestureMappings = gestureMappings
-                ) else btn
+                if (btn.id == id) updated.copy(id = id) else btn
             })
         }
     }
@@ -502,15 +484,7 @@ class MainViewModel @Inject constructor(
 
     private data class Placement(val col: Int, val row: Int, val colSpan: Int, val rowSpan: Int)
 
-    fun addButtonAt(
-        col: Int, row: Int,
-        label: String, code: String,
-        topText: String = "", topAlign: String = "CENTER",
-        bottomText: String = "", bottomAlign: String = "CENTER",
-        type: String = "key",
-        sensitivity: Float? = null,
-        gestureMappings: Map<String, String>? = null
-    ) {
+    fun addButtonAt(col: Int, row: Int, spec: GridButton) {
         mutateEditingLayout { layout ->
             if (col !in 0 until layout.columns || row !in 0 until layout.rows) {
                 return@mutateEditingLayout null
@@ -519,17 +493,13 @@ class MainViewModel @Inject constructor(
                 emitError("Cell already occupied")
                 return@mutateEditingLayout null
             }
-            val button = GridButton(
-                label = label, code = code,
-                col = col, row = row,
-                topText = topText.ifEmpty { null }, topAlign = topAlign,
-                bottomText = bottomText.ifEmpty { null }, bottomAlign = bottomAlign,
-                type = type,
-                sensitivity = sensitivity,
-                gestureMappings = gestureMappings
+            val placed = spec.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                col = col,
+                row = row,
             )
-            _selectedButtonId.value = button.id
-            layout.copy(buttons = layout.buttons + button)
+            _selectedButtonId.value = placed.id
+            layout.copy(buttons = layout.buttons + placed)
         }
     }
 

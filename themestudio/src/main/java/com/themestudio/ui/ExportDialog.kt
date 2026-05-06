@@ -129,12 +129,19 @@ private fun renderTypography(typo: TypographyOverrides): String? {
         o.letterSpacing?.let { fields += "letterSpacing = %.2f.sp".format(it.value) }
         "    ${role.name} = ${role.name}.copy(${fields.joinToString(", ")}),"
     }
-    if (rows.isEmpty()) return null
+    val familyLines = buildList {
+        typo.displayFontFamilyName?.let { add("// Display family: ${'"'}$it${'"'} (Google Font)") }
+        typo.bodyFontFamilyName?.let { add("// Body family:    ${'"'}$it${'"'} (Google Font)") }
+    }
+    if (rows.isEmpty() && familyLines.isEmpty()) return null
     return buildString {
         append("// typography overrides\n")
-        append("Typography(\n")
-        rows.forEach { append(it).append('\n') }
-        append(")")
+        familyLines.forEach { append(it).append('\n') }
+        if (rows.isNotEmpty()) {
+            append("Typography(\n")
+            rows.forEach { append(it).append('\n') }
+            append(")")
+        }
     }
 }
 

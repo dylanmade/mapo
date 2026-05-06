@@ -1,18 +1,18 @@
 package com.mapo.data.defaults
 
+import com.mapo.data.model.ButtonRegion
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.KeyDef
 import com.mapo.data.model.LayoutDef
+import com.mapo.data.model.RegionPosition
+import com.mapo.data.model.RemapTarget
 import kotlin.math.max
 import kotlin.math.roundToInt
 
 object DefaultLayouts {
 
     // ── Conversion helper ─────────────────────────────────────────────────────
-    // Converts weight-based row layout to an absolute grid.
-    // Each row's keys are scaled to fill [gridCols] columns proportionally.
-    // Column positions are accumulated as floats to avoid rounding drift.
     private fun LayoutDef.toGridLayout(gridCols: Int): GridLayout {
         val buttons = mutableListOf<GridButton>()
         rows.forEachIndexed { rowIndex, row ->
@@ -21,14 +21,21 @@ object DefaultLayouts {
             row.forEach { key ->
                 val spanF = key.weight / totalWeight * gridCols
                 if (key.code.isNotEmpty()) {
+                    val regions = mutableMapOf<String, ButtonRegion>()
+                    if (key.topText.isNotEmpty()) {
+                        regions[RegionPosition.TOP_CENTER.name] = ButtonRegion(
+                            label = key.topText,
+                            sizeSp = 8f,
+                        )
+                    }
                     buttons.add(
                         GridButton(
                             label = key.label,
-                            code = key.code,
                             col = colF.roundToInt(),
                             row = rowIndex,
                             colSpan = max(1, (colF + spanF).roundToInt() - colF.roundToInt()),
-                            topText = key.topText.ifEmpty { null }
+                            onTap = RemapTarget.fromCode(key.code).encode(),
+                            regions = regions,
                         )
                     )
                 }
@@ -38,23 +45,19 @@ object DefaultLayouts {
         return GridLayout(name = name, columns = gridCols, rows = rows.size, buttons = buttons)
     }
 
-    // ── Row-based source definitions ──────────────────────────────────────────
     private fun k(label: String, code: String, weight: Float = 1f, topText: String = "") = KeyDef(label, code, weight, topText)
     private fun gap(weight: Float = 1f) = KeyDef("", "", weight)
 
     // gridCols=364 = 2×LCM(13,14) → exact integer colSpans for all weights used.
-    // Row totals: rows 1/4 = 13, rows 2/3/5/6 = 14.
     private val keysMainDef = LayoutDef(
         name = "Keys Main",
         rows = listOf(
-            // Row 1: 13 × 1.0 = 13  →  each key = 28 cols
             listOf(
                 k("Esc", "ESCAPE"),
                 k("F1", "F1"), k("F2", "F2"), k("F3", "F3"), k("F4", "F4"),
                 k("F5", "F5"), k("F6", "F6"), k("F7", "F7"), k("F8", "F8"),
                 k("F9", "F9"), k("F10", "F10"), k("F11", "F11"), k("F12", "F12")
             ),
-            // Row 2: 14 × 1.0 = 14  →  each key = 26 cols
             listOf(
                 k("`",  "GRAVE",   topText = "~"),
                 k("1",  "1",       topText = "!"), k("2",  "2",      topText = "@"),
@@ -65,7 +68,6 @@ object DefaultLayouts {
                 k("-",  "MINUS",   topText = "_"), k("=",  "EQUALS", topText = "+"),
                 k("⌫",  "BACKSPACE")
             ),
-            // Row 3: 14 × 1.0 = 14  →  each key = 26 cols (Tab and \ are standard width)
             listOf(
                 k("Tab", "TAB"),
                 k("Q", "Q"), k("W", "W"), k("E", "E"), k("R", "R"), k("T", "T"),
@@ -74,7 +76,6 @@ object DefaultLayouts {
                 k("]",  "RIGHT_BRACKET", topText = "}"),
                 k("\\", "BACKSLASH",     topText = "|")
             ),
-            // Row 4: Caps(1.5) + 10×1.0 + Enter(1.5) = 13  →  std=28, Caps/Enter=42 cols
             listOf(
                 k("Caps", "CAPS_LOCK", 1.5f),
                 k("A", "A"), k("S", "S"), k("D", "D"), k("F", "F"),
@@ -83,7 +84,6 @@ object DefaultLayouts {
                 k("'",  "APOSTROPHE", topText = "\""),
                 k("↵",  "ENTER", 1.5f)
             ),
-            // Row 5: Shift(2.0) + 12×1.0 = 14  →  std=26, Shift=52 cols
             listOf(
                 k("Shift", "SHIFT_LEFT", 2f),
                 k("Z", "Z"), k("X", "X"), k("C", "C"), k("V", "V"),
@@ -94,7 +94,6 @@ object DefaultLayouts {
                 k("↑",  "DPAD_UP"),
                 k("Shift", "SHIFT_RIGHT")
             ),
-            // Row 6: Ctrl(1.5)+Win(1.5)+Alt(1.5)+Space(4.5)+5×1.0 = 14  →  std=26, wide=39, Space=117 cols
             listOf(
                 k("Ctrl",  "CTRL_LEFT",  1.5f),
                 k("Win",   "META_LEFT",  1.5f),
@@ -129,7 +128,6 @@ object DefaultLayouts {
         )
     )
 
-    // ── Public GridLayout instances ───────────────────────────────────────────
     val keysMain: GridLayout = keysMainDef.toGridLayout(gridCols = 364)
     val keysAlt: GridLayout  = keysAltDef.toGridLayout(gridCols = 6)
     val mouse: GridLayout    = mouseDef.toGridLayout(gridCols = 6)
@@ -140,10 +138,26 @@ object DefaultLayouts {
         columns = 6,
         rows = 4,
         buttons = listOf(
-            GridButton(label = "", code = "TRACKPAD", col = 0, row = 0, colSpan = 6, rowSpan = 3, type = "trackpad"),
-            GridButton(label = "L Click",   code = "MOUSE_LEFT",   col = 0, row = 3, colSpan = 2),
-            GridButton(label = "M Click",   code = "MOUSE_MIDDLE", col = 2, row = 3, colSpan = 2),
-            GridButton(label = "R Click",   code = "MOUSE_RIGHT",  col = 4, row = 3, colSpan = 2),
+            GridButton(
+                label = "",
+                col = 0, row = 0, colSpan = 6, rowSpan = 3,
+                type = "trackpad",
+                onTap = RemapTarget.Mouse("MOUSE_LEFT").encode(),
+                onHold = RemapTarget.Mouse("MOUSE_RIGHT").encode(),
+                sensitivity = GridButtonDefaults.TRACKPAD_SENSITIVITY,
+            ),
+            GridButton(
+                label = "L Click", col = 0, row = 3, colSpan = 2,
+                onTap = RemapTarget.Mouse("MOUSE_LEFT").encode(),
+            ),
+            GridButton(
+                label = "M Click", col = 2, row = 3, colSpan = 2,
+                onTap = RemapTarget.Mouse("MOUSE_MIDDLE").encode(),
+            ),
+            GridButton(
+                label = "R Click", col = 4, row = 3, colSpan = 2,
+                onTap = RemapTarget.Mouse("MOUSE_RIGHT").encode(),
+            ),
         )
     )
 

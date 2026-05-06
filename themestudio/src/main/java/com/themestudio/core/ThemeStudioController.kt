@@ -52,6 +52,20 @@ class ThemeStudioController(
         storage.save(_overrides)
     }
 
+    fun setDisplayFontFamilyName(name: String?) {
+        _overrides = _overrides.copy(
+            typography = _overrides.typography.copy(displayFontFamilyName = name?.takeIf { it.isNotBlank() }),
+        )
+        storage.save(_overrides)
+    }
+
+    fun setBodyFontFamilyName(name: String?) {
+        _overrides = _overrides.copy(
+            typography = _overrides.typography.copy(bodyFontFamilyName = name?.takeIf { it.isNotBlank() }),
+        )
+        storage.save(_overrides)
+    }
+
     // ── Shapes ────────────────────────────────────────────────────────────
 
     fun setShapeRole(role: ShapeRole, radius: Dp?) {

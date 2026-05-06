@@ -21,6 +21,17 @@ sealed class RemapTarget {
             raw.startsWith("mouse:")    -> Mouse(raw.removePrefix("mouse:"))
             else                        -> Unbound
         }
+
+        /**
+         * Classify a bare code (e.g. "ENTER", "MOUSE_LEFT", "SCROLL_UP") into the
+         * appropriate RemapTarget subtype. Mirrors the dispatch routing the
+         * accessibility service uses for click-style targets.
+         */
+        fun fromCode(code: String): RemapTarget = when (code) {
+            "MOUSE_LEFT", "MOUSE_MIDDLE", "MOUSE_RIGHT", "MOUSE_BACK", "MOUSE_FORWARD",
+            "SCROLL_UP", "SCROLL_DOWN" -> Mouse(code)
+            else -> Keyboard(code)
+        }
     }
 }
 

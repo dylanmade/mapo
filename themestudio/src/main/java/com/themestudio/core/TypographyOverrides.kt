@@ -19,8 +19,16 @@ data class TextStyleOverride(
 /**
  * Override container for all 15 Material 3 typography roles. Each role is a
  * [TextStyleOverride]; absent fields fall through to the base [Typography].
+ *
+ * Family overrides are umbrella-level (not per-role) because that mirrors how
+ * Material 3 typescales are usually structured: one family for display/
+ * headline/title, another for body/label. When a name is set, the resolved
+ * Google Font replaces the base family for the matching role group; null
+ * leaves each role's family untouched.
  */
 data class TypographyOverrides(
+    val displayFontFamilyName: String? = null,
+    val bodyFontFamilyName: String? = null,
     val displayLarge: TextStyleOverride = TextStyleOverride(),
     val displayMedium: TextStyleOverride = TextStyleOverride(),
     val displaySmall: TextStyleOverride = TextStyleOverride(),
@@ -38,29 +46,43 @@ data class TypographyOverrides(
     val labelSmall: TextStyleOverride = TextStyleOverride(),
 )
 
-/** Returns a copy of [this] with non-null override fields applied. */
-fun Typography.applyOverrides(o: TypographyOverrides): Typography = copy(
-    displayLarge = displayLarge.applyOverride(o.displayLarge),
-    displayMedium = displayMedium.applyOverride(o.displayMedium),
-    displaySmall = displaySmall.applyOverride(o.displaySmall),
-    headlineLarge = headlineLarge.applyOverride(o.headlineLarge),
-    headlineMedium = headlineMedium.applyOverride(o.headlineMedium),
-    headlineSmall = headlineSmall.applyOverride(o.headlineSmall),
-    titleLarge = titleLarge.applyOverride(o.titleLarge),
-    titleMedium = titleMedium.applyOverride(o.titleMedium),
-    titleSmall = titleSmall.applyOverride(o.titleSmall),
-    bodyLarge = bodyLarge.applyOverride(o.bodyLarge),
-    bodyMedium = bodyMedium.applyOverride(o.bodyMedium),
-    bodySmall = bodySmall.applyOverride(o.bodySmall),
-    labelLarge = labelLarge.applyOverride(o.labelLarge),
-    labelMedium = labelMedium.applyOverride(o.labelMedium),
-    labelSmall = labelSmall.applyOverride(o.labelSmall),
-)
+/**
+ * Returns a copy of [this] with non-null override fields applied.
+ *
+ * Family overrides are applied first (display family → display/headline/title,
+ * body family → body/label) so that per-role TextStyleOverride values layer
+ * on top of the family swap.
+ */
+fun Typography.applyOverrides(o: TypographyOverrides): Typography {
+    val displayFamily = o.displayFontFamilyName?.let(::googleFontFamily)
+    val bodyFamily = o.bodyFontFamilyName?.let(::googleFontFamily)
+    return copy(
+        displayLarge = displayLarge.applyOverride(o.displayLarge, displayFamily),
+        displayMedium = displayMedium.applyOverride(o.displayMedium, displayFamily),
+        displaySmall = displaySmall.applyOverride(o.displaySmall, displayFamily),
+        headlineLarge = headlineLarge.applyOverride(o.headlineLarge, displayFamily),
+        headlineMedium = headlineMedium.applyOverride(o.headlineMedium, displayFamily),
+        headlineSmall = headlineSmall.applyOverride(o.headlineSmall, displayFamily),
+        titleLarge = titleLarge.applyOverride(o.titleLarge, displayFamily),
+        titleMedium = titleMedium.applyOverride(o.titleMedium, displayFamily),
+        titleSmall = titleSmall.applyOverride(o.titleSmall, displayFamily),
+        bodyLarge = bodyLarge.applyOverride(o.bodyLarge, bodyFamily),
+        bodyMedium = bodyMedium.applyOverride(o.bodyMedium, bodyFamily),
+        bodySmall = bodySmall.applyOverride(o.bodySmall, bodyFamily),
+        labelLarge = labelLarge.applyOverride(o.labelLarge, bodyFamily),
+        labelMedium = labelMedium.applyOverride(o.labelMedium, bodyFamily),
+        labelSmall = labelSmall.applyOverride(o.labelSmall, bodyFamily),
+    )
+}
 
-private fun TextStyle.applyOverride(o: TextStyleOverride): TextStyle = copy(
+private fun TextStyle.applyOverride(
+    o: TextStyleOverride,
+    familyOverride: androidx.compose.ui.text.font.FontFamily? = null,
+): TextStyle = copy(
     fontSize = o.fontSize ?: fontSize,
     fontWeight = o.fontWeight ?: fontWeight,
     letterSpacing = o.letterSpacing ?: letterSpacing,
+    fontFamily = familyOverride ?: fontFamily,
 )
 
 /**

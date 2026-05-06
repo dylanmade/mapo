@@ -4,6 +4,7 @@ import com.mapo.data.model.AppProfileBinding
 import com.mapo.data.model.GamepadMapping
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
+import com.mapo.data.model.onTapTarget
 import com.mapo.data.model.KeyLayout
 import com.mapo.data.model.Profile
 import com.mapo.data.model.RemapTarget
@@ -157,7 +158,7 @@ class MainViewModelTest {
     @Test
     fun autoFitButtons_clampsButtonSpansToGrid() {
         val source = listOf(
-            GridButton(label = "A", code = "A", col = 0, row = 0, colSpan = 5, rowSpan = 5),
+            GridButton(label = "A", col = 0, row = 0, colSpan = 5, rowSpan = 5),
         )
         val fit = subject.autoFitButtons(source, cols = 3, rows = 3)
         assertEquals(1, fit.size)
@@ -168,7 +169,7 @@ class MainViewModelTest {
     @Test
     fun autoFitButtons_relocatesButtonsThatFallOutsideGrid() {
         val source = listOf(
-            GridButton(label = "A", code = "A", col = 5, row = 0, colSpan = 1, rowSpan = 1),
+            GridButton(label = "A", col = 5, row = 0, colSpan = 1, rowSpan = 1),
         )
         val fit = subject.autoFitButtons(source, cols = 3, rows = 3)
         assertEquals(1, fit.size)
@@ -178,8 +179,8 @@ class MainViewModelTest {
     @Test
     fun autoFitButtons_dropsButtonsThatCannotFitWithoutOverlap() {
         val source = listOf(
-            GridButton(label = "A", code = "A", col = 0, row = 0),
-            GridButton(label = "B", code = "B", col = 0, row = 0), // would overlap A after fitting
+            GridButton(label = "A", col = 0, row = 0),
+            GridButton(label = "B", col = 0, row = 0), // would overlap A after fitting
         )
         val fit = subject.autoFitButtons(source, cols = 3, rows = 3)
         assertEquals(1, fit.size)
@@ -189,7 +190,7 @@ class MainViewModelTest {
     @Test
     fun autoFitButtons_emptyGrid_returnsEmpty() {
         val source = listOf(
-            GridButton(label = "A", code = "A", col = 0, row = 0),
+            GridButton(label = "A", col = 0, row = 0),
         )
         assertEquals(emptyList<GridButton>(), subject.autoFitButtons(source, cols = 0, rows = 5))
         assertEquals(emptyList<GridButton>(), subject.autoFitButtons(source, cols = 5, rows = 0))
@@ -475,12 +476,17 @@ class MainViewModelTest {
 
     // ── Input dispatch ────────────────────────────────────────────────────────
 
+    private fun btn(target: RemapTarget) = GridButton(
+        label = "x", col = 0, row = 0,
+        onTap = target.encode(),
+    )
+
     @Test
-    fun onKeyPress_serviceNotReady_emitsToastAndDoesNotDispatch() = runTest(testDispatcher) {
+    fun onButtonTap_serviceNotReady_emitsToastAndDoesNotDispatch() = runTest(testDispatcher) {
         every { inputDispatcher.isReady } returns false
 
         subject.toastMessage.test {
-            subject.onKeyPress("ENTER")
+            subject.onButtonTap(btn(RemapTarget.Keyboard("ENTER")))
             assertEquals("Accessibility service not running", awaitItem())
         }
         verify(exactly = 0) { inputDispatcher.injectKey(any()) }
@@ -488,49 +494,61 @@ class MainViewModelTest {
     }
 
     @Test
-    fun onKeyPress_keyboardCode_routesToInjectKey() {
+    fun onButtonTap_keyboardTarget_routesToInjectKey() {
         every { inputDispatcher.isReady } returns true
 
-        subject.onKeyPress("ENTER")
+        subject.onButtonTap(btn(RemapTarget.Keyboard("ENTER")))
 
         verify { inputDispatcher.injectKey("ENTER") }
         verify(exactly = 0) { inputDispatcher.dispatchTargetAsClick(any()) }
     }
 
     @Test
-    fun onKeyPress_mouseCode_routesToDispatchTargetAsClick() {
+    fun onButtonTap_mouseTarget_routesToDispatchTargetAsClick() {
         every { inputDispatcher.isReady } returns true
 
-        subject.onKeyPress("MOUSE_LEFT")
+        subject.onButtonTap(btn(RemapTarget.Mouse("MOUSE_LEFT")))
 
         verify { inputDispatcher.dispatchTargetAsClick(RemapTarget.Mouse("MOUSE_LEFT")) }
         verify(exactly = 0) { inputDispatcher.injectKey(any()) }
     }
 
     @Test
-    fun onKeyPress_scrollCode_routesToDispatchTargetAsClick() {
+    fun onButtonTap_scrollTarget_routesToDispatchTargetAsClick() {
         every { inputDispatcher.isReady } returns true
 
-        subject.onKeyPress("SCROLL_DOWN")
+        subject.onButtonTap(btn(RemapTarget.Mouse("SCROLL_DOWN")))
 
         verify { inputDispatcher.dispatchTargetAsClick(RemapTarget.Mouse("SCROLL_DOWN")) }
     }
 
     @Test
+    fun onButtonTap_unboundTarget_isNoOp() {
+        every { inputDispatcher.isReady } returns true
+
+        subject.onButtonTap(btn(RemapTarget.Unbound))
+
+        verify(exactly = 0) { inputDispatcher.injectKey(any()) }
+        verify(exactly = 0) { inputDispatcher.dispatchTargetAsClick(any()) }
+    }
+
+    @Test
     fun onTrackpadGesture_serviceReady_dispatchesGestureTarget() {
         every { inputDispatcher.isReady } returns true
-        val button = GridButton(label = "tp", code = "trackpad", col = 0, row = 0, type = "trackpad")
+        val button = GridButton(
+            label = "tp", col = 0, row = 0, type = "trackpad",
+            onTap = RemapTarget.Mouse("MOUSE_LEFT").encode(),
+        )
 
         subject.onTrackpadGesture(button, com.mapo.data.model.TrackpadGesture.TAP)
 
-        // TAP default target is Mouse("MOUSE_LEFT") per TrackpadGesture.defaultTarget().
         verify { inputDispatcher.dispatchTargetAsClick(RemapTarget.Mouse("MOUSE_LEFT")) }
     }
 
     @Test
     fun onTrackpadGesture_serviceNotReady_emitsToastAndDoesNotDispatch() = runTest(testDispatcher) {
         every { inputDispatcher.isReady } returns false
-        val button = GridButton(label = "tp", code = "trackpad", col = 0, row = 0, type = "trackpad")
+        val button = GridButton(label = "tp", col = 0, row = 0, type = "trackpad")
 
         subject.toastMessage.test {
             subject.onTrackpadGesture(button, com.mapo.data.model.TrackpadGesture.TAP)
@@ -607,7 +625,7 @@ class MainViewModelTest {
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 2)))
         subject.enterEditMode(10L)
 
-        subject.addButton(label = "X", code = "X")
+        subject.addButton(GridButton(label = "X", col = 0, row = 0))
         advanceUntilIdle()
 
         val layout = subject.layouts.value.first()
@@ -622,7 +640,7 @@ class MainViewModelTest {
     fun addButton_fullGrid_emitsErrorAndDoesNotPersist() = runTest(testDispatcher) {
         val full = sampleLayout(
             id = 10L, cols = 1, rows = 1,
-            buttons = listOf(GridButton(label = "A", code = "A", col = 0, row = 0)),
+            buttons = listOf(GridButton(label = "A", col = 0, row = 0)),
         )
         seedLayouts(listOf(full))
         subject.enterEditMode(10L)
@@ -630,7 +648,7 @@ class MainViewModelTest {
         // Drain initial DB load saveLayout calls (none expected, but defensive).
         advanceUntilIdle()
 
-        subject.addButton(label = "Y", code = "Y")
+        subject.addButton(GridButton(label = "Y", col = 0, row = 0))
         advanceUntilIdle()
 
         // _layouts unchanged (still 1 button).
@@ -642,7 +660,7 @@ class MainViewModelTest {
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 3)))
         subject.enterEditMode(10L)
 
-        subject.addButtonAt(col = 2, row = 1, label = "X", code = "X")
+        subject.addButtonAt(col = 2, row = 1, GridButton(label = "X", col = 0, row = 0))
         advanceUntilIdle()
 
         val placed = subject.layouts.value.first().buttons.single()
@@ -655,7 +673,7 @@ class MainViewModelTest {
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 3)))
         subject.enterEditMode(10L)
 
-        subject.addButtonAt(col = 5, row = 0, label = "X", code = "X")
+        subject.addButtonAt(col = 5, row = 0, GridButton(label = "X", col = 0, row = 0))
         advanceUntilIdle()
 
         assertTrue(subject.layouts.value.first().buttons.isEmpty())
@@ -665,12 +683,12 @@ class MainViewModelTest {
     fun addButtonAt_occupiedCell_isRejected() = runTest(testDispatcher) {
         val occupied = sampleLayout(
             id = 10L, cols = 3, rows = 3,
-            buttons = listOf(GridButton(label = "A", code = "A", col = 1, row = 1)),
+            buttons = listOf(GridButton(label = "A", col = 1, row = 1)),
         )
         seedLayouts(listOf(occupied))
         subject.enterEditMode(10L)
 
-        subject.addButtonAt(col = 1, row = 1, label = "X", code = "X")
+        subject.addButtonAt(col = 1, row = 1, GridButton(label = "X", col = 0, row = 0))
         advanceUntilIdle()
 
         assertEquals(1, subject.layouts.value.first().buttons.size)
@@ -680,7 +698,7 @@ class MainViewModelTest {
     fun duplicateButton_originalSizeFits_clonesAtSameSpan() = runTest(testDispatcher) {
         val source = GridButton(
             id = "src",
-            label = "A", code = "A",
+            label = "A",
             col = 0, row = 0,
             colSpan = 2, rowSpan = 1,
         )
@@ -703,11 +721,11 @@ class MainViewModelTest {
         // splits row 1 so no 3-wide gap remains anywhere in the grid. Single
         // free cells exist (e.g. col 3 of row 0), so the 1x1 fallback succeeds.
         val source = GridButton(
-            id = "src", label = "A", code = "A",
+            id = "src", label = "A",
             col = 0, row = 0, colSpan = 3, rowSpan = 1,
         )
         val blocker = GridButton(
-            id = "blk", label = "B", code = "B",
+            id = "blk", label = "B",
             col = 1, row = 1, colSpan = 1, rowSpan = 1,
         )
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 4, rows = 2, buttons = listOf(source, blocker))))
@@ -725,8 +743,8 @@ class MainViewModelTest {
 
     @Test
     fun moveButton_clampsToGridAndRejectsOverlap() = runTest(testDispatcher) {
-        val a = GridButton(id = "a", label = "A", code = "A", col = 0, row = 0)
-        val b = GridButton(id = "b", label = "B", code = "B", col = 1, row = 0)
+        val a = GridButton(id = "a", label = "A", col = 0, row = 0)
+        val b = GridButton(id = "b", label = "B", col = 1, row = 0)
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 3, buttons = listOf(a, b))))
         subject.enterEditMode(10L)
 
@@ -752,7 +770,7 @@ class MainViewModelTest {
 
     @Test
     fun resizeButton_validResize_persists() = runTest(testDispatcher) {
-        val a = GridButton(id = "a", label = "A", code = "A", col = 0, row = 0)
+        val a = GridButton(id = "a", label = "A", col = 0, row = 0)
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 3, buttons = listOf(a))))
         subject.enterEditMode(10L)
 
@@ -766,8 +784,8 @@ class MainViewModelTest {
 
     @Test
     fun resizeButton_overlapsAnother_isRejected() = runTest(testDispatcher) {
-        val a = GridButton(id = "a", label = "A", code = "A", col = 0, row = 0)
-        val b = GridButton(id = "b", label = "B", code = "B", col = 1, row = 0)
+        val a = GridButton(id = "a", label = "A", col = 0, row = 0)
+        val b = GridButton(id = "b", label = "B", col = 1, row = 0)
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 3, buttons = listOf(a, b))))
         subject.enterEditMode(10L)
 
@@ -781,8 +799,8 @@ class MainViewModelTest {
 
     @Test
     fun deleteButton_removesById() = runTest(testDispatcher) {
-        val a = GridButton(id = "a", label = "A", code = "A", col = 0, row = 0)
-        val b = GridButton(id = "b", label = "B", code = "B", col = 1, row = 0)
+        val a = GridButton(id = "a", label = "A", col = 0, row = 0)
+        val b = GridButton(id = "b", label = "B", col = 1, row = 0)
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 3, buttons = listOf(a, b))))
         subject.enterEditMode(10L)
 
@@ -796,7 +814,7 @@ class MainViewModelTest {
 
     @Test
     fun deleteSelectedButton_removesAndClearsSelection() = runTest(testDispatcher) {
-        val a = GridButton(id = "a", label = "A", code = "A", col = 0, row = 0)
+        val a = GridButton(id = "a", label = "A", col = 0, row = 0)
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 3, buttons = listOf(a))))
         subject.enterEditMode(10L)
         subject.selectButton("a")
@@ -810,42 +828,32 @@ class MainViewModelTest {
 
     @Test
     fun updateSelectedButton_appliesChangesToSelectedButton() = runTest(testDispatcher) {
-        val a = GridButton(id = "a", label = "A", code = "A", col = 0, row = 0)
+        val a = GridButton(id = "a", label = "A", col = 0, row = 0)
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 3, buttons = listOf(a))))
         subject.enterEditMode(10L)
         subject.selectButton("a")
 
         subject.updateSelectedButton(
-            label = "Renamed",
-            code = "Z",
-            topText = "top",
-            topAlign = "LEFT",
-            bottomText = "",
-            bottomAlign = "CENTER",
+            a.copy(
+                label = "Renamed",
+                onTap = RemapTarget.Keyboard("Z").encode(),
+            )
         )
         advanceUntilIdle()
 
         val updated = subject.layouts.value.first().buttons.single()
         assertEquals("Renamed", updated.label)
-        assertEquals("Z", updated.code)
-        assertEquals("top", updated.topText)
-        assertEquals("LEFT", updated.topAlign)
-        // bottomText is "" → stored as null per VM logic (.ifEmpty { null })
-        assertNull(updated.bottomText)
+        assertEquals(RemapTarget.Keyboard("Z"), updated.onTapTarget)
     }
 
     @Test
     fun updateSelectedButton_noSelection_isNoOp() = runTest(testDispatcher) {
-        val a = GridButton(id = "a", label = "A", code = "A", col = 0, row = 0)
+        val a = GridButton(id = "a", label = "A", col = 0, row = 0)
         seedLayouts(listOf(sampleLayout(id = 10L, cols = 3, rows = 3, buttons = listOf(a))))
         subject.enterEditMode(10L)
         // No selectButton call → _selectedButtonId is null.
 
-        subject.updateSelectedButton(
-            label = "Renamed", code = "Z",
-            topText = "", topAlign = "CENTER",
-            bottomText = "", bottomAlign = "CENTER",
-        )
+        subject.updateSelectedButton(a.copy(label = "Renamed"))
         advanceUntilIdle()
 
         assertEquals("A", subject.layouts.value.first().buttons.single().label)
@@ -899,7 +907,7 @@ class MainViewModelTest {
     fun configureKeyboard_noOverflow_persistsConfig() = runTest(testDispatcher) {
         val layout = sampleLayout(
             id = 10L, cols = 3, rows = 2,
-            buttons = listOf(GridButton(label = "A", code = "A", col = 0, row = 0)),
+            buttons = listOf(GridButton(label = "A", col = 0, row = 0)),
         )
         seedLayouts(listOf(layout))
 
@@ -917,7 +925,7 @@ class MainViewModelTest {
         val layout = sampleLayout(
             id = 10L, cols = 4, rows = 4,
             buttons = listOf(
-                GridButton(id = "big", label = "Big", code = "B", col = 2, row = 2, colSpan = 2, rowSpan = 2),
+                GridButton(id = "big", label = "Big", col = 2, row = 2, colSpan = 2, rowSpan = 2),
             ),
         )
         seedLayouts(listOf(layout))
@@ -939,8 +947,8 @@ class MainViewModelTest {
         val layout = sampleLayout(
             id = 10L, cols = 4, rows = 4,
             buttons = listOf(
-                GridButton(id = "a", label = "A", code = "A", col = 0, row = 0),
-                GridButton(id = "b", label = "B", code = "B", col = 0, row = 0), // already overlap-y
+                GridButton(id = "a", label = "A", col = 0, row = 0),
+                GridButton(id = "b", label = "B", col = 0, row = 0), // already overlap-y
             ),
         )
         seedLayouts(listOf(layout))

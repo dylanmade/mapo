@@ -25,7 +25,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,11 +42,11 @@ fun AutoSwitchScreen(
     onBack: () -> Unit,
     viewModel: MainViewModel = hiltViewModel()
 ) {
-    val enabled by viewModel.autoSwitchEnabled.collectAsState()
-    val autoCreateEnabled by viewModel.autoCreateProfilesEnabled.collectAsState()
-    val bindings by viewModel.appProfileBindings.collectAsState()
-    val profiles by viewModel.profiles.collectAsState()
-    val appLabels by viewModel.appLabels.collectAsState()
+    val enabled by viewModel.autoSwitchEnabled.collectAsStateWithLifecycle()
+    val autoCreateEnabled by viewModel.autoCreateProfilesEnabled.collectAsStateWithLifecycle()
+    val bindings by viewModel.appProfileBindings.collectAsStateWithLifecycle()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val appLabels by viewModel.appLabels.collectAsStateWithLifecycle()
     val profilesById = profiles.associateBy { it.id }
 
     BackHandler { onBack() }

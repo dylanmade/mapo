@@ -7,6 +7,7 @@ import com.mapo.data.settings.AutoSwitchSettings
 import com.mapo.di.ApplicationScope
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.foreground.ForegroundAppMonitor
+import com.mapo.service.input.InputDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -29,6 +30,7 @@ class ProfileAutoSwitcher @Inject constructor(
     private val profileRepo: ProfileRepository,
     private val settings: AutoSwitchSettings,
     private val filter: ForegroundAppFilter,
+    private val inputDispatcher: InputDispatcher,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
 
@@ -98,6 +100,25 @@ class ProfileAutoSwitcher @Inject constructor(
         lastPromptedAt[pkg] = now
         Log.d(TAG, "no binding for $pkg → emitting create-profile prompt")
         _events.tryEmit(UiEvent.PromptCreate(pkg, appLabel))
+    }
+
+    /**
+     * Force a re-check against the foreground package, bypassing `distinctUntilChanged`.
+     * Called from the activity on `ON_RESUME` so opening Mapo while a bound app is already
+     * running on another display switches the profile, even though no fresh
+     * `WINDOW_STATE_CHANGED` arrives. Prefers the live primary-display query (handles the
+     * dual-screen case where Mapo on the bottom screen never causes the top screen's
+     * active window to change), falls back to the cached package.
+     */
+    fun reevaluate() {
+        val pkg = inputDispatcher.queryPrimaryDisplayForegroundPackage()
+            ?: foregroundAppMonitor.currentPackage.value
+        if (pkg.isNullOrBlank()) {
+            Log.d(TAG, "reevaluate skipped: no foreground package found")
+            return
+        }
+        Log.d(TAG, "reevaluate firing for $pkg")
+        scope.launch { handleForegroundChange(pkg) }
     }
 
     suspend fun createProfileAndBind(pkg: String, appLabel: String) {

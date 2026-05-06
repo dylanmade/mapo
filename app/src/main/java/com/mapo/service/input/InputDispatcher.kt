@@ -9,9 +9,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Performs an input-dispatch action requested by the [InputDispatcher]. Implemented
- * by `InputAccessibilityService`; null while the service isn't connected, in which
- * case dispatcher methods are no-ops and [InputDispatcher.isReady] returns false.
+ * Performs an input-dispatch action (or accessibility query) requested by the
+ * [InputDispatcher]. Implemented by `InputAccessibilityService`; null while the service
+ * isn't connected, in which case dispatcher methods are no-ops and [InputDispatcher.isReady]
+ * returns false.
  */
 interface InputSink {
     fun injectKey(code: String): Boolean
@@ -19,6 +20,13 @@ interface InputSink {
     fun startMouseDrag()
     fun injectMouseMove(dx: Float, dy: Float)
     fun endMouseDrag()
+
+    /**
+     * Returns the package name of the foreground app on the device's primary (default)
+     * display, or null if it can't be determined or matches Mapo itself. Implemented via
+     * `getWindowsOnAllDisplays()` so it works across both screens of dual-display devices.
+     */
+    fun queryPrimaryDisplayForegroundPackage(): String?
 }
 
 /**
@@ -87,4 +95,7 @@ class InputDispatcher @Inject constructor() {
     fun endMouseDrag() {
         sink?.endMouseDrag()
     }
+
+    fun queryPrimaryDisplayForegroundPackage(): String? =
+        sink?.queryPrimaryDisplayForegroundPackage()
 }

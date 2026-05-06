@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.mapo.data.model.GridLayout
 import com.mapo.ui.MapoGesture
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
@@ -79,7 +80,7 @@ import kotlinx.coroutines.withTimeout
  */
 @Composable
 fun KeyboardTabBar(
-    layouts: List<GridLayout>,
+    layouts: ImmutableList<GridLayout>,
     selectedIndex: Int,
     tabContextMenuFor: Long?,
     onSelectIndex: (Int) -> Unit,

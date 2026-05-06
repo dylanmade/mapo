@@ -65,6 +65,7 @@ kotlin {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
 
@@ -85,6 +86,9 @@ dependencies {
 
     // Gson
     implementation(libs.gson)
+
+    // Kotlinx immutable collections (stable Compose params)
+    implementation(libs.kotlinx.collections.immutable)
 
     // Room
     implementation(libs.room.runtime)

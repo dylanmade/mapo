@@ -28,10 +28,12 @@ import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.data.settings.AutoSwitchSettings
+import com.mapo.di.IoDispatcher
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.InputDispatcher
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +45,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.Dispatchers
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
@@ -82,12 +87,13 @@ class MainViewModel @Inject constructor(
     private val foregroundAppFilter: ForegroundAppFilter,
     private val keyboardTemplateRepository: KeyboardTemplateRepository,
     private val inputDispatcher: InputDispatcher,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
     // Empty until the active profile's layouts emit from the DB. Avoids duplicate LazyRow keys
     // (every DefaultLayouts entry has id=0 since they're code-only).
-    private val _layouts = MutableStateFlow<List<GridLayout>>(emptyList())
-    val layouts: StateFlow<List<GridLayout>> = _layouts.asStateFlow()
+    private val _layouts = MutableStateFlow<ImmutableList<GridLayout>>(persistentListOf())
+    val layouts: StateFlow<ImmutableList<GridLayout>> = _layouts.asStateFlow()
 
     private val _originalNames = MutableStateFlow<Map<Long, String>>(emptyMap())
     val originalNames: StateFlow<Map<Long, String>> = _originalNames.asStateFlow()
@@ -127,8 +133,8 @@ class MainViewModel @Inject constructor(
 
     val activeProfile: StateFlow<Profile?> = profileRepository.activeProfile
 
-    private val _profiles = MutableStateFlow<List<Profile>>(emptyList())
-    val profiles: StateFlow<List<Profile>> = _profiles.asStateFlow()
+    private val _profiles = MutableStateFlow<ImmutableList<Profile>>(persistentListOf())
+    val profiles: StateFlow<ImmutableList<Profile>> = _profiles.asStateFlow()
 
     private val _remapEnabled = MutableStateFlow(false)
     val remapEnabled: StateFlow<Boolean> = _remapEnabled.asStateFlow()
@@ -142,9 +148,10 @@ class MainViewModel @Inject constructor(
 
     val ignoredPackages: StateFlow<Set<String>> = autoSwitchSettings.ignoredPackages
 
-    val appProfileBindings: StateFlow<List<AppProfileBinding>> =
+    val appProfileBindings: StateFlow<ImmutableList<AppProfileBinding>> =
         appProfileBindingRepository.getAll()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .map { it.toImmutableList() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), persistentListOf())
 
     // Cached app labels for packages referenced by bindings or the blocklist. Resolved
     // off the main thread (PackageManager calls aren't free) and looked up by Compose
@@ -160,8 +167,13 @@ class MainViewModel @Inject constructor(
             .map { list -> list.associate { it.gamepadButton to RemapTarget.decode(it.targetEncoded) } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    val templates: StateFlow<List<TemplateRef>> = keyboardTemplateRepository.allTemplates
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), keyboardTemplateRepository.builtIns)
+    val templates: StateFlow<ImmutableList<TemplateRef>> = keyboardTemplateRepository.allTemplates
+        .map { it.toImmutableList() }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            keyboardTemplateRepository.builtIns.toImmutableList()
+        )
 
     val displayLayout: StateFlow<GridLayout> = combine(
         _selectedIndex, _layouts
@@ -171,7 +183,7 @@ class MainViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            profileRepository.getAllProfiles().collect { _profiles.value = it }
+            profileRepository.getAllProfiles().collect { _profiles.value = it.toImmutableList() }
         }
         viewModelScope.launch {
             activeProfile.filterNotNull().flatMapLatest { profile ->
@@ -180,7 +192,7 @@ class MainViewModel @Inject constructor(
                     emitAll(layoutRepository.getLayoutsByProfile(profile.id))
                 }
             }.collect { roomLayouts ->
-                _layouts.value = roomLayouts.map { it.toGridLayout() }
+                _layouts.value = roomLayouts.map { it.toGridLayout() }.toImmutableList()
                 _originalNames.value = roomLayouts.mapNotNull { row ->
                     row.parseOriginalSnapshot()?.let { snap -> row.id to snap.name }
                 }.toMap()
@@ -207,7 +219,7 @@ class MainViewModel @Inject constructor(
                 val current = _appLabels.value
                 val missing = packages - current.keys
                 if (missing.isEmpty()) return@collect
-                val resolved = withContext(Dispatchers.IO) {
+                val resolved = withContext(ioDispatcher) {
                     missing.associateWith { foregroundAppFilter.appLabel(it) }
                 }
                 _appLabels.value = current + resolved
@@ -260,6 +272,11 @@ class MainViewModel @Inject constructor(
 
     fun setAutoCreateProfilesEnabled(enabled: Boolean) {
         autoSwitchSettings.setAutoCreateProfilesEnabled(enabled)
+    }
+
+    /** Re-fire auto-switch against the cached foreground package; called on activity resume. */
+    fun reevaluateAutoSwitch() {
+        autoSwitcher.reevaluate()
     }
 
     fun acceptCreateProfilePrompt(pkg: String, appLabel: String) {
@@ -564,17 +581,18 @@ class MainViewModel @Inject constructor(
         val mutable = current.toMutableList()
         val moved = mutable.removeAt(fromIndex)
         mutable.add(toIndex, moved)
-        _layouts.value = mutable
+        val reordered = mutable.toImmutableList()
+        _layouts.value = reordered
 
         // Keep selection on the moved tab if it was selected; otherwise re-resolve by id.
         val previouslySelectedId = current.getOrNull(_selectedIndex.value)?.id
         if (previouslySelectedId != null) {
-            val newIdx = mutable.indexOfFirst { it.id == previouslySelectedId }
+            val newIdx = reordered.indexOfFirst { it.id == previouslySelectedId }
             if (newIdx >= 0) _selectedIndex.value = newIdx
         }
 
         val profileId = activeProfile.value?.id ?: return
-        val idToPosition = mutable.mapIndexed { idx, layout -> layout.id to idx }.toMap()
+        val idToPosition = reordered.mapIndexed { idx, layout -> layout.id to idx }.toMap()
         viewModelScope.launch { layoutRepository.reorder(profileId, idToPosition) }
     }
 
@@ -663,11 +681,10 @@ class MainViewModel @Inject constructor(
             }
             val reverted = snapshot.toGridLayout(layoutId)
             // Optimistic update.
-            val list = _layouts.value.toMutableList()
-            val idx = list.indexOfFirst { it.id == layoutId }
+            val current = _layouts.value
+            val idx = current.indexOfFirst { it.id == layoutId }
             if (idx >= 0) {
-                list[idx] = reverted
-                _layouts.value = list
+                _layouts.value = current.toPersistentList().set(idx, reverted)
             }
             layoutRepository.saveLayout(
                 reverted.toKeyLayout(
@@ -730,7 +747,7 @@ class MainViewModel @Inject constructor(
         val name = current[idx].name
 
         // Optimistic UI.
-        val newList = current.toMutableList().apply { removeAt(idx) }
+        val newList = current.toPersistentList().removeAt(idx)
         _layouts.value = newList
         if (_selectedIndex.value >= newList.size) {
             _selectedIndex.value = (newList.size - 1).coerceAtLeast(0)
@@ -849,11 +866,10 @@ class MainViewModel @Inject constructor(
 
     private fun persistLayoutFields(updated: GridLayout, profileId: Long) {
         // Optimistic in-memory update.
-        val list = _layouts.value.toMutableList()
-        val idx = list.indexOfFirst { it.id == updated.id }
+        val current = _layouts.value
+        val idx = current.indexOfFirst { it.id == updated.id }
         if (idx >= 0) {
-            list[idx] = updated
-            _layouts.value = list
+            _layouts.value = current.toPersistentList().set(idx, updated)
         }
         viewModelScope.launch {
             val existing = layoutRepository.getById(updated.id)

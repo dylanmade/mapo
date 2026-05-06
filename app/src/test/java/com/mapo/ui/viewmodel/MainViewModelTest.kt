@@ -109,6 +109,7 @@ class MainViewModelTest {
             foregroundAppFilter = filter,
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
+            ioDispatcher = testDispatcher,
         )
     }
 
@@ -375,6 +376,12 @@ class MainViewModelTest {
     fun unignorePackage_delegatesToSettings() {
         subject.unignorePackage("com.example")
         verify { settings.removeIgnoredPackage("com.example") }
+    }
+
+    @Test
+    fun reevaluateAutoSwitch_delegatesToAutoSwitcher() {
+        subject.reevaluateAutoSwitch()
+        verify { autoSwitcher.reevaluate() }
     }
 
     @Test

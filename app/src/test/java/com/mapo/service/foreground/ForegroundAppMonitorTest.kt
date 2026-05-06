@@ -1,6 +1,9 @@
 package com.mapo.service.foreground
 
+import android.content.Context
 import app.cash.turbine.test
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -8,22 +11,28 @@ import org.junit.Test
 
 class ForegroundAppMonitorTest {
 
+    private fun newMonitor(ownPackage: String = "com.mapo"): ForegroundAppMonitor {
+        val context = mockk<Context>()
+        every { context.packageName } returns ownPackage
+        return ForegroundAppMonitor(context)
+    }
+
     @Test
     fun initialValue_isNull() {
-        val monitor = ForegroundAppMonitor()
+        val monitor = newMonitor()
         assertNull(monitor.currentPackage.value)
     }
 
     @Test
     fun reportForegroundPackage_updatesFlow() = runTest {
-        val monitor = ForegroundAppMonitor()
+        val monitor = newMonitor()
         monitor.reportForegroundPackage("com.example.foo")
         assertEquals("com.example.foo", monitor.currentPackage.value)
     }
 
     @Test
     fun blankOrNull_isIgnored() {
-        val monitor = ForegroundAppMonitor()
+        val monitor = newMonitor()
         monitor.reportForegroundPackage(null)
         monitor.reportForegroundPackage("")
         monitor.reportForegroundPackage("   ")
@@ -31,8 +40,22 @@ class ForegroundAppMonitorTest {
     }
 
     @Test
+    fun ownPackage_isIgnored() {
+        val monitor = newMonitor(ownPackage = "com.mapo")
+
+        monitor.reportForegroundPackage("com.example.foo")
+        assertEquals("com.example.foo", monitor.currentPackage.value)
+
+        // Mapo coming to foreground (e.g. user reopens it on the bottom screen) must
+        // not overwrite the cached game pkg — that cache feeds the resume-time
+        // auto-switch re-evaluation.
+        monitor.reportForegroundPackage("com.mapo")
+        assertEquals("com.example.foo", monitor.currentPackage.value)
+    }
+
+    @Test
     fun repeatedReports_dedupedAtStateFlow() = runTest {
-        val monitor = ForegroundAppMonitor()
+        val monitor = newMonitor()
 
         monitor.currentPackage.test {
             assertNull(awaitItem()) // initial null

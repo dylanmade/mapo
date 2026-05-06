@@ -28,11 +28,14 @@ import org.junit.Test
  */
 class ProfileAutoSwitcherTest {
 
-    private val foregroundAppMonitor = ForegroundAppMonitor()
+    private val foregroundAppMonitor = ForegroundAppMonitor(
+        mockk { every { packageName } returns "com.mapo" }
+    )
     private lateinit var bindingRepo: AppProfileBindingRepository
     private lateinit var profileRepo: ProfileRepository
     private lateinit var settings: AutoSwitchSettings
     private lateinit var filter: ForegroundAppFilter
+    private lateinit var inputDispatcher: com.mapo.service.input.InputDispatcher
     private lateinit var subject: ProfileAutoSwitcher
 
     private val autoSwitchEnabled = MutableStateFlow(true)
@@ -48,6 +51,7 @@ class ProfileAutoSwitcherTest {
         profileRepo = mockk(relaxed = true)
         settings = mockk(relaxed = true)
         filter = mockk(relaxed = true)
+        inputDispatcher = mockk(relaxed = true)
 
         every { settings.autoSwitchEnabled } returns autoSwitchEnabled
         every { settings.autoCreateProfilesEnabled } returns autoCreateEnabled
@@ -55,6 +59,7 @@ class ProfileAutoSwitcherTest {
         every { profileRepo.activeProfile } returns activeProfile
         every { filter.isInteresting(any()) } returns true
         every { filter.appLabel(any()) } answers { firstArg<String>().substringAfterLast('.') }
+        every { inputDispatcher.queryPrimaryDisplayForegroundPackage() } returns null
 
         coEvery { bindingRepo.getForPackageOnce(any(), any()) } returns null
 
@@ -64,6 +69,7 @@ class ProfileAutoSwitcherTest {
             profileRepo = profileRepo,
             settings = settings,
             filter = filter,
+            inputDispatcher = inputDispatcher,
             scope = TestScope(),
         )
     }
@@ -237,5 +243,61 @@ class ProfileAutoSwitcherTest {
     fun ignorePackage_delegatesToSettings() {
         subject.ignorePackage("com.example.ignored")
         io.mockk.verify { settings.addIgnoredPackage("com.example.ignored") }
+    }
+
+    @Test
+    fun reevaluate_noCachedAndNoLiveQuery_isNoOp() = runTest {
+        every { inputDispatcher.queryPrimaryDisplayForegroundPackage() } returns null
+        // foregroundAppMonitor's currentPackage is null initially.
+        subject.reevaluate()
+        coVerify(exactly = 0) { bindingRepo.getForPackageOnce(any(), any()) }
+    }
+
+    @Test
+    fun reevaluate_cachedPackage_firesHandleForegroundChange() = runTest {
+        foregroundAppMonitor.reportForegroundPackage("com.example.foo")
+        every { inputDispatcher.queryPrimaryDisplayForegroundPackage() } returns null
+        coEvery { bindingRepo.getForPackageOnce("com.example.foo", any()) } returns null
+
+        // Use a TestScope so launch in reevaluate() runs against the test dispatcher.
+        val testScope = this
+        val testSubject = ProfileAutoSwitcher(
+            foregroundAppMonitor = foregroundAppMonitor,
+            bindingRepo = bindingRepo,
+            profileRepo = profileRepo,
+            settings = settings,
+            filter = filter,
+            inputDispatcher = inputDispatcher,
+            scope = testScope,
+        )
+        testSubject.reevaluate()
+        testScope.testScheduler.advanceUntilIdle()
+
+        coVerify { bindingRepo.getForPackageOnce("com.example.foo", any()) }
+    }
+
+    @Test
+    fun reevaluate_liveQuery_winsOverCachedPackage() = runTest {
+        // Cache holds an old / stale package; the live query knows the current primary
+        // display foreground app. The live result should win.
+        foregroundAppMonitor.reportForegroundPackage("com.example.stale")
+        every { inputDispatcher.queryPrimaryDisplayForegroundPackage() } returns "com.example.live"
+        coEvery { bindingRepo.getForPackageOnce(any(), any()) } returns null
+
+        val testScope = this
+        val testSubject = ProfileAutoSwitcher(
+            foregroundAppMonitor = foregroundAppMonitor,
+            bindingRepo = bindingRepo,
+            profileRepo = profileRepo,
+            settings = settings,
+            filter = filter,
+            inputDispatcher = inputDispatcher,
+            scope = testScope,
+        )
+        testSubject.reevaluate()
+        testScope.testScheduler.advanceUntilIdle()
+
+        coVerify { bindingRepo.getForPackageOnce("com.example.live", any()) }
+        coVerify(exactly = 0) { bindingRepo.getForPackageOnce("com.example.stale", any()) }
     }
 }

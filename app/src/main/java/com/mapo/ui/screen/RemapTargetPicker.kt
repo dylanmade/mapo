@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
 import com.mapo.data.defaults.InputOption
 import com.mapo.data.defaults.RemapInputOptions
+import kotlinx.collections.immutable.ImmutableList
 import com.mapo.data.model.RemapTarget
 
 /**
@@ -155,7 +156,7 @@ private fun CategoryRow(
 
 @Composable
 private fun FilteredInputList(
-    options: List<InputOption>,
+    options: ImmutableList<InputOption>,
     filter: String,
     showFilter: Boolean,
     current: RemapTarget,

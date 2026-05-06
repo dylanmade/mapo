@@ -23,7 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,8 +40,8 @@ fun BlocklistScreen(
     onBack: () -> Unit,
     viewModel: MainViewModel = hiltViewModel()
 ) {
-    val ignored by viewModel.ignoredPackages.collectAsState()
-    val appLabels by viewModel.appLabels.collectAsState()
+    val ignored by viewModel.ignoredPackages.collectAsStateWithLifecycle()
+    val appLabels by viewModel.appLabels.collectAsStateWithLifecycle()
     val sorted = ignored.sorted()
 
     BackHandler { onBack() }

@@ -37,10 +37,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.mapo.R
 import com.mapo.data.model.Profile
+import kotlinx.collections.immutable.ImmutableList
 
 @Composable
 fun ProfileDrawerContent(
-    profiles: List<Profile>,
+    profiles: ImmutableList<Profile>,
     activeProfile: Profile?,
     onSelectProfile: (Profile) -> Unit,
     onAddProfile: (String) -> Unit,

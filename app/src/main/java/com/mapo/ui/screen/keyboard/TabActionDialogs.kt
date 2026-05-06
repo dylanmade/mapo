@@ -43,6 +43,7 @@ import com.mapo.data.model.TemplateRef
 import com.mapo.ui.components.ColorSwatchPicker
 import com.mapo.ui.components.SteppedSliderWithNumberInput
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.collections.immutable.ImmutableList
 
 /**
  * Top-level dispatcher for the keyboard tab action dialog tree. MainScreen passes the current
@@ -52,9 +53,9 @@ import androidx.compose.runtime.LaunchedEffect
 fun TabActionDialogHost(
     state: TabActionDialog?,
     profileName: String,
-    userTemplates: List<TemplateRef.User>,
-    allTemplates: List<TemplateRef>,
-    profiles: List<Profile>,
+    userTemplates: ImmutableList<TemplateRef.User>,
+    allTemplates: ImmutableList<TemplateRef>,
+    profiles: ImmutableList<Profile>,
     activeProfileId: Long?,
     onStateChange: (TabActionDialog?) -> Unit,
     onApplyConfigure: (layoutId: Long, name: String, cols: Int, rows: Int, bgColor: Int?) -> Unit,

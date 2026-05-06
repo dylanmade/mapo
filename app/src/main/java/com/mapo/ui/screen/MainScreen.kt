@@ -58,7 +58,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -105,6 +105,8 @@ import com.mapo.ui.screen.keyboard.TabActionDialog
 import com.mapo.ui.screen.keyboard.TabActionDialogHost
 import com.mapo.ui.viewmodel.MainViewModel
 import com.mapo.ui.viewmodel.TabUiEvent
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -112,16 +114,18 @@ import kotlin.math.roundToInt
 
 @Composable
 fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
-    val selectedIndex by viewModel.selectedIndex.collectAsState()
-    val isEditMode by viewModel.isEditMode.collectAsState()
-    val layouts by viewModel.layouts.collectAsState()
-    val displayLayout by viewModel.displayLayout.collectAsState()
-    val selectedButtonId by viewModel.selectedButtonId.collectAsState()
-    val activeProfile by viewModel.activeProfile.collectAsState()
-    val profiles by viewModel.profiles.collectAsState()
-    val tabContextMenuFor by viewModel.tabContextMenuFor.collectAsState()
-    val templates by viewModel.templates.collectAsState()
-    val userTemplates = remember(templates) { templates.filterIsInstance<TemplateRef.User>() }
+    val selectedIndex by viewModel.selectedIndex.collectAsStateWithLifecycle()
+    val isEditMode by viewModel.isEditMode.collectAsStateWithLifecycle()
+    val layouts by viewModel.layouts.collectAsStateWithLifecycle()
+    val displayLayout by viewModel.displayLayout.collectAsStateWithLifecycle()
+    val selectedButtonId by viewModel.selectedButtonId.collectAsStateWithLifecycle()
+    val activeProfile by viewModel.activeProfile.collectAsStateWithLifecycle()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val tabContextMenuFor by viewModel.tabContextMenuFor.collectAsStateWithLifecycle()
+    val templates by viewModel.templates.collectAsStateWithLifecycle()
+    val userTemplates = remember(templates) {
+        templates.filterIsInstance<TemplateRef.User>().toImmutableList()
+    }
 
     var tabActionDialog by remember { mutableStateOf<TabActionDialog?>(null) }
 
@@ -185,9 +189,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         }
     }
 
-    val showRemapControls by viewModel.showRemapControls.collectAsState()
-    val activeProfileMappings by viewModel.activeProfileMappings.collectAsState()
-    val remapEnabled by viewModel.remapEnabled.collectAsState()
+    val showRemapControls by viewModel.showRemapControls.collectAsStateWithLifecycle()
+    val activeProfileMappings by viewModel.activeProfileMappings.collectAsStateWithLifecycle()
+    val remapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -203,6 +207,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 accessibilityGranted = isAccessibilityServiceEnabled(context)
                 overlayGranted = isOverlayPermissionGranted(context)
+                // Dual-screen flow: opening Mapo while a bound app is already running
+                // on the primary screen wouldn't fire a fresh WINDOW_STATE_CHANGED for
+                // the game, so the auto-switcher's distinctUntilChanged would suppress
+                // it. Force a re-evaluation on every resume.
+                viewModel.reevaluateAutoSwitch()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -688,7 +697,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 
 @Composable
 private fun KeyboardTopBar(
-    layouts: List<GridLayout>,
+    layouts: ImmutableList<GridLayout>,
     selectedIndex: Int,
     tabContextMenuFor: Long?,
     onSelectIndex: (Int) -> Unit,

@@ -5,10 +5,13 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
 import android.graphics.Path
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
+import android.view.Display
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.RemapTarget
 import com.mapo.service.foreground.ForegroundAppMonitor
@@ -107,6 +110,34 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         val pkg = event.packageName?.toString() ?: return
         Log.d(TAG, "window state changed → pkg=$pkg className=${event.className}")
         foregroundAppMonitor.reportForegroundPackage(pkg)
+    }
+
+    override fun queryPrimaryDisplayForegroundPackage(): String? {
+        val primaryWindows: List<AccessibilityWindowInfo> = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                windowsOnAllDisplays?.get(Display.DEFAULT_DISPLAY).orEmpty()
+            } else {
+                // Pre-API 30: getWindows() only ever returns the default display anyway.
+                windows.orEmpty()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "queryPrimaryDisplayForegroundPackage: window list query failed", e)
+            return null
+        }
+
+        val apps = primaryWindows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        // Active = the window that currently has input focus on its display. On dual-display
+        // devices the bottom screen's app is "active" only when its display is foregrounded;
+        // when the user is looking at Mapo on the bottom screen, the primary display's
+        // active window stays the game.
+        val candidate = apps.firstOrNull { it.isActive }
+            ?: apps.firstOrNull { it.isFocused }
+            ?: apps.maxByOrNull { it.layer }
+            ?: return null
+
+        val pkg = candidate.root?.packageName?.toString()
+        Log.d(TAG, "queryPrimaryDisplayForegroundPackage → $pkg (apps=${apps.size})")
+        return pkg?.takeIf { it.isNotBlank() && it != packageName }
     }
 
     override fun onInterrupt() = Unit

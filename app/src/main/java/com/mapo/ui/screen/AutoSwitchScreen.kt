@@ -46,6 +46,7 @@ fun AutoSwitchScreen(
     val autoCreateEnabled by viewModel.autoCreateProfilesEnabled.collectAsState()
     val bindings by viewModel.appProfileBindings.collectAsState()
     val profiles by viewModel.profiles.collectAsState()
+    val appLabels by viewModel.appLabels.collectAsState()
     val profilesById = profiles.associateBy { it.id }
 
     BackHandler { onBack() }
@@ -139,7 +140,7 @@ fun AutoSwitchScreen(
                     items(bindings, key = { "${it.packageName}::${it.subId}" }) { binding ->
                         val profileName = profilesById[binding.profileId]?.name
                             ?: stringResource(R.string.auto_switch_unknown_profile)
-                        val appLabel = viewModel.appLabelFor(binding.packageName)
+                        val appLabel = appLabels[binding.packageName] ?: binding.packageName
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier

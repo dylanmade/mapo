@@ -43,12 +43,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed class TabUiEvent {
@@ -144,6 +146,12 @@ class MainViewModel @Inject constructor(
         appProfileBindingRepository.getAll()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // Cached app labels for packages referenced by bindings or the blocklist. Resolved
+    // off the main thread (PackageManager calls aren't free) and looked up by Compose
+    // via `appLabels[pkg] ?: pkg` — never call PackageManager from composition.
+    private val _appLabels = MutableStateFlow<Map<String, String>>(emptyMap())
+    val appLabels: StateFlow<Map<String, String>> = _appLabels.asStateFlow()
+
     val autoSwitchEvents: SharedFlow<ProfileAutoSwitcher.UiEvent> = autoSwitcher.events
 
     val activeProfileMappings: StateFlow<Map<String, RemapTarget>> =
@@ -190,6 +198,19 @@ class MainViewModel @Inject constructor(
                     .toMap()
                 inputDispatcher.setCurrentMappings(mapped)
                 android.util.Log.d("MainViewModel", "Pushed ${mapped.size} remap entries to dispatcher: $mapped")
+            }
+        }
+        viewModelScope.launch {
+            combine(appProfileBindings, ignoredPackages) { bindings, ignored ->
+                bindings.mapTo(mutableSetOf()) { it.packageName }.apply { addAll(ignored) }
+            }.collect { packages ->
+                val current = _appLabels.value
+                val missing = packages - current.keys
+                if (missing.isEmpty()) return@collect
+                val resolved = withContext(Dispatchers.IO) {
+                    missing.associateWith { foregroundAppFilter.appLabel(it) }
+                }
+                _appLabels.value = current + resolved
             }
         }
     }
@@ -256,8 +277,6 @@ class MainViewModel @Inject constructor(
     fun deleteBinding(packageName: String, subId: String = "") {
         viewModelScope.launch { appProfileBindingRepository.unbind(packageName, subId) }
     }
-
-    fun appLabelFor(pkg: String): String = foregroundAppFilter.appLabel(pkg)
 
     fun saveRemapMappings(draft: Map<DeviceButton, RemapTarget>) {
         val profileId = activeProfile.value?.id ?: return

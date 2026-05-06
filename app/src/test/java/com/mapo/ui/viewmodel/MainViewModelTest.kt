@@ -385,9 +385,46 @@ class MainViewModelTest {
     }
 
     @Test
-    fun appLabelFor_delegatesToFilter() {
+    fun appLabels_resolvesLabelsForBindingPackages() = runTest(testDispatcher) {
         every { filter.appLabel("com.example") } returns "Example"
-        assertEquals("Example", subject.appLabelFor("com.example"))
+        every { filter.appLabel("com.foo") } returns "Foo"
+
+        allBindings.value = listOf(
+            AppProfileBinding(packageName = "com.example", subId = "", profileId = 1L),
+            AppProfileBinding(packageName = "com.foo", subId = "", profileId = 1L),
+        )
+        advanceUntilIdle()
+
+        assertEquals(
+            mapOf("com.example" to "Example", "com.foo" to "Foo"),
+            subject.appLabels.value
+        )
+    }
+
+    @Test
+    fun appLabels_resolvesLabelsForIgnoredPackages() = runTest(testDispatcher) {
+        every { filter.appLabel("com.blocked") } returns "Blocked App"
+
+        ignoredPackages.value = setOf("com.blocked")
+        advanceUntilIdle()
+
+        assertEquals("Blocked App", subject.appLabels.value["com.blocked"])
+    }
+
+    @Test
+    fun appLabels_doesNotReResolveAlreadyCachedPackages() = runTest(testDispatcher) {
+        every { filter.appLabel("com.example") } returns "Example"
+
+        allBindings.value = listOf(
+            AppProfileBinding(packageName = "com.example", subId = "", profileId = 1L)
+        )
+        advanceUntilIdle()
+        // Same package re-emitted via the ignored-packages channel; should not call
+        // the filter again because the label is cached.
+        ignoredPackages.value = setOf("com.example")
+        advanceUntilIdle()
+
+        verify(exactly = 1) { filter.appLabel("com.example") }
     }
 
     @Test

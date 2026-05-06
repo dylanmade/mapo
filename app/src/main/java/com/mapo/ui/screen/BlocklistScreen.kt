@@ -41,6 +41,7 @@ fun BlocklistScreen(
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val ignored by viewModel.ignoredPackages.collectAsState()
+    val appLabels by viewModel.appLabels.collectAsState()
     val sorted = ignored.sorted()
 
     BackHandler { onBack() }
@@ -98,7 +99,7 @@ fun BlocklistScreen(
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(text = viewModel.appLabelFor(pkg), fontSize = 14.sp)
+                                Text(text = appLabels[pkg] ?: pkg, fontSize = 14.sp)
                                 Text(
                                     text = pkg,
                                     fontSize = 11.sp,

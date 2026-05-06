@@ -6,6 +6,7 @@ import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.KeyLayout
 import com.mapo.data.model.Profile
+import com.mapo.data.model.RemapTarget
 import com.mapo.data.model.TemplateRef
 import com.mapo.data.model.toKeyLayout
 import com.mapo.data.repository.AppProfileBindingRepository
@@ -16,6 +17,7 @@ import com.mapo.data.repository.ProfileRepository
 import com.mapo.data.settings.AutoSwitchSettings
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
+import com.mapo.service.input.InputDispatcher
 import app.cash.turbine.test
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -54,6 +56,7 @@ class MainViewModelTest {
     private lateinit var autoSwitcher: ProfileAutoSwitcher
     private lateinit var filter: ForegroundAppFilter
     private lateinit var templateRepo: KeyboardTemplateRepository
+    private lateinit var inputDispatcher: InputDispatcher
 
     private val activeProfile = MutableStateFlow<Profile?>(null)
     private val allProfiles = MutableStateFlow<List<Profile>>(emptyList())
@@ -82,6 +85,7 @@ class MainViewModelTest {
         autoSwitcher = mockk(relaxed = true)
         filter = mockk(relaxed = true)
         templateRepo = mockk(relaxed = true)
+        inputDispatcher = mockk(relaxed = true)
 
         every { profileRepo.activeProfile } returns activeProfile
         every { profileRepo.getAllProfiles() } returns allProfiles
@@ -104,6 +108,7 @@ class MainViewModelTest {
             autoSwitcher = autoSwitcher,
             foregroundAppFilter = filter,
             keyboardTemplateRepository = templateRepo,
+            inputDispatcher = inputDispatcher,
         )
     }
 
@@ -414,6 +419,133 @@ class MainViewModelTest {
         assertTrue(subject.remapEnabled.value)
         subject.toggleRemap()
         assertFalse(subject.remapEnabled.value)
+    }
+
+    @Test
+    fun toggleRemap_pushesNewValueToDispatcher() {
+        subject.toggleRemap() // off → on
+        verify { inputDispatcher.setRemapEnabled(true) }
+        subject.toggleRemap() // on → off
+        verify { inputDispatcher.setRemapEnabled(false) }
+    }
+
+    // ── Input dispatch ────────────────────────────────────────────────────────
+
+    @Test
+    fun onKeyPress_serviceNotReady_emitsToastAndDoesNotDispatch() = runTest(testDispatcher) {
+        every { inputDispatcher.isReady } returns false
+
+        subject.toastMessage.test {
+            subject.onKeyPress("ENTER")
+            assertEquals("Accessibility service not running", awaitItem())
+        }
+        verify(exactly = 0) { inputDispatcher.injectKey(any()) }
+        verify(exactly = 0) { inputDispatcher.dispatchTargetAsClick(any()) }
+    }
+
+    @Test
+    fun onKeyPress_keyboardCode_routesToInjectKey() {
+        every { inputDispatcher.isReady } returns true
+
+        subject.onKeyPress("ENTER")
+
+        verify { inputDispatcher.injectKey("ENTER") }
+        verify(exactly = 0) { inputDispatcher.dispatchTargetAsClick(any()) }
+    }
+
+    @Test
+    fun onKeyPress_mouseCode_routesToDispatchTargetAsClick() {
+        every { inputDispatcher.isReady } returns true
+
+        subject.onKeyPress("MOUSE_LEFT")
+
+        verify { inputDispatcher.dispatchTargetAsClick(RemapTarget.Mouse("MOUSE_LEFT")) }
+        verify(exactly = 0) { inputDispatcher.injectKey(any()) }
+    }
+
+    @Test
+    fun onKeyPress_scrollCode_routesToDispatchTargetAsClick() {
+        every { inputDispatcher.isReady } returns true
+
+        subject.onKeyPress("SCROLL_DOWN")
+
+        verify { inputDispatcher.dispatchTargetAsClick(RemapTarget.Mouse("SCROLL_DOWN")) }
+    }
+
+    @Test
+    fun onTrackpadGesture_serviceReady_dispatchesGestureTarget() {
+        every { inputDispatcher.isReady } returns true
+        val button = GridButton(label = "tp", code = "trackpad", col = 0, row = 0, type = "trackpad")
+
+        subject.onTrackpadGesture(button, com.mapo.data.model.TrackpadGesture.TAP)
+
+        // TAP default target is Mouse("MOUSE_LEFT") per TrackpadGesture.defaultTarget().
+        verify { inputDispatcher.dispatchTargetAsClick(RemapTarget.Mouse("MOUSE_LEFT")) }
+    }
+
+    @Test
+    fun onTrackpadGesture_serviceNotReady_emitsToastAndDoesNotDispatch() = runTest(testDispatcher) {
+        every { inputDispatcher.isReady } returns false
+        val button = GridButton(label = "tp", code = "trackpad", col = 0, row = 0, type = "trackpad")
+
+        subject.toastMessage.test {
+            subject.onTrackpadGesture(button, com.mapo.data.model.TrackpadGesture.TAP)
+            assertEquals("Accessibility service not running", awaitItem())
+        }
+        verify(exactly = 0) { inputDispatcher.dispatchTargetAsClick(any()) }
+    }
+
+    @Test
+    fun onDragStart_serviceReady_startsMouseDrag() {
+        every { inputDispatcher.isReady } returns true
+
+        subject.onDragStart()
+
+        verify { inputDispatcher.startMouseDrag() }
+    }
+
+    @Test
+    fun onDragStart_serviceNotReady_emitsToast() = runTest(testDispatcher) {
+        every { inputDispatcher.isReady } returns false
+
+        subject.toastMessage.test {
+            subject.onDragStart()
+            assertEquals("Accessibility service not running", awaitItem())
+        }
+        verify(exactly = 0) { inputDispatcher.startMouseDrag() }
+    }
+
+    @Test
+    fun onMouseMove_alwaysDelegatesToDispatcher() {
+        // High-frequency call site — dispatcher is silent no-op when not ready, so the
+        // VM doesn't bother gating; verify it just forwards.
+        subject.onMouseMove(dx = 5f, dy = -3f)
+        verify { inputDispatcher.injectMouseMove(5f, -3f) }
+    }
+
+    @Test
+    fun onDragEnd_alwaysDelegatesToDispatcher() {
+        subject.onDragEnd()
+        verify { inputDispatcher.endMouseDrag() }
+    }
+
+    @Test
+    fun activeProfileMappings_pushesDeviceButtonMapToDispatcher() = runTest(testDispatcher) {
+        val profile = Profile(id = 1L, name = "Test")
+        activeProfile.value = profile
+        // Stub the gamepad mappings flow with one valid + one invalid (unparseable) entry
+        // to verify mapNotNull discards the bad one before pushing to the dispatcher.
+        allMappings.value = listOf(
+            GamepadMapping(profileId = 1L, gamepadButton = "BUTTON_A", targetEncoded = "keyboard:ENTER"),
+            GamepadMapping(profileId = 1L, gamepadButton = "NOT_A_DEVICE_BUTTON", targetEncoded = "keyboard:X"),
+        )
+        advanceUntilIdle()
+
+        verify {
+            inputDispatcher.setCurrentMappings(
+                mapOf(com.mapo.data.model.DeviceButton.BUTTON_A to RemapTarget.Keyboard("ENTER")),
+            )
+        }
     }
 
     @Test

@@ -12,29 +12,18 @@ import android.view.accessibility.AccessibilityEvent
 import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.RemapTarget
 import com.mapo.service.foreground.ForegroundAppMonitor
+import com.mapo.service.input.InputDispatcher
+import com.mapo.service.input.InputSink
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class InputAccessibilityService : AccessibilityService() {
+class InputAccessibilityService : AccessibilityService(), InputSink {
 
     @Inject lateinit var foregroundAppMonitor: ForegroundAppMonitor
+    @Inject lateinit var dispatcher: InputDispatcher
 
     companion object {
-        @Volatile var instance: InputAccessibilityService? = null
-            private set
-
-        // Active profile's remap mappings — updated by MainViewModel.
-        @Volatile var currentMappings: Map<DeviceButton, RemapTarget> = emptyMap()
-
-        // Remapping on/off toggle — updated by MainViewModel.
-        @Volatile var remapEnabled: Boolean = false
-
-        // True while a focusable Mapo overlay is on screen (e.g. the create-profile
-        // prompt). When set, gamepad A becomes ENTER and B becomes BACK so the user
-        // can drive the overlay from a controller, regardless of remap state.
-        @Volatile var overlayFocused: Boolean = false
-
         // Physical gamepad keycodes → DeviceButton enum
         private val GAMEPAD_KEYCODE_MAP: Map<Int, DeviceButton> = mapOf(
             KeyEvent.KEYCODE_BUTTON_A      to DeviceButton.BUTTON_A,
@@ -92,7 +81,7 @@ class InputAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        instance = this
+        dispatcher.register(this)
         val info = serviceInfo
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         setServiceInfo(info)
@@ -109,7 +98,7 @@ class InputAccessibilityService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
-        instance = null
+        dispatcher.unregister()
         return super.onUnbind(intent)
     }
 
@@ -125,7 +114,7 @@ class InputAccessibilityService : AccessibilityService() {
     // ── Physical button interception (remap) ──────────────────────────────────
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (overlayFocused) {
+        if (dispatcher.overlayFocused.value) {
             // Translate gamepad A/B into ENTER/BACK so DPAD-navigated overlay buttons
             // can be activated. DPAD events pass through unchanged so Compose's focus
             // traversal handles left/right/up/down naturally.
@@ -142,11 +131,12 @@ class InputAccessibilityService : AccessibilityService() {
                 else -> false
             }
         }
-        if (!remapEnabled) return false
-        Log.d(TAG, "onKeyEvent: keyCode=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} mappings=${currentMappings.size}")
+        if (!dispatcher.remapEnabled.value) return false
+        val mappings = dispatcher.currentMappings.value
+        Log.d(TAG, "onKeyEvent: keyCode=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} mappings=${mappings.size}")
 
         val deviceButton = GAMEPAD_KEYCODE_MAP[event.keyCode] ?: return false
-        val target = currentMappings[deviceButton]
+        val target = mappings[deviceButton]
 
         // No mapping or explicitly Unbound → pass through to game
         if (target == null || target is RemapTarget.Unbound) return false
@@ -183,7 +173,7 @@ class InputAccessibilityService : AccessibilityService() {
     // ── Virtual keyboard injection (called from ViewModel) ────────────────────
 
     /** Inject a full DOWN+UP cycle for the given button code string. */
-    fun injectKey(code: String): Boolean {
+    override fun injectKey(code: String): Boolean {
         if (code in MOUSE_CODES) return false
         val keyCode = resolveKeyCode(code) ?: run {
             Log.w(TAG, "Unknown key code: $code")
@@ -199,7 +189,7 @@ class InputAccessibilityService : AccessibilityService() {
      * targets, the appropriate single gesture for mouse targets. Used by trackpad gesture
      * remapping and any other path that has a RemapTarget and wants to fire it as a tap.
      */
-    fun dispatchTargetAsClick(target: RemapTarget) {
+    override fun dispatchTargetAsClick(target: RemapTarget) {
         Log.d(TAG, "dispatchTargetAsClick target=$target")
         when (target) {
             is RemapTarget.Unbound -> { /* no-op */ }
@@ -236,7 +226,7 @@ class InputAccessibilityService : AccessibilityService() {
     private var segEndX = 540f
     private var segEndY = 960f
 
-    fun startMouseDrag() {
+    override fun startMouseDrag() {
         Log.d(TAG, "startMouseDrag — cursor reset to center")
         isDragging = true
         segmentActive = false
@@ -249,13 +239,13 @@ class InputAccessibilityService : AccessibilityService() {
         segEndY = cursorY
     }
 
-    fun injectMouseMove(dx: Float, dy: Float) {
+    override fun injectMouseMove(dx: Float, dy: Float) {
         cursorX = (cursorX + dx).coerceIn(safeL, safeR)
         cursorY = (cursorY + dy).coerceIn(safeT, safeB)
         if (!segmentActive) dispatchMoveSegment(willContinue = true)
     }
 
-    fun endMouseDrag() {
+    override fun endMouseDrag() {
         isDragging = false
         if (!segmentActive && currentStroke != null) dispatchMoveSegment(willContinue = false)
     }

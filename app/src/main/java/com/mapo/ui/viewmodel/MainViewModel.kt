@@ -28,9 +28,9 @@ import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.data.settings.AutoSwitchSettings
-import com.mapo.service.InputAccessibilityService
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
+import com.mapo.service.input.InputDispatcher
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -78,7 +78,8 @@ class MainViewModel @Inject constructor(
     private val autoSwitchSettings: AutoSwitchSettings,
     private val autoSwitcher: ProfileAutoSwitcher,
     private val foregroundAppFilter: ForegroundAppFilter,
-    private val keyboardTemplateRepository: KeyboardTemplateRepository
+    private val keyboardTemplateRepository: KeyboardTemplateRepository,
+    private val inputDispatcher: InputDispatcher,
 ) : ViewModel() {
 
     // Empty until the active profile's layouts emit from the DB. Avoids duplicate LazyRow keys
@@ -187,8 +188,8 @@ class MainViewModel @Inject constructor(
                         runCatching { DeviceButton.valueOf(key) }.getOrNull()?.let { it to value }
                     }
                     .toMap()
-                InputAccessibilityService.currentMappings = mapped
-                android.util.Log.d("MainViewModel", "Pushed ${mapped.size} remap entries to service: $mapped")
+                inputDispatcher.setCurrentMappings(mapped)
+                android.util.Log.d("MainViewModel", "Pushed ${mapped.size} remap entries to dispatcher: $mapped")
             }
         }
     }
@@ -224,7 +225,7 @@ class MainViewModel @Inject constructor(
     fun toggleRemap() {
         val enabled = !_remapEnabled.value
         _remapEnabled.value = enabled
-        InputAccessibilityService.remapEnabled = enabled
+        inputDispatcher.setRemapEnabled(enabled)
     }
 
     fun openRemapControls() { _showRemapControls.value = true }
@@ -279,34 +280,41 @@ class MainViewModel @Inject constructor(
     // ── Normal mode ───────────────────────────────────────────────────────────
 
     fun onKeyPress(code: String) {
-        val svc = InputAccessibilityService.instance
-            ?: run { _toastMessage.tryEmit("Accessibility service not running"); return }
+        if (!inputDispatcher.isReady) {
+            _toastMessage.tryEmit("Accessibility service not running")
+            return
+        }
         when (code) {
             "MOUSE_LEFT", "MOUSE_MIDDLE", "MOUSE_RIGHT", "MOUSE_BACK", "MOUSE_FORWARD",
-            "SCROLL_UP", "SCROLL_DOWN" -> svc.dispatchTargetAsClick(RemapTarget.Mouse(code))
-            else -> svc.injectKey(code)
+            "SCROLL_UP", "SCROLL_DOWN" -> inputDispatcher.dispatchTargetAsClick(RemapTarget.Mouse(code))
+            else -> inputDispatcher.injectKey(code)
         }
     }
 
     fun onTrackpadGesture(button: GridButton, gesture: TrackpadGesture) {
         val target = button.gestureTarget(gesture)
         android.util.Log.d("MapoInput", "onTrackpadGesture button=${button.id} gesture=$gesture target=$target")
-        val svc = InputAccessibilityService.instance
-            ?: run { _toastMessage.tryEmit("Accessibility service not running"); return }
-        svc.dispatchTargetAsClick(target)
+        if (!inputDispatcher.isReady) {
+            _toastMessage.tryEmit("Accessibility service not running")
+            return
+        }
+        inputDispatcher.dispatchTargetAsClick(target)
     }
 
     fun onDragStart() {
-        InputAccessibilityService.instance?.startMouseDrag()
-            ?: _toastMessage.tryEmit("Accessibility service not running")
+        if (inputDispatcher.isReady) {
+            inputDispatcher.startMouseDrag()
+        } else {
+            _toastMessage.tryEmit("Accessibility service not running")
+        }
     }
 
     fun onMouseMove(dx: Float, dy: Float) {
-        InputAccessibilityService.instance?.injectMouseMove(dx, dy)
+        inputDispatcher.injectMouseMove(dx, dy)
     }
 
     fun onDragEnd() {
-        InputAccessibilityService.instance?.endMouseDrag()
+        inputDispatcher.endMouseDrag()
     }
 
     // ── Tab context menu ──────────────────────────────────────────────────────

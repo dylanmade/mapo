@@ -17,7 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import com.mapo.service.InputAccessibilityService
+import com.mapo.service.input.InputDispatcher
 import com.mapo.ui.theme.MapoTheme
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -33,7 +33,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class OverlayManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val inputDispatcher: InputDispatcher,
 ) {
 
     private val windowManager: WindowManager =
@@ -115,14 +116,14 @@ class OverlayManager @Inject constructor(
         }
 
         current = AttachedOverlay(composeView, owner, focusable)
-        if (focusable) InputAccessibilityService.overlayFocused = true
+        if (focusable) inputDispatcher.setOverlayFocused(true)
         Log.i(TAG, "overlay attached (focusable=$focusable)")
     }
 
     private fun detach() {
         val attached = current ?: return
         current = null
-        if (attached.focusable) InputAccessibilityService.overlayFocused = false
+        if (attached.focusable) inputDispatcher.setOverlayFocused(false)
         try {
             windowManager.removeViewImmediate(attached.view)
         } catch (e: Exception) {

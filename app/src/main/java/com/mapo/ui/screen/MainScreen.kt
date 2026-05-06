@@ -826,6 +826,8 @@ private fun KeyGrid(
         // ── Drop indicator ────────────────────────────────────────────────────
         val draggingButton = if (draggingId != null) layout.buttons.find { it.id == draggingId } else null
         if (isEditMode && draggingButton != null) {
+            val validColor = MaterialTheme.colorScheme.tertiary
+            val invalidColor = MaterialTheme.colorScheme.error
             Box(
                 modifier = Modifier
                     .absoluteOffset(
@@ -838,7 +840,7 @@ private fun KeyGrid(
                     )
                     .zIndex(5f)
                     .background(
-                        if (dropIsValid) Color(0x6000C853) else Color(0x60FF1744),
+                        (if (dropIsValid) validColor else invalidColor).copy(alpha = 0.38f),
                         RoundedCornerShape(8.dp)
                     )
             )
@@ -995,18 +997,25 @@ private fun KeyGrid(
                                     // Phase 1: race long-press timer vs. up vs. drag-before-timer.
                                     // Crucially we do NOT consume on tap — we let OutlinedButton's
                                     // onClick handle the tap (preserves ripple + select behavior).
+                                    var releasedOrMoved = false
                                     val longPressed: Boolean = try {
                                         withTimeout(longPressMs) {
                                             while (true) {
                                                 val event = awaitPointerEvent()
                                                 val change = event.changes.firstOrNull { it.id == down.id }
                                                     ?: continue
-                                                if (!change.pressed) return@withTimeout false
+                                                if (!change.pressed) {
+                                                    releasedOrMoved = true
+                                                    break
+                                                }
                                                 val moved = (change.position - downPos).getDistance()
-                                                if (moved > touchSlop) return@withTimeout false
+                                                if (moved > touchSlop) {
+                                                    releasedOrMoved = true
+                                                    break
+                                                }
                                             }
-                                            @Suppress("UNREACHABLE_CODE") false
                                         }
+                                        !releasedOrMoved
                                     } catch (_: PointerEventTimeoutCancellationException) {
                                         true
                                     }

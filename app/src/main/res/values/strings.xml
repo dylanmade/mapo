@@ -34,4 +34,71 @@
     <string name="blocklist_header">Apps Mapo will never prompt you about</string>
     <string name="blocklist_empty">No apps blocked. When you tap “Never for this app” on a prompt, the app will appear here.</string>
     <string name="blocklist_remove">Remove from blocklist</string>
+
+    <!-- Tab action dialogs (TabActionDialogHost). Used across the keyboard tab dialog tree. -->
+    <string name="dialog_cancel">Cancel</string>
+    <string name="dialog_back">Back</string>
+    <string name="dialog_clear">Clear</string>
+    <string name="dialog_filter_label">Filter</string>
+
+    <string name="tab_dialog_reset_title">Reset “%1$s”?</string>
+    <string name="tab_dialog_reset_text">“%1$s” will revert to its original layout and settings (“%2$s”). This cannot be undone.</string>
+    <string name="tab_dialog_reset_confirm">Reset “%1$s”</string>
+
+    <string name="tab_dialog_remove_title">Remove “%1$s”?</string>
+    <string name="tab_dialog_remove_text">The “%1$s” keyboard will be removed from the “%2$s” profile. This cannot be undone.</string>
+    <string name="tab_dialog_remove_confirm">Remove “%1$s”</string>
+
+    <string name="tab_dialog_resize_conflict_title">New keyboard size won\'t fit some buttons</string>
+    <string name="tab_dialog_resize_conflict_text">The new keyboard size will not fit the following buttons: %1$s. What would you like to do?</string>
+    <string name="tab_dialog_resize_conflict_try">Try auto-resizing</string>
+    <string name="tab_dialog_resize_conflict_cancel">Cancel resizing</string>
+
+    <string name="tab_dialog_save_template_title">Save keyboard template</string>
+    <string name="tab_dialog_save_as_new_template">Save as new keyboard template</string>
+    <string name="tab_dialog_update_existing_template">Update existing keyboard template</string>
+    <string name="tab_dialog_template_name_label">Template name</string>
+    <string name="tab_dialog_save_template_confirm">Save “%1$s”</string>
+
+    <string name="tab_dialog_update_template_title">Update keyboard template</string>
+    <string name="tab_dialog_no_saved_templates">No saved templates yet.</string>
+    <string name="tab_dialog_no_templates_match">No templates match “%1$s”.</string>
+    <string name="tab_dialog_template_dimensions">%1$d×%2$d, %3$d buttons</string>
+
+    <string name="tab_dialog_update_confirm_title">Update “%1$s” template?</string>
+    <string name="tab_dialog_update_confirm_text">The current “%1$s” template will be replaced. This cannot be undone.</string>
+    <string name="tab_dialog_update_confirm_button">Update “%1$s”</string>
+
+    <string name="tab_dialog_name_conflict_title">“%1$s” template already exists</string>
+    <string name="tab_dialog_name_conflict_text">A keyboard template with the name “%1$s” already exists. What would you like to do?</string>
+    <string name="tab_dialog_name_conflict_choose_different">Choose a different name</string>
+    <string name="tab_dialog_name_conflict_update_existing">Update “%1$s” template</string>
+    <string name="tab_dialog_name_conflict_cancel">Cancel saving</string>
+
+    <string name="tab_dialog_add_keyboard_title">Add keyboard</string>
+    <string name="tab_dialog_add_blank">Add a blank keyboard</string>
+    <string name="tab_dialog_add_from_template">Copy a keyboard from templates</string>
+    <string name="tab_dialog_add_from_profile">Copy a keyboard from another profile</string>
+
+    <string name="tab_dialog_add_from_template_title">Add from template</string>
+    <string name="tab_dialog_no_templates_available">No templates available.</string>
+
+    <string name="tab_dialog_pick_profile_title">Pick a profile</string>
+    <string name="tab_dialog_no_other_profiles">No other profiles available.</string>
+
+    <string name="tab_dialog_remove_button_title">Delete button?</string>
+    <string name="tab_dialog_remove_button_fallback">this button</string>
+    <string name="tab_dialog_remove_button_text">“%1$s” will be removed from this keyboard. This cannot be undone.</string>
+    <string name="tab_dialog_remove_button_confirm">Delete</string>
+
+    <string name="tab_dialog_pick_keyboard_title">Pick a keyboard from “%1$s”</string>
+    <string name="tab_dialog_no_keyboards_in_profile">No keyboards in this profile.</string>
+
+    <string name="tab_dialog_configure_title">Configure keyboard</string>
+    <string name="tab_dialog_configure_name_label">Name</string>
+    <string name="tab_dialog_configure_background_color">Background color</string>
+    <string name="tab_dialog_configure_rows">Rows</string>
+    <string name="tab_dialog_configure_columns">Columns</string>
+    <string name="tab_dialog_configure_reset">Reset keyboard</string>
+    <string name="tab_dialog_configure_apply">Apply</string>
 </resources>

@@ -1,7 +1,6 @@
 package com.mapo.ui.screen
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -20,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -131,6 +131,7 @@ private fun CategoryList(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CategoryRow(
     label: String,
@@ -139,21 +140,21 @@ private fun CategoryRow(
     onClick: () -> Unit
 ) {
     ListItem(
-        headlineContent = { Text(label) },
+        onClick = onClick,
         trailingContent = if (showChevron) {
             { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) }
         } else null,
         leadingContent = if (selected) {
             { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
         } else null,
-        modifier = Modifier.clickable(onClick = onClick),
         colors = ListItemDefaults.colors(
             containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
                              else MaterialTheme.colorScheme.surface
         )
-    )
+    ) { Text(label) }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun FilteredInputList(
     options: ImmutableList<InputOption>,
@@ -189,16 +190,15 @@ private fun FilteredInputList(
                 itemsIndexed(filtered) { index, option ->
                     val isSelected = option.target == current
                     ListItem(
-                        headlineContent = { Text(option.label) },
+                        onClick = { onSelect(option.target) },
                         leadingContent = if (isSelected) {
                             { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
                         } else null,
-                        modifier = Modifier.clickable { onSelect(option.target) },
                         colors = ListItemDefaults.colors(
                             containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
                                              else MaterialTheme.colorScheme.surfaceContainer
                         )
-                    )
+                    ) { Text(option.label) }
                     if (index < filtered.lastIndex) HorizontalDivider()
                 }
             }

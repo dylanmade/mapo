@@ -29,11 +29,49 @@ class AutoSwitchSettingsTest {
         settings = AutoSwitchSettings(context)
     }
 
+    /**
+     * Construct settings with the launcher seed already marked complete + ignored set
+     * cleared, so add/remove tests can assert against small focused sets without the
+     * 20-entry default seed muddying the comparison.
+     */
+    private fun freshUnseededSettings(): AutoSwitchSettings {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences("mapo_settings", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .putBoolean("blocklist_seeded_v1", true)
+            .commit()
+        return AutoSwitchSettings(context)
+    }
+
     @Test
-    fun defaults_autoSwitchAndAutoCreateOn_ignoredEmpty() {
+    fun defaults_autoSwitchAndAutoCreateOn_blocklistSeededWithLaunchers() {
         assertTrue(settings.autoSwitchEnabled.value)
         assertTrue(settings.autoCreateProfilesEnabled.value)
-        assertEquals(emptySet<String>(), settings.ignoredPackages.value)
+        // Seed includes AOSP launcher3 and Pixel Launcher; spot-check both.
+        assertTrue(
+            "com.android.launcher3 should be seeded into the blocklist",
+            "com.android.launcher3" in settings.ignoredPackages.value,
+        )
+        assertTrue(
+            "Pixel Launcher should be seeded into the blocklist",
+            "com.google.android.apps.nexuslauncher" in settings.ignoredPackages.value,
+        )
+    }
+
+    @Test
+    fun seedRunsOnce_userRemovedLauncher_isNotResurrected() {
+        // Remove a seeded entry through normal API.
+        settings.removeIgnoredPackage("com.android.launcher3")
+        assertFalse("com.android.launcher3" in settings.ignoredPackages.value)
+
+        // A fresh AutoSwitchSettings instance reading the same prefs must NOT re-add it
+        // (seed flag is sticky once set on first launch).
+        val reread = AutoSwitchSettings(ApplicationProvider.getApplicationContext())
+        assertFalse(
+            "removed launcher should not be re-seeded by a later instance",
+            "com.android.launcher3" in reread.ignoredPackages.value,
+        )
     }
 
     @Test
@@ -57,13 +95,14 @@ class AutoSwitchSettingsTest {
 
     @Test
     fun addIgnoredPackage_addsToFlowAndPersists() {
-        settings.addIgnoredPackage("com.example.foo")
-        assertEquals(setOf("com.example.foo"), settings.ignoredPackages.value)
+        val s = freshUnseededSettings()
+        s.addIgnoredPackage("com.example.foo")
+        assertEquals(setOf("com.example.foo"), s.ignoredPackages.value)
 
-        settings.addIgnoredPackage("com.example.bar")
+        s.addIgnoredPackage("com.example.bar")
         assertEquals(
             setOf("com.example.foo", "com.example.bar"),
-            settings.ignoredPackages.value,
+            s.ignoredPackages.value,
         )
 
         val reread = AutoSwitchSettings(ApplicationProvider.getApplicationContext())
@@ -75,24 +114,27 @@ class AutoSwitchSettingsTest {
 
     @Test
     fun addIgnoredPackage_isIdempotent() {
-        settings.addIgnoredPackage("com.example.foo")
-        settings.addIgnoredPackage("com.example.foo")
-        assertEquals(setOf("com.example.foo"), settings.ignoredPackages.value)
+        val s = freshUnseededSettings()
+        s.addIgnoredPackage("com.example.foo")
+        s.addIgnoredPackage("com.example.foo")
+        assertEquals(setOf("com.example.foo"), s.ignoredPackages.value)
     }
 
     @Test
     fun removeIgnoredPackage_removesAndPersists() {
-        settings.addIgnoredPackage("com.example.foo")
-        settings.addIgnoredPackage("com.example.bar")
+        val s = freshUnseededSettings()
+        s.addIgnoredPackage("com.example.foo")
+        s.addIgnoredPackage("com.example.bar")
 
-        settings.removeIgnoredPackage("com.example.foo")
-        assertEquals(setOf("com.example.bar"), settings.ignoredPackages.value)
+        s.removeIgnoredPackage("com.example.foo")
+        assertEquals(setOf("com.example.bar"), s.ignoredPackages.value)
     }
 
     @Test
     fun removeIgnoredPackage_missingPackage_isNoOp() {
-        settings.addIgnoredPackage("com.example.foo")
-        settings.removeIgnoredPackage("com.example.never.added")
-        assertEquals(setOf("com.example.foo"), settings.ignoredPackages.value)
+        val s = freshUnseededSettings()
+        s.addIgnoredPackage("com.example.foo")
+        s.removeIgnoredPackage("com.example.never.added")
+        assertEquals(setOf("com.example.foo"), s.ignoredPackages.value)
     }
 }

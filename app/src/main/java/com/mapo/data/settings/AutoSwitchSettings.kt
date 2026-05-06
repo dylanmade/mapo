@@ -52,7 +52,25 @@ class AutoSwitchSettings @Inject constructor(
     }
 
     init {
+        seedDefaultBlocklistIfNeeded()
         prefs.registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    /**
+     * On first launch, union the default launcher set into the blocklist. The seeded flag is
+     * sticky: if the user later removes a seeded entry it stays removed across re-installs of
+     * the same data dir / future settings re-instantiations. (A new seeded-flag key with a
+     * different version suffix would let us add more defaults later without resurrecting
+     * user-removed entries.)
+     */
+    private fun seedDefaultBlocklistIfNeeded() {
+        if (prefs.getBoolean(KEY_BLOCKLIST_SEEDED, false)) return
+        val seeded = _ignoredPackages.value + DEFAULT_BLOCKED_LAUNCHERS
+        prefs.edit()
+            .putStringSet(KEY_IGNORED_PACKAGES, seeded)
+            .putBoolean(KEY_BLOCKLIST_SEEDED, true)
+            .apply()
+        _ignoredPackages.value = seeded
     }
 
     fun setAutoSwitchEnabled(enabled: Boolean) {
@@ -78,5 +96,42 @@ class AutoSwitchSettings @Inject constructor(
         private const val KEY_AUTO_SWITCH_ENABLED = "auto_switch_enabled"
         private const val KEY_AUTO_CREATE_PROFILES_ENABLED = "auto_create_profiles_enabled"
         private const val KEY_IGNORED_PACKAGES = "ignored_packages"
+        private const val KEY_BLOCKLIST_SEEDED = "blocklist_seeded_v1"
+
+        /**
+         * Pre-populated blocklist of stock OEM and popular custom launcher packages.
+         * `ForegroundAppFilter` already excludes the *resolved default* launcher, but on
+         * dual-display devices the launcher can briefly grab focus during app-switch
+         * animations on the primary screen, slipping past that filter; the blocklist
+         * acts as a final defense so we never prompt to bind a profile to one.
+         */
+        private val DEFAULT_BLOCKED_LAUNCHERS: Set<String> = setOf(
+            // Google / AOSP
+            "com.android.launcher3",
+            "com.google.android.apps.nexuslauncher",
+            // OEMs
+            "com.sec.android.app.launcher",      // Samsung One UI Home
+            "com.miui.home",                     // Xiaomi MIUI
+            "com.huawei.android.launcher",       // Huawei EMUI
+            "com.oneplus.launcher",              // OnePlus
+            "com.oppo.launcher",                 // Oppo / ColorOS
+            "com.realme.launcher",               // Realme
+            "com.vivo.launcher",                 // Vivo
+            "com.asus.launcher",                 // Asus
+            "com.lge.launcher2",                 // LG (older)
+            "com.lge.launcher3",                 // LG (newer)
+            "com.motorola.launcher3",            // Motorola
+            "com.sonyericsson.home",             // Sony
+            "com.transsion.hilauncher",          // Tecno / Infinix
+            // Popular replacements
+            "org.lineageos.trebuchet",           // LineageOS Trebuchet
+            "com.teslacoilsw.launcher",          // Nova
+            "com.microsoft.launcher",            // Microsoft
+            "ginlemon.flowerfree",               // Smart Launcher (free)
+            "ginlemon.flowerpro",                // Smart Launcher (pro)
+            "com.actionlauncher.playstore",      // Action Launcher
+            "is.shortcut",                       // Niagara
+            "app.lawnchair",                     // Lawnchair
+        )
     }
 }

@@ -182,6 +182,7 @@ fun KeyboardTabBar(
                                 val longPressMs = viewConfiguration.longPressTimeoutMillis
                                 val downPos = down.position
 
+                                var releasedOrMoved = false
                                 val longPressed: Boolean = try {
                                     withTimeout(longPressMs) {
                                         while (true) {
@@ -190,15 +191,17 @@ fun KeyboardTabBar(
                                                 ?: continue
                                             if (!change.pressed) {
                                                 change.consume()
-                                                return@withTimeout false
+                                                releasedOrMoved = true
+                                                break
                                             }
                                             val moved = (change.position - downPos).getDistance()
                                             if (moved > touchSlop) {
-                                                return@withTimeout false
+                                                releasedOrMoved = true
+                                                break
                                             }
                                         }
-                                        @Suppress("UNREACHABLE_CODE") false
                                     }
+                                    !releasedOrMoved
                                 } catch (_: PointerEventTimeoutCancellationException) {
                                     true
                                 }

@@ -1,6 +1,5 @@
 package com.mapo.ui.screen.keyboard
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +20,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -35,8 +35,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.mapo.R
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.Profile
 import com.mapo.data.model.TemplateRef
@@ -49,6 +51,7 @@ import kotlinx.collections.immutable.ImmutableList
  * Top-level dispatcher for the keyboard tab action dialog tree. MainScreen passes the current
  * state and a setter; this composable picks the appropriate dialog and renders it.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TabActionDialogHost(
     state: TabActionDialog?,
@@ -94,12 +97,9 @@ fun TabActionDialogHost(
         )
         is TabActionDialog.ResetConfirm -> AlertDialog(
             onDismissRequest = { onStateChange(s.configDraft) },
-            title = { Text("Reset \"${s.currentName}\"?") },
+            title = { Text(stringResource(R.string.tab_dialog_reset_title, s.currentName)) },
             text = {
-                Text(
-                    "\"${s.currentName}\" will revert to its original layout and settings " +
-                            "(\"${s.originalName}\"). This cannot be undone."
-                )
+                Text(stringResource(R.string.tab_dialog_reset_text, s.currentName, s.originalName))
             },
             confirmButton = {
                 TextButton(
@@ -110,7 +110,7 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.error
                     )
-                ) { Text("Reset \"${s.currentName}\"") }
+                ) { Text(stringResource(R.string.tab_dialog_reset_confirm, s.currentName)) }
             },
             dismissButton = {
                 TextButton(
@@ -118,17 +118,14 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.dialog_cancel)) }
             }
         )
         is TabActionDialog.RemoveConfirm -> AlertDialog(
             onDismissRequest = { onStateChange(null) },
-            title = { Text("Remove \"${s.name}\"?") },
+            title = { Text(stringResource(R.string.tab_dialog_remove_title, s.name)) },
             text = {
-                Text(
-                    "The \"${s.name}\" keyboard will be removed from the \"${s.profileName}\" " +
-                            "profile. This cannot be undone."
-                )
+                Text(stringResource(R.string.tab_dialog_remove_text, s.name, s.profileName))
             },
             confirmButton = {
                 TextButton(
@@ -139,7 +136,7 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.error
                     )
-                ) { Text("Remove \"${s.name}\"") }
+                ) { Text(stringResource(R.string.tab_dialog_remove_confirm, s.name)) }
             },
             dismissButton = {
                 TextButton(
@@ -147,16 +144,18 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.dialog_cancel)) }
             }
         )
         is TabActionDialog.ResizeConflict -> AlertDialog(
             onDismissRequest = { onStateChange(s.draft) },
-            title = { Text("New keyboard size won't fit some buttons") },
+            title = { Text(stringResource(R.string.tab_dialog_resize_conflict_title)) },
             text = {
                 Text(
-                    "The new keyboard size will not fit the following buttons: " +
-                            s.offendingLabels.joinToString(", ") + ". What would you like to do?"
+                    stringResource(
+                        R.string.tab_dialog_resize_conflict_text,
+                        s.offendingLabels.joinToString(", "),
+                    )
                 )
             },
             confirmButton = {
@@ -174,7 +173,7 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.error
                     )
-                ) { Text("Try auto-resizing") }
+                ) { Text(stringResource(R.string.tab_dialog_resize_conflict_try)) }
             },
             dismissButton = {
                 TextButton(
@@ -182,19 +181,16 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                ) { Text("Cancel resizing") }
+                ) { Text(stringResource(R.string.tab_dialog_resize_conflict_cancel)) }
             }
         )
         is TabActionDialog.SaveTemplateChooser -> AlertDialog(
             onDismissRequest = { onTemplateSaveCanceled() },
-            title = { Text("Save keyboard template") },
+            title = { Text(stringResource(R.string.tab_dialog_save_template_title)) },
             text = {
                 Column {
                     ListItem(
-                        headlineContent = { Text("Save as new keyboard template") },
-                        leadingContent = { Icon(Icons.Default.Add, contentDescription = null) },
-                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        modifier = Modifier.fillMaxWidth().clickableListItem {
+                        onClick = {
                             onStateChange(
                                 TabActionDialog.SaveAsNewTemplate(
                                     layoutId = s.layoutId,
@@ -202,13 +198,13 @@ fun TabActionDialogHost(
                                     templateName = s.keyboardName
                                 )
                             )
-                        }
-                    )
-                    ListItem(
-                        headlineContent = { Text("Update existing keyboard template") },
-                        leadingContent = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingContent = { Icon(Icons.Default.Add, contentDescription = null) },
                         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        modifier = Modifier.fillMaxWidth().clickableListItem {
+                    ) { Text(stringResource(R.string.tab_dialog_save_as_new_template)) }
+                    ListItem(
+                        onClick = {
                             onStateChange(
                                 TabActionDialog.UpdateExistingTemplate(
                                     layoutId = s.layoutId,
@@ -216,8 +212,11 @@ fun TabActionDialogHost(
                                     filter = s.keyboardName
                                 )
                             )
-                        }
-                    )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingContent = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    ) { Text(stringResource(R.string.tab_dialog_update_existing_template)) }
                 }
             },
             confirmButton = {},
@@ -227,24 +226,24 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.dialog_cancel)) }
             }
         )
         is TabActionDialog.SaveAsNewTemplate -> {
             var name by remember(s.layoutId) { mutableStateOf(s.templateName) }
             AlertDialog(
                 onDismissRequest = { onTemplateSaveCanceled() },
-                title = { Text("Save keyboard template") },
+                title = { Text(stringResource(R.string.tab_dialog_save_template_title)) },
                 text = {
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("Template name") },
+                        label = { Text(stringResource(R.string.tab_dialog_template_name_label)) },
                         singleLine = true,
                         trailingIcon = {
                             if (name.isNotEmpty()) {
                                 IconButton(onClick = { name = "" }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                    Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.dialog_clear))
                                 }
                             }
                         }
@@ -256,7 +255,7 @@ fun TabActionDialogHost(
                         onClick = {
                             onSaveAsNewTemplate(s.layoutId, name.trim())
                         }
-                    ) { Text("Save \"${s.keyboardName}\"") }
+                    ) { Text(stringResource(R.string.tab_dialog_save_template_confirm, s.keyboardName)) }
                 },
                 dismissButton = {
                     TextButton(
@@ -264,7 +263,7 @@ fun TabActionDialogHost(
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    ) { Text("Cancel") }
+                    ) { Text(stringResource(R.string.dialog_cancel)) }
                 }
             )
         }
@@ -276,18 +275,18 @@ fun TabActionDialogHost(
             }
             AlertDialog(
                 onDismissRequest = { onTemplateSaveCanceled() },
-                title = { Text("Update keyboard template") },
+                title = { Text(stringResource(R.string.tab_dialog_update_template_title)) },
                 text = {
                     Column {
                         OutlinedTextField(
                             value = filter,
                             onValueChange = { filter = it },
-                            label = { Text("Filter") },
+                            label = { Text(stringResource(R.string.dialog_filter_label)) },
                             singleLine = true,
                             trailingIcon = {
                                 if (filter.isNotEmpty()) {
                                     IconButton(onClick = { filter = "" }) {
-                                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                        Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.dialog_clear))
                                     }
                                 }
                             },
@@ -296,19 +295,15 @@ fun TabActionDialogHost(
                         Spacer(Modifier.height(8.dp))
                         if (matches.isEmpty()) {
                             Text(
-                                if (userTemplates.isEmpty()) "No saved templates yet."
-                                else "No templates match \"$filter\".",
+                                if (userTemplates.isEmpty()) stringResource(R.string.tab_dialog_no_saved_templates)
+                                else stringResource(R.string.tab_dialog_no_templates_match, filter),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
                             LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
                                 items(matches, key = { it.id }) { template ->
                                     ListItem(
-                                        headlineContent = { Text(template.name) },
-                                        supportingContent = {
-                                            Text("${template.columns}×${template.rows}, ${template.buttons.size} buttons")
-                                        },
-                                        modifier = Modifier.fillMaxWidth().clickableListItem {
+                                        onClick = {
                                             onStateChange(
                                                 TabActionDialog.UpdateTemplateConfirm(
                                                     layoutId = s.layoutId,
@@ -317,8 +312,19 @@ fun TabActionDialogHost(
                                                     previous = s
                                                 )
                                             )
-                                        }
-                                    )
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        supportingContent = {
+                                            Text(
+                                                stringResource(
+                                                    R.string.tab_dialog_template_dimensions,
+                                                    template.columns,
+                                                    template.rows,
+                                                    template.buttons.size,
+                                                )
+                                            )
+                                        },
+                                    ) { Text(template.name) }
                                 }
                             }
                         }
@@ -331,18 +337,15 @@ fun TabActionDialogHost(
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    ) { Text("Cancel") }
+                    ) { Text(stringResource(R.string.dialog_cancel)) }
                 }
             )
         }
         is TabActionDialog.UpdateTemplateConfirm -> AlertDialog(
             onDismissRequest = { onStateChange(s.previous) },
-            title = { Text("Update \"${s.target.name}\" template?") },
+            title = { Text(stringResource(R.string.tab_dialog_update_confirm_title, s.target.name)) },
             text = {
-                Text(
-                    "The current \"${s.target.name}\" template will be replaced. " +
-                            "This cannot be undone."
-                )
+                Text(stringResource(R.string.tab_dialog_update_confirm_text, s.target.name))
             },
             confirmButton = {
                 TextButton(
@@ -353,7 +356,7 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.error
                     )
-                ) { Text("Update \"${s.target.name}\"") }
+                ) { Text(stringResource(R.string.tab_dialog_update_confirm_button, s.target.name)) }
             },
             dismissButton = {
                 TextButton(
@@ -361,19 +364,16 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                ) { Text("Back") }
+                ) { Text(stringResource(R.string.dialog_back)) }
             }
         )
         is TabActionDialog.TemplateNameConflict -> {
             val existingUser = s.existing as? TemplateRef.User
             AlertDialog(
                 onDismissRequest = { onTemplateSaveCanceled() },
-                title = { Text("\"${s.templateName}\" template already exists") },
+                title = { Text(stringResource(R.string.tab_dialog_name_conflict_title, s.templateName)) },
                 text = {
-                    Text(
-                        "A keyboard template with the name \"${s.templateName}\" already " +
-                                "exists. What would you like to do?"
-                    )
+                    Text(stringResource(R.string.tab_dialog_name_conflict_text, s.templateName))
                 },
                 confirmButton = {
                     Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
@@ -387,7 +387,7 @@ fun TabActionDialogHost(
                                     )
                                 )
                             }
-                        ) { Text("Choose a different name") }
+                        ) { Text(stringResource(R.string.tab_dialog_name_conflict_choose_different)) }
                         if (existingUser != null) {
                             TextButton(
                                 onClick = {
@@ -403,7 +403,14 @@ fun TabActionDialogHost(
                                 colors = ButtonDefaults.textButtonColors(
                                     contentColor = MaterialTheme.colorScheme.error
                                 )
-                            ) { Text("Update \"${s.templateName}\" template") }
+                            ) {
+                                Text(
+                                    stringResource(
+                                        R.string.tab_dialog_name_conflict_update_existing,
+                                        s.templateName,
+                                    )
+                                )
+                            }
                         }
                     }
                 },
@@ -413,40 +420,36 @@ fun TabActionDialogHost(
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    ) { Text("Cancel saving") }
+                    ) { Text(stringResource(R.string.tab_dialog_name_conflict_cancel)) }
                 }
             )
         }
         is TabActionDialog.AddKeyboardChooser -> AlertDialog(
             onDismissRequest = { onStateChange(null) },
-            title = { Text("Add keyboard") },
+            title = { Text(stringResource(R.string.tab_dialog_add_keyboard_title)) },
             text = {
                 Column {
                     ListItem(
-                        headlineContent = { Text("Add a blank keyboard") },
-                        leadingContent = { Icon(Icons.Default.Add, contentDescription = null) },
-                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        modifier = Modifier.fillMaxWidth().clickableListItem {
+                        onClick = {
                             onAddBlankKeyboard()
                             onStateChange(null)
-                        }
-                    )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingContent = { Icon(Icons.Default.Add, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    ) { Text(stringResource(R.string.tab_dialog_add_blank)) }
                     ListItem(
-                        headlineContent = { Text("Copy a keyboard from templates") },
+                        onClick = { onStateChange(TabActionDialog.AddFromTemplate) },
+                        modifier = Modifier.fillMaxWidth(),
                         leadingContent = { Icon(Icons.Default.Bookmark, contentDescription = null) },
                         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        modifier = Modifier.fillMaxWidth().clickableListItem {
-                            onStateChange(TabActionDialog.AddFromTemplate)
-                        }
-                    )
+                    ) { Text(stringResource(R.string.tab_dialog_add_from_template)) }
                     ListItem(
-                        headlineContent = { Text("Copy a keyboard from another profile") },
+                        onClick = { onStateChange(TabActionDialog.AddFromProfile) },
+                        modifier = Modifier.fillMaxWidth(),
                         leadingContent = { Icon(Icons.Default.Person, contentDescription = null) },
                         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        modifier = Modifier.fillMaxWidth().clickableListItem {
-                            onStateChange(TabActionDialog.AddFromProfile)
-                        }
-                    )
+                    ) { Text(stringResource(R.string.tab_dialog_add_from_profile)) }
                 }
             },
             confirmButton = {},
@@ -456,7 +459,7 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.dialog_cancel)) }
             }
         )
         is TabActionDialog.AddFromTemplate -> {
@@ -467,18 +470,18 @@ fun TabActionDialogHost(
             }
             AlertDialog(
                 onDismissRequest = { onStateChange(null) },
-                title = { Text("Add from template") },
+                title = { Text(stringResource(R.string.tab_dialog_add_from_template_title)) },
                 text = {
                     Column {
                         OutlinedTextField(
                             value = filter,
                             onValueChange = { filter = it },
-                            label = { Text("Filter") },
+                            label = { Text(stringResource(R.string.dialog_filter_label)) },
                             singleLine = true,
                             trailingIcon = {
                                 if (filter.isNotEmpty()) {
                                     IconButton(onClick = { filter = "" }) {
-                                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                        Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.dialog_clear))
                                     }
                                 }
                             },
@@ -487,23 +490,30 @@ fun TabActionDialogHost(
                         Spacer(Modifier.height(8.dp))
                         if (matches.isEmpty()) {
                             Text(
-                                if (allTemplates.isEmpty()) "No templates available."
-                                else "No templates match \"$filter\".",
+                                if (allTemplates.isEmpty()) stringResource(R.string.tab_dialog_no_templates_available)
+                                else stringResource(R.string.tab_dialog_no_templates_match, filter),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
                             LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
                                 items(matches, key = { templateKey(it) }) { template ->
                                     ListItem(
-                                        headlineContent = { Text(template.name) },
-                                        supportingContent = {
-                                            Text("${template.columns}×${template.rows}, ${template.buttons.size} buttons")
-                                        },
-                                        modifier = Modifier.fillMaxWidth().clickableListItem {
+                                        onClick = {
                                             onAddFromTemplate(template)
                                             onStateChange(null)
-                                        }
-                                    )
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        supportingContent = {
+                                            Text(
+                                                stringResource(
+                                                    R.string.tab_dialog_template_dimensions,
+                                                    template.columns,
+                                                    template.rows,
+                                                    template.buttons.size,
+                                                )
+                                            )
+                                        },
+                                    ) { Text(template.name) }
                                 }
                             }
                         }
@@ -516,7 +526,7 @@ fun TabActionDialogHost(
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    ) { Text("Cancel") }
+                    ) { Text(stringResource(R.string.dialog_cancel)) }
                 }
             )
         }
@@ -526,27 +536,27 @@ fun TabActionDialogHost(
             }
             AlertDialog(
                 onDismissRequest = { onStateChange(null) },
-                title = { Text("Pick a profile") },
+                title = { Text(stringResource(R.string.tab_dialog_pick_profile_title)) },
                 text = {
                     if (otherProfiles.isEmpty()) {
                         Text(
-                            "No other profiles available.",
+                            stringResource(R.string.tab_dialog_no_other_profiles),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
                         LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
                             items(otherProfiles, key = { it.id }) { profile ->
                                 ListItem(
-                                    headlineContent = { Text(profile.name) },
-                                    modifier = Modifier.fillMaxWidth().clickableListItem {
+                                    onClick = {
                                         onStateChange(
                                             TabActionDialog.AddFromProfileLayout(
                                                 profileId = profile.id,
                                                 profileName = profile.name
                                             )
                                         )
-                                    }
-                                )
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text(profile.name) }
                             }
                         }
                     }
@@ -558,16 +568,17 @@ fun TabActionDialogHost(
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    ) { Text("Cancel") }
+                    ) { Text(stringResource(R.string.dialog_cancel)) }
                 }
             )
         }
         is TabActionDialog.RemoveButtonConfirm -> AlertDialog(
             onDismissRequest = { onStateChange(null) },
-            title = { Text("Delete button?") },
+            title = { Text(stringResource(R.string.tab_dialog_remove_button_title)) },
             text = {
-                val label = s.buttonLabel.ifBlank { "this button" }
-                Text("\"$label\" will be removed from this keyboard. This cannot be undone.")
+                val fallback = stringResource(R.string.tab_dialog_remove_button_fallback)
+                val label = s.buttonLabel.ifBlank { fallback }
+                Text(stringResource(R.string.tab_dialog_remove_button_text, label))
             },
             confirmButton = {
                 TextButton(
@@ -578,7 +589,7 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.error
                     )
-                ) { Text("Delete") }
+                ) { Text(stringResource(R.string.tab_dialog_remove_button_confirm)) }
             },
             dismissButton = {
                 TextButton(
@@ -586,7 +597,7 @@ fun TabActionDialogHost(
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.dialog_cancel)) }
             }
         )
         is TabActionDialog.AddFromProfileLayout -> {
@@ -596,26 +607,33 @@ fun TabActionDialogHost(
             }
             AlertDialog(
                 onDismissRequest = { onStateChange(null) },
-                title = { Text("Pick a keyboard from \"${s.profileName}\"") },
+                title = { Text(stringResource(R.string.tab_dialog_pick_keyboard_title, s.profileName)) },
                 text = {
                     if (profileLayouts.isEmpty()) {
                         Text(
-                            "No keyboards in this profile.",
+                            stringResource(R.string.tab_dialog_no_keyboards_in_profile),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
                         LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
                             items(profileLayouts, key = { it.id }) { layout ->
                                 ListItem(
-                                    headlineContent = { Text(layout.name) },
-                                    supportingContent = {
-                                        Text("${layout.columns}×${layout.rows}, ${layout.buttons.size} buttons")
-                                    },
-                                    modifier = Modifier.fillMaxWidth().clickableListItem {
+                                    onClick = {
                                         onAddFromProfile(layout.id)
                                         onStateChange(null)
-                                    }
-                                )
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    supportingContent = {
+                                        Text(
+                                            stringResource(
+                                                R.string.tab_dialog_template_dimensions,
+                                                layout.columns,
+                                                layout.rows,
+                                                layout.buttons.size,
+                                            )
+                                        )
+                                    },
+                                ) { Text(layout.name) }
                             }
                         }
                     }
@@ -627,7 +645,7 @@ fun TabActionDialogHost(
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    ) { Text("Back") }
+                    ) { Text(stringResource(R.string.dialog_back)) }
                 }
             )
         }
@@ -653,7 +671,7 @@ private fun ConfigureKeyboardDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Configure keyboard") },
+        title = { Text(stringResource(R.string.tab_dialog_configure_title)) },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -662,12 +680,12 @@ private fun ConfigureKeyboardDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Name") },
+                    label = { Text(stringResource(R.string.tab_dialog_configure_name_label)) },
                     singleLine = true,
                     trailingIcon = {
                         if (name.isNotEmpty()) {
                             IconButton(onClick = { name = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.dialog_clear))
                             }
                         }
                     },
@@ -675,7 +693,7 @@ private fun ConfigureKeyboardDialog(
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        "Background color",
+                        stringResource(R.string.tab_dialog_configure_background_color),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -685,14 +703,14 @@ private fun ConfigureKeyboardDialog(
                     )
                 }
                 SteppedSliderWithNumberInput(
-                    label = "Rows",
+                    label = stringResource(R.string.tab_dialog_configure_rows),
                     value = rows,
                     onValueChange = { rows = it },
                     min = 1,
                     max = 20
                 )
                 SteppedSliderWithNumberInput(
-                    label = "Columns",
+                    label = stringResource(R.string.tab_dialog_configure_columns),
                     value = cols,
                     onValueChange = { cols = it },
                     min = 1,
@@ -708,7 +726,7 @@ private fun ConfigureKeyboardDialog(
                             contentColor = MaterialTheme.colorScheme.error
                         )
                     ) {
-                        Text("Reset keyboard", fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.tab_dialog_configure_reset), fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -717,7 +735,7 @@ private fun ConfigureKeyboardDialog(
             TextButton(
                 enabled = name.isNotBlank(),
                 onClick = { onApply(name.trim(), cols, rows, bgColor) }
-            ) { Text("Apply") }
+            ) { Text(stringResource(R.string.tab_dialog_configure_apply)) }
         },
         dismissButton = {
             TextButton(
@@ -725,10 +743,7 @@ private fun ConfigureKeyboardDialog(
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            ) { Text("Cancel") }
+            ) { Text(stringResource(R.string.dialog_cancel)) }
         }
     )
 }
-
-private fun Modifier.clickableListItem(onClick: () -> Unit): Modifier =
-    this.clickable(onClick = onClick)

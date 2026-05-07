@@ -43,7 +43,9 @@ import com.themestudio.core.ColorRoles
 import com.themestudio.core.LocalThemeStudioController
 import com.themestudio.core.LocalThemeStudioVariantOverride
 import com.themestudio.core.ShapeRoles
+import com.themestudio.core.TextStyleOverride
 import com.themestudio.core.TypographyRoles
+import com.themestudio.core.UmbrellaRoles
 import com.themestudio.preview.ColorRoleSwatches
 import com.themestudio.preview.MaterialComponentGallery
 import com.themestudio.preview.ShapeSpecimen
@@ -112,6 +114,7 @@ fun ThemeStudioScreen(
     var pickerTypoRole by remember { mutableStateOf<String?>(null) }
     var pickerShapeRole by remember { mutableStateOf<String?>(null) }
     var pickerFontFamilyKind by remember { mutableStateOf<FontFamilyKind?>(null) }
+    var pickerUmbrellaKind by remember { mutableStateOf<FontFamilyKind?>(null) }
 
     Scaffold(
         topBar = {
@@ -195,7 +198,7 @@ fun ThemeStudioScreen(
                                     currentName = displayName,
                                     defaultLabel = "(theme default)",
                                     previewStyle = MaterialTheme.typography.titleLarge,
-                                    onTap = { pickerFontFamilyKind = FontFamilyKind.Display },
+                                    onTap = { pickerUmbrellaKind = FontFamilyKind.Display },
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -215,7 +218,7 @@ fun ThemeStudioScreen(
                                     currentName = bodyName,
                                     defaultLabel = "(theme default)",
                                     previewStyle = MaterialTheme.typography.bodyLarge,
-                                    onTap = { pickerFontFamilyKind = FontFamilyKind.Body },
+                                    onTap = { pickerUmbrellaKind = FontFamilyKind.Body },
                                 )
                                 typographyPreview { name -> pickerTypoRole = name }
                             }
@@ -300,6 +303,43 @@ fun ThemeStudioScreen(
                     onClear = { controller.setShapeRole(role, null) },
                 )
             }
+        }
+    }
+
+    // ── Umbrella ("set-all") picker sheet ─────────────────────────────────
+    pickerUmbrellaKind?.let { kind ->
+        val umbrellaRole = when (kind) {
+            FontFamilyKind.Display -> UmbrellaRoles.display
+            FontFamilyKind.Body -> UmbrellaRoles.body
+        }
+        val familyName = when (kind) {
+            FontFamilyKind.Display -> overrides.typography.displayFontFamilyName
+            FontFamilyKind.Body -> overrides.typography.bodyFontFamilyName
+        }
+        val cascadeSummary = when (kind) {
+            FontFamilyKind.Display -> "Cascades to display, headline, title roles."
+            FontFamilyKind.Body -> "Cascades to body, label roles."
+        }
+        val baseStyle = umbrellaRole.read(MaterialTheme.typography)
+        val current = umbrellaRole.readOverride(overrides.typography)
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            sheetState = sheetState,
+            onDismissRequest = { pickerUmbrellaKind = null },
+        ) {
+            UmbrellaPickerSheet(
+                title = kind.title,
+                cascadeSummary = cascadeSummary,
+                currentFamilyName = familyName,
+                role = umbrellaRole,
+                baseStyle = baseStyle,
+                current = current,
+                onPickFamily = { pickerFontFamilyKind = kind },
+                onChange = { v -> controller.setTypographyRole(umbrellaRole, v) },
+                onClearOverrides = {
+                    controller.setTypographyRole(umbrellaRole, TextStyleOverride())
+                },
+            )
         }
     }
 

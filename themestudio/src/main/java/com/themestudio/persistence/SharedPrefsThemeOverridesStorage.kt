@@ -17,6 +17,7 @@ import com.themestudio.core.ThemeOverrides
 import com.themestudio.core.ThemeOverridesStorage
 import com.themestudio.core.TypographyOverrides
 import com.themestudio.core.TypographyRoles
+import com.themestudio.core.UmbrellaRoles
 
 /**
  * SharedPreferences-backed [ThemeOverridesStorage] for the full umbrella
@@ -88,7 +89,10 @@ class SharedPrefsThemeOverridesStorage(
             displayFontFamilyName = prefs.getString(TYPE_DISPLAY_FAMILY_KEY, null),
             bodyFontFamilyName = prefs.getString(TYPE_BODY_FAMILY_KEY, null),
         )
-        for (role in TypographyRoles.all) {
+        // Umbrella roles share the same key shape as per-role entries, so we
+        // iterate both lists with one loop. UmbrellaRoles.all entries are
+        // named "displayUmbrella" / "bodyUmbrella" — no name collision.
+        for (role in UmbrellaRoles.all + TypographyRoles.all) {
             val sizeKey = "$TYPE_PREFIX${role.name}.fontSize"
             val weightKey = "$TYPE_PREFIX${role.name}.fontWeight"
             val letterKey = "$TYPE_PREFIX${role.name}.letterSpacing"
@@ -107,7 +111,7 @@ class SharedPrefsThemeOverridesStorage(
         else edit.remove(TYPE_DISPLAY_FAMILY_KEY)
         if (overrides.bodyFontFamilyName != null) edit.putString(TYPE_BODY_FAMILY_KEY, overrides.bodyFontFamilyName)
         else edit.remove(TYPE_BODY_FAMILY_KEY)
-        for (role in TypographyRoles.all) {
+        for (role in UmbrellaRoles.all + TypographyRoles.all) {
             val o = role.readOverride(overrides)
             val sizeKey = "$TYPE_PREFIX${role.name}.fontSize"
             val weightKey = "$TYPE_PREFIX${role.name}.fontWeight"

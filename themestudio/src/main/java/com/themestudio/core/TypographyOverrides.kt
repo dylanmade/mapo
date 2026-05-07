@@ -17,18 +17,29 @@ data class TextStyleOverride(
 )
 
 /**
- * Override container for all 15 Material 3 typography roles. Each role is a
- * [TextStyleOverride]; absent fields fall through to the base [Typography].
+ * Override container for all 15 Material 3 typography roles plus two
+ * umbrella overrides (Display and Body) that cascade across role groups.
  *
- * Family overrides are umbrella-level (not per-role) because that mirrors how
- * Material 3 typescales are usually structured: one family for display/
- * headline/title, another for body/label. When a name is set, the resolved
- * Google Font replaces the base family for the matching role group; null
- * leaves each role's family untouched.
+ * Family overrides are umbrella-level because that mirrors how Material 3
+ * typescales are usually structured: one family for display/headline/title,
+ * another for body/label. The umbrella [TextStyleOverride]s extend that
+ * pattern to size/weight/tracking — set them once and they cascade across
+ * every role in the group.
+ *
+ * Cascade order (in [applyOverrides], strongest first):
+ *   1. umbrella override field (display* or body* depending on role)
+ *   2. per-role override field
+ *   3. base [Typography] value
+ *
+ * In other words an umbrella value, when set, overrides any per-role value
+ * for the same field. Per-role overrides remain stored — they reassert if
+ * the umbrella field is later cleared.
  */
 data class TypographyOverrides(
     val displayFontFamilyName: String? = null,
     val bodyFontFamilyName: String? = null,
+    val displayUmbrella: TextStyleOverride = TextStyleOverride(),
+    val bodyUmbrella: TextStyleOverride = TextStyleOverride(),
     val displayLarge: TextStyleOverride = TextStyleOverride(),
     val displayMedium: TextStyleOverride = TextStyleOverride(),
     val displaySmall: TextStyleOverride = TextStyleOverride(),
@@ -49,9 +60,9 @@ data class TypographyOverrides(
 /**
  * Returns a copy of [this] with non-null override fields applied.
  *
- * Family overrides are applied first (display family → display/headline/title,
- * body family → body/label) so that per-role TextStyleOverride values layer
- * on top of the family swap.
+ * Cascade for each [TextStyle] field is umbrella → per-role → base: when an
+ * umbrella value is set it wins over any per-role value for the same field.
+ * Family override is umbrella-only (no per-role family today).
  *
  * [resolveFamily] turns a stored name into a [FontFamily]. The default
  * resolves through GMS Fonts, which keeps non-Composable callers and unit
@@ -65,32 +76,35 @@ fun Typography.applyOverrides(
 ): Typography {
     val displayFamily = o.displayFontFamilyName?.let(resolveFamily)
     val bodyFamily = o.bodyFontFamilyName?.let(resolveFamily)
+    val du = o.displayUmbrella
+    val bu = o.bodyUmbrella
     return copy(
-        displayLarge = displayLarge.applyOverride(o.displayLarge, displayFamily),
-        displayMedium = displayMedium.applyOverride(o.displayMedium, displayFamily),
-        displaySmall = displaySmall.applyOverride(o.displaySmall, displayFamily),
-        headlineLarge = headlineLarge.applyOverride(o.headlineLarge, displayFamily),
-        headlineMedium = headlineMedium.applyOverride(o.headlineMedium, displayFamily),
-        headlineSmall = headlineSmall.applyOverride(o.headlineSmall, displayFamily),
-        titleLarge = titleLarge.applyOverride(o.titleLarge, displayFamily),
-        titleMedium = titleMedium.applyOverride(o.titleMedium, displayFamily),
-        titleSmall = titleSmall.applyOverride(o.titleSmall, displayFamily),
-        bodyLarge = bodyLarge.applyOverride(o.bodyLarge, bodyFamily),
-        bodyMedium = bodyMedium.applyOverride(o.bodyMedium, bodyFamily),
-        bodySmall = bodySmall.applyOverride(o.bodySmall, bodyFamily),
-        labelLarge = labelLarge.applyOverride(o.labelLarge, bodyFamily),
-        labelMedium = labelMedium.applyOverride(o.labelMedium, bodyFamily),
-        labelSmall = labelSmall.applyOverride(o.labelSmall, bodyFamily),
+        displayLarge = displayLarge.applyOverride(o.displayLarge, du, displayFamily),
+        displayMedium = displayMedium.applyOverride(o.displayMedium, du, displayFamily),
+        displaySmall = displaySmall.applyOverride(o.displaySmall, du, displayFamily),
+        headlineLarge = headlineLarge.applyOverride(o.headlineLarge, du, displayFamily),
+        headlineMedium = headlineMedium.applyOverride(o.headlineMedium, du, displayFamily),
+        headlineSmall = headlineSmall.applyOverride(o.headlineSmall, du, displayFamily),
+        titleLarge = titleLarge.applyOverride(o.titleLarge, du, displayFamily),
+        titleMedium = titleMedium.applyOverride(o.titleMedium, du, displayFamily),
+        titleSmall = titleSmall.applyOverride(o.titleSmall, du, displayFamily),
+        bodyLarge = bodyLarge.applyOverride(o.bodyLarge, bu, bodyFamily),
+        bodyMedium = bodyMedium.applyOverride(o.bodyMedium, bu, bodyFamily),
+        bodySmall = bodySmall.applyOverride(o.bodySmall, bu, bodyFamily),
+        labelLarge = labelLarge.applyOverride(o.labelLarge, bu, bodyFamily),
+        labelMedium = labelMedium.applyOverride(o.labelMedium, bu, bodyFamily),
+        labelSmall = labelSmall.applyOverride(o.labelSmall, bu, bodyFamily),
     )
 }
 
 private fun TextStyle.applyOverride(
-    o: TextStyleOverride,
+    role: TextStyleOverride,
+    umbrella: TextStyleOverride = TextStyleOverride(),
     familyOverride: androidx.compose.ui.text.font.FontFamily? = null,
 ): TextStyle = copy(
-    fontSize = o.fontSize ?: fontSize,
-    fontWeight = o.fontWeight ?: fontWeight,
-    letterSpacing = o.letterSpacing ?: letterSpacing,
+    fontSize = umbrella.fontSize ?: role.fontSize ?: fontSize,
+    fontWeight = umbrella.fontWeight ?: role.fontWeight ?: fontWeight,
+    letterSpacing = umbrella.letterSpacing ?: role.letterSpacing ?: letterSpacing,
     fontFamily = familyOverride ?: fontFamily,
 )
 
@@ -105,6 +119,31 @@ data class TypographyRole(
     val readOverride: (TypographyOverrides) -> TextStyleOverride,
     val withOverride: (TypographyOverrides, TextStyleOverride) -> TypographyOverrides,
 )
+
+/**
+ * Umbrella "set-all" roles. These don't correspond to a real Material 3
+ * typography role — they hook into [TypographyOverrides.displayUmbrella] /
+ * [TypographyOverrides.bodyUmbrella] and cascade across an entire role
+ * group via [applyOverrides]. The [read] callback returns a representative
+ * base style (titleLarge / bodyLarge) so the editor's live-preview line in
+ * the existing [TypographyRole]-shaped picker has something sensible to
+ * render against.
+ */
+object UmbrellaRoles {
+    val display: TypographyRole = TypographyRole(
+        name = "displayUmbrella",
+        read = { it.titleLarge },
+        readOverride = { it.displayUmbrella },
+        withOverride = { o, v -> o.copy(displayUmbrella = v) },
+    )
+    val body: TypographyRole = TypographyRole(
+        name = "bodyUmbrella",
+        read = { it.bodyLarge },
+        readOverride = { it.bodyUmbrella },
+        withOverride = { o, v -> o.copy(bodyUmbrella = v) },
+    )
+    val all: List<TypographyRole> = listOf(display, body)
+}
 
 object TypographyRoles {
     val all: List<TypographyRole> = listOf(

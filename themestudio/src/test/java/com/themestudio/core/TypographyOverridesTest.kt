@@ -108,4 +108,67 @@ class TypographyOverridesTest {
         assertEquals(base.displayLarge.fontFamily, merged.displayLarge.fontFamily)
         assertEquals(base.headlineLarge.fontFamily, merged.headlineLarge.fontFamily)
     }
+
+    @Test
+    fun applyOverrides_displayUmbrella_cascadesAcrossDisplayHeadlineTitle() {
+        val base = Typography()
+        val merged = base.applyOverrides(
+            TypographyOverrides(displayUmbrella = TextStyleOverride(fontSize = 24.sp)),
+        )
+        assertEquals(24.sp, merged.displayLarge.fontSize)
+        assertEquals(24.sp, merged.headlineMedium.fontSize)
+        assertEquals(24.sp, merged.titleSmall.fontSize)
+        // body/label unchanged
+        assertEquals(base.bodyLarge.fontSize, merged.bodyLarge.fontSize)
+        assertEquals(base.labelLarge.fontSize, merged.labelLarge.fontSize)
+    }
+
+    @Test
+    fun applyOverrides_bodyUmbrella_cascadesAcrossBodyLabel() {
+        val base = Typography()
+        val merged = base.applyOverrides(
+            TypographyOverrides(bodyUmbrella = TextStyleOverride(fontWeight = FontWeight.Bold)),
+        )
+        assertEquals(FontWeight.Bold, merged.bodyLarge.fontWeight)
+        assertEquals(FontWeight.Bold, merged.labelSmall.fontWeight)
+        // display group unchanged
+        assertEquals(base.displayLarge.fontWeight, merged.displayLarge.fontWeight)
+    }
+
+    @Test
+    fun applyOverrides_umbrella_overridesPerRoleSameField() {
+        // Umbrella beats per-role for the same field; per-role still wins for fields the umbrella leaves null.
+        val base = Typography()
+        val overrides = TypographyOverrides(
+            displayUmbrella = TextStyleOverride(fontSize = 30.sp),
+            displayLarge = TextStyleOverride(
+                fontSize = 99.sp,                // shadowed by umbrella
+                fontWeight = FontWeight.Black,   // umbrella has no weight → per-role wins
+            ),
+        )
+        val merged = base.applyOverrides(overrides)
+        assertEquals(30.sp, merged.displayLarge.fontSize)
+        assertEquals(FontWeight.Black, merged.displayLarge.fontWeight)
+    }
+
+    @Test
+    fun applyOverrides_umbrellaCleared_perRoleReasserts() {
+        val base = Typography()
+        val withBoth = TypographyOverrides(
+            displayUmbrella = TextStyleOverride(fontSize = 30.sp),
+            displayLarge = TextStyleOverride(fontSize = 99.sp),
+        )
+        val cleared = withBoth.copy(displayUmbrella = TextStyleOverride())
+        assertEquals(99.sp, base.applyOverrides(cleared).displayLarge.fontSize)
+    }
+
+    @Test
+    fun umbrellaRoles_readWriteRoundTrip() {
+        val empty = TypographyOverrides()
+        assertEquals(TextStyleOverride(), UmbrellaRoles.display.readOverride(empty))
+        val applied = UmbrellaRoles.display.withOverride(empty, TextStyleOverride(fontSize = 22.sp))
+        assertEquals(TextStyleOverride(fontSize = 22.sp), UmbrellaRoles.display.readOverride(applied))
+        // Doesn't bleed into per-role
+        assertEquals(TextStyleOverride(), applied.displayLarge)
+    }
 }

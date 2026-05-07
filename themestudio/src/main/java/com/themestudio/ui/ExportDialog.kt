@@ -32,8 +32,10 @@ import com.themestudio.core.ColorRoles
 import com.themestudio.core.LocalFontRegistry
 import com.themestudio.core.ShapeOverrides
 import com.themestudio.core.ShapeRoles
+import com.themestudio.core.TextStyleOverride
 import com.themestudio.core.ThemeOverrides
 import com.themestudio.core.TypographyOverrides
+import com.themestudio.core.TypographyRole
 import com.themestudio.core.TypographyRoles
 
 /**
@@ -121,18 +123,26 @@ private fun renderColorScheme(label: String, fnName: String, variant: ColorOverr
 }
 
 private fun renderTypography(typo: TypographyOverrides): String? {
+    // Materialize the umbrella → per-role cascade so the exported Typography
+    // is a self-contained snapshot. Consumers don't need umbrella semantics.
     val rows = TypographyRoles.all.mapNotNull { role ->
         val o = role.readOverride(typo)
-        if (o.fontSize == null && o.fontWeight == null && o.letterSpacing == null) return@mapNotNull null
+        val u = umbrellaFor(role, typo)
+        val effSize = u.fontSize ?: o.fontSize
+        val effWeight = u.fontWeight ?: o.fontWeight
+        val effLetter = u.letterSpacing ?: o.letterSpacing
+        if (effSize == null && effWeight == null && effLetter == null) return@mapNotNull null
         val fields = mutableListOf<String>()
-        o.fontSize?.let { fields += "fontSize = ${it.value.toInt()}.sp" }
-        o.fontWeight?.let { fields += "fontWeight = FontWeight(${it.weight})" }
-        o.letterSpacing?.let { fields += "letterSpacing = %.2f.sp".format(it.value) }
+        effSize?.let { fields += "fontSize = ${it.value.toInt()}.sp" }
+        effWeight?.let { fields += "fontWeight = FontWeight(${it.weight})" }
+        effLetter?.let { fields += "letterSpacing = %.2f.sp".format(it.value) }
         "    ${role.name} = ${role.name}.copy(${fields.joinToString(", ")}),"
     }
     val familyLines = buildList {
         typo.displayFontFamilyName?.let { add(familyExportLine("Display family", it)) }
         typo.bodyFontFamilyName?.let { add(familyExportLine("Body family   ", it)) }
+        if (typo.displayUmbrella.hasAny()) add(umbrellaExportLine("Display umbrella (display/headline/title)", typo.displayUmbrella))
+        if (typo.bodyUmbrella.hasAny()) add(umbrellaExportLine("Body umbrella    (body/label)            ", typo.bodyUmbrella))
         // If any selected family is a non-redistributable local font, add a
         // loud banner so anyone copying this output into a public/standalone
         // build sees the warning before they paste.
@@ -154,6 +164,27 @@ private fun renderTypography(typo: TypographyOverrides): String? {
             append(")")
         }
     }
+}
+
+private fun umbrellaFor(role: TypographyRole, typo: TypographyOverrides): TextStyleOverride {
+    val n = role.name
+    return when {
+        n.startsWith("display") || n.startsWith("headline") || n.startsWith("title") -> typo.displayUmbrella
+        n.startsWith("body") || n.startsWith("label") -> typo.bodyUmbrella
+        else -> TextStyleOverride()
+    }
+}
+
+private fun TextStyleOverride.hasAny(): Boolean =
+    fontSize != null || fontWeight != null || letterSpacing != null
+
+private fun umbrellaExportLine(label: String, o: TextStyleOverride): String {
+    val parts = buildList {
+        o.fontSize?.let { add("fontSize=${it.value.toInt()}sp") }
+        o.fontWeight?.let { add("fontWeight=${it.weight}") }
+        o.letterSpacing?.let { add("letterSpacing=%.2fsp".format(it.value)) }
+    }
+    return "// $label: ${parts.joinToString(", ")}"
 }
 
 private fun familyExportLine(label: String, name: String): String {

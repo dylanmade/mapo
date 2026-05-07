@@ -111,7 +111,7 @@ internal fun FontFamilyPickerSheet(
     onApply: (String) -> Unit,
     onClear: () -> Unit,
 ) {
-    var query by remember { mutableStateOf(currentName.orEmpty()) }
+    var query by remember { mutableStateOf("") }
     val resolve = rememberThemeFontResolver()
     val catalog = rememberGoogleFontsCatalog()
     val localFonts = remember { LocalFontRegistry.all }
@@ -141,8 +141,13 @@ internal fun FontFamilyPickerSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (currentName != null) {
-                TextButton(onClick = onClear) { Text("Clear") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (query.isNotBlank()) {
+                    TextButton(onClick = { query = "" }) { Text("Clear") }
+                }
+                if (currentName != null) {
+                    TextButton(onClick = onClear) { Text("Use default") }
+                }
             }
         }
 

@@ -1,0 +1,23 @@
+Restricted (non-redistributable) fonts
+=======================================
+
+Everything under this directory is bundled for in-house theme exploration only
+and MUST NOT ship in any standalone or public distribution of the themestudio
+module. License terms forbid redistribution.
+
+When themestudio is extracted from this repo or published as a library, this
+entire directory MUST be removed prior to publication, and the corresponding
+entries in `LocalFontRegistry` (com.themestudio.core.LocalFontFamilies) must
+be deleted along with their UI references.
+
+Inventory
+---------
+
+ppmori/
+    PP Mori — © Pangram Pangram Foundry
+    Distributed by the foundry as "Free for Personal Use v2.6".
+    Personal-use only. No commercial use, no redistribution.
+    See https://pangrampangram.com/products/mori for current terms.
+
+If you add another restricted family here, add it to this inventory and to
+`LocalFontRegistry.all` with `redistributable = false`.

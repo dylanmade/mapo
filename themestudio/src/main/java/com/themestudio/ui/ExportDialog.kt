@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.themestudio.core.ColorOverrides
 import com.themestudio.core.ColorRole
 import com.themestudio.core.ColorRoles
+import com.themestudio.core.LocalFontRegistry
 import com.themestudio.core.ShapeOverrides
 import com.themestudio.core.ShapeRoles
 import com.themestudio.core.ThemeOverrides
@@ -130,8 +131,18 @@ private fun renderTypography(typo: TypographyOverrides): String? {
         "    ${role.name} = ${role.name}.copy(${fields.joinToString(", ")}),"
     }
     val familyLines = buildList {
-        typo.displayFontFamilyName?.let { add("// Display family: ${'"'}$it${'"'} (Google Font)") }
-        typo.bodyFontFamilyName?.let { add("// Body family:    ${'"'}$it${'"'} (Google Font)") }
+        typo.displayFontFamilyName?.let { add(familyExportLine("Display family", it)) }
+        typo.bodyFontFamilyName?.let { add(familyExportLine("Body family   ", it)) }
+        // If any selected family is a non-redistributable local font, add a
+        // loud banner so anyone copying this output into a public/standalone
+        // build sees the warning before they paste.
+        val restricted = listOfNotNull(typo.displayFontFamilyName, typo.bodyFontFamilyName)
+            .mapNotNull { LocalFontRegistry.findByDisplayName(it) }
+            .filter { !it.redistributable }
+        if (restricted.isNotEmpty()) {
+            add(0, "// !! Non-redistributable font(s) selected — DO NOT ship this theme:")
+            restricted.forEach { add(1, "//    - ${it.displayName}: ${it.licenseNote}") }
+        }
     }
     if (rows.isEmpty() && familyLines.isEmpty()) return null
     return buildString {
@@ -143,6 +154,16 @@ private fun renderTypography(typo: TypographyOverrides): String? {
             append(")")
         }
     }
+}
+
+private fun familyExportLine(label: String, name: String): String {
+    val spec = LocalFontRegistry.findByDisplayName(name)
+    val source = when {
+        spec == null -> "Google Font"
+        spec.redistributable -> "local — ${spec.licenseNote}"
+        else -> "LOCAL/RESTRICTED — ${spec.licenseNote}"
+    }
+    return "// $label: \"$name\" ($source)"
 }
 
 private fun renderShapes(shapes: ShapeOverrides): String? {

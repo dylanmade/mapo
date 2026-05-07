@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,8 +34,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.themestudio.core.googleFontFamily
+import com.themestudio.core.LocalFontFamilySpec
+import com.themestudio.core.LocalFontRegistry
+import com.themestudio.core.ThemeFontResolver
 import com.themestudio.core.rememberGoogleFontsCatalog
+import com.themestudio.core.rememberThemeFontResolver
 
 /**
  * Inline card shown in the Typography tab for one family group (Display or
@@ -55,7 +59,8 @@ internal fun FamilyChooserCard(
     modifier: Modifier = Modifier,
 ) {
     val effectiveName = currentName?.takeIf { it.isNotBlank() }
-    val previewFamily = effectiveName?.let { remember(it) { googleFontFamily(it) } }
+    val resolve = rememberThemeFontResolver()
+    val previewFamily = effectiveName?.let { remember(it, resolve) { resolve(it) } }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -88,15 +93,15 @@ internal fun FamilyChooserCard(
 
 /**
  * Picker sheet body. Contents are: a search/free-text field, a "live"
- * preview of whatever's typed, and a LazyColumn of catalog fonts filtered
- * by the search. Tapping any row applies that family. Free-text input also
- * supports an "Apply" affordance when no exact catalog match exists, so
- * fonts not in the snapshot list are still reachable.
+ * preview of whatever's typed, and a LazyColumn that pins locally-bundled
+ * font families ([LocalFontRegistry]) at the top above the GMS Fonts
+ * catalog. Tapping any row applies that family. Free-text input also
+ * supports an "Apply" affordance when no exact match exists in either set.
  *
- * Catalog rows render their preview text in their own font using [rowStyle],
- * which is what triggers the on-demand GMS download. LazyColumn only
- * composes visible rows, so scrolling fast doesn't request the whole list —
- * and the LRU in [googleFontFamily] keeps memory bounded regardless.
+ * Catalog rows render their preview text in their own font via [rowStyle];
+ * that's what triggers the on-demand GMS download for Google entries.
+ * LazyColumn only composes visible rows, so scrolling fast doesn't request
+ * the whole list — and the resolver caches keep memory bounded regardless.
  */
 @Composable
 internal fun FontFamilyPickerSheet(
@@ -107,13 +112,20 @@ internal fun FontFamilyPickerSheet(
     onClear: () -> Unit,
 ) {
     var query by remember { mutableStateOf(currentName.orEmpty()) }
+    val resolve = rememberThemeFontResolver()
     val catalog = rememberGoogleFontsCatalog()
-    val filtered = remember(query, catalog) {
+    val localFonts = remember { LocalFontRegistry.all }
+    val filteredLocal = remember(query, localFonts) {
+        if (query.isBlank()) localFonts
+        else localFonts.filter { it.displayName.contains(query, ignoreCase = true) }
+    }
+    val filteredCatalog = remember(query, catalog) {
         if (query.isBlank()) catalog
         else catalog.filter { it.contains(query, ignoreCase = true) }
     }
     val trimmed = query.trim()
-    val exactMatch = catalog.any { it.equals(trimmed, ignoreCase = true) }
+    val exactMatch = catalog.any { it.equals(trimmed, ignoreCase = true) } ||
+        localFonts.any { it.displayName.equals(trimmed, ignoreCase = true) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -124,7 +136,7 @@ internal fun FontFamilyPickerSheet(
             Column(modifier = Modifier.padding(vertical = 8.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = "Pick a Google Font — fonts download on demand and the last 10 stay cached.",
+                    text = "Local fonts at top; Google Fonts download on demand.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -166,22 +178,58 @@ internal fun FontFamilyPickerSheet(
                 .fillMaxSize()
                 .heightIn(min = 200.dp),
         ) {
-            items(filtered, key = { it }) { name ->
-                FontRow(
-                    name = name,
-                    rowStyle = rowStyle,
-                    selected = name.equals(currentName, ignoreCase = true),
-                    onClick = { onApply(name) },
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (filteredLocal.isNotEmpty()) {
+                item(key = "__header_local__") { SectionHeader("Local") }
+                items(filteredLocal, key = { "local:${it.displayName}" }) { spec ->
+                    LocalFontRow(
+                        spec = spec,
+                        rowStyle = rowStyle,
+                        resolve = resolve,
+                        selected = spec.displayName.equals(currentName, ignoreCase = true),
+                        onClick = { onApply(spec.displayName) },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
+            }
+            if (filteredCatalog.isNotEmpty()) {
+                item(key = "__header_google__") { SectionHeader("Google Fonts") }
+                items(filteredCatalog, key = { "google:$it" }) { name ->
+                    FontRow(
+                        name = name,
+                        rowStyle = rowStyle,
+                        resolve = resolve,
+                        selected = name.equals(currentName, ignoreCase = true),
+                        onClick = { onApply(name) },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun FontRow(name: String, rowStyle: TextStyle, selected: Boolean, onClick: () -> Unit) {
-    val family = remember(name) { googleFontFamily(name) }
+private fun SectionHeader(label: String) {
+    Text(
+        text = label,
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+    )
+}
+
+@Composable
+private fun FontRow(
+    name: String,
+    rowStyle: TextStyle,
+    resolve: ThemeFontResolver,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val family = remember(name, resolve) { resolve(name) }
     val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer
     else MaterialTheme.colorScheme.surface
     Row(
@@ -207,6 +255,63 @@ private fun FontRow(name: String, rowStyle: TextStyle, selected: Boolean, onClic
             )
         }
     }
+}
+
+@Composable
+private fun LocalFontRow(
+    spec: LocalFontFamilySpec,
+    rowStyle: TextStyle,
+    resolve: ThemeFontResolver,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val family = remember(spec.displayName, resolve) { resolve(spec.displayName) }
+    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer
+    else MaterialTheme.colorScheme.surface
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .background(bg)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = spec.displayName,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(6.dp))
+                LicenseChip(redistributable = spec.redistributable)
+            }
+            Text(
+                text = SAMPLE,
+                style = rowStyle.copy(fontFamily = family),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LicenseChip(redistributable: Boolean) {
+    val (label, container, onContainer) = if (redistributable) {
+        Triple("Local", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+    } else {
+        Triple("Personal use only", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+    }
+    Text(
+        text = label,
+        fontSize = 9.sp,
+        color = onContainer,
+        modifier = Modifier
+            .background(container, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 private const val SAMPLE = "The quick brown fox jumps over 0123"

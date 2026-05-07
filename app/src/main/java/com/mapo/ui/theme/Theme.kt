@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import com.themestudio.core.LocalThemeStudioController
 import com.themestudio.core.LocalThemeStudioVariantOverride
 import com.themestudio.core.applyOverrides
+import com.themestudio.core.rememberThemeFontResolver
 
 private val lightScheme = lightColorScheme(
     primary = primaryLight,
@@ -104,7 +105,8 @@ fun MapoTheme(
     val variantColors =
         if (effectiveDark) overrides.colors.dark else overrides.colors.light
     val colorScheme = baseScheme.applyOverrides(variantColors)
-    val typography = AppTypography.applyOverrides(overrides.typography)
+    val fontResolver = rememberThemeFontResolver()
+    val typography = AppTypography.applyOverrides(overrides.typography, fontResolver)
     val shapes = Shapes().applyOverrides(overrides.shapes)
 
     MaterialExpressiveTheme(

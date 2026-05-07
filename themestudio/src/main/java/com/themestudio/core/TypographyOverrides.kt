@@ -52,10 +52,19 @@ data class TypographyOverrides(
  * Family overrides are applied first (display family → display/headline/title,
  * body family → body/label) so that per-role TextStyleOverride values layer
  * on top of the family swap.
+ *
+ * [resolveFamily] turns a stored name into a [FontFamily]. The default
+ * resolves through GMS Fonts, which keeps non-Composable callers and unit
+ * tests working unchanged. Composable call sites (notably MapoTheme) should
+ * pass `rememberThemeFontResolver()` so asset-bundled families in
+ * [LocalFontRegistry] resolve too.
  */
-fun Typography.applyOverrides(o: TypographyOverrides): Typography {
-    val displayFamily = o.displayFontFamilyName?.let(::googleFontFamily)
-    val bodyFamily = o.bodyFontFamilyName?.let(::googleFontFamily)
+fun Typography.applyOverrides(
+    o: TypographyOverrides,
+    resolveFamily: ThemeFontResolver = ::googleFontFamily,
+): Typography {
+    val displayFamily = o.displayFontFamilyName?.let(resolveFamily)
+    val bodyFamily = o.bodyFontFamilyName?.let(resolveFamily)
     return copy(
         displayLarge = displayLarge.applyOverride(o.displayLarge, displayFamily),
         displayMedium = displayMedium.applyOverride(o.displayMedium, displayFamily),

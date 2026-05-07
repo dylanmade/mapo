@@ -193,6 +193,11 @@ fun ThemeStudioScreen(
                                 // titleLarge for Display, bodyLarge for Body.
                                 val displayName = overrides.typography.displayFontFamilyName
                                 val bodyName = overrides.typography.bodyFontFamilyName
+                                val displayUmbrella = overrides.typography.displayUmbrella
+                                val bodyUmbrella = overrides.typography.bodyUmbrella
+                                val emptyOverride = TextStyleOverride()
+                                val hasDisplayCascade = displayName != null || displayUmbrella != emptyOverride
+                                val hasBodyCascade = bodyName != null || bodyUmbrella != emptyOverride
                                 FamilyChooserCard(
                                     label = "Display family (display / headline / title)",
                                     currentName = displayName,
@@ -205,12 +210,18 @@ fun ThemeStudioScreen(
                                     horizontalArrangement = Arrangement.End,
                                 ) {
                                     TextButton(
-                                        onClick = { displayName?.let(controller::setBodyFontFamilyName) },
-                                        enabled = displayName != null,
+                                        onClick = {
+                                            controller.setBodyFontFamilyName(displayName)
+                                            controller.setTypographyRole(UmbrellaRoles.body, displayUmbrella)
+                                        },
+                                        enabled = hasDisplayCascade,
                                     ) { Text("Copy Display → Body", fontSize = 12.sp) }
                                     TextButton(
-                                        onClick = { bodyName?.let(controller::setDisplayFontFamilyName) },
-                                        enabled = bodyName != null,
+                                        onClick = {
+                                            controller.setDisplayFontFamilyName(bodyName)
+                                            controller.setTypographyRole(UmbrellaRoles.display, bodyUmbrella)
+                                        },
+                                        enabled = hasBodyCascade,
                                     ) { Text("Copy Body → Display", fontSize = 12.sp) }
                                 }
                                 FamilyChooserCard(

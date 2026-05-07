@@ -77,26 +77,6 @@ internal fun TypographyPicker(
 
         Spacer(Modifier.height(16.dp))
 
-        // Font size
-        LabeledSlider(
-            label = "Size",
-            value = effectiveSize,
-            range = 8f..72f,
-            valueLabel = "${effectiveSize.toInt()}sp",
-            onChange = { onChange(current.copy(fontSize = it.sp)) },
-        )
-
-        // Letter spacing
-        LabeledSlider(
-            label = "Tracking",
-            value = effectiveLetterSpacing,
-            range = -2f..6f,
-            valueLabel = "%.1fsp".format(effectiveLetterSpacing),
-            onChange = { onChange(current.copy(letterSpacing = it.sp)) },
-        )
-
-        Spacer(Modifier.height(8.dp))
-
         // Font weight chips
         Text(
             text = "Weight",
@@ -117,6 +97,26 @@ internal fun TypographyPicker(
                 )
             }
         }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Font size
+        LabeledSlider(
+            label = "Size",
+            value = effectiveSize,
+            range = 8f..72f,
+            valueLabel = "${effectiveSize.toInt()}sp",
+            onChange = { onChange(current.copy(fontSize = it.sp)) },
+        )
+
+        // Letter spacing
+        LabeledSlider(
+            label = "Tracking",
+            value = effectiveLetterSpacing,
+            range = -2f..6f,
+            valueLabel = "%.1fsp".format(effectiveLetterSpacing),
+            onChange = { onChange(current.copy(letterSpacing = it.sp)) },
+        )
 
         if (isOverridden) {
             Spacer(Modifier.height(8.dp))

@@ -42,7 +42,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 private enum class PickerMode { HSL, RGB }
 
@@ -111,7 +110,7 @@ fun ColorPicker(
                         onChange(Color(parsed))
                     }
                 },
-                label = { Text("Hex", fontSize = 11.sp) },
+                label = { Text("Hex", style = MaterialTheme.typography.labelSmall) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                 modifier = Modifier.weight(1f),
@@ -124,12 +123,12 @@ fun ColorPicker(
                 selected = mode == PickerMode.HSL,
                 onClick = { mode = PickerMode.HSL },
                 shape = SegmentedButtonDefaults.itemShape(0, 2),
-            ) { Text("HSL", fontSize = 11.sp) }
+            ) { Text("HSL", style = MaterialTheme.typography.labelSmall) }
             SegmentedButton(
                 selected = mode == PickerMode.RGB,
                 onClick = { mode = PickerMode.RGB },
                 shape = SegmentedButtonDefaults.itemShape(1, 2),
-            ) { Text("RGB", fontSize = 11.sp) }
+            ) { Text("RGB", style = MaterialTheme.typography.labelSmall) }
         }
         Spacer(Modifier.height(8.dp))
 
@@ -270,7 +269,7 @@ private fun GradientSlider(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(vertical = 6.dp),
     ) {
-        Text(label, fontSize = 12.sp, modifier = Modifier.width(20.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(20.dp))
         Spacer(Modifier.width(8.dp))
         BoxWithConstraints(
             modifier = Modifier
@@ -330,7 +329,7 @@ private fun GradientSlider(
         Spacer(Modifier.width(8.dp))
         Text(
             text = valueLabel.padStart(5, ' '),
-            fontSize = 12.sp,
+            style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.width(48.dp),
         )
     }

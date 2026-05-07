@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -18,6 +17,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -29,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.mapo.R
 import com.mapo.ui.viewmodel.MainViewModel
@@ -82,7 +82,7 @@ fun BlocklistScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.blocklist_empty),
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -92,31 +92,26 @@ fun BlocklistScreen(
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     items(sorted, key = { it }) { pkg ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp)
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = appLabels[pkg] ?: pkg, fontSize = 14.sp)
-                                Text(
-                                    text = pkg,
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            IconButton(
-                                onClick = { viewModel.unignorePackage(pkg) },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = stringResource(R.string.blocklist_remove),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
+                        // surfaceVariant — list-row container per Reply convention (unselected list items)
+                        ListItem(
+                            headlineContent = { Text(appLabels[pkg] ?: pkg) },
+                            supportingContent = { Text(pkg) },
+                            trailingContent = {
+                                IconButton(
+                                    onClick = { viewModel.unignorePackage(pkg) },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = stringResource(R.string.blocklist_remove),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            },
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                        )
                     }
                 }
             }

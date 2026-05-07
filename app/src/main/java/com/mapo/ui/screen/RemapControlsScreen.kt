@@ -13,7 +13,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -102,7 +101,6 @@ fun RemapControlsScreen(
                         }
                     },
                     modifier = Modifier.clickable { editingButton = btn },
-                    colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface)
                 )
                 if (index < DeviceButton.entries.lastIndex) {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))

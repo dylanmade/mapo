@@ -7,7 +7,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -17,9 +16,12 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
@@ -33,12 +35,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.mapo.R
 import com.mapo.data.model.Profile
 import kotlinx.collections.immutable.ImmutableList
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ProfileDrawerContent(
     profiles: ImmutableList<Profile>,
@@ -86,7 +90,10 @@ fun ProfileDrawerContent(
         )
     }
 
-    ModalDrawerSheet {
+    // surfaceContainerHigh — drawer sheet (canonical M3 elevated container per Reply)
+    ModalDrawerSheet(
+        drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
         if (showProfileSelector) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -103,11 +110,11 @@ fun ProfileDrawerContent(
             HorizontalDivider()
             LazyColumn {
                 items(profiles, key = { it.id }) { profile ->
-                    NavigationDrawerItem(
-                        label = { Text(profile.name) },
-                        selected = profile.id == activeProfile?.id,
+                    val isSelected = profile.id == activeProfile?.id
+                    // primaryContainer when selected; transparent otherwise so the drawer surfaceContainerHigh shows through
+                    ListItem(
                         onClick = { onSelectProfile(profile) },
-                        badge = {
+                        trailingContent = {
                             Row {
                                 IconButton(
                                     onClick = { onDuplicateProfile(profile) },
@@ -133,20 +140,23 @@ fun ProfileDrawerContent(
                                 }
                             }
                         },
+                        colors = ListItemDefaults.colors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                            else Color.Transparent
+                        ),
                         modifier = Modifier.padding(horizontal = 8.dp)
-                    )
+                    ) { Text(profile.name) }
                 }
                 item {
-                    NavigationDrawerItem(
-                        label = { Text("Add Profile") },
-                        selected = false,
+                    ListItem(
                         onClick = {
                             newProfileName = ""
                             showAddDialog = true
                         },
-                        icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                        leadingContent = { Icon(Icons.Default.Add, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.padding(horizontal = 8.dp)
-                    )
+                    ) { Text("Add Profile") }
                 }
             }
         } else {
@@ -169,13 +179,6 @@ fun ProfileDrawerContent(
                         selected = false,
                         onClick = { showProfileSelector = true },
                         icon = { Icon(Icons.Default.Person, contentDescription = null) },
-                        badge = {
-                            Icon(
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
                         modifier = Modifier.padding(horizontal = 8.dp)
                     )
                 }
@@ -185,13 +188,6 @@ fun ProfileDrawerContent(
                         selected = false,
                         onClick = { onOpenRemapControls() },
                         icon = { Icon(Icons.Default.SportsEsports, contentDescription = null) },
-                        badge = {
-                            Icon(
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
                         modifier = Modifier.padding(horizontal = 8.dp)
                     )
                 }
@@ -201,13 +197,6 @@ fun ProfileDrawerContent(
                         selected = false,
                         onClick = { onOpenAutoSwitch() },
                         icon = { Icon(Icons.Default.SwapHoriz, contentDescription = null) },
-                        badge = {
-                            Icon(
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
                         modifier = Modifier.padding(horizontal = 8.dp)
                     )
                 }
@@ -217,13 +206,6 @@ fun ProfileDrawerContent(
                         selected = false,
                         onClick = { onOpenBlocklist() },
                         icon = { Icon(Icons.Default.Block, contentDescription = null) },
-                        badge = {
-                            Icon(
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
                         modifier = Modifier.padding(horizontal = 8.dp)
                     )
                 }
@@ -233,13 +215,6 @@ fun ProfileDrawerContent(
                         selected = false,
                         onClick = { onOpenThemeStudio() },
                         icon = { Icon(Icons.Default.Palette, contentDescription = null) },
-                        badge = {
-                            Icon(
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
                         modifier = Modifier.padding(horizontal = 8.dp)
                     )
                 }

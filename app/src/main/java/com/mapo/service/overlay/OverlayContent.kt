@@ -1,6 +1,5 @@
 package com.mapo.service.overlay
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,6 +10,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,7 +29,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 /**
  * Snackbar-shaped informational message. Used for "Loaded profile X for Y".
@@ -53,23 +52,23 @@ fun OverlayToast(
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
-        Row(
-            modifier = Modifier
-                .widthIn(min = 240.dp, max = 600.dp)
-                .background(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(8.dp)
-                )
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // surfaceContainerHigh — elevated overlay surface (per Reply convention for floating containers)
+        Surface(
+            modifier = Modifier.widthIn(min = 240.dp, max = 600.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(8.dp),
         ) {
-            Text(
-                text = message,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -114,45 +113,45 @@ fun OverlayCreatePrompt(
             },
         contentAlignment = Alignment.Center
     ) {
-        Row(
-            modifier = Modifier
-                .widthIn(min = 320.dp, max = 720.dp)
-                .background(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(8.dp)
-                )
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        // surfaceContainerHigh — elevated overlay prompt (per Reply convention for floating containers)
+        Surface(
+            modifier = Modifier.widthIn(min = 320.dp, max = 720.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(8.dp),
         ) {
-            Text(
-                text = "Create profile for $appLabel?",
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
             Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                PromptButton(
-                    label = "Never for this app",
-                    onClick = onNever,
-                    contentColor = MaterialTheme.colorScheme.error
+                Text(
+                    text = "Create profile for $appLabel?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                PromptButton(
-                    label = "No",
-                    onClick = onNo,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                PromptButton(
-                    label = "Yes",
-                    onClick = onYes,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    focusRequester = yesRequester
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    PromptButton(
+                        label = "Never for this app",
+                        onClick = onNever,
+                        contentColor = MaterialTheme.colorScheme.error,
+                    )
+                    PromptButton(
+                        label = "No",
+                        onClick = onNo,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    PromptButton(
+                        label = "Yes",
+                        onClick = onYes,
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        focusRequester = yesRequester,
+                    )
+                }
             }
         }
     }
@@ -171,5 +170,5 @@ private fun PromptButton(
         colors = ButtonDefaults.textButtonColors(contentColor = contentColor),
         modifier = Modifier
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
-    ) { Text(label, fontSize = 13.sp) }
+    ) { Text(label, style = MaterialTheme.typography.labelMedium) }
 }

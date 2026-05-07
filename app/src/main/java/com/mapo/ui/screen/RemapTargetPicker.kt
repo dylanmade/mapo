@@ -27,6 +27,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,8 +37,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.mapo.data.defaults.InputOption
 import com.mapo.data.defaults.RemapInputOptions
@@ -139,6 +140,7 @@ private fun CategoryRow(
     showChevron: Boolean = true,
     onClick: () -> Unit
 ) {
+    // primaryContainer when selected; transparent otherwise so the dialog's surfaceContainerHigh shows through
     ListItem(
         onClick = onClick,
         trailingContent = if (showChevron) {
@@ -149,7 +151,7 @@ private fun CategoryRow(
         } else null,
         colors = ListItemDefaults.colors(
             containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
-                             else MaterialTheme.colorScheme.surface
+                             else Color.Transparent
         )
     ) { Text(label) }
 }
@@ -179,31 +181,33 @@ private fun FilteredInputList(
                     .padding(bottom = 8.dp)
             )
         }
-        Box(
-            modifier = Modifier
-                .heightIn(max = 320.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainer)
+        // surfaceContainer — list block inside the dialog's surfaceContainerHigh; gives the list a visible "card" tier
+        Surface(
+            modifier = Modifier.heightIn(max = 320.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = RoundedCornerShape(8.dp),
         ) {
-            val listState = rememberLazyListState()
-            LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
-                itemsIndexed(filtered) { index, option ->
-                    val isSelected = option.target == current
-                    ListItem(
-                        onClick = { onSelect(option.target) },
-                        leadingContent = if (isSelected) {
-                            { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
-                        } else null,
-                        colors = ListItemDefaults.colors(
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                             else MaterialTheme.colorScheme.surfaceContainer
-                        )
-                    ) { Text(option.label) }
-                    if (index < filtered.lastIndex) HorizontalDivider()
+            Box {
+                val listState = rememberLazyListState()
+                LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
+                    itemsIndexed(filtered) { index, option ->
+                        val isSelected = option.target == current
+                        ListItem(
+                            onClick = { onSelect(option.target) },
+                            leadingContent = if (isSelected) {
+                                { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
+                            } else null,
+                            colors = ListItemDefaults.colors(
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                                 else Color.Transparent
+                            )
+                        ) { Text(option.label) }
+                        if (index < filtered.lastIndex) HorizontalDivider()
+                    }
                 }
+                ScrollFade(visible = listState.canScrollBackward, alignment = Alignment.TopCenter, fromTop = true)
+                ScrollFade(visible = listState.canScrollForward, alignment = Alignment.BottomCenter, fromTop = false)
             }
-            ScrollFade(visible = listState.canScrollBackward, alignment = Alignment.TopCenter, fromTop = true)
-            ScrollFade(visible = listState.canScrollForward, alignment = Alignment.BottomCenter, fromTop = false)
         }
         if (filtered.isEmpty()) {
             Spacer(Modifier.height(8.dp))

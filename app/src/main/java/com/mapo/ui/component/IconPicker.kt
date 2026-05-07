@@ -31,7 +31,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 /**
  * Modal dialog that lets the user pick an icon by name from [MapoIcons.catalog],
@@ -77,9 +76,9 @@ fun IconPickerDialog(
                                 RoundedCornerShape(4.dp),
                             ),
                         contentAlignment = Alignment.Center,
-                    ) { Text("—", fontSize = 16.sp) }
+                    ) { Text("—", style = MaterialTheme.typography.bodyLarge) }
                     Spacer(Modifier.size(12.dp))
-                    Text("None", fontSize = 13.sp)
+                    Text("None", style = MaterialTheme.typography.bodyMedium)
                 }
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 64.dp),
@@ -111,7 +110,7 @@ fun IconPickerDialog(
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 name,
-                                fontSize = 8.sp,
+                                style = MaterialTheme.typography.labelSmall,
                                 maxLines = 2,
                             )
                         }

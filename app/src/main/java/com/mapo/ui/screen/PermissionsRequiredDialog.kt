@@ -21,7 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.mapo.R
 import com.mapo.service.InputAccessibilityService
@@ -50,7 +49,7 @@ fun PermissionsRequiredDialog(
             Column {
                 Text(
                     text = stringResource(R.string.permissions_required_intro),
-                    fontSize = 14.sp
+                    style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.height(12.dp))
                 PermissionRow(
@@ -90,26 +89,25 @@ private fun PermissionRow(
         ) {
             Text(
                 text = label,
-                fontSize = 14.sp,
-                modifier = Modifier
+                style = MaterialTheme.typography.bodyMedium,
             )
             Text(
                 text = if (granted)
                     stringResource(R.string.permission_granted_indicator)
                 else "",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.primary
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
         Text(
             text = description,
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (!granted) {
             Spacer(Modifier.height(4.dp))
             OutlinedButton(onClick = onGrant) {
-                Text(stringResource(R.string.permission_grant_button), fontSize = 13.sp)
+                Text(stringResource(R.string.permission_grant_button))
             }
         }
     }

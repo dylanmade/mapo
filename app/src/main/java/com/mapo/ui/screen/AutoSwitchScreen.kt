@@ -19,6 +19,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -31,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.mapo.R
 import com.mapo.ui.viewmodel.MainViewModel
@@ -81,7 +82,7 @@ fun AutoSwitchScreen(
             ) {
                 Text(
                     text = stringResource(R.string.auto_switch_setting_label),
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.weight(1f)
                 )
                 Switch(
@@ -99,7 +100,7 @@ fun AutoSwitchScreen(
             ) {
                 Text(
                     text = stringResource(R.string.auto_create_profiles_setting_label),
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = if (enabled) MaterialTheme.colorScheme.onSurface
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
@@ -128,7 +129,7 @@ fun AutoSwitchScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.auto_switch_bindings_empty),
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -141,31 +142,28 @@ fun AutoSwitchScreen(
                         val profileName = profilesById[binding.profileId]?.name
                             ?: stringResource(R.string.auto_switch_unknown_profile)
                         val appLabel = appLabels[binding.packageName] ?: binding.packageName
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp)
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = appLabel, fontSize = 14.sp)
-                                Text(
-                                    text = "${binding.packageName} → $profileName",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            IconButton(
-                                onClick = { viewModel.deleteBinding(binding.packageName, binding.subId) },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = stringResource(R.string.auto_switch_delete_binding),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
+                        // surfaceVariant — list-row container per Reply convention (unselected list items)
+                        ListItem(
+                            headlineContent = { Text(appLabel) },
+                            supportingContent = {
+                                Text("${binding.packageName} → $profileName")
+                            },
+                            trailingContent = {
+                                IconButton(
+                                    onClick = { viewModel.deleteBinding(binding.packageName, binding.subId) },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = stringResource(R.string.auto_switch_delete_binding),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            },
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                        )
                     }
                 }
             }

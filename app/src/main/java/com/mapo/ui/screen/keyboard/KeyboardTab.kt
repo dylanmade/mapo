@@ -58,7 +58,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.mapo.data.model.GridLayout
 import com.mapo.ui.MapoGesture
@@ -388,8 +387,8 @@ private fun TabSurface(
     ) {
         Text(
             text = label,
-            fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            style = if (selected) MaterialTheme.typography.labelMedium
+            else MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Normal),
             color = labelColor
         )
     }

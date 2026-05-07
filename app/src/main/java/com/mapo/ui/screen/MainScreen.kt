@@ -294,6 +294,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             )
         }
     ) {
+        // surfaceContainerLowest — root app Scaffold (M3 default; do not override to colorScheme.background)
         Scaffold(
             snackbarHost = {
                 val prompt = pendingPrompt
@@ -342,7 +343,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     }
                 }
             },
-            containerColor = MaterialTheme.colorScheme.background,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
             contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
         ) { _ ->
             Column(
@@ -1156,7 +1157,7 @@ private fun BottomBar(
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
             modifier = Modifier.height(40.dp)
         ) {
-            Text("Quit", fontSize = 12.sp)
+            Text("Quit", style = MaterialTheme.typography.labelMedium)
         }
         Spacer(modifier = Modifier.weight(1f))
         Icon(

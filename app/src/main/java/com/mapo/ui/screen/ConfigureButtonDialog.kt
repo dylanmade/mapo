@@ -1,6 +1,5 @@
 package com.mapo.ui.screen
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,18 +17,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -44,9 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.mapo.data.defaults.GridButtonDefaults
 import com.mapo.data.model.ButtonRegion
@@ -97,12 +95,12 @@ fun ConfigureButtonDialog(
                     Tab(
                         selected = tab == 0,
                         onClick = { tab = 0 },
-                        text = { Text("Behavior", fontSize = 13.sp) },
+                        text = { Text("Behavior") },
                     )
                     Tab(
                         selected = tab == 1,
                         onClick = { tab = 1 },
-                        text = { Text("Appearance", fontSize = 13.sp) },
+                        text = { Text("Appearance") },
                     )
                 }
                 Spacer(Modifier.height(8.dp))
@@ -238,7 +236,11 @@ private fun BehaviorTab(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Sensitivity", fontSize = 13.sp, modifier = Modifier.width(110.dp))
+            Text(
+                "Sensitivity",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.width(110.dp),
+            )
             val sens = draft.sensitivity ?: GridButtonDefaults.TRACKPAD_SENSITIVITY
             Slider(
                 value = sens,
@@ -246,7 +248,11 @@ private fun BehaviorTab(
                 valueRange = 0.5f..4.0f,
                 modifier = Modifier.weight(1f),
             )
-            Text("%.1f×".format(sens), fontSize = 12.sp, modifier = Modifier.width(40.dp))
+            Text(
+                "%.1f×".format(sens),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.width(40.dp),
+            )
         }
     }
 
@@ -283,8 +289,7 @@ private fun AppearanceTab(
     Spacer(Modifier.height(4.dp))
     Text(
         "Regions",
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
+        style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
@@ -311,24 +316,14 @@ private fun AppearanceTab(
 
 @Composable
 private fun TypeToggle(isTrackpad: Boolean, onChange: (Boolean) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        listOf("Button" to false, "Trackpad" to true).forEach { (label, trackpad) ->
-            val selected = isTrackpad == trackpad
-            OutlinedButton(
+    val options = listOf("Button" to false, "Trackpad" to true)
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, (label, trackpad) ->
+            SegmentedButton(
+                selected = isTrackpad == trackpad,
                 onClick = { onChange(trackpad) },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(6.dp),
-                border = BorderStroke(
-                    if (selected) 2.dp else 1.dp,
-                    if (selected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.outline,
-                ),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surface,
-                ),
-                contentPadding = PaddingValues(vertical = 8.dp),
-            ) { Text(label, fontSize = 13.sp) }
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+            ) { Text(label) }
         }
     }
 }
@@ -340,13 +335,22 @@ private fun GestureRow(label: String, target: RemapTarget, onClick: () -> Unit) 
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(label, fontSize = 13.sp, modifier = Modifier.width(110.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.width(110.dp),
+        )
         OutlinedButton(
             onClick = onClick,
             shape = RoundedCornerShape(6.dp),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
             modifier = Modifier.weight(1f),
-        ) { Text(target.displayLabel(), fontSize = 12.sp) }
+        ) {
+            Text(
+                target.displayLabel(),
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
     }
 }
 
@@ -360,12 +364,16 @@ private fun ColorRow(label: String, argb: Int?, onClick: () -> Unit) {
             .clickable { onClick() }
             .padding(vertical = 4.dp),
     ) {
-        Text(label, fontSize = 13.sp, modifier = Modifier.width(110.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.width(110.dp),
+        )
         ColorSwatch(argb = argb)
         Spacer(Modifier.weight(1f))
         Text(
             text = if (argb == null) "Theme default" else "#%08X".format(argb),
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -405,7 +413,11 @@ private fun RegionRowItem(
             .padding(vertical = 4.dp),
     ) {
         RegionPositionIndicator(position)
-        Text(position.displayName(), fontSize = 12.sp, modifier = Modifier.width(96.dp))
+        Text(
+            position.displayName(),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.width(96.dp),
+        )
         val labelPreview = region?.label ?: onTapPreview
         val iconVec = MapoIcons.resolve(region?.icon)
         if (iconVec != null) {
@@ -413,14 +425,14 @@ private fun RegionRowItem(
         }
         Text(
             text = labelPreview.ifEmpty { "—" },
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelMedium,
             color = if (region == null) MaterialTheme.colorScheme.onSurfaceVariant
             else MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.weight(1f))
         Text(
             text = if (region == null) "default" else "${region.sizeSp.toInt()}sp",
-            fontSize = 10.sp,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -468,7 +480,7 @@ private fun ResetButton(label: String, onClick: () -> Unit) {
     ) {
         Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(8.dp))
-        Text(label, fontSize = 12.sp)
+        Text(label, style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -537,7 +549,11 @@ private fun RegionEditDialog(
                         .clickable { iconPickerOpen = true }
                         .padding(vertical = 4.dp),
                 ) {
-                    Text("Icon", fontSize = 13.sp, modifier = Modifier.width(96.dp))
+                    Text(
+                        "Icon",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.width(96.dp),
+                    )
                     val vec = MapoIcons.resolve(region.icon)
                     if (vec != null) {
                         Icon(vec, contentDescription = null, modifier = Modifier.size(20.dp))
@@ -547,12 +563,12 @@ private fun RegionEditDialog(
                                 .size(20.dp)
                                 .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
                             contentAlignment = Alignment.Center,
-                        ) { Text("—", fontSize = 11.sp) }
+                        ) { Text("—", style = MaterialTheme.typography.labelMedium) }
                     }
                     Spacer(Modifier.width(4.dp))
                     Text(
                         region.icon ?: "None",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -574,12 +590,16 @@ private fun RegionEditDialog(
                         .clickable { labelColorOpen = true }
                         .padding(vertical = 4.dp),
                 ) {
-                    Text("Label color", fontSize = 13.sp, modifier = Modifier.width(96.dp))
+                    Text(
+                        "Label color",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.width(96.dp),
+                    )
                     ColorSwatch(argb = region.labelColorArgb)
                     Spacer(Modifier.weight(1f))
                     Text(
                         text = if (region.labelColorArgb == null) "Theme default" else "#%08X".format(region.labelColorArgb!!),
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -592,12 +612,16 @@ private fun RegionEditDialog(
                         .clickable { iconColorOpen = true }
                         .padding(vertical = 4.dp),
                 ) {
-                    Text("Icon color", fontSize = 13.sp, modifier = Modifier.width(96.dp))
+                    Text(
+                        "Icon color",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.width(96.dp),
+                    )
                     ColorSwatch(argb = region.iconColorArgb)
                     Spacer(Modifier.weight(1f))
                     Text(
                         text = if (region.iconColorArgb == null) "Theme default" else "#%08X".format(region.iconColorArgb!!),
-                        fontSize = 11.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

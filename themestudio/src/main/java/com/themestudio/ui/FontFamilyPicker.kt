@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,8 +39,11 @@ import com.themestudio.core.rememberGoogleFontsCatalog
 /**
  * Inline card shown in the Typography tab for one family group (Display or
  * Body). Displays the currently-applied family name (or "(default)" when
- * none is overridden) with a sample line rendered in that family. Tap to
- * open the picker sheet.
+ * none is overridden) with a sample line rendered in that family.
+ *
+ * The preview line uses [previewStyle] — Display callers pass titleLarge,
+ * Body callers pass bodyLarge — so each card shows the chosen font at the
+ * scale it would actually be used.
  */
 @Composable
 internal fun FamilyChooserCard(
@@ -47,6 +51,7 @@ internal fun FamilyChooserCard(
     currentName: String?,
     defaultLabel: String,
     onTap: () -> Unit,
+    previewStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
     val effectiveName = currentName?.takeIf { it.isNotBlank() }
@@ -73,8 +78,7 @@ internal fun FamilyChooserCard(
         Spacer(Modifier.height(6.dp))
         Text(
             text = SAMPLE,
-            fontSize = 14.sp,
-            fontFamily = previewFamily,
+            style = previewStyle.copy(fontFamily = previewFamily ?: previewStyle.fontFamily),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -89,15 +93,16 @@ internal fun FamilyChooserCard(
  * supports an "Apply" affordance when no exact catalog match exists, so
  * fonts not in the snapshot list are still reachable.
  *
- * Catalog rows render their preview text in their own font, which is what
- * triggers the on-demand GMS download. LazyColumn only composes visible
- * rows, so scrolling fast doesn't request the whole list — and the LRU in
- * [googleFontFamily] keeps memory bounded regardless.
+ * Catalog rows render their preview text in their own font using [rowStyle],
+ * which is what triggers the on-demand GMS download. LazyColumn only
+ * composes visible rows, so scrolling fast doesn't request the whole list —
+ * and the LRU in [googleFontFamily] keeps memory bounded regardless.
  */
 @Composable
 internal fun FontFamilyPickerSheet(
     title: String,
     currentName: String?,
+    rowStyle: TextStyle,
     onApply: (String) -> Unit,
     onClear: () -> Unit,
 ) {
@@ -164,6 +169,7 @@ internal fun FontFamilyPickerSheet(
             items(filtered, key = { it }) { name ->
                 FontRow(
                     name = name,
+                    rowStyle = rowStyle,
                     selected = name.equals(currentName, ignoreCase = true),
                     onClick = { onApply(name) },
                 )
@@ -174,7 +180,7 @@ internal fun FontFamilyPickerSheet(
 }
 
 @Composable
-private fun FontRow(name: String, selected: Boolean, onClick: () -> Unit) {
+private fun FontRow(name: String, rowStyle: TextStyle, selected: Boolean, onClick: () -> Unit) {
     val family = remember(name) { googleFontFamily(name) }
     val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer
     else MaterialTheme.colorScheme.surface
@@ -194,8 +200,7 @@ private fun FontRow(name: String, selected: Boolean, onClick: () -> Unit) {
             )
             Text(
                 text = SAMPLE,
-                fontSize = 16.sp,
-                fontFamily = family,
+                style = rowStyle.copy(fontFamily = family),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

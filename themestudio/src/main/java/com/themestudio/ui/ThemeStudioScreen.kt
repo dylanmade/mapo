@@ -103,7 +103,9 @@ fun ThemeStudioScreen(
     val controller = LocalThemeStudioController.current
     val overrides = controller.overrides
 
-    var editingDark by remember { mutableStateOf(false) }
+    // Default to dark since that's the only mode Mapo currently uses; the
+    // segmented button below still lets the user flip to light for previewing.
+    var editingDark by remember { mutableStateOf(true) }
     var tabIndex by remember { mutableIntStateOf(0) }
     var showExport by remember { mutableStateOf(false) }
     var pickerColorRole by remember { mutableStateOf<String?>(null) }
@@ -184,16 +186,35 @@ fun ThemeStudioScreen(
                                 // Family chooser cards sit above the per-role specimen so swapping
                                 // the Display or Body family is the most discoverable action — the
                                 // specimen below then re-renders in the chosen fonts immediately.
+                                // Each card previews fonts at the scale they'll actually be used:
+                                // titleLarge for Display, bodyLarge for Body.
+                                val displayName = overrides.typography.displayFontFamilyName
+                                val bodyName = overrides.typography.bodyFontFamilyName
                                 FamilyChooserCard(
                                     label = "Display family (display / headline / title)",
-                                    currentName = overrides.typography.displayFontFamilyName,
+                                    currentName = displayName,
                                     defaultLabel = "(theme default)",
+                                    previewStyle = MaterialTheme.typography.titleLarge,
                                     onTap = { pickerFontFamilyKind = FontFamilyKind.Display },
                                 )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                ) {
+                                    TextButton(
+                                        onClick = { displayName?.let(controller::setBodyFontFamilyName) },
+                                        enabled = displayName != null,
+                                    ) { Text("Copy Display → Body", fontSize = 12.sp) }
+                                    TextButton(
+                                        onClick = { bodyName?.let(controller::setDisplayFontFamilyName) },
+                                        enabled = bodyName != null,
+                                    ) { Text("Copy Body → Display", fontSize = 12.sp) }
+                                }
                                 FamilyChooserCard(
                                     label = "Body family (body / label)",
-                                    currentName = overrides.typography.bodyFontFamilyName,
+                                    currentName = bodyName,
                                     defaultLabel = "(theme default)",
+                                    previewStyle = MaterialTheme.typography.bodyLarge,
                                     onTap = { pickerFontFamilyKind = FontFamilyKind.Body },
                                 )
                                 typographyPreview { name -> pickerTypoRole = name }
@@ -289,6 +310,13 @@ fun ThemeStudioScreen(
             FontFamilyKind.Display -> overrides.typography.displayFontFamilyName
             FontFamilyKind.Body -> overrides.typography.bodyFontFamilyName
         }
+        // Each row previews in the role-group's actual scale: titleLarge for
+        // Display so users see headline-feel sizing, bodyLarge for Body so
+        // they see paragraph-feel sizing.
+        val rowStyle = when (kind) {
+            FontFamilyKind.Display -> MaterialTheme.typography.titleLarge
+            FontFamilyKind.Body -> MaterialTheme.typography.bodyLarge
+        }
         ModalBottomSheet(
             sheetState = sheetState,
             onDismissRequest = { pickerFontFamilyKind = null },
@@ -296,6 +324,7 @@ fun ThemeStudioScreen(
             FontFamilyPickerSheet(
                 title = kind.title,
                 currentName = current,
+                rowStyle = rowStyle,
                 onApply = { name ->
                     when (kind) {
                         FontFamilyKind.Display -> controller.setDisplayFontFamilyName(name)

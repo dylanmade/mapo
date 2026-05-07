@@ -1,6 +1,8 @@
 package com.mapo.data.defaults
 
+import com.mapo.data.model.ButtonRegion
 import com.mapo.data.model.GridButton
+import com.mapo.data.model.RegionPosition
 import com.mapo.data.model.RemapTarget
 
 /**
@@ -29,17 +31,29 @@ object GridButtonDefaults {
         sensitivity = TRACKPAD_SENSITIVITY,
     )
 
-    private val sharedAppearance = AppearancePreset(
+    private val buttonAppearance = AppearancePreset(
         fillColorArgb = null,
         outlineColorArgb = null,
         regions = emptyMap(),
     )
 
+    private val trackpadAppearance = AppearancePreset(
+        fillColorArgb = null,
+        outlineColorArgb = null,
+        regions = mapOf(
+            RegionPosition.CENTER.name to ButtonRegion(
+                icon = "Mouse",
+                label = "Trackpad",
+                sizeSp = 14f,
+            ),
+        ),
+    )
+
     fun behaviorFor(type: String?): BehaviorPreset =
         if (type == "trackpad") trackpadBehavior else buttonBehavior
 
-    fun appearanceFor(@Suppress("UNUSED_PARAMETER") type: String?): AppearancePreset =
-        sharedAppearance
+    fun appearanceFor(type: String?): AppearancePreset =
+        if (type == "trackpad") trackpadAppearance else buttonAppearance
 
     data class BehaviorPreset(
         val onTap: String,

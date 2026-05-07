@@ -2,11 +2,9 @@ package com.mapo.ui.component
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Bookmark
@@ -26,13 +24,10 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Gesture
-import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
@@ -65,10 +60,6 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.VolumeDown
-import androidx.compose.material.icons.filled.VolumeMute
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.ZoomIn
@@ -88,14 +79,10 @@ object MapoIcons {
         // Direction / navigation
         "ArrowUpward" to Icons.Filled.ArrowUpward,
         "ArrowDownward" to Icons.Filled.ArrowDownward,
-        "ArrowBack" to Icons.Filled.ArrowBack,
-        "ArrowForward" to Icons.Filled.ArrowForward,
         "ArrowDropUp" to Icons.Filled.ArrowDropUp,
         "ArrowDropDown" to Icons.Filled.ArrowDropDown,
         "KeyboardArrowUp" to Icons.Filled.KeyboardArrowUp,
         "KeyboardArrowDown" to Icons.Filled.KeyboardArrowDown,
-        "KeyboardArrowLeft" to Icons.Filled.KeyboardArrowLeft,
-        "KeyboardArrowRight" to Icons.Filled.KeyboardArrowRight,
 
         // Input / gaming
         "Mouse" to Icons.Filled.Mouse,
@@ -116,10 +103,6 @@ object MapoIcons {
         "SkipPrevious" to Icons.Filled.SkipPrevious,
 
         // Audio
-        "VolumeUp" to Icons.Filled.VolumeUp,
-        "VolumeDown" to Icons.Filled.VolumeDown,
-        "VolumeMute" to Icons.Filled.VolumeMute,
-        "VolumeOff" to Icons.Filled.VolumeOff,
         "Mic" to Icons.Filled.Mic,
         "MicOff" to Icons.Filled.MicOff,
 
@@ -161,7 +144,6 @@ object MapoIcons {
         "Info" to Icons.Filled.Info,
         "CheckCircle" to Icons.Filled.CheckCircle,
         "Cancel" to Icons.Filled.Cancel,
-        "Help" to Icons.Filled.Help,
 
         // Display / misc
         "BrightnessHigh" to Icons.Filled.BrightnessHigh,

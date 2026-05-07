@@ -14,6 +14,8 @@ import com.mapo.data.model.TemplateRef
 import com.mapo.data.model.TrackpadGesture
 import com.mapo.data.model.buttonsExceeding
 import com.mapo.data.model.gestureTarget
+import com.mapo.data.model.onDoubleTapTarget
+import com.mapo.data.model.onHoldTarget
 import com.mapo.data.model.onTapTarget
 import com.mapo.data.model.findFirstEmptyArea
 import com.mapo.data.model.findFirstEmptyCell
@@ -316,13 +318,18 @@ class MainViewModel @Inject constructor(
 
     // ── Normal mode ───────────────────────────────────────────────────────────
 
-    fun onButtonTap(button: GridButton) {
+    fun onButtonTap(button: GridButton) = dispatchButtonTarget(button.onTapTarget)
+    fun onButtonDoubleTap(button: GridButton) = dispatchButtonTarget(button.onDoubleTapTarget)
+    fun onButtonHold(button: GridButton) = dispatchButtonTarget(button.onHoldTarget)
+
+    private fun dispatchButtonTarget(target: RemapTarget) {
+        if (target is RemapTarget.Unbound) return
         if (!inputDispatcher.isReady) {
             _toastMessage.tryEmit("Accessibility service not running")
             return
         }
-        when (val target = button.onTapTarget) {
-            is RemapTarget.Unbound -> Unit
+        when (target) {
+            is RemapTarget.Unbound -> Unit  // already returned above; here for exhaustiveness
             is RemapTarget.Keyboard -> inputDispatcher.injectKey(target.code)
             is RemapTarget.Mouse, is RemapTarget.Gamepad ->
                 inputDispatcher.dispatchTargetAsClick(target)

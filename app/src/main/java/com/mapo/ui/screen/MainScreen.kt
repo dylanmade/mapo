@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -94,7 +95,10 @@ import com.mapo.data.model.TrackpadGesture
 import com.mapo.data.model.ButtonRegion
 import com.mapo.data.model.RegionPosition
 import com.mapo.data.model.gestureTarget
+import com.mapo.data.model.onDoubleTapTarget
+import com.mapo.data.model.onHoldTarget
 import com.mapo.data.model.onTapTarget
+import androidx.compose.ui.draw.clip
 import com.mapo.ui.component.MapoIcons
 import com.mapo.data.model.isTrackpad
 import com.mapo.data.model.displayLabel
@@ -407,6 +411,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     isEditMode = isEditMode,
                     selectedButtonId = selectedButtonId,
                     onButtonTap = viewModel::onButtonTap,
+                    onButtonDoubleTap = viewModel::onButtonDoubleTap,
+                    onButtonHold = viewModel::onButtonHold,
                     onSelectButton = viewModel::selectButton,
                     onMoveButton = viewModel::moveButton,
                     onResizeButton = viewModel::resizeButton,
@@ -569,6 +575,8 @@ private fun KeyGrid(
     isEditMode: Boolean,
     selectedButtonId: String?,
     onButtonTap: (GridButton) -> Unit,
+    onButtonDoubleTap: (GridButton) -> Unit,
+    onButtonHold: (GridButton) -> Unit,
     onSelectButton: (String) -> Unit,
     onMoveButton: (String, Int, Int) -> Unit,
     onResizeButton: (String, Int, Int) -> Unit,
@@ -686,12 +694,16 @@ private fun KeyGrid(
 
             if (!isEditMode && button.isTrackpad) {
                 // ── Trackpad (normal mode) ────────────────────────────────────
+                val tpFill = button.fillColorArgb?.let { Color(it) }
+                    ?: MaterialTheme.colorScheme.surface
+                val tpOutline = button.outlineColorArgb?.let { Color(it) }
+                    ?: MaterialTheme.colorScheme.outline
                 Box(
                     modifier = Modifier
                         .absoluteOffset(x = bx, y = by)
                         .size(width = bw, height = bh)
-                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
-                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                        .background(tpFill, RoundedCornerShape(8.dp))
+                        .border(1.dp, tpOutline, RoundedCornerShape(8.dp))
                         .pointerInput(button.id + "_tp") {
                             var lastTapTimeMs = 0L
                             awaitPointerEventScope {
@@ -766,29 +778,8 @@ private fun KeyGrid(
                                 }
                             }
                         },
-                    contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Mouse,
-                            contentDescription = "Trackpad",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (button.label.isNotEmpty()) {
-                            Text(
-                                text = button.label,
-                                fontSize = 9.sp,
-                                lineHeight = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Clip
-                            )
-                        }
-                    }
+                    ButtonContent(button = button, modifier = Modifier.fillMaxSize())
                 }
             } else {
                 // ── Key button (all modes) / trackpad in edit mode ────────────
@@ -892,26 +883,40 @@ private fun KeyGrid(
                         ?: MaterialTheme.colorScheme.surface
                     val outlineColor = button.outlineColorArgb?.let { Color(it) }
                         ?: MaterialTheme.colorScheme.outline
-                    OutlinedButton(
-                        onClick = {
-                            if (isEditMode) onSelectButton(button.id) else onButtonTap(button)
-                        },
+                    // Only register double/long handlers when targets are configured —
+                    // an idle onDoubleClick handler would delay every single tap by the
+                    // double-tap window, even on buttons without a configured double-tap.
+                    val hasDouble = button.onDoubleTapTarget !is RemapTarget.Unbound
+                    val hasHold = button.onHoldTarget !is RemapTarget.Unbound
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
                                 translationX = dragOffset.x
                                 translationY = dragOffset.y
-                            },
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(
-                            if (isSelected) 2.dp else 1.dp,
-                            if (isSelected) MaterialTheme.colorScheme.primary else outlineColor
-                        ),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = fillColor,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        contentPadding = PaddingValues(0.dp)
+                            }
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(fillColor)
+                            .border(
+                                BorderStroke(
+                                    if (isSelected) 2.dp else 1.dp,
+                                    if (isSelected) MaterialTheme.colorScheme.primary
+                                    else outlineColor,
+                                ),
+                                RoundedCornerShape(8.dp),
+                            )
+                            .combinedClickable(
+                                onClick = {
+                                    if (isEditMode) onSelectButton(button.id)
+                                    else onButtonTap(button)
+                                },
+                                onDoubleClick = if (!isEditMode && hasDouble) {
+                                    { onButtonDoubleTap(button) }
+                                } else null,
+                                onLongClick = if (!isEditMode && hasHold) {
+                                    { onButtonHold(button) }
+                                } else null,
+                            ),
                     ) {
                         ButtonContent(button = button, modifier = Modifier.fillMaxSize())
                     }

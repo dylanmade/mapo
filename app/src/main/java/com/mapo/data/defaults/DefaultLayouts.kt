@@ -138,13 +138,15 @@ object DefaultLayouts {
         columns = 6,
         rows = 4,
         buttons = listOf(
-            GridButton(
-                label = "",
-                col = 0, row = 0, colSpan = 6, rowSpan = 3,
-                type = "trackpad",
-                onTap = RemapTarget.Mouse("MOUSE_LEFT").encode(),
-                onHold = RemapTarget.Mouse("MOUSE_RIGHT").encode(),
-                sensitivity = GridButtonDefaults.TRACKPAD_SENSITIVITY,
+            GridButtonDefaults.appearanceFor("trackpad").apply(
+                GridButton(
+                    label = "Trackpad",
+                    col = 0, row = 0, colSpan = 6, rowSpan = 3,
+                    type = "trackpad",
+                    onTap = RemapTarget.Mouse("MOUSE_LEFT").encode(),
+                    onHold = RemapTarget.Mouse("MOUSE_RIGHT").encode(),
+                    sensitivity = GridButtonDefaults.TRACKPAD_SENSITIVITY,
+                )
             ),
             GridButton(
                 label = "L Click", col = 0, row = 3, colSpan = 2,

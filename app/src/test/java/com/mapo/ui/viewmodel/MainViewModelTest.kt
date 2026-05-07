@@ -533,6 +533,48 @@ class MainViewModelTest {
     }
 
     @Test
+    fun onButtonDoubleTap_dispatchesOnDoubleTapTarget() {
+        every { inputDispatcher.isReady } returns true
+        val button = GridButton(
+            label = "x", col = 0, row = 0,
+            onTap = RemapTarget.Keyboard("ENTER").encode(),
+            onDoubleTap = RemapTarget.Mouse("MOUSE_RIGHT").encode(),
+        )
+
+        subject.onButtonDoubleTap(button)
+
+        verify { inputDispatcher.dispatchTargetAsClick(RemapTarget.Mouse("MOUSE_RIGHT")) }
+        verify(exactly = 0) { inputDispatcher.injectKey(any()) }
+    }
+
+    @Test
+    fun onButtonHold_dispatchesOnHoldTarget() {
+        every { inputDispatcher.isReady } returns true
+        val button = GridButton(
+            label = "x", col = 0, row = 0,
+            onHold = RemapTarget.Keyboard("F12").encode(),
+        )
+
+        subject.onButtonHold(button)
+
+        verify { inputDispatcher.injectKey("F12") }
+    }
+
+    @Test
+    fun onButtonHold_unboundTarget_isNoOpEvenIfServiceNotReady() = runTest(testDispatcher) {
+        every { inputDispatcher.isReady } returns false
+        val button = GridButton(label = "x", col = 0, row = 0)  // all targets default to Unbound
+
+        subject.toastMessage.test {
+            subject.onButtonHold(button)
+            // No toast for unbound — nothing meaningful would dispatch anyway.
+            expectNoEvents()
+        }
+        verify(exactly = 0) { inputDispatcher.injectKey(any()) }
+        verify(exactly = 0) { inputDispatcher.dispatchTargetAsClick(any()) }
+    }
+
+    @Test
     fun onTrackpadGesture_serviceReady_dispatchesGestureTarget() {
         every { inputDispatcher.isReady } returns true
         val button = GridButton(

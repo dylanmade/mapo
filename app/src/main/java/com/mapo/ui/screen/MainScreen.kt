@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.Log
 import android.view.ViewTreeObserver
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
@@ -110,8 +111,9 @@ import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
 import com.mapo.data.model.TemplateRef
 import com.mapo.service.InputAccessibilityService
-import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -236,6 +238,12 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     LaunchedEffect(keyboardViewActive) {
         viewModel.setConsumeSystemBack(keyboardViewActive)
     }
+    // M3's ModalNavigationDrawer doesn't ship an internal BackHandler, so without this
+    // the press falls through to the activity default (moveTaskToBack) and the whole
+    // app minimizes. Close the drawer instead, which is what the user expects.
+    BackHandler(enabled = drawerOpen) {
+        scope.launch { drawerState.close() }
+    }
 
     var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted(context)) }
@@ -269,15 +277,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             ProfileDrawerContent(
-                profiles = profiles,
                 activeProfile = activeProfile,
-                onSelectProfile = { profile ->
-                    viewModel.selectProfile(profile)
+                onOpenChangeProfile = {
                     scope.launch { drawerState.close() }
+                    navController.navigate(MapoRoute.CHANGE_PROFILE)
                 },
-                onAddProfile = { name -> viewModel.addProfile(name) },
-                onDuplicateProfile = { profile -> viewModel.duplicateProfile(profile) },
-                onDeleteProfile = { profile -> viewModel.deleteProfile(profile) },
                 onOpenRemapControls = {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.REMAP_CONTROLS)
@@ -293,30 +297,25 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 onOpenThemeStudio = {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.THEME_STUDIO)
-                }
+                },
             )
         }
     ) {
         NavHost(
             navController = navController,
             startDestination = MapoRoute.MAIN,
-            modifier = Modifier.fillMaxSize(),
-            // Slide horizontally (instead of the default fade) — drill-down nav: forward slides
-            // in from the right, back slides out to the right. 400 ms tween (default
-            // FastOutSlowInEasing) is snappier than Compose Navigation's ~700 ms default and
-            // avoids the crossfade dip-to-window-bg that fade transitions exhibit.
-            enterTransition = {
-                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(400))
-            },
-            exitTransition = {
-                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(400))
-            },
-            popEnterTransition = {
-                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(400))
-            },
-            popExitTransition = {
-                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(400))
-            },
+            // Background matches the home screen's Scaffold (and the secondary destinations'
+            // visual base in this theme), so the crossfade middle no longer reveals the
+            // activity window beneath. Without this the partial alpha of both screens lets
+            // the activity background bleed through mid-transition.
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+            // Crossfade at 250 ms with default FastOutSlowInEasing.
+            enterTransition = { fadeIn(tween(250)) },
+            exitTransition = { fadeOut(tween(250)) },
+            popEnterTransition = { fadeIn(tween(250)) },
+            popExitTransition = { fadeOut(tween(250)) },
         ) {
             composable(MapoRoute.MAIN) {
                 // surfaceContainerLowest — root app Scaffold (M3 default; do not override to colorScheme.background)
@@ -488,6 +487,21 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         )
                     }
                 }
+            }
+            composable(MapoRoute.CHANGE_PROFILE) {
+                ChangeProfileScreen(
+                    profiles = profiles,
+                    activeProfile = activeProfile,
+                    onSelectProfile = { profile ->
+                        viewModel.selectProfile(profile)
+                        navController.popBackStack()
+                    },
+                    onAddProfile = { name -> viewModel.addProfile(name) },
+                    onDuplicateProfile = { profile -> viewModel.duplicateProfile(profile) },
+                    onDeleteProfile = { profile -> viewModel.deleteProfile(profile) },
+                    onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
             composable(MapoRoute.REMAP_CONTROLS) { entry ->
                 val pickerResult by entry.savedStateHandle

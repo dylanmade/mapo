@@ -13,6 +13,7 @@ import android.net.Uri
  */
 object MapoRoute {
     const val MAIN = "main"
+    const val CHANGE_PROFILE = "change_profile"
     const val REMAP_CONTROLS = "remap_controls"
     const val AUTO_SWITCH = "auto_switch"
     const val BLOCKLIST = "blocklist"

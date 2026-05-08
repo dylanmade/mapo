@@ -1,7 +1,5 @@
 package com.mapo
 
-import android.graphics.Rect
-import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -18,8 +16,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Prevent mapo from stealing hardware-button focus from the game on the primary screen.
-        // Touch events still work normally; only hardware keyboard/gamepad focus is withheld.
+        // Initial window state: not focusable (so unmapped gamepad inputs go to the game on
+        // the primary screen) and gesture-suppressed across the whole window. Both are
+        // toggled per-destination by ApplyMainScreenWindowBehavior in MainScreen — on the
+        // keyboard view they stay set, on secondary screens they're cleared so back works.
         window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         // No enableEdgeToEdge() on purpose: we want the OS to size the window below the
         // status bar where one exists (phone, Thor primary screen) and to leave the window
@@ -27,12 +27,6 @@ class MainActivity : ComponentActivity() {
         // statusBarsPadding had an intermittent first-frame stale-inset bug that shifted
         // content down on the bezel screen. Letting decorFitsSystemWindows stay at its
         // default (true) sidesteps the inset race entirely — no per-screen padding needed.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.decorView.viewTreeObserver.addOnGlobalLayoutListener {
-                val dv = window.decorView
-                dv.systemGestureExclusionRects = listOf(Rect(0, 0, dv.width, dv.height))
-            }
-        }
 
         // TODO: Secondary display detection for AYN Thor secondary screen.
         // Use DisplayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)

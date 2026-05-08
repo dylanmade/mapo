@@ -446,15 +446,13 @@ class MainViewModelTest {
     }
 
     @Test
-    fun saveRemapMappings_activeProfile_delegatesAndClosesControls() = runTest(testDispatcher) {
+    fun saveRemapMappings_activeProfile_delegatesToRepository() = runTest(testDispatcher) {
         activeProfile.value = Profile(id = 5L, name = "Test")
-        subject.openRemapControls()
 
         subject.saveRemapMappings(emptyMap())
         advanceUntilIdle()
 
         coVerify { gamepadRepo.saveMappings(5L, emptyMap()) }
-        assertFalse(subject.showRemapControls.value)
     }
 
     @Test
@@ -650,14 +648,6 @@ class MainViewModelTest {
                 mapOf(com.mapo.data.model.DeviceButton.BUTTON_A to RemapTarget.Keyboard("ENTER")),
             )
         }
-    }
-
-    @Test
-    fun openCloseRemapControls() {
-        subject.openRemapControls()
-        assertTrue(subject.showRemapControls.value)
-        subject.closeRemapControls()
-        assertFalse(subject.showRemapControls.value)
     }
 
     // ── Button CRUD ───────────────────────────────────────────────────────────

@@ -4,21 +4,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -27,9 +25,9 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,39 +44,54 @@ import kotlinx.collections.immutable.ImmutableList
 import com.mapo.data.model.RemapTarget
 
 /**
- * Shared picker dialog for choosing a RemapTarget. Used by physical-button remapping,
- * virtual-button edit, and trackpad gesture remapping. Single source of truth for the
- * category-then-filtered-list flow.
+ * Full-screen picker for choosing a [RemapTarget]. Reached as a Navigation destination from
+ * RemapControlsScreen (per-physical-button mappings) and ConfigureButtonScreen (per-virtual-
+ * button trackpad gestures). The internal multi-step flow (category → filtered list) is
+ * preserved from the previous AlertDialog version, just hosted in a Scaffold + TopAppBar.
+ *
+ * On selection the screen invokes [onSelect] with the chosen target; the caller is
+ * responsible for routing it back to the previous destination's savedStateHandle and popping.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RemapTargetPickerDialog(
+fun RemapTargetPickerScreen(
     title: String,
-    current: RemapTarget,
+    currentEncoded: String,
     onSelect: (RemapTarget) -> Unit,
-    onDismiss: () -> Unit
+    onBack: () -> Unit,
 ) {
+    val current = remember(currentEncoded) { RemapTarget.decode(currentEncoded) }
     var pickerState by remember { mutableStateOf<RemapPickerState>(RemapPickerState.CategorySelection) }
+    val onCategoryNav: () -> Unit = { pickerState = RemapPickerState.CategorySelection }
+    val isCategoryView = pickerState is RemapPickerState.CategorySelection
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (pickerState !is RemapPickerState.CategorySelection) {
-                    IconButton(onClick = { pickerState = RemapPickerState.CategorySelection }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(title) },
+                navigationIcon = {
+                    IconButton(onClick = if (isCategoryView) onBack else onCategoryNav) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = if (isCategoryView) "Back" else "Back to categories",
+                        )
                     }
-                }
-                Text(title)
-            }
+                },
+            )
         },
-        text = {
+    ) { contentPadding ->
+        Column(
+            modifier = Modifier
+                .padding(contentPadding)
+                .fillMaxSize(),
+        ) {
             when (val state = pickerState) {
                 is RemapPickerState.CategorySelection -> CategoryList(
                     current = current,
                     onUnbound = { onSelect(RemapTarget.Unbound) },
-                    onPickGamepad  = { pickerState = RemapPickerState.GamepadList() },
+                    onPickGamepad = { pickerState = RemapPickerState.GamepadList() },
                     onPickKeyboard = { pickerState = RemapPickerState.KeyboardList() },
-                    onPickMouse    = { pickerState = RemapPickerState.MouseList() }
+                    onPickMouse = { pickerState = RemapPickerState.MouseList() },
                 )
                 is RemapPickerState.GamepadList -> FilteredInputList(
                     options = RemapInputOptions.gamepadOptions,
@@ -86,7 +99,7 @@ fun RemapTargetPickerDialog(
                     showFilter = true,
                     current = current,
                     onFilterChange = { pickerState = state.copy(filter = it) },
-                    onSelect = onSelect
+                    onSelect = onSelect,
                 )
                 is RemapPickerState.KeyboardList -> FilteredInputList(
                     options = RemapInputOptions.keyboardOptions,
@@ -94,7 +107,7 @@ fun RemapTargetPickerDialog(
                     showFilter = true,
                     current = current,
                     onFilterChange = { pickerState = state.copy(filter = it) },
-                    onSelect = onSelect
+                    onSelect = onSelect,
                 )
                 is RemapPickerState.MouseList -> FilteredInputList(
                     options = RemapInputOptions.mouseOptions,
@@ -102,15 +115,11 @@ fun RemapTargetPickerDialog(
                     showFilter = false,
                     current = current,
                     onFilterChange = {},
-                    onSelect = onSelect
+                    onSelect = onSelect,
                 )
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
-    )
+    }
 }
 
 @Composable
@@ -119,7 +128,7 @@ private fun CategoryList(
     onUnbound: () -> Unit,
     onPickGamepad: () -> Unit,
     onPickKeyboard: () -> Unit,
-    onPickMouse: () -> Unit
+    onPickMouse: () -> Unit,
 ) {
     Column {
         CategoryRow("Unbound / None", current is RemapTarget.Unbound, showChevron = false, onClick = onUnbound)
@@ -138,9 +147,10 @@ private fun CategoryRow(
     label: String,
     selected: Boolean,
     showChevron: Boolean = true,
-    onClick: () -> Unit
+    onClick: () -> Unit,
 ) {
-    // primaryContainer when selected; transparent otherwise so the dialog's surfaceContainerHigh shows through
+    // primaryContainer when selected; transparent otherwise (lets the screen Scaffold's
+    // surfaceContainerLowest show through)
     ListItem(
         onClick = onClick,
         trailingContent = if (showChevron) {
@@ -151,8 +161,8 @@ private fun CategoryRow(
         } else null,
         colors = ListItemDefaults.colors(
             containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
-                             else Color.Transparent
-        )
+                             else Color.Transparent,
+        ),
     ) { Text(label) }
 }
 
@@ -164,12 +174,12 @@ private fun FilteredInputList(
     showFilter: Boolean,
     current: RemapTarget,
     onFilterChange: (String) -> Unit,
-    onSelect: (RemapTarget) -> Unit
+    onSelect: (RemapTarget) -> Unit,
 ) {
     val filtered = if (filter.isBlank()) options
     else options.filter { it.label.contains(filter, ignoreCase = true) }
 
-    Column {
+    Column(modifier = Modifier.fillMaxSize()) {
         if (showFilter) {
             OutlinedTextField(
                 value = filter,
@@ -178,36 +188,29 @@ private fun FilteredInputList(
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
-        // surfaceContainer — list block inside the dialog's surfaceContainerHigh; gives the list a visible "card" tier
-        Surface(
-            modifier = Modifier.heightIn(max = 320.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            shape = RoundedCornerShape(8.dp),
-        ) {
-            Box {
-                val listState = rememberLazyListState()
-                LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
-                    itemsIndexed(filtered) { index, option ->
-                        val isSelected = option.target == current
-                        ListItem(
-                            onClick = { onSelect(option.target) },
-                            leadingContent = if (isSelected) {
-                                { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
-                            } else null,
-                            colors = ListItemDefaults.colors(
-                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                                 else Color.Transparent
-                            )
-                        ) { Text(option.label) }
-                        if (index < filtered.lastIndex) HorizontalDivider()
-                    }
+        Box(modifier = Modifier.fillMaxSize()) {
+            val listState = rememberLazyListState()
+            LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
+                itemsIndexed(filtered) { index, option ->
+                    val isSelected = option.target == current
+                    ListItem(
+                        onClick = { onSelect(option.target) },
+                        leadingContent = if (isSelected) {
+                            { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
+                        } else null,
+                        colors = ListItemDefaults.colors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                             else Color.Transparent,
+                        ),
+                    ) { Text(option.label) }
+                    if (index < filtered.lastIndex) HorizontalDivider()
                 }
-                ScrollFade(visible = listState.canScrollBackward, alignment = Alignment.TopCenter, fromTop = true)
-                ScrollFade(visible = listState.canScrollForward, alignment = Alignment.BottomCenter, fromTop = false)
             }
+            ScrollFade(visible = listState.canScrollBackward, alignment = Alignment.TopCenter, fromTop = true)
+            ScrollFade(visible = listState.canScrollForward, alignment = Alignment.BottomCenter, fromTop = false)
         }
         if (filtered.isEmpty()) {
             Spacer(Modifier.height(8.dp))
@@ -215,7 +218,7 @@ private fun FilteredInputList(
                 "No matches",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp)
+                modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
     }
@@ -224,7 +227,7 @@ private fun FilteredInputList(
 @Composable
 private fun BoxScope.ScrollFade(visible: Boolean, alignment: Alignment, fromTop: Boolean) {
     if (!visible) return
-    val surface = MaterialTheme.colorScheme.surfaceContainer
+    val surface = MaterialTheme.colorScheme.surfaceContainerLowest
     Box(
         modifier = Modifier
             .align(alignment)
@@ -233,9 +236,8 @@ private fun BoxScope.ScrollFade(visible: Boolean, alignment: Alignment, fromTop:
             .background(
                 Brush.verticalGradient(
                     colors = if (fromTop) listOf(surface, surface.copy(alpha = 0f))
-                             else listOf(surface.copy(alpha = 0f), surface)
-                )
-            )
+                             else listOf(surface.copy(alpha = 0f), surface),
+                ),
+            ),
     )
 }
-

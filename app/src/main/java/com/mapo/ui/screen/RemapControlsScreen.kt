@@ -19,6 +19,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -34,9 +35,12 @@ import com.mapo.data.model.displayLabel
 @Composable
 fun RemapControlsScreen(
     initialMappings: Map<String, RemapTarget>,
+    pickerResult: RemapTarget?,
+    onConsumePickerResult: () -> Unit,
     onSave: (Map<DeviceButton, RemapTarget>) -> Unit,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    onOpenPicker: (title: String, current: RemapTarget) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val draft = remember {
         mutableStateMapOf<DeviceButton, RemapTarget>().also { map ->
@@ -46,19 +50,23 @@ fun RemapControlsScreen(
         }
     }
 
+    // Track which physical button is awaiting a picker result; survives the picker
+    // round-trip via remember in this NavBackStackEntry-scoped composable.
     var editingButton by remember { mutableStateOf<DeviceButton?>(null) }
 
-    if (editingButton != null) {
-        val btn = editingButton!!
-        RemapTargetPickerDialog(
-            title = "Remap: ${btn.displayName}",
-            current = draft[btn] ?: RemapTarget.Unbound,
-            onSelect = { target ->
-                draft[btn] = target
-                editingButton = null
-            },
-            onDismiss = { editingButton = null }
-        )
+    LaunchedEffect(pickerResult) {
+        val target = pickerResult ?: return@LaunchedEffect
+        editingButton?.let { btn ->
+            draft[btn] = target
+            editingButton = null
+        }
+        onConsumePickerResult()
+    }
+
+    val openPickerFor: (DeviceButton) -> Unit = { btn ->
+        editingButton = btn
+        val current = draft[btn] ?: RemapTarget.Unbound
+        onOpenPicker("Remap: ${btn.displayName}", current)
     }
 
     Scaffold(
@@ -94,13 +102,13 @@ fun RemapControlsScreen(
                     },
                     trailingContent = {
                         OutlinedButton(
-                            onClick = { editingButton = btn },
+                            onClick = { openPickerFor(btn) },
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text("Edit")
                         }
                     },
-                    modifier = Modifier.clickable { editingButton = btn },
+                    modifier = Modifier.clickable { openPickerFor(btn) },
                 )
                 if (index < DeviceButton.entries.lastIndex) {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))

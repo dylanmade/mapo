@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Light-mode activity theme. The Compose layer (MapoTheme) paints over this with the
+         M3 surfaceContainerLowest, so this only shows during transitions / partial-transparency
+         moments. Dark variant lives in values-night/themes.xml. -->
     <style name="Theme.Mapo" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark-mode activity theme. Mirrors values/themes.xml but with a dark system parent so
+         the activity windowBackground is dark; prevents white from bleeding through during
+         Compose transitions or partial-transparency moments while in dark mode. -->
+    <style name="Theme.Mapo" parent="android:Theme.Material.NoActionBar" />
+</resources>

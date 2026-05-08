@@ -85,6 +85,9 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
 
+    // Navigation Compose
+    implementation(libs.androidx.navigation.compose)
+
     // Gson
     implementation(libs.gson)
 

@@ -142,9 +142,6 @@ class MainViewModel @Inject constructor(
     private val _remapEnabled = MutableStateFlow(false)
     val remapEnabled: StateFlow<Boolean> = _remapEnabled.asStateFlow()
 
-    private val _showRemapControls = MutableStateFlow(false)
-    val showRemapControls: StateFlow<Boolean> = _showRemapControls.asStateFlow()
-
     val autoSwitchEnabled: StateFlow<Boolean> = autoSwitchSettings.autoSwitchEnabled
 
     val autoCreateProfilesEnabled: StateFlow<Boolean> = autoSwitchSettings.autoCreateProfilesEnabled
@@ -264,8 +261,14 @@ class MainViewModel @Inject constructor(
         inputDispatcher.setRemapEnabled(enabled)
     }
 
-    fun openRemapControls() { _showRemapControls.value = true }
-    fun closeRemapControls() { _showRemapControls.value = false }
+    /**
+     * Tell the accessibility service to swallow `KEYCODE_BACK` while the keyboard view
+     * (Main destination + drawer closed) is showing — that view has FLAG_NOT_FOCUSABLE set
+     * for gamepad routing, so back has no focusable target and would ANR the input dispatcher.
+     */
+    fun setConsumeSystemBack(consume: Boolean) {
+        inputDispatcher.setConsumeSystemBack(consume)
+    }
 
     // ── Auto-switch ───────────────────────────────────────────────────────────
 
@@ -301,7 +304,6 @@ class MainViewModel @Inject constructor(
     fun saveRemapMappings(draft: Map<DeviceButton, RemapTarget>) {
         val profileId = activeProfile.value?.id ?: return
         viewModelScope.launch { gampadMappingRepository.saveMappings(profileId, draft) }
-        _showRemapControls.value = false
     }
 
     // ── Navigation ────────────────────────────────────────────────────────────

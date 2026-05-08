@@ -1,7 +1,11 @@
 package com.mapo.ui.screen
 
 import android.app.Activity
+import android.graphics.Rect
+import android.os.Build
 import android.util.Log
+import android.view.ViewTreeObserver
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
@@ -59,12 +63,13 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -105,7 +110,16 @@ import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
 import com.mapo.data.model.TemplateRef
 import com.mapo.service.InputAccessibilityService
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.mapo.ui.MapoGesture
+import com.mapo.ui.nav.MapoRoute
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.ui.screen.keyboard.KeyboardTabBar
 import com.mapo.ui.screen.keyboard.TabActionDialog
@@ -196,15 +210,32 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         }
     }
 
-    val showRemapControls by viewModel.showRemapControls.collectAsStateWithLifecycle()
     val activeProfileMappings by viewModel.activeProfileMappings.collectAsStateWithLifecycle()
     val remapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    var showAutoSwitch by remember { mutableStateOf(false) }
-    var showBlocklist by remember { mutableStateOf(false) }
-    var showThemeStudio by remember { mutableStateOf(false) }
+    val navController = rememberNavController()
+
+    // Toggle window flags + back-gesture suppression based on which destination is showing
+    // and whether the drawer is open. Keeping these conditional (vs. unconditional in
+    // MainActivity) is what makes back-gesture / back-button work on the secondary screens
+    // and on the drawer (drawer-open implies the user is choosing nav, not playing a game).
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val isMainRoute = currentBackStackEntry?.destination?.route == MapoRoute.MAIN
+    val drawerOpen = drawerState.isOpen
+    val keyboardViewActive = isMainRoute && !drawerOpen
+    ApplyMainScreenWindowBehavior(
+        notFocusable = keyboardViewActive,
+        suppressBackGesture = keyboardViewActive,
+    )
+    // While the keyboard view is showing the window is not focusable, so KEYCODE_BACK
+    // has nowhere to deliver and the input dispatcher would ANR. Have the accessibility
+    // service consume the back key in that exact state. Matches user intent (back is a
+    // no-op on the keyboard view to prevent accidental dismissal during typing/trackpad).
+    LaunchedEffect(keyboardViewActive) {
+        viewModel.setConsumeSystemBack(keyboardViewActive)
+    }
 
     var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted(context)) }
@@ -232,34 +263,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         )
     }
 
-    var configureDraft by remember { mutableStateOf<GridButton?>(null) }
-    var configureIsEdit by remember { mutableStateOf(false) }
-    // When non-null, the dialog's OK handler creates a button at this exact (col, row)
-    // instead of at the next first-empty cell. Set by the in-grid + icons.
-    var newButtonCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-
-    val draftSnapshot = configureDraft
-    if (draftSnapshot != null) {
-        ConfigureButtonDialog(
-            initial = draftSnapshot,
-            isEdit = configureIsEdit,
-            onConfirm = { result ->
-                if (configureIsEdit) {
-                    viewModel.updateSelectedButton(result)
-                } else {
-                    val cell = newButtonCell
-                    if (cell != null) viewModel.addButtonAt(cell.first, cell.second, result)
-                    else viewModel.addButton(result)
-                    newButtonCell = null
-                }
-            },
-            onDismiss = {
-                configureDraft = null
-                newButtonCell = null
-            },
-        )
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -277,210 +280,307 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 onDeleteProfile = { profile -> viewModel.deleteProfile(profile) },
                 onOpenRemapControls = {
                     scope.launch { drawerState.close() }
-                    viewModel.openRemapControls()
+                    navController.navigate(MapoRoute.REMAP_CONTROLS)
                 },
                 onOpenAutoSwitch = {
                     scope.launch { drawerState.close() }
-                    showAutoSwitch = true
+                    navController.navigate(MapoRoute.AUTO_SWITCH)
                 },
                 onOpenBlocklist = {
                     scope.launch { drawerState.close() }
-                    showBlocklist = true
+                    navController.navigate(MapoRoute.BLOCKLIST)
                 },
                 onOpenThemeStudio = {
                     scope.launch { drawerState.close() }
-                    showThemeStudio = true
+                    navController.navigate(MapoRoute.THEME_STUDIO)
                 }
             )
         }
     ) {
-        // surfaceContainerLowest — root app Scaffold (M3 default; do not override to colorScheme.background)
-        Scaffold(
-            snackbarHost = {
-                val prompt = pendingPrompt
-                if (prompt != null) {
-                    Snackbar(
-                        modifier = Modifier.padding(12.dp),
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                        actionOnNewLine = true,
-                        action = {
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                TextButton(
-                                    onClick = {
-                                        viewModel.ignorePackageForever(prompt.pkg)
-                                        pendingPrompt = null
-                                    },
-                                    colors = ButtonDefaults.textButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error
-                                    )
-                                ) { Text(stringResource(R.string.auto_switch_prompt_never)) }
-                                TextButton(
-                                    onClick = { pendingPrompt = null },
-                                    colors = ButtonDefaults.textButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                ) { Text(stringResource(R.string.auto_switch_prompt_no)) }
-                                TextButton(
-                                    onClick = {
-                                        viewModel.acceptCreateProfilePrompt(prompt.pkg, prompt.appLabel)
-                                        pendingPrompt = null
+        NavHost(
+            navController = navController,
+            startDestination = MapoRoute.MAIN,
+            modifier = Modifier.fillMaxSize(),
+            // Slide horizontally (instead of the default fade) — drill-down nav: forward slides
+            // in from the right, back slides out to the right. 400 ms tween (default
+            // FastOutSlowInEasing) is snappier than Compose Navigation's ~700 ms default and
+            // avoids the crossfade dip-to-window-bg that fade transitions exhibit.
+            enterTransition = {
+                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(400))
+            },
+            exitTransition = {
+                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(400))
+            },
+            popEnterTransition = {
+                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(400))
+            },
+            popExitTransition = {
+                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(400))
+            },
+        ) {
+            composable(MapoRoute.MAIN) {
+                // surfaceContainerLowest — root app Scaffold (M3 default; do not override to colorScheme.background)
+                Scaffold(
+                    snackbarHost = {
+                        val prompt = pendingPrompt
+                        if (prompt != null) {
+                            Snackbar(
+                                modifier = Modifier.padding(12.dp),
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                                actionOnNewLine = true,
+                                action = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.ignorePackageForever(prompt.pkg)
+                                                pendingPrompt = null
+                                            },
+                                            colors = ButtonDefaults.textButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.error
+                                            )
+                                        ) { Text(stringResource(R.string.auto_switch_prompt_never)) }
+                                        TextButton(
+                                            onClick = { pendingPrompt = null },
+                                            colors = ButtonDefaults.textButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        ) { Text(stringResource(R.string.auto_switch_prompt_no)) }
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.acceptCreateProfilePrompt(prompt.pkg, prompt.appLabel)
+                                                pendingPrompt = null
+                                            }
+                                        ) { Text(stringResource(R.string.auto_switch_prompt_yes)) }
                                     }
-                                ) { Text(stringResource(R.string.auto_switch_prompt_yes)) }
+                                }
+                            ) {
+                                Text(stringResource(R.string.auto_switch_prompt_title, prompt.appLabel))
+                            }
+                        } else {
+                            SnackbarHost(snackbarHostState) { data ->
+                                Snackbar(
+                                    snackbarData = data,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurface,
+                                    actionColor = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
+                    },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
+                ) { _ ->
+                    Column(
+                        // No manual inset padding: MainActivity does NOT call enableEdgeToEdge,
+                        // so the OS sizes the activity window below the status bar where one
+                        // exists (phone, Thor primary screen) and leaves it alone where one
+                        // doesn't (Thor bottom bezel screen). Adding statusBarsPadding here
+                        // would double-reserve and reintroduce the stale-inset shift bug.
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        Text(stringResource(R.string.auto_switch_prompt_title, prompt.appLabel))
-                    }
-                } else {
-                    SnackbarHost(snackbarHostState) { data ->
-                        Snackbar(
-                            snackbarData = data,
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                            actionColor = MaterialTheme.colorScheme.primary
+                        KeyboardTopBar(
+                            layouts = layouts,
+                            selectedIndex = selectedIndex,
+                            tabContextMenuFor = tabContextMenuFor,
+                            onSelectIndex = { viewModel.selectLayout(it) },
+                            onLongPressMenu = { id -> viewModel.openTabMenu(id) },
+                            onReorder = { from, to -> viewModel.reorderTabs(from, to) },
+                            onCloseMenu = { viewModel.closeTabMenu() },
+                            onMenuEditButtons = { id -> viewModel.enterEditMode(id) },
+                            onMenuConfigure = { id ->
+                                val layout = layouts.find { it.id == id }
+                                if (layout != null) {
+                                    tabActionDialog = TabActionDialog.Configure(
+                                        layoutId = id,
+                                        name = layout.name,
+                                        cols = layout.columns,
+                                        rows = layout.rows,
+                                        bgColor = layout.backgroundColorArgb,
+                                        originalName = viewModel.originalNames.value[id]
+                                    )
+                                }
+                            },
+                            onMenuDuplicate = { id -> viewModel.duplicateKeyboard(id) },
+                            onMenuRemove = { id ->
+                                val layout = layouts.find { it.id == id }
+                                val profileName = activeProfile?.name ?: ""
+                                if (layout != null) {
+                                    tabActionDialog = TabActionDialog.RemoveConfirm(
+                                        layoutId = id,
+                                        name = layout.name,
+                                        profileName = profileName
+                                    )
+                                }
+                            },
+                            onMenuSaveTemplate = { id ->
+                                val layout = layouts.find { it.id == id }
+                                if (layout != null) {
+                                    tabActionDialog = TabActionDialog.SaveTemplateChooser(
+                                        layoutId = id,
+                                        keyboardName = layout.name
+                                    )
+                                }
+                            },
+                            onOpenDrawer = {
+                                // Drawer surfaces global navigation; opening it ends any per-tab
+                                // edit context. Add-keyboard cancellation, by contrast, leaves
+                                // edit mode intact (handled in the VM funnel).
+                                viewModel.exitEditMode()
+                                scope.launch { drawerState.open() }
+                            },
+                            onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser }
+                        )
+
+                        KeyGrid(
+                            layout = displayLayout,
+                            isEditMode = isEditMode,
+                            selectedButtonId = selectedButtonId,
+                            onButtonTap = viewModel::onButtonTap,
+                            onButtonDoubleTap = viewModel::onButtonDoubleTap,
+                            onButtonHold = viewModel::onButtonHold,
+                            onSelectButton = viewModel::selectButton,
+                            onMoveButton = viewModel::moveButton,
+                            onResizeButton = viewModel::resizeButton,
+                            onDragStart = viewModel::onDragStart,
+                            onMouseMove = viewModel::onMouseMove,
+                            onDragEnd = viewModel::onDragEnd,
+                            onTrackpadGesture = viewModel::onTrackpadGesture,
+                            onConfigureButton = { id ->
+                                val btn = displayLayout.buttons.find { it.id == id }
+                                if (btn != null) {
+                                    // The configure screen is instant-commit; setting selectedButtonId
+                                    // here makes viewModel.updateSelectedButton apply to the right one.
+                                    viewModel.selectButtonOnly(id)
+                                    navController.navigate(MapoRoute.configureButton(id))
+                                }
+                            },
+                            onDuplicateButton = { id -> viewModel.duplicateButton(id) },
+                            onRemoveButton = { id ->
+                                val btn = displayLayout.buttons.find { it.id == id }
+                                if (btn != null) {
+                                    tabActionDialog = TabActionDialog.RemoveButtonConfirm(
+                                        buttonId = id,
+                                        buttonLabel = btn.label
+                                    )
+                                }
+                            },
+                            onAddAtCell = { col, row ->
+                                // Instant-commit add: create a default key-button at the cell first,
+                                // then navigate to its config screen for further editing. Backing out
+                                // leaves the button in place; the user removes it via long-press if
+                                // they didn't actually want it.
+                                viewModel.addButtonAt(col, row, GridButton(col = col, row = row, type = "key"))
+                                viewModel.selectedButtonId.value?.let { newId ->
+                                    navController.navigate(MapoRoute.configureButton(newId))
+                                }
+                            },
+                            onLongPressEmptyArea = { viewModel.enterEditMode(displayLayout.id) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(4.dp)
+                        )
+                        BottomBar(
+                            remapEnabled = remapEnabled,
+                            onToggleRemap = { viewModel.toggleRemap() },
+                            onQuit = { (context as? Activity)?.finish() }
                         )
                     }
                 }
-            },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-            contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
-        ) { _ ->
-            Column(
-                // No manual inset padding: MainActivity does NOT call enableEdgeToEdge,
-                // so the OS sizes the activity window below the status bar where one
-                // exists (phone, Thor primary screen) and leaves it alone where one
-                // doesn't (Thor bottom bezel screen). Adding statusBarsPadding here
-                // would double-reserve and reintroduce the stale-inset shift bug.
-                modifier = Modifier.fillMaxSize()
-            ) {
-                KeyboardTopBar(
-                    layouts = layouts,
-                    selectedIndex = selectedIndex,
-                    tabContextMenuFor = tabContextMenuFor,
-                    onSelectIndex = { viewModel.selectLayout(it) },
-                    onLongPressMenu = { id -> viewModel.openTabMenu(id) },
-                    onReorder = { from, to -> viewModel.reorderTabs(from, to) },
-                    onCloseMenu = { viewModel.closeTabMenu() },
-                    onMenuEditButtons = { id -> viewModel.enterEditMode(id) },
-                    onMenuConfigure = { id ->
-                        val layout = layouts.find { it.id == id }
-                        if (layout != null) {
-                            tabActionDialog = TabActionDialog.Configure(
-                                layoutId = id,
-                                name = layout.name,
-                                cols = layout.columns,
-                                rows = layout.rows,
-                                bgColor = layout.backgroundColorArgb,
-                                originalName = viewModel.originalNames.value[id]
-                            )
-                        }
+            }
+            composable(MapoRoute.REMAP_CONTROLS) { entry ->
+                val pickerResult by entry.savedStateHandle
+                    .getStateFlow<String?>(MapoRoute.PICKER_RESULT_KEY, null)
+                    .collectAsStateWithLifecycle()
+                RemapControlsScreen(
+                    initialMappings = activeProfileMappings,
+                    pickerResult = pickerResult?.let { RemapTarget.decode(it) },
+                    onConsumePickerResult = {
+                        entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
                     },
-                    onMenuDuplicate = { id -> viewModel.duplicateKeyboard(id) },
-                    onMenuRemove = { id ->
-                        val layout = layouts.find { it.id == id }
-                        val profileName = activeProfile?.name ?: ""
-                        if (layout != null) {
-                            tabActionDialog = TabActionDialog.RemoveConfirm(
-                                layoutId = id,
-                                name = layout.name,
-                                profileName = profileName
-                            )
-                        }
+                    onSave = { mappings ->
+                        viewModel.saveRemapMappings(mappings)
+                        navController.popBackStack()
                     },
-                    onMenuSaveTemplate = { id ->
-                        val layout = layouts.find { it.id == id }
-                        if (layout != null) {
-                            tabActionDialog = TabActionDialog.SaveTemplateChooser(
-                                layoutId = id,
-                                keyboardName = layout.name
-                            )
-                        }
+                    onBack = { navController.popBackStack() },
+                    onOpenPicker = { title, current ->
+                        navController.navigate(MapoRoute.remapTargetPicker(title, current.encode()))
                     },
-                    onOpenDrawer = {
-                        // Drawer surfaces global navigation; opening it ends any per-tab
-                        // edit context. Add-keyboard cancellation, by contrast, leaves
-                        // edit mode intact (handled in the VM funnel).
-                        viewModel.exitEditMode()
-                        scope.launch { drawerState.open() }
-                    },
-                    onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser }
+                    modifier = Modifier.fillMaxSize()
                 )
-
-                KeyGrid(
-                    layout = displayLayout,
-                    isEditMode = isEditMode,
-                    selectedButtonId = selectedButtonId,
-                    onButtonTap = viewModel::onButtonTap,
-                    onButtonDoubleTap = viewModel::onButtonDoubleTap,
-                    onButtonHold = viewModel::onButtonHold,
-                    onSelectButton = viewModel::selectButton,
-                    onMoveButton = viewModel::moveButton,
-                    onResizeButton = viewModel::resizeButton,
-                    onDragStart = viewModel::onDragStart,
-                    onMouseMove = viewModel::onMouseMove,
-                    onDragEnd = viewModel::onDragEnd,
-                    onTrackpadGesture = viewModel::onTrackpadGesture,
-                    onConfigureButton = { id ->
-                        val btn = displayLayout.buttons.find { it.id == id }
-                        if (btn != null) {
-                            configureDraft = btn
-                            configureIsEdit = true
-                            viewModel.selectButtonOnly(id)
-                        }
-                    },
-                    onDuplicateButton = { id -> viewModel.duplicateButton(id) },
-                    onRemoveButton = { id ->
-                        val btn = displayLayout.buttons.find { it.id == id }
-                        if (btn != null) {
-                            tabActionDialog = TabActionDialog.RemoveButtonConfirm(
-                                buttonId = id,
-                                buttonLabel = btn.label
-                            )
-                        }
-                    },
-                    onAddAtCell = { col, row ->
-                        newButtonCell = col to row
-                        configureDraft = GridButton(col = col, row = row, type = "key")
-                        configureIsEdit = false
-                    },
-                    onLongPressEmptyArea = { viewModel.enterEditMode(displayLayout.id) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(4.dp)
+            }
+            composable(MapoRoute.AUTO_SWITCH) {
+                AutoSwitchScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MapoRoute.BLOCKLIST) {
+                BlocklistScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MapoRoute.THEME_STUDIO) {
+                com.themestudio.ui.ThemeStudioScreen(
+                    onClose = { navController.popBackStack() },
+                    theme = { content -> com.mapo.ui.theme.MapoTheme { content() } },
                 )
-                BottomBar(
-                    remapEnabled = remapEnabled,
-                    onToggleRemap = { viewModel.toggleRemap() },
-                    onQuit = { (context as? Activity)?.finish() }
+            }
+            composable(
+                route = MapoRoute.CONFIGURE_BUTTON,
+                arguments = listOf(navArgument(MapoRoute.ARG_BUTTON_ID) { type = NavType.StringType }),
+            ) { entry ->
+                val buttonId = entry.arguments?.getString(MapoRoute.ARG_BUTTON_ID) ?: return@composable
+                // Resolve the button live from the current display layout. If it's gone (e.g. user
+                // navigated back from a delete), pop ourselves.
+                val button = displayLayout.buttons.find { it.id == buttonId }
+                if (button == null) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                    return@composable
+                }
+                val pickerResult by entry.savedStateHandle
+                    .getStateFlow<String?>(MapoRoute.PICKER_RESULT_KEY, null)
+                    .collectAsStateWithLifecycle()
+                ConfigureButtonScreen(
+                    button = button,
+                    pickerResult = pickerResult?.let { RemapTarget.decode(it) },
+                    onConsumePickerResult = {
+                        entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
+                    },
+                    onUpdate = { updated ->
+                        // selectedButtonId was set to this button before navigation, so the VM's
+                        // updateSelectedButton applies to the right one.
+                        viewModel.selectButtonOnly(buttonId)
+                        viewModel.updateSelectedButton(updated)
+                    },
+                    onOpenPicker = { title, current ->
+                        navController.navigate(MapoRoute.remapTargetPicker(title, current.encode()))
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(
+                route = MapoRoute.REMAP_TARGET_PICKER,
+                arguments = listOf(
+                    navArgument(MapoRoute.ARG_TITLE) { type = NavType.StringType },
+                    navArgument(MapoRoute.ARG_CURRENT) { type = NavType.StringType },
+                ),
+            ) { entry ->
+                val title = entry.arguments?.getString(MapoRoute.ARG_TITLE) ?: ""
+                val currentEncoded = entry.arguments?.getString(MapoRoute.ARG_CURRENT) ?: "none"
+                RemapTargetPickerScreen(
+                    title = title,
+                    currentEncoded = currentEncoded,
+                    onSelect = { target ->
+                        // Write the result to the previous destination's saved state and pop. The
+                        // caller observes its own saved-state handle and applies the result to
+                        // whatever it's editing (RemapControlsScreen's editingButton, or
+                        // ConfigureButtonScreen's editingGesture).
+                        navController.previousBackStackEntry
+                            ?.savedStateHandle
+                            ?.set(MapoRoute.PICKER_RESULT_KEY, target.encode())
+                        navController.popBackStack()
+                    },
+                    onBack = { navController.popBackStack() },
                 )
             }
         }
-    }
-    if (showRemapControls) {
-        RemapControlsScreen(
-            initialMappings = activeProfileMappings,
-            onSave = { viewModel.saveRemapMappings(it) },
-            onBack = { viewModel.closeRemapControls() },
-            modifier = Modifier.fillMaxSize()
-        )
-    }
-    if (showAutoSwitch) {
-        AutoSwitchScreen(
-            onBack = { showAutoSwitch = false }
-        )
-    }
-    if (showBlocklist) {
-        BlocklistScreen(
-            onBack = { showBlocklist = false }
-        )
-    }
-    if (showThemeStudio) {
-        com.themestudio.ui.ThemeStudioScreen(
-            onClose = { showThemeStudio = false },
-            theme = { content -> com.mapo.ui.theme.MapoTheme { content() } },
-        )
     }
 
     TabActionDialogHost(
@@ -516,6 +616,63 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         onConfirmDeleteButton = { id -> viewModel.deleteButton(id) }
     )
     } // end Box
+}
+
+/**
+ * Per-destination window behavior. Replaces the unconditional setup in MainActivity so the
+ * back-gesture exclusion + FLAG_NOT_FOCUSABLE only apply on the keyboard view (Main + drawer
+ * closed). On secondary destinations (and on Main with the drawer open) both are cleared, so
+ * the back gesture / button can navigate normally.
+ *
+ * **Why this exists:**
+ * - `FLAG_NOT_FOCUSABLE` keeps unmapped gamepad inputs flowing to the game on the primary
+ *   screen — load-bearing for the dual-screen design — but it also blocks the back button
+ *   from reaching the activity, causing a 5 s input-dispatch ANR. Clearing it on secondary
+ *   screens lets back work without sacrificing the gamepad routing on Main (where it matters).
+ * - `systemGestureExclusionRects` covering the full window prevents accidental back-gesture
+ *   swipes during virtual-keyboard / trackpad use on the keyboard view. On secondary screens
+ *   (settings) there's no virtual-keyboard concern, so we let the gesture work for navigation.
+ */
+@Composable
+private fun ApplyMainScreenWindowBehavior(
+    notFocusable: Boolean,
+    suppressBackGesture: Boolean,
+) {
+    val view = LocalView.current
+    val window = (view.context as? Activity)?.window ?: return
+
+    LaunchedEffect(notFocusable) {
+        if (notFocusable) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+        }
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // The exclusion rect needs to follow the view's current bounds (which can change with
+        // configuration / display swaps), so we both apply on suppress-state changes AND
+        // re-apply on every layout pass while suppression is active.
+        val suppressState = rememberUpdatedState(suppressBackGesture)
+        DisposableEffect(view) {
+            val listener = ViewTreeObserver.OnGlobalLayoutListener {
+                view.systemGestureExclusionRects = if (suppressState.value) {
+                    listOf(Rect(0, 0, view.width, view.height))
+                } else {
+                    emptyList()
+                }
+            }
+            view.viewTreeObserver.addOnGlobalLayoutListener(listener)
+            onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+        }
+        LaunchedEffect(suppressBackGesture) {
+            view.systemGestureExclusionRects = if (suppressBackGesture) {
+                listOf(Rect(0, 0, view.width, view.height))
+            } else {
+                emptyList()
+            }
+        }
+    }
 }
 
 @Composable

@@ -52,6 +52,18 @@ class InputDispatcher @Inject constructor() {
     private val _overlayFocused = MutableStateFlow(false)
     val overlayFocused: StateFlow<Boolean> = _overlayFocused.asStateFlow()
 
+    /**
+     * When true, the accessibility service consumes `KEYCODE_BACK` (returns true from
+     * `onKeyEvent`) without dispatching it. Set by MainScreen when the user is on the
+     * keyboard view with the drawer closed: `FLAG_NOT_FOCUSABLE` is on there (so unmapped
+     * gamepad inputs flow to the game on the primary screen), which means the back key
+     * has no focusable target and would otherwise hit the system's 5 s input-dispatch
+     * timeout and ANR. Consuming it here ack's the press without acting on it — matching
+     * the user-facing intent that back does nothing on the keyboard view.
+     */
+    private val _consumeSystemBack = MutableStateFlow(false)
+    val consumeSystemBack: StateFlow<Boolean> = _consumeSystemBack.asStateFlow()
+
     fun setCurrentMappings(mappings: Map<DeviceButton, RemapTarget>) {
         _currentMappings.value = mappings
     }
@@ -62,6 +74,10 @@ class InputDispatcher @Inject constructor() {
 
     fun setOverlayFocused(focused: Boolean) {
         _overlayFocused.value = focused
+    }
+
+    fun setConsumeSystemBack(consume: Boolean) {
+        _consumeSystemBack.value = consume
     }
 
     @Volatile private var sink: InputSink? = null

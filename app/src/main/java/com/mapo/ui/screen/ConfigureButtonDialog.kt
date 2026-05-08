@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -20,13 +21,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -34,7 +39,9 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,135 +70,156 @@ import com.mapo.ui.component.MapoIcons
 import com.mapo.ui.component.SizeDropdown
 
 /**
- * Two-tab configuration dialog for one [GridButton]. Behavior covers type, gesture
- * mappings, and trackpad sensitivity. Appearance covers fill/outline colors and the
- * nine drawable regions (CENTER + 8 edges). Reset buttons restore the per-type
- * defaults from [GridButtonDefaults].
+ * Two-tab full-screen configuration screen for one [GridButton]. Behavior tab covers type,
+ * gesture mappings, and trackpad sensitivity. Appearance tab covers fill/outline colors and
+ * the nine drawable regions (CENTER + 8 edges). Reset buttons restore the per-type defaults
+ * from [GridButtonDefaults].
  *
- * Emits the fully-updated button via [onConfirm]. Caller is responsible for placing
- * it in the layout (add vs update), since this dialog has no opinion on col/row.
+ * Edits commit immediately via [onUpdate] — there's no draft layer. The caller (MainScreen)
+ * routes the update through the ViewModel's instant-commit `updateSelectedButton`. The
+ * `autoDeriveLabel` wrap keeps `GridButton.label` in sync on every change so dialog text
+ * elsewhere (Remove confirm, conflict labels) stays meaningful.
+ *
+ * Sub-dialogs (color picker, region edit, icon picker) stay as `AlertDialog`s because each is
+ * a short-lived OK/Cancel pick-a-value sub-flow. The remap-target picker, on the other hand,
+ * is its own Navigation destination — this screen invokes [onOpenPicker] to navigate there,
+ * and observes [pickerResult] (provided by the caller from the destination's
+ * `savedStateHandle`) to apply the choice back to whichever gesture was being edited.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConfigureButtonDialog(
-    initial: GridButton,
-    isEdit: Boolean,
-    onConfirm: (GridButton) -> Unit,
-    onDismiss: () -> Unit,
+fun ConfigureButtonScreen(
+    button: GridButton,
+    pickerResult: RemapTarget?,
+    onConsumePickerResult: () -> Unit,
+    onUpdate: (GridButton) -> Unit,
+    onOpenPicker: (title: String, current: RemapTarget) -> Unit,
+    onBack: () -> Unit,
 ) {
-    var draft by remember(initial.id) { mutableStateOf(initial) }
     var tab by remember { mutableStateOf(0) }
-
+    // Tracks which of the three trackpad gestures is being remapped while the picker
+    // destination is active. Survives the navigation round-trip via NavBackStackEntry's
+    // remembered state. `null` means "no edit in flight".
     var editingGesture by remember { mutableStateOf<TrackpadGesture?>(null) }
     var editingColor by remember { mutableStateOf<ColorRole?>(null) }
     var editingRegion by remember { mutableStateOf<RegionPosition?>(null) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-        title = { Text(if (isEdit) "Edit Button" else "Add Button") },
-        text = {
-            Column(modifier = Modifier.widthIn(min = 320.dp, max = 520.dp)) {
-                PrimaryTabRow(selectedTabIndex = tab) {
-                    Tab(
-                        selected = tab == 0,
-                        onClick = { tab = 0 },
-                        text = { Text("Behavior") },
-                    )
-                    Tab(
-                        selected = tab == 1,
-                        onClick = { tab = 1 },
-                        text = { Text("Appearance") },
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Column(
-                    modifier = Modifier
-                        .heightIn(max = 460.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    when (tab) {
-                        0 -> BehaviorTab(
-                            draft = draft,
-                            onDraftChange = { draft = it },
-                            onEditGesture = { editingGesture = it },
-                        )
-                        else -> AppearanceTab(
-                            draft = draft,
-                            onDraftChange = { draft = it },
-                            onEditColor = { editingColor = it },
-                            onEditRegion = { editingRegion = it },
-                        )
+    val commit: (GridButton) -> Unit = { next -> onUpdate(autoDeriveLabel(next)) }
+
+    // When the picker pops back with a result, apply it to whichever gesture is being edited
+    // and clear the in-flight edit. Consume the saved-state entry so re-entering the screen
+    // doesn't re-fire the same result.
+    LaunchedEffect(pickerResult) {
+        val target = pickerResult ?: return@LaunchedEffect
+        val gesture = editingGesture
+        if (gesture != null) {
+            val updated = when (gesture) {
+                TrackpadGesture.TAP        -> button.copy(onTap = target.encode())
+                TrackpadGesture.DOUBLE_TAP -> button.copy(onDoubleTap = target.encode())
+                TrackpadGesture.LONG_PRESS -> button.copy(onHold = target.encode())
+            }
+            commit(updated)
+            editingGesture = null
+        }
+        onConsumePickerResult()
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Configure Button") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                },
+            )
+        },
+    ) { contentPadding ->
+        Column(
+            modifier = Modifier
+                .padding(contentPadding)
+                .fillMaxSize(),
+        ) {
+            PrimaryTabRow(selectedTabIndex = tab) {
+                Tab(
+                    selected = tab == 0,
+                    onClick = { tab = 0 },
+                    text = { Text("Behavior") },
+                )
+                Tab(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    text = { Text("Appearance") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                when (tab) {
+                    0 -> BehaviorTab(
+                        draft = button,
+                        onDraftChange = commit,
+                        onEditGesture = { gesture ->
+                            editingGesture = gesture
+                            val current = when (gesture) {
+                                TrackpadGesture.TAP        -> button.onTapTarget
+                                TrackpadGesture.DOUBLE_TAP -> button.onDoubleTapTarget
+                                TrackpadGesture.LONG_PRESS -> button.onHoldTarget
+                            }
+                            onOpenPicker(gesture.displayName, current)
+                        },
+                    )
+                    else -> AppearanceTab(
+                        draft = button,
+                        onDraftChange = commit,
+                        onEditColor = { editingColor = it },
+                        onEditRegion = { editingRegion = it },
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                onConfirm(autoDeriveLabel(draft))
-                onDismiss()
-            }) { Text("OK") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
-
-    if (editingGesture != null) {
-        val gesture = editingGesture!!
-        val current = when (gesture) {
-            TrackpadGesture.TAP        -> draft.onTapTarget
-            TrackpadGesture.DOUBLE_TAP -> draft.onDoubleTapTarget
-            TrackpadGesture.LONG_PRESS -> draft.onHoldTarget
         }
-        RemapTargetPickerDialog(
-            title = gesture.displayName,
-            current = current,
-            onSelect = { target ->
-                draft = when (gesture) {
-                    TrackpadGesture.TAP        -> draft.copy(onTap = target.encode())
-                    TrackpadGesture.DOUBLE_TAP -> draft.copy(onDoubleTap = target.encode())
-                    TrackpadGesture.LONG_PRESS -> draft.copy(onHold = target.encode())
-                }
-                editingGesture = null
-            },
-            onDismiss = { editingGesture = null },
-        )
     }
 
     editingColor?.let { role ->
-        val current = role.read(draft)
+        val current = role.read(button)
         ColorPickerInDialog(
             title = role.title,
             initial = current,
             onConfirm = { color ->
-                draft = role.write(draft, color)
+                commit(role.write(button, color))
                 editingColor = null
             },
             onClear = if (role.canClear) {
-                { draft = role.clear(draft); editingColor = null }
+                { commit(role.clear(button)); editingColor = null }
             } else null,
             onDismiss = { editingColor = null },
         )
     }
 
     editingRegion?.let { pos ->
-        val current = draft.regions[pos.name] ?: ButtonRegion(sizeSp = pos.defaultSizeSp())
-        val placeholder = remember(draft.onTap) { simpleLabel(draft.onTapTarget) }
+        val current = button.regions[pos.name] ?: ButtonRegion(sizeSp = pos.defaultSizeSp())
+        val placeholder = remember(button.onTap) { simpleLabel(button.onTapTarget) }
         RegionEditDialog(
             position = pos,
             initial = current,
             labelPlaceholder = placeholder,
             onConfirm = { updated ->
-                val next = draft.regions.toMutableMap()
+                val next = button.regions.toMutableMap()
                 if (updated.isEmpty()) next.remove(pos.name) else next[pos.name] = updated
-                draft = draft.copy(regions = next)
+                commit(button.copy(regions = next))
                 editingRegion = null
             },
             onClear = {
-                val next = draft.regions.toMutableMap()
+                val next = button.regions.toMutableMap()
                 next.remove(pos.name)
-                draft = draft.copy(regions = next)
+                commit(button.copy(regions = next))
                 editingRegion = null
             },
             onDismiss = { editingRegion = null },

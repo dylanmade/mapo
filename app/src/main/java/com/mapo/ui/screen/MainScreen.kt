@@ -9,7 +9,6 @@ import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -105,7 +104,10 @@ import com.mapo.data.model.onDoubleTapTarget
 import com.mapo.data.model.onHoldTarget
 import com.mapo.data.model.onTapTarget
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Shape
 import com.mapo.ui.component.MapoIcons
+import com.mapo.ui.util.resolveAutoColors
 import com.mapo.data.model.isTrackpad
 import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
@@ -553,14 +555,15 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     .collectAsStateWithLifecycle()
                 ConfigureButtonScreen(
                     button = button,
+                    keyboardThemeColorArgb = displayLayout.backgroundColorArgb,
                     pickerResult = pickerResult?.let { RemapTarget.decode(it) },
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
                     },
                     onUpdate = { updated ->
-                        // selectedButtonId was set to this button before navigation, so the VM's
-                        // updateSelectedButton applies to the right one.
-                        viewModel.selectButtonOnly(buttonId)
+                        // selectedButtonId was set at the navigation-entry point and persists
+                        // for the lifetime of this destination, so updateSelectedButton routes
+                        // to the right button without a defensive re-selection here.
                         viewModel.updateSelectedButton(updated)
                     },
                     onOpenPicker = { title, current ->
@@ -866,16 +869,12 @@ private fun KeyGrid(
 
             if (!isEditMode && button.isTrackpad) {
                 // ── Trackpad (normal mode) ────────────────────────────────────
-                val tpFill = button.fillColorArgb?.let { Color(it) }
+                val keyboardTheme = layout.backgroundColorArgb?.let { Color(it) }
                     ?: MaterialTheme.colorScheme.surface
-                val tpOutline = button.outlineColorArgb?.let { Color(it) }
-                    ?: MaterialTheme.colorScheme.outline
                 Box(
                     modifier = Modifier
                         .absoluteOffset(x = bx, y = by)
                         .size(width = bw, height = bh)
-                        .background(tpFill, RoundedCornerShape(8.dp))
-                        .border(1.dp, tpOutline, RoundedCornerShape(8.dp))
                         .pointerInput(button.id + "_tp") {
                             var lastTapTimeMs = 0L
                             awaitPointerEventScope {
@@ -951,7 +950,14 @@ private fun KeyGrid(
                             }
                         },
                 ) {
-                    ButtonContent(button = button, modifier = Modifier.fillMaxSize())
+                    KeyButtonShape(
+                        button = button,
+                        isSelected = false,
+                        keyboardThemeColor = keyboardTheme,
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        ButtonContent(button = button, modifier = Modifier.fillMaxSize())
+                    }
                 }
             } else {
                 // ── Key button (all modes) / trackpad in edit mode ────────────
@@ -1051,44 +1057,35 @@ private fun KeyGrid(
                             } else Modifier
                         )
                 ) {
-                    val fillColor = button.fillColorArgb?.let { Color(it) }
+                    val keyboardTheme = layout.backgroundColorArgb?.let { Color(it) }
                         ?: MaterialTheme.colorScheme.surface
-                    val outlineColor = button.outlineColorArgb?.let { Color(it) }
-                        ?: MaterialTheme.colorScheme.outline
                     // Only register double/long handlers when targets are configured —
                     // an idle onDoubleClick handler would delay every single tap by the
                     // double-tap window, even on buttons without a configured double-tap.
                     val hasDouble = button.onDoubleTapTarget !is RemapTarget.Unbound
                     val hasHold = button.onHoldTarget !is RemapTarget.Unbound
-                    Box(
+                    KeyButtonShape(
+                        button = button,
+                        isSelected = isSelected,
+                        keyboardThemeColor = keyboardTheme,
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
                                 translationX = dragOffset.x
                                 translationY = dragOffset.y
-                            }
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(fillColor)
-                            .border(
-                                BorderStroke(
-                                    if (isSelected) 2.dp else 1.dp,
-                                    if (isSelected) MaterialTheme.colorScheme.primary
-                                    else outlineColor,
-                                ),
-                                RoundedCornerShape(8.dp),
-                            )
-                            .combinedClickable(
-                                onClick = {
-                                    if (isEditMode) onSelectButton(button.id)
-                                    else onButtonTap(button)
-                                },
-                                onDoubleClick = if (!isEditMode && hasDouble) {
-                                    { onButtonDoubleTap(button) }
-                                } else null,
-                                onLongClick = if (!isEditMode && hasHold) {
-                                    { onButtonHold(button) }
-                                } else null,
-                            ),
+                            },
+                        surfaceModifier = Modifier.combinedClickable(
+                            onClick = {
+                                if (isEditMode) onSelectButton(button.id)
+                                else onButtonTap(button)
+                            },
+                            onDoubleClick = if (!isEditMode && hasDouble) {
+                                { onButtonDoubleTap(button) }
+                            } else null,
+                            onLongClick = if (!isEditMode && hasHold) {
+                                { onButtonHold(button) }
+                            } else null,
+                        ),
                     ) {
                         ButtonContent(button = button, modifier = Modifier.fillMaxSize())
                     }
@@ -1228,6 +1225,81 @@ private const val TRACKPAD_SENSITIVITY = 1.5f
 private const val TAP_MOVEMENT_THRESHOLD_PX = 12f
 private const val DOUBLE_TAP_INTERVAL_MS = 250L
 private const val LONG_PRESS_DURATION_MS = 500L
+
+/**
+ * Layered visual surface for one button. Layers, bottom-up:
+ *  1. Drop shadow (when shadow slot enabled).
+ *  2. Bevel — fills the full rounded shape with the bevel color.
+ *  3. Surface — clipped to a rounded-top / flat-bottom shape, inset above the bevel
+ *     so the bevel band peeks out at the bottom. Fills with the fill color when fill
+ *     is enabled. The outline (when enabled) and the selection ring stroke just this
+ *     surface, so the stroke encompasses only the surface, not surface+bevel.
+ *  4. Content — placed inside the surface, so labels/icons center on the surface and
+ *     end up shifted up by half the bevel height when bevel is enabled.
+ *
+ * [modifier] applies to the outer (shadow + clip) box; pass [graphicsLayer] / size /
+ * offset here. [surfaceModifier] applies to the inner clipped surface box; pass
+ * gesture modifiers (combinedClickable, pointerInput) here so ripples + hit-testing
+ * stay inside the visible surface.
+ */
+@Composable
+private fun KeyButtonShape(
+    button: GridButton,
+    isSelected: Boolean,
+    keyboardThemeColor: Color,
+    modifier: Modifier = Modifier,
+    surfaceModifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+) {
+    val resolved = resolveAutoColors(button, keyboardThemeColor)
+    val outerShape: Shape = RoundedCornerShape(BUTTON_CORNER)
+    val surfaceShape: Shape = if (resolved.bevelEnabled) {
+        RoundedCornerShape(
+            topStart = BUTTON_CORNER, topEnd = BUTTON_CORNER,
+            bottomStart = 0.dp, bottomEnd = 0.dp,
+        )
+    } else outerShape
+
+    Box(
+        modifier = modifier
+            .then(
+                if (resolved.shadowEnabled) Modifier.shadow(
+                    elevation = SHADOW_ELEVATION,
+                    shape = outerShape,
+                    clip = false,
+                    spotColor = resolved.shadow,
+                    ambientColor = resolved.shadow,
+                ) else Modifier
+            )
+            .clip(outerShape)
+            .then(if (resolved.bevelEnabled) Modifier.background(resolved.bevel) else Modifier)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (resolved.bevelEnabled) Modifier.padding(bottom = BEVEL_HEIGHT) else Modifier)
+                .clip(surfaceShape)
+                .then(if (resolved.fillEnabled) Modifier.background(resolved.fill) else Modifier)
+                .then(
+                    when {
+                        isSelected -> Modifier.border(2.dp, MaterialTheme.colorScheme.primary, surfaceShape)
+                        resolved.outlineEnabled -> Modifier.border(1.dp, resolved.outline, surfaceShape)
+                        else -> Modifier
+                    }
+                )
+                .then(surfaceModifier),
+            content = content,
+        )
+    }
+}
+
+// Bevel must be tall enough to extend ABOVE the bottom-corner curve, otherwise
+// the entire band lives inside the curve area and visually pinches into two thin
+// wedges with no flat strip between them. Keeping BEVEL_HEIGHT > BUTTON_CORNER
+// gives a clean band with rounded ends following the outer shape.
+private val BUTTON_CORNER = 8.dp
+private val BEVEL_HEIGHT = 10.dp
+private val SHADOW_ELEVATION = 3.dp
 
 /**
  * Renders a button's nine drawable regions. CENTER falls back to [GridButton.label]

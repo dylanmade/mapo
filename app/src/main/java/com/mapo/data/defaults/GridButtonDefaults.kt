@@ -32,14 +32,10 @@ object GridButtonDefaults {
     )
 
     private val buttonAppearance = AppearancePreset(
-        fillColorArgb = null,
-        outlineColorArgb = null,
         regions = emptyMap(),
     )
 
     private val trackpadAppearance = AppearancePreset(
-        fillColorArgb = null,
-        outlineColorArgb = null,
         regions = mapOf(
             RegionPosition.CENTER.name to ButtonRegion(
                 icon = "Mouse",
@@ -69,15 +65,31 @@ object GridButtonDefaults {
         )
     }
 
+    /**
+     * Per-type appearance preset. Color-slot defaults (fill on, outline off, bevel on,
+     * shadow on, all auto) live on [GridButton] itself; "Reset Appearance" rebuilds the
+     * button from a fresh [GridButton] so the slot defaults stay in one place.
+     */
     data class AppearancePreset(
-        val fillColorArgb: Int?,
-        val outlineColorArgb: Int?,
         val regions: Map<String, com.mapo.data.model.ButtonRegion>,
     ) {
-        fun apply(button: GridButton): GridButton = button.copy(
-            fillColorArgb = fillColorArgb,
-            outlineColorArgb = outlineColorArgb,
-            regions = regions,
-        )
+        fun apply(button: GridButton): GridButton {
+            val template = GridButton(col = button.col, row = button.row)
+            return button.copy(
+                fillEnabled = template.fillEnabled,
+                fillColorArgb = template.fillColorArgb,
+                fillIsAuto = template.fillIsAuto,
+                outlineEnabled = template.outlineEnabled,
+                outlineColorArgb = template.outlineColorArgb,
+                outlineIsAuto = template.outlineIsAuto,
+                bevelEnabled = template.bevelEnabled,
+                bevelColorArgb = template.bevelColorArgb,
+                bevelIsAuto = template.bevelIsAuto,
+                shadowEnabled = template.shadowEnabled,
+                shadowColorArgb = template.shadowColorArgb,
+                shadowIsAuto = template.shadowIsAuto,
+                regions = regions,
+            )
+        }
     }
 }

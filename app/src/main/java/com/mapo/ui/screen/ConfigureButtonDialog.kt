@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,6 +37,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
@@ -68,6 +71,8 @@ import com.mapo.ui.component.ColorPicker
 import com.mapo.ui.component.IconPickerDialog
 import com.mapo.ui.component.MapoIcons
 import com.mapo.ui.component.SizeDropdown
+import com.mapo.ui.util.ResolvedButtonColors
+import com.mapo.ui.util.resolveAutoColors
 
 /**
  * Two-tab full-screen configuration screen for one [GridButton]. Behavior tab covers type,
@@ -90,6 +95,7 @@ import com.mapo.ui.component.SizeDropdown
 @Composable
 fun ConfigureButtonScreen(
     button: GridButton,
+    keyboardThemeColorArgb: Int?,
     pickerResult: RemapTarget?,
     onConsumePickerResult: () -> Unit,
     onUpdate: (GridButton) -> Unit,
@@ -101,8 +107,10 @@ fun ConfigureButtonScreen(
     // destination is active. Survives the navigation round-trip via NavBackStackEntry's
     // remembered state. `null` means "no edit in flight".
     var editingGesture by remember { mutableStateOf<TrackpadGesture?>(null) }
-    var editingColor by remember { mutableStateOf<ColorRole?>(null) }
+    var editingSlot by remember { mutableStateOf<ColorSlot?>(null) }
     var editingRegion by remember { mutableStateOf<RegionPosition?>(null) }
+    val keyboardThemeColor = keyboardThemeColorArgb?.let { Color(it) }
+        ?: MaterialTheme.colorScheme.surface
 
     val commit: (GridButton) -> Unit = { next -> onUpdate(autoDeriveLabel(next)) }
 
@@ -178,8 +186,9 @@ fun ConfigureButtonScreen(
                     )
                     else -> AppearanceTab(
                         draft = button,
+                        keyboardThemeColor = keyboardThemeColor,
                         onDraftChange = commit,
-                        onEditColor = { editingColor = it },
+                        onEditSlot = { editingSlot = it },
                         onEditRegion = { editingRegion = it },
                     )
                 }
@@ -187,19 +196,27 @@ fun ConfigureButtonScreen(
         }
     }
 
-    editingColor?.let { role ->
-        val current = role.read(button)
+    editingSlot?.let { slot ->
+        val resolved = resolveAutoColors(button, keyboardThemeColor)
         ColorPickerInDialog(
-            title = role.title,
-            initial = current,
+            title = slot.title,
+            // Initial color is whatever the swatch is showing — the resolved (auto or
+            // manual) color the renderer is using. So opening the picker on an auto slot
+            // starts with the auto-derived color rather than blank.
+            initial = slot.resolvedColor(resolved),
             onConfirm = { color ->
-                commit(role.write(button, color))
-                editingColor = null
+                // Picking a manual color flips the slot off auto so future renders use
+                // the user's choice instead of re-deriving from the parent.
+                commit(slot.setManualColor(button, color))
+                editingSlot = null
             },
-            onClear = if (role.canClear) {
-                { commit(role.clear(button)); editingColor = null }
-            } else null,
-            onDismiss = { editingColor = null },
+            // "Clear" in the picker means "go back to auto" — restoring the auto-derived
+            // color and clearing the stored manual choice.
+            onClear = {
+                commit(slot.setAuto(button, true).let { slot.clearColor(it) })
+                editingSlot = null
+            },
+            onDismiss = { editingSlot = null },
         )
     }
 
@@ -266,7 +283,7 @@ private fun BehaviorTab(
         ) {
             Text(
                 "Sensitivity",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.width(110.dp),
             )
             val sens = draft.sensitivity ?: GridButtonDefaults.TRACKPAD_SENSITIVITY
@@ -299,20 +316,27 @@ private fun BehaviorTab(
 @Composable
 private fun AppearanceTab(
     draft: GridButton,
+    keyboardThemeColor: Color,
     onDraftChange: (GridButton) -> Unit,
-    onEditColor: (ColorRole) -> Unit,
+    onEditSlot: (ColorSlot) -> Unit,
     onEditRegion: (RegionPosition) -> Unit,
 ) {
-    ColorRow(
-        label = "Button fill",
-        argb = draft.fillColorArgb,
-        onClick = { onEditColor(ColorRole.Fill) },
+    val resolved = resolveAutoColors(draft, keyboardThemeColor)
+
+    Text(
+        "Colors",
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    ColorRow(
-        label = "Button outline",
-        argb = draft.outlineColorArgb,
-        onClick = { onEditColor(ColorRole.Outline) },
-    )
+    ColorSlot.values().forEach { slot ->
+        ColorSlotRow(
+            slot = slot,
+            button = draft,
+            resolved = resolved,
+            onChange = onDraftChange,
+            onEditColor = onEditSlot,
+        )
+    }
 
     Spacer(Modifier.height(4.dp))
     Text(
@@ -365,7 +389,7 @@ private fun GestureRow(label: String, target: RemapTarget, onClick: () -> Unit) 
     ) {
         Text(
             label,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.width(110.dp),
         )
         OutlinedButton(
@@ -376,37 +400,134 @@ private fun GestureRow(label: String, target: RemapTarget, onClick: () -> Unit) 
         ) {
             Text(
                 target.displayLabel(),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelLarge,
             )
         }
     }
 }
 
+/**
+ * One row in the "Colors" section. Layout:
+ *
+ *   [Switch] [label]  [swatch] [☐ Auto]   ·   ·   ·   [hex]  [↻]
+ *
+ * When the switch is off, only [Switch] [label] are visible — but the slot's
+ * stored color and auto state are preserved, so flipping the switch back on
+ * restores the row's previous configuration.
+ */
 @Composable
-private fun ColorRow(label: String, argb: Int?, onClick: () -> Unit) {
+private fun ColorSlotRow(
+    slot: ColorSlot,
+    button: GridButton,
+    resolved: ResolvedButtonColors,
+    onChange: (GridButton) -> Unit,
+    onEditColor: (ColorSlot) -> Unit,
+) {
+    val enabled = slot.enabled(button)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(vertical = 4.dp),
+            .padding(vertical = 2.dp),
     ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.width(110.dp),
-        )
-        ColorSwatch(argb = argb)
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = if (argb == null) "Theme default" else "#%08X".format(argb),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // Master switch + label, both wrapped in a clickable Row so tapping the label
+        // also toggles (M3's recommended pattern; avoids fragile small Switch hit-targets).
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .clickable { onChange(slot.setEnabled(button, !enabled)) }
+                .padding(end = 4.dp),
+        ) {
+            Switch(
+                checked = enabled,
+                // Parent Row owns the toggle; passing null on the control prevents the
+                // double-handler (and the small native Switch hit area) from fighting it.
+                onCheckedChange = null,
+                modifier = Modifier.scale(SLOT_CONTROL_SCALE),
+            )
+            Text(
+                slot.switchLabel,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+        if (enabled) {
+            val shown = slot.resolvedColor(resolved)
+            ClickableColorSwatch(color = shown, onClick = { onEditColor(slot) })
+            // Auto checkbox + label — same clickable-Row pattern.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier
+                    .clickable { onChange(slot.setAuto(button, !slot.isAuto(button))) }
+                    .padding(end = 4.dp),
+            ) {
+                Checkbox(
+                    checked = slot.isAuto(button),
+                    onCheckedChange = null,
+                    modifier = Modifier.scale(SLOT_CONTROL_SCALE),
+                )
+                Text("Auto", style = MaterialTheme.typography.bodyMedium)
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = "#%08X".format(shown.toArgb()),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IconButton(
+                onClick = { onChange(slot.reset(button)) },
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Filled.RestartAlt,
+                    contentDescription = "Reset to default",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
     }
 }
 
+// Switches and checkboxes default to their full M3 size, which dominates a row of
+// small text. 0.85f trims them just enough to feel proportional next to bodyLarge.
+private const val SLOT_CONTROL_SCALE = 0.85f
+
+@Composable
+private fun ClickableColorSwatch(color: Color, onClick: () -> Unit) {
+    // 40dp tap target with a 28dp visual swatch inside, so the hit area is generous
+    // enough to land on without cramping the row.
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .background(Color(0xFFCCCCCC), RoundedCornerShape(6.dp))
+                .padding(2.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(color)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
+            )
+        }
+    }
+}
+
+/**
+ * Read-only swatch used by [RegionEditDialog] for the per-region label/icon colors,
+ * which still use the legacy "null = inherit, otherwise explicit" model.
+ */
 @Composable
 private fun ColorSwatch(argb: Int?) {
     Box(
@@ -443,7 +564,7 @@ private fun RegionRowItem(
         RegionPositionIndicator(position)
         Text(
             position.displayName(),
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.width(96.dp),
         )
         val labelPreview = region?.label ?: onTapPreview
@@ -453,7 +574,7 @@ private fun RegionRowItem(
         }
         Text(
             text = labelPreview.ifEmpty { "—" },
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.bodyMedium,
             color = if (region == null) MaterialTheme.colorScheme.onSurfaceVariant
             else MaterialTheme.colorScheme.onSurface,
         )
@@ -508,7 +629,7 @@ private fun ResetButton(label: String, onClick: () -> Unit) {
     ) {
         Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium)
+        Text(label, style = MaterialTheme.typography.labelLarge)
     }
 }
 
@@ -579,7 +700,7 @@ private fun RegionEditDialog(
                 ) {
                     Text(
                         "Icon",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.width(96.dp),
                     )
                     val vec = MapoIcons.resolve(region.icon)
@@ -591,12 +712,12 @@ private fun RegionEditDialog(
                                 .size(20.dp)
                                 .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
                             contentAlignment = Alignment.Center,
-                        ) { Text("—", style = MaterialTheme.typography.labelMedium) }
+                        ) { Text("—", style = MaterialTheme.typography.bodyMedium) }
                     }
                     Spacer(Modifier.width(4.dp))
                     Text(
                         region.icon ?: "None",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -620,14 +741,14 @@ private fun RegionEditDialog(
                 ) {
                     Text(
                         "Label color",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.width(96.dp),
                     )
                     ColorSwatch(argb = region.labelColorArgb)
                     Spacer(Modifier.weight(1f))
                     Text(
                         text = if (region.labelColorArgb == null) "Theme default" else "#%08X".format(region.labelColorArgb!!),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -642,14 +763,14 @@ private fun RegionEditDialog(
                 ) {
                     Text(
                         "Icon color",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.width(96.dp),
                     )
                     ColorSwatch(argb = region.iconColorArgb)
                     Spacer(Modifier.weight(1f))
                     Text(
                         text = if (region.iconColorArgb == null) "Theme default" else "#%08X".format(region.iconColorArgb!!),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -711,26 +832,79 @@ private fun RegionEditDialog(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-private enum class ColorRole(
+/**
+ * The four color slots on a [GridButton]. Each knows its labels, its default-enabled
+ * state for "Reset", and how to read/write the corresponding fields. Manual color
+ * picks always set `IsAuto = false`; toggling Auto on doesn't clear the stored manual
+ * color so the user can flip back without losing their work.
+ */
+private enum class ColorSlot(
     val title: String,
-    val canClear: Boolean,
+    val switchLabel: String,
+    val defaultEnabled: Boolean,
 ) {
-    Fill("Button fill", true),
-    Outline("Button outline", true);
+    Fill("Button fill", "Enable button fill", defaultEnabled = true),
+    Outline("Button outline", "Enable button outline", defaultEnabled = false),
+    Bevel("Button bevel", "Enable button bevel", defaultEnabled = true),
+    Shadow("Button shadow", "Enable button shadow", defaultEnabled = true);
 
-    fun read(b: GridButton): Color = when (this) {
-        Fill    -> b.fillColorArgb?.let { Color(it) } ?: Color.White
-        Outline -> b.outlineColorArgb?.let { Color(it) } ?: Color.White
+    fun enabled(b: GridButton): Boolean = when (this) {
+        Fill    -> b.fillEnabled
+        Outline -> b.outlineEnabled
+        Bevel   -> b.bevelEnabled
+        Shadow  -> b.shadowEnabled
     }
 
-    fun write(b: GridButton, c: Color): GridButton = when (this) {
-        Fill    -> b.copy(fillColorArgb = c.toArgb())
-        Outline -> b.copy(outlineColorArgb = c.toArgb())
+    fun isAuto(b: GridButton): Boolean = when (this) {
+        Fill    -> b.fillIsAuto
+        Outline -> b.outlineIsAuto
+        Bevel   -> b.bevelIsAuto
+        Shadow  -> b.shadowIsAuto
     }
 
-    fun clear(b: GridButton): GridButton = when (this) {
+    fun setEnabled(b: GridButton, v: Boolean): GridButton = when (this) {
+        Fill    -> b.copy(fillEnabled = v)
+        Outline -> b.copy(outlineEnabled = v)
+        Bevel   -> b.copy(bevelEnabled = v)
+        Shadow  -> b.copy(shadowEnabled = v)
+    }
+
+    fun setAuto(b: GridButton, v: Boolean): GridButton = when (this) {
+        Fill    -> b.copy(fillIsAuto = v)
+        Outline -> b.copy(outlineIsAuto = v)
+        Bevel   -> b.copy(bevelIsAuto = v)
+        Shadow  -> b.copy(shadowIsAuto = v)
+    }
+
+    fun setManualColor(b: GridButton, c: Color): GridButton {
+        val argb = c.toArgb()
+        return when (this) {
+            Fill    -> b.copy(fillColorArgb = argb, fillIsAuto = false)
+            Outline -> b.copy(outlineColorArgb = argb, outlineIsAuto = false)
+            Bevel   -> b.copy(bevelColorArgb = argb, bevelIsAuto = false)
+            Shadow  -> b.copy(shadowColorArgb = argb, shadowIsAuto = false)
+        }
+    }
+
+    fun clearColor(b: GridButton): GridButton = when (this) {
         Fill    -> b.copy(fillColorArgb = null)
         Outline -> b.copy(outlineColorArgb = null)
+        Bevel   -> b.copy(bevelColorArgb = null)
+        Shadow  -> b.copy(shadowColorArgb = null)
+    }
+
+    fun reset(b: GridButton): GridButton = when (this) {
+        Fill    -> b.copy(fillEnabled = defaultEnabled, fillIsAuto = true, fillColorArgb = null)
+        Outline -> b.copy(outlineEnabled = defaultEnabled, outlineIsAuto = true, outlineColorArgb = null)
+        Bevel   -> b.copy(bevelEnabled = defaultEnabled, bevelIsAuto = true, bevelColorArgb = null)
+        Shadow  -> b.copy(shadowEnabled = defaultEnabled, shadowIsAuto = true, shadowColorArgb = null)
+    }
+
+    fun resolvedColor(resolved: ResolvedButtonColors): Color = when (this) {
+        Fill    -> resolved.fill
+        Outline -> resolved.outline
+        Bevel   -> resolved.bevel
+        Shadow  -> resolved.shadow
     }
 }
 

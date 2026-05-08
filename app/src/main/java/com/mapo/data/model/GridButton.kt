@@ -49,9 +49,32 @@ data class GridButton(
     // Behavior — trackpad-specific. null = use the global default sensitivity.
     val sensitivity: Float? = null,
 
-    // Appearance — null on any field means "use the theme default for this button type".
+    // Appearance — four parallel "color slots" (fill, outline, bevel, shadow). For each:
+    //   *Enabled  — master switch. When false the slot is not drawn at all.
+    //   *ColorArgb — the user's last manually-picked color, or null if never picked.
+    //                Preserved across switch toggles so flipping enabled off-and-on
+    //                restores their choice. Ignored when *IsAuto is true.
+    //   *IsAuto   — when true, the color is derived from the parent in the hierarchy
+    //                (theme → fill → outline/bevel/shadow). See ColorContrast.kt for
+    //                the resolver. Picking a manual color flips this off.
+    //
+    // Default appearance for new buttons: fill+bevel+shadow ON, outline OFF, all auto.
+    val fillEnabled: Boolean = true,
     val fillColorArgb: Int? = null,
+    val fillIsAuto: Boolean = true,
+
+    val outlineEnabled: Boolean = false,
     val outlineColorArgb: Int? = null,
+    val outlineIsAuto: Boolean = true,
+
+    val bevelEnabled: Boolean = true,
+    val bevelColorArgb: Int? = null,
+    val bevelIsAuto: Boolean = true,
+
+    val shadowEnabled: Boolean = true,
+    val shadowColorArgb: Int? = null,
+    val shadowIsAuto: Boolean = true,
+
     // Keyed by RegionPosition.name so Gson serializes cleanly without an enum-key adapter.
     val regions: Map<String, ButtonRegion> = emptyMap(),
 )

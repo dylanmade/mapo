@@ -405,26 +405,55 @@ class MainViewModel @Inject constructor(
     // ── Button CRUD ───────────────────────────────────────────────────────────
     //
     // All button mutations write through to the DB via persistLayoutFields. Edits are
-    // permanent the moment they're made — there is no draft/Save/Cancel layer.
+    // permanent the moment they're made — there is no draft/Save/Cancel layer. Edit
+    // mode (`_editingLayoutId`) is purely a UI-affordance flag (drag handles, +icons,
+    // long-press menus) and does NOT gate writes; otherwise instant-commit paths like
+    // ConfigureButtonScreen would silently no-op when edit mode happened to be off.
 
-    private inline fun mutateEditingLayout(transform: (GridLayout) -> GridLayout?) {
-        val id = _editingLayoutId.value ?: return
+    /**
+     * Apply [transform] to whichever layout currently owns [buttonId]. Used by per-
+     * button operations (update/delete/duplicate/move/resize) where the relevant
+     * layout is unambiguously the one containing the targeted button.
+     */
+    private inline fun mutateLayoutContaining(
+        buttonId: String,
+        transform: (GridLayout) -> GridLayout?,
+    ) {
         val profileId = activeProfile.value?.id ?: return
-        val current = _layouts.value.find { it.id == id } ?: return
+        val current = _layouts.value.find { l -> l.buttons.any { it.id == buttonId } } ?: return
         val updated = transform(current) ?: return
         persistLayoutFields(updated, profileId)
     }
 
     /**
-     * Add [spec] to the editing layout at the first available cell. The spec's
+     * Apply [transform] to the currently-displayed layout. Used by add-style operations
+     * where the only meaningful target is the visible tab — these are only triggered
+     * from the visible keyboard's edit-mode UI in the first place.
+     *
+     * Resolves the displayed layout from `_layouts` + `_selectedIndex` directly rather
+     * than reading [displayLayout].value — that StateFlow uses WhileSubscribed and
+     * returns its initial fallback when there are no active collectors (e.g. in unit
+     * tests), which would silently route writes to the default layout instead of the
+     * one the user is editing.
+     */
+    private inline fun mutateDisplayedLayout(transform: (GridLayout) -> GridLayout?) {
+        val profileId = activeProfile.value?.id ?: return
+        val layouts = _layouts.value
+        val current = layouts.getOrNull(_selectedIndex.value) ?: layouts.firstOrNull() ?: return
+        val updated = transform(current) ?: return
+        persistLayoutFields(updated, profileId)
+    }
+
+    /**
+     * Add [spec] to the displayed layout at the first available cell. The spec's
      * `id`, `col`, and `row` are overwritten with a fresh UUID and the chosen cell.
      */
     fun addButton(spec: GridButton) {
-        mutateEditingLayout { layout ->
+        mutateDisplayedLayout { layout ->
             val cell = layout.findFirstEmptyCell()
             if (cell == null) {
                 emitError("No empty space available in this layout")
-                return@mutateEditingLayout null
+                return@mutateDisplayedLayout null
             }
             val placed = spec.copy(
                 id = java.util.UUID.randomUUID().toString(),
@@ -439,7 +468,7 @@ class MainViewModel @Inject constructor(
     /** Replace the currently-selected button with [updated]. The button's id must match. */
     fun updateSelectedButton(updated: GridButton) {
         val id = _selectedButtonId.value ?: return
-        mutateEditingLayout { layout ->
+        mutateLayoutContaining(id) { layout ->
             layout.copy(buttons = layout.buttons.map { btn ->
                 if (btn.id == id) updated.copy(id = id) else btn
             })
@@ -448,23 +477,23 @@ class MainViewModel @Inject constructor(
 
     fun deleteSelectedButton() {
         val id = _selectedButtonId.value ?: return
-        mutateEditingLayout { layout ->
+        mutateLayoutContaining(id) { layout ->
             _selectedButtonId.value = null
             layout.copy(buttons = layout.buttons.filter { it.id != id })
         }
     }
 
     fun deleteButton(id: String) {
-        mutateEditingLayout { layout ->
+        mutateLayoutContaining(id) { layout ->
             if (_selectedButtonId.value == id) _selectedButtonId.value = null
             layout.copy(buttons = layout.buttons.filter { it.id != id })
         }
     }
 
     fun duplicateButton(id: String) {
-        mutateEditingLayout { layout ->
+        mutateLayoutContaining(id) { layout ->
             val source = layout.buttons.find { it.id == id }
-                ?: return@mutateEditingLayout null
+                ?: return@mutateLayoutContaining null
             // Try the source's original size first; only downscale if no empty area
             // that big exists. Falling all the way to 1×1 (always last attempt) is
             // better than refusing the duplicate when only smaller gaps remain.
@@ -475,7 +504,7 @@ class MainViewModel @Inject constructor(
                 val small = layout.findFirstEmptyCell()
                 if (small == null) {
                     emitError("No empty space available in this layout")
-                    return@mutateEditingLayout null
+                    return@mutateLayoutContaining null
                 }
                 Placement(small.first, small.second, 1, 1)
             }
@@ -494,13 +523,13 @@ class MainViewModel @Inject constructor(
     private data class Placement(val col: Int, val row: Int, val colSpan: Int, val rowSpan: Int)
 
     fun addButtonAt(col: Int, row: Int, spec: GridButton) {
-        mutateEditingLayout { layout ->
+        mutateDisplayedLayout { layout ->
             if (col !in 0 until layout.columns || row !in 0 until layout.rows) {
-                return@mutateEditingLayout null
+                return@mutateDisplayedLayout null
             }
             if (layout.wouldOverlap("__new__", col, row, 1, 1)) {
                 emitError("Cell already occupied")
-                return@mutateEditingLayout null
+                return@mutateDisplayedLayout null
             }
             val placed = spec.copy(
                 id = java.util.UUID.randomUUID().toString(),
@@ -515,13 +544,13 @@ class MainViewModel @Inject constructor(
     // ── Drag to move ──────────────────────────────────────────────────────────
 
     fun moveButton(buttonId: String, newCol: Int, newRow: Int) {
-        mutateEditingLayout { layout ->
+        mutateLayoutContaining(buttonId) { layout ->
             val button = layout.buttons.find { it.id == buttonId }
-                ?: return@mutateEditingLayout null
+                ?: return@mutateLayoutContaining null
             val col = newCol.coerceIn(0, layout.columns - button.colSpan)
             val row = newRow.coerceIn(0, layout.rows - button.rowSpan)
             if (layout.wouldOverlap(buttonId, col, row, button.colSpan, button.rowSpan)) {
-                return@mutateEditingLayout null
+                return@mutateLayoutContaining null
             }
             layout.copy(
                 buttons = layout.buttons.map {
@@ -534,14 +563,14 @@ class MainViewModel @Inject constructor(
     // ── Resize ────────────────────────────────────────────────────────────────
 
     fun resizeButton(buttonId: String, newColSpan: Int, newRowSpan: Int) {
-        mutateEditingLayout { layout ->
+        mutateLayoutContaining(buttonId) { layout ->
             val button = layout.buttons.find { it.id == buttonId }
-                ?: return@mutateEditingLayout null
+                ?: return@mutateLayoutContaining null
             val colSpan = newColSpan.coerceIn(1, layout.columns - button.col)
             val rowSpan = newRowSpan.coerceIn(1, layout.rows - button.row)
             if (layout.wouldOverlap(buttonId, button.col, button.row, colSpan, rowSpan)) {
                 emitError("Cannot resize: overlaps another button")
-                return@mutateEditingLayout null
+                return@mutateLayoutContaining null
             }
             layout.copy(
                 buttons = layout.buttons.map {

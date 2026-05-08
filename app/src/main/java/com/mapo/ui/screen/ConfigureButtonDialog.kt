@@ -28,6 +28,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -51,7 +52,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
@@ -162,12 +162,15 @@ fun ConfigureButtonScreen(
                 )
             }
             Spacer(Modifier.height(8.dp))
+            // No horizontal padding here: M3 ListItem (used by AppearanceTab's color slots)
+            // applies its own 16dp horizontal padding internally. Non-ListItem children
+            // add `Modifier.padding(horizontal = 16.dp)` on their own modifiers below so
+            // visual alignment matches across both row types.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 when (tab) {
@@ -279,7 +282,9 @@ private fun BehaviorTab(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
         ) {
             Text(
                 "Sensitivity",
@@ -327,6 +332,7 @@ private fun AppearanceTab(
         "Colors",
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
     )
     ColorSlot.values().forEach { slot ->
         ColorSlotRow(
@@ -343,6 +349,7 @@ private fun AppearanceTab(
         "Regions",
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
     )
 
     RegionPosition.values().forEach { pos ->
@@ -369,7 +376,11 @@ private fun AppearanceTab(
 @Composable
 private fun TypeToggle(isTrackpad: Boolean, onChange: (Boolean) -> Unit) {
     val options = listOf("Button" to false, "Trackpad" to true)
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+    ) {
         options.forEachIndexed { index, (label, trackpad) ->
             SegmentedButton(
                 selected = isTrackpad == trackpad,
@@ -385,7 +396,9 @@ private fun GestureRow(label: String, target: RemapTarget, onClick: () -> Unit) 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
     ) {
         Text(
             label,
@@ -407,13 +420,19 @@ private fun GestureRow(label: String, target: RemapTarget, onClick: () -> Unit) 
 }
 
 /**
- * One row in the "Colors" section. Layout:
+ * One slot in the "Colors" section, rendered as a master M3 list item plus three
+ * conditional sub-list-items when enabled. The shape mirrors the Android Settings
+ * convention of "feature row with a Switch, dependent options nested below":
  *
- *   [Switch] [label]  [swatch] [☐ Auto]   ·   ·   ·   [hex]  [↻]
+ *   [ Button fill                            ●─ ]   master row, tap-to-toggle
+ *   [   Color           #FF8888              ▣  ]   sub-row, opens picker
+ *   [   Auto            (helper text)       [✓] ]   sub-row, toggles auto-derive
+ *   [   Reset to default (helper text)       ↻  ]   sub-row, resets this slot only
  *
- * When the switch is off, only [Switch] [label] are visible — but the slot's
- * stored color and auto state are preserved, so flipping the switch back on
- * restores the row's previous configuration.
+ * Toggling the master switch off preserves the slot's stored color and auto state,
+ * so flipping it back on restores the row's previous configuration. Sub-rows are
+ * indented via `start = 24.dp` so the M3 ListItem internal padding still applies on
+ * top of the indent.
  */
 @Composable
 private fun ColorSlotRow(
@@ -424,101 +443,70 @@ private fun ColorSlotRow(
     onEditColor: (ColorSlot) -> Unit,
 ) {
     val enabled = slot.enabled(button)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-    ) {
-        // Master switch + label, both wrapped in a clickable Row so tapping the label
-        // also toggles (M3's recommended pattern; avoids fragile small Switch hit-targets).
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier
-                .clickable { onChange(slot.setEnabled(button, !enabled)) }
-                .padding(end = 4.dp),
-        ) {
-            Switch(
-                checked = enabled,
-                // Parent Row owns the toggle; passing null on the control prevents the
-                // double-handler (and the small native Switch hit area) from fighting it.
-                onCheckedChange = null,
-                modifier = Modifier.scale(SLOT_CONTROL_SCALE),
-            )
-            Text(
-                slot.switchLabel,
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        }
+    Column {
+        // Master row. M3 convention is the feature label alone (e.g. "Button fill"),
+        // not "Enable button fill" — the trailing Switch already implies the verb.
+        ListItem(
+            headlineContent = { Text(slot.title) },
+            supportingContent = { Text(slot.description) },
+            trailingContent = {
+                Switch(
+                    checked = enabled,
+                    // Parent ListItem (via the clickable modifier) owns the toggle so
+                    // the whole row is tappable; null prevents the Switch from also
+                    // competing for click handling.
+                    onCheckedChange = null,
+                )
+            },
+            modifier = Modifier.clickable {
+                onChange(slot.setEnabled(button, !enabled))
+            },
+        )
         if (enabled) {
             val shown = slot.resolvedColor(resolved)
-            ClickableColorSwatch(color = shown, onClick = { onEditColor(slot) })
-            // Auto checkbox + label — same clickable-Row pattern.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            // Color sub-row — opens the picker. Hex value as supporting text; swatch
+            // in trailing for at-a-glance feedback. Whole row click opens picker.
+            ListItem(
+                headlineContent = { Text("Color") },
+                supportingContent = { Text("#%08X".format(shown.toArgb())) },
+                trailingContent = { ColorSwatch(argb = shown.toArgb()) },
                 modifier = Modifier
-                    .clickable { onChange(slot.setAuto(button, !slot.isAuto(button))) }
-                    .padding(end = 4.dp),
-            ) {
-                Checkbox(
-                    checked = slot.isAuto(button),
-                    onCheckedChange = null,
-                    modifier = Modifier.scale(SLOT_CONTROL_SCALE),
-                )
-                Text("Auto", style = MaterialTheme.typography.bodyMedium)
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = "#%08X".format(shown.toArgb()),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    .padding(start = 24.dp)
+                    .clickable { onEditColor(slot) },
             )
-            IconButton(
-                onClick = { onChange(slot.reset(button)) },
-                modifier = Modifier.size(32.dp),
-            ) {
-                Icon(
-                    Icons.Filled.RestartAlt,
-                    contentDescription = "Reset to default",
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        } else {
-            Spacer(Modifier.weight(1f))
-        }
-    }
-}
-
-// Switches and checkboxes default to their full M3 size, which dominates a row of
-// small text. 0.85f trims them just enough to feel proportional next to bodyLarge.
-private const val SLOT_CONTROL_SCALE = 0.85f
-
-@Composable
-private fun ClickableColorSwatch(color: Color, onClick: () -> Unit) {
-    // 40dp tap target with a 28dp visual swatch inside, so the hit area is generous
-    // enough to land on without cramping the row.
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .background(Color(0xFFCCCCCC), RoundedCornerShape(6.dp))
-                .padding(2.dp),
-        ) {
-            Box(
+            // Auto sub-row — toggles whether the color is derived from the theme
+            // hierarchy (theme → fill → bevel/outline/shadow) or read from the
+            // user's stored manual choice.
+            ListItem(
+                headlineContent = { Text("Auto") },
+                supportingContent = { Text("Derive color from the theme and fill") },
+                trailingContent = {
+                    Checkbox(
+                        checked = slot.isAuto(button),
+                        onCheckedChange = null,
+                    )
+                },
                 modifier = Modifier
-                    .size(24.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(color)
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
+                    .padding(start = 24.dp)
+                    .clickable {
+                        onChange(slot.setAuto(button, !slot.isAuto(button)))
+                    },
+            )
+            // Reset sub-row — restores defaults for just this slot. The tab also
+            // has a "Reset Appearance" button below; this is the per-slot version.
+            ListItem(
+                headlineContent = { Text("Reset to default") },
+                supportingContent = { Text("Restore the default settings for this slot") },
+                trailingContent = {
+                    Icon(
+                        Icons.Filled.RestartAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                    )
+                },
+                modifier = Modifier
+                    .padding(start = 24.dp)
+                    .clickable { onChange(slot.reset(button)) },
             )
         }
     }
@@ -559,7 +547,7 @@ private fun RegionRowItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
         RegionPositionIndicator(position)
         Text(
@@ -625,7 +613,9 @@ private fun ResetButton(label: String, onClick: () -> Unit) {
     OutlinedButton(
         onClick = onClick,
         shape = RoundedCornerShape(6.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
     ) {
         Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(8.dp))
@@ -833,20 +823,39 @@ private fun RegionEditDialog(
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * The four color slots on a [GridButton]. Each knows its labels, its default-enabled
- * state for "Reset", and how to read/write the corresponding fields. Manual color
- * picks always set `IsAuto = false`; toggling Auto on doesn't clear the stored manual
- * color so the user can flip back without losing their work.
+ * The four color slots on a [GridButton]. Each knows its label (used both for the
+ * master ListItem headline and the picker dialog title), a one-line `description`
+ * shown as supporting text on the master row, its default-enabled state for "Reset",
+ * and how to read/write the corresponding fields.
+ *
+ * Manual color picks always set `IsAuto = false`; toggling Auto on doesn't clear the
+ * stored manual color so the user can flip back without losing their work.
  */
 private enum class ColorSlot(
     val title: String,
-    val switchLabel: String,
+    val description: String,
     val defaultEnabled: Boolean,
 ) {
-    Fill("Button fill", "Enable button fill", defaultEnabled = true),
-    Outline("Button outline", "Enable button outline", defaultEnabled = false),
-    Bevel("Button bevel", "Enable button bevel", defaultEnabled = true),
-    Shadow("Button shadow", "Enable button shadow", defaultEnabled = true);
+    Fill(
+        title = "Button fill",
+        description = "Solid color filling the button",
+        defaultEnabled = true,
+    ),
+    Outline(
+        title = "Button outline",
+        description = "Stroke around the button edge",
+        defaultEnabled = false,
+    ),
+    Bevel(
+        title = "Button bevel",
+        description = "Darkened bottom edge for a 3D appearance",
+        defaultEnabled = true,
+    ),
+    Shadow(
+        title = "Button shadow",
+        description = "Soft drop shadow beneath the button",
+        defaultEnabled = true,
+    );
 
     fun enabled(b: GridButton): Boolean = when (this) {
         Fill    -> b.fillEnabled

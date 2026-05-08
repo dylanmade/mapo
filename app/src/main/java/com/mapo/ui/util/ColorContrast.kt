@@ -83,7 +83,10 @@ fun resolveAutoColors(button: GridButton, keyboardTheme: Color): ResolvedButtonC
     }
 
     val bevel = if (button.bevelIsAuto || button.bevelColorArgb == null) {
-        parent.darkened()
+        // Subtle 8% darken: enough to read as a 3D bottom edge without converging on
+        // the keyboard background. (Higher values collide with the bg in dark themes
+        // because `parent` is already +18% lightness from theme via `contrastShift`.)
+        parent.darkened(amount = 0.08f)
     } else {
         Color(button.bevelColorArgb)
     }

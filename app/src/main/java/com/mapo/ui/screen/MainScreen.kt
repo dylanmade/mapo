@@ -378,7 +378,14 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         // exists (phone, Thor primary screen) and leaves it alone where one
                         // doesn't (Thor bottom bezel screen). Adding statusBarsPadding here
                         // would double-reserve and reintroduce the stale-inset shift bug.
-                        modifier = Modifier.fillMaxSize()
+                        //
+                        // The vertical 8.dp here is plain visual padding (not inset-aware), so
+                        // it doesn't conflict with the rule above. It gives the top/bottom bars
+                        // breathing room from the screen edge — without it, the bar controls
+                        // appeared to be clipped by the Thor's bottom bezel screen.
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(vertical = 8.dp)
                     ) {
                         KeyboardTopBar(
                             layouts = layouts,
@@ -821,6 +828,12 @@ private fun KeyGrid(
         val cellH = maxHeight / layout.rows
         val cellWPx = with(density) { cellW.toPx() }
         val cellHPx = with(density) { cellH.toPx() }
+        // Buttons are sized `cellW * span - gap` / `cellH * span - gap`, leaving a
+        // `gap`-wide shortfall at the end of each cell. Without compensation that
+        // shortfall accumulates only on the right/bottom edges of the grid (left/top
+        // columns start at 0). Shifting every position by gap/2 distributes the
+        // outer margin evenly: gap/2 on every side, full `gap` between buttons.
+        val halfGap = gap / 2
 
         // ── Drop indicator ────────────────────────────────────────────────────
         val draggingButton = if (draggingId != null) layout.buttons.find { it.id == draggingId } else null
@@ -830,8 +843,8 @@ private fun KeyGrid(
             Box(
                 modifier = Modifier
                     .absoluteOffset(
-                        x = cellW * dropTargetCol,
-                        y = cellH * dropTargetRow
+                        x = cellW * dropTargetCol + halfGap,
+                        y = cellH * dropTargetRow + halfGap
                     )
                     .size(
                         width = cellW * draggingButton.colSpan - gap,
@@ -854,8 +867,8 @@ private fun KeyGrid(
             var isDragging by remember(button.id) { mutableStateOf(false) }
             var resizeDragPx by remember(button.id) { mutableStateOf(Offset.Zero) }
 
-            val bx = cellW * button.col
-            val by = cellH * button.row
+            val bx = cellW * button.col + halfGap
+            val by = cellH * button.row + halfGap
 
             // Live size preview while resize handle is being dragged
             val displayColSpan = (button.colSpan + (resizeDragPx.x / cellWPx).roundToInt())
@@ -1198,8 +1211,8 @@ private fun KeyGrid(
             for (r in 0 until layout.rows) {
                 for (c in 0 until layout.columns) {
                     if ((c to r) in occupied) continue
-                    val ix = cellW * c
-                    val iy = cellH * r
+                    val ix = cellW * c + halfGap
+                    val iy = cellH * r + halfGap
                     Box(
                         modifier = Modifier
                             .absoluteOffset(x = ix, y = iy)
@@ -1252,53 +1265,73 @@ private fun KeyButtonShape(
     content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
 ) {
     val resolved = resolveAutoColors(button, keyboardThemeColor)
+    // Surface uses the SAME fully-rounded shape as the outer button when bevel is enabled.
+    // The surface sits at the top of the outer-clipped box with bottom-padding equal to
+    // BEVEL_HEIGHT, so the bevel (painted by the outer Box's background) shows in two
+    // places: the bottom band (with rounded outer-bottom corners) AND the surface's
+    // rounded bottom-corner cutouts (with the same radius). Both pairs of bevel corners
+    // are cut-off arcs of identical radius — visually the bevel "wraps" the surface's
+    // bottom curve.
     val outerShape: Shape = RoundedCornerShape(BUTTON_CORNER)
-    val surfaceShape: Shape = if (resolved.bevelEnabled) {
-        RoundedCornerShape(
-            topStart = BUTTON_CORNER, topEnd = BUTTON_CORNER,
-            bottomStart = 0.dp, bottomEnd = 0.dp,
-        )
-    } else outerShape
 
-    Box(
-        modifier = modifier
-            .then(
-                if (resolved.shadowEnabled) Modifier.shadow(
-                    elevation = SHADOW_ELEVATION,
-                    shape = outerShape,
-                    clip = false,
-                    spotColor = resolved.shadow,
-                    ambientColor = resolved.shadow,
-                ) else Modifier
-            )
-            .clip(outerShape)
-            .then(if (resolved.bevelEnabled) Modifier.background(resolved.bevel) else Modifier)
-    ) {
+    Box(modifier = modifier) {
+        // Shape Box: shadow + outer clip + bevel background + click handling. The clip
+        // applies to children (surface + content). Click ripples expand within the
+        // outer rounded shape, so taps on the bevel band also register as button taps.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (resolved.bevelEnabled) Modifier.padding(bottom = BEVEL_HEIGHT) else Modifier)
-                .clip(surfaceShape)
-                .then(if (resolved.fillEnabled) Modifier.background(resolved.fill) else Modifier)
                 .then(
-                    when {
-                        isSelected -> Modifier.border(2.dp, MaterialTheme.colorScheme.primary, surfaceShape)
-                        resolved.outlineEnabled -> Modifier.border(1.dp, resolved.outline, surfaceShape)
-                        else -> Modifier
-                    }
+                    if (resolved.shadowEnabled) Modifier.shadow(
+                        elevation = SHADOW_ELEVATION,
+                        shape = outerShape,
+                        clip = false,
+                        spotColor = resolved.shadow,
+                        ambientColor = resolved.shadow,
+                    ) else Modifier
                 )
+                .clip(outerShape)
+                .then(if (resolved.bevelEnabled) Modifier.background(resolved.bevel) else Modifier)
                 .then(surfaceModifier),
-            content = content,
-        )
+        ) {
+            // Surface: fully rounded so the bottom corners expose bevel "wings" that
+            // wrap the surface. The user-facing outline (when enabled) strokes only the
+            // surface — per spec, it encompasses the surface, not surface+bevel.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (resolved.bevelEnabled) Modifier.padding(bottom = BEVEL_HEIGHT) else Modifier)
+                    .clip(outerShape)
+                    .then(if (resolved.fillEnabled) Modifier.background(resolved.fill) else Modifier)
+                    .then(
+                        if (resolved.outlineEnabled) Modifier.border(1.dp, resolved.outline, outerShape)
+                        else Modifier
+                    ),
+                content = content,
+            )
+        }
+
+        // Selection ring: sibling overlay OUTSIDE the outer clip so the 2dp stroke isn't
+        // half-clipped, and so it wraps the full button (surface + bevel). Drawn last
+        // so it sits on top of bevel/surface/content.
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .border(2.dp, MaterialTheme.colorScheme.primary, outerShape)
+            )
+        }
     }
 }
 
-// Bevel must be tall enough to extend ABOVE the bottom-corner curve, otherwise
-// the entire band lives inside the curve area and visually pinches into two thin
-// wedges with no flat strip between them. Keeping BEVEL_HEIGHT > BUTTON_CORNER
-// gives a clean band with rounded ends following the outer shape.
+// BEVEL_HEIGHT >= BUTTON_CORNER keeps the bevel band visually grounded — below that,
+// the band lives entirely inside the outer bottom-corner curve and pinches at the
+// midline. Surface and outer share the corner radius so the bevel's top "wings"
+// (revealed by the surface's rounded bottom corners) match the bevel's bottom-corner
+// arcs (clipped by the outer shape) — both radius BUTTON_CORNER, same direction.
+// BEVEL_HEIGHT is set at the floor (== BUTTON_CORNER) to keep the bevel subtle.
 private val BUTTON_CORNER = 8.dp
-private val BEVEL_HEIGHT = 10.dp
+private val BEVEL_HEIGHT = 8.dp
 private val SHADOW_ELEVATION = 3.dp
 
 /**

@@ -2,6 +2,7 @@ package com.mapo.ui.component
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +36,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -85,7 +88,22 @@ fun ColorPicker(
     var hexInput by remember(pickerKey) { mutableStateOf(argb.toHex(includeAlpha = a != 255)) }
     LaunchedEffect(argb) { hexInput = argb.toHex(includeAlpha = a != 255) }
 
+    // Pre-empt the hex OutlinedTextField from auto-grabbing focus when the picker
+    // first composes inside a Dialog: a TextField as the first focusable element
+    // would otherwise spawn the fullscreen IME the moment the dialog appears, hiding
+    // the picker before the user can see it. We let an invisible focusable Box take
+    // initial focus instead. The user's first tap on the hex field still focuses it
+    // normally and brings up the keyboard.
+    val initialFocus = remember(pickerKey) { FocusRequester() }
+    LaunchedEffect(pickerKey) { initialFocus.requestFocus() }
+
     Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Box(
+            modifier = Modifier
+                .size(0.dp)
+                .focusRequester(initialFocus)
+                .focusable(),
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier

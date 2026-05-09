@@ -89,7 +89,7 @@ private fun PermissionRow(
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyLarge,
             )
             Text(
                 text = if (granted)

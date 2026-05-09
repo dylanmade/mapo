@@ -68,7 +68,7 @@ fun BlocklistScreen(
         ) {
             Text(
                 text = stringResource(R.string.blocklist_header),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )

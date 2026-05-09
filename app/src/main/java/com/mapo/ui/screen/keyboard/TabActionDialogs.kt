@@ -694,7 +694,7 @@ private fun ConfigureKeyboardDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         stringResource(R.string.tab_dialog_configure_background_color),
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     ColorSwatchPicker(

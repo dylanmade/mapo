@@ -379,13 +379,13 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         // doesn't (Thor bottom bezel screen). Adding statusBarsPadding here
                         // would double-reserve and reintroduce the stale-inset shift bug.
                         //
-                        // The vertical 8.dp here is plain visual padding (not inset-aware), so
+                        // The vertical 4.dp here is plain visual padding (not inset-aware), so
                         // it doesn't conflict with the rule above. It gives the top/bottom bars
                         // breathing room from the screen edge — without it, the bar controls
                         // appeared to be clipped by the Thor's bottom bezel screen.
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(vertical = 8.dp)
+                            .padding(vertical = 4.dp)
                     ) {
                         KeyboardTopBar(
                             layouts = layouts,
@@ -1433,7 +1433,7 @@ private fun BottomBar(
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
             modifier = Modifier.height(40.dp)
         ) {
-            Text("Quit", style = MaterialTheme.typography.labelMedium)
+            Text("Quit", style = MaterialTheme.typography.labelLarge)
         }
         Spacer(modifier = Modifier.weight(1f))
         Icon(

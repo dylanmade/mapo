@@ -216,7 +216,7 @@ private fun FilteredInputList(
             Spacer(Modifier.height(8.dp))
             Text(
                 "No matches",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )

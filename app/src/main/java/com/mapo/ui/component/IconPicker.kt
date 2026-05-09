@@ -78,7 +78,7 @@ fun IconPickerDialog(
                         contentAlignment = Alignment.Center,
                     ) { Text("—", style = MaterialTheme.typography.bodyLarge) }
                     Spacer(Modifier.size(12.dp))
-                    Text("None", style = MaterialTheme.typography.bodyMedium)
+                    Text("None", style = MaterialTheme.typography.bodyLarge)
                 }
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 64.dp),

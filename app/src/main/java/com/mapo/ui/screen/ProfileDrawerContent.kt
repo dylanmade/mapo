@@ -38,7 +38,7 @@ fun ProfileDrawerContent(
     ) {
         Text(
             text = "Current Profile",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
         )

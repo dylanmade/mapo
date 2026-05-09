@@ -95,7 +95,7 @@ fun RemapControlsScreen(
                     supportingContent = {
                         Text(
                             target.displayLabel(),
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = if (target is RemapTarget.Unbound) MaterialTheme.colorScheme.onSurfaceVariant
                                     else MaterialTheme.colorScheme.primary
                         )

@@ -82,7 +82,7 @@ fun AutoSwitchScreen(
             ) {
                 Text(
                     text = stringResource(R.string.auto_switch_setting_label),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f)
                 )
                 Switch(
@@ -100,7 +100,7 @@ fun AutoSwitchScreen(
             ) {
                 Text(
                     text = stringResource(R.string.auto_create_profiles_setting_label),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     color = if (enabled) MaterialTheme.colorScheme.onSurface
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
@@ -115,7 +115,7 @@ fun AutoSwitchScreen(
 
             Text(
                 text = stringResource(R.string.auto_switch_bindings_header),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )

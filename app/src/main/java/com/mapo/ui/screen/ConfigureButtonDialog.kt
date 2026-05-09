@@ -569,7 +569,7 @@ private fun RegionRowItem(
         Spacer(Modifier.weight(1f))
         Text(
             text = if (region == null) "default" else "${region.sizeSp.toInt()}sp",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

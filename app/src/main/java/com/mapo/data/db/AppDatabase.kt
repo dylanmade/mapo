@@ -4,12 +4,32 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.mapo.data.db.steam.ActionLayerDao
+import com.mapo.data.db.steam.ActionSetDao
+import com.mapo.data.db.steam.ActivatorDao
+import com.mapo.data.db.steam.BindingDao
+import com.mapo.data.db.steam.BindingGroupDao
+import com.mapo.data.db.steam.ControllerProfileDao
+import com.mapo.data.db.steam.GameActionDao
+import com.mapo.data.db.steam.GroupInputDao
+import com.mapo.data.db.steam.PresetBindingDao
+import com.mapo.data.db.steam.SteamTypeConverters
 import com.mapo.data.model.AppProfileBinding
 import com.mapo.data.model.GamepadMapping
 import com.mapo.data.model.KeyLayout
 import com.mapo.data.model.KeyboardTemplate
 import com.mapo.data.model.Profile
+import com.mapo.data.model.steam.ActionLayer
+import com.mapo.data.model.steam.ActionSet
+import com.mapo.data.model.steam.Activator
+import com.mapo.data.model.steam.Binding
+import com.mapo.data.model.steam.BindingGroup
+import com.mapo.data.model.steam.ControllerProfile
+import com.mapo.data.model.steam.GameAction
+import com.mapo.data.model.steam.GroupInput
+import com.mapo.data.model.steam.PresetBinding
 
 @Database(
     entities = [
@@ -17,11 +37,21 @@ import com.mapo.data.model.Profile
         Profile::class,
         GamepadMapping::class,
         AppProfileBinding::class,
-        KeyboardTemplate::class
+        KeyboardTemplate::class,
+        ControllerProfile::class,
+        ActionSet::class,
+        ActionLayer::class,
+        GameAction::class,
+        BindingGroup::class,
+        GroupInput::class,
+        Activator::class,
+        Binding::class,
+        PresetBinding::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
+@TypeConverters(SteamTypeConverters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun layoutDao(): LayoutDao
@@ -29,6 +59,16 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun gamepadMappingDao(): GamepadMappingDao
     abstract fun appProfileBindingDao(): AppProfileBindingDao
     abstract fun keyboardTemplateDao(): KeyboardTemplateDao
+
+    abstract fun controllerProfileDao(): ControllerProfileDao
+    abstract fun actionSetDao(): ActionSetDao
+    abstract fun actionLayerDao(): ActionLayerDao
+    abstract fun gameActionDao(): GameActionDao
+    abstract fun bindingGroupDao(): BindingGroupDao
+    abstract fun groupInputDao(): GroupInputDao
+    abstract fun activatorDao(): ActivatorDao
+    abstract fun bindingDao(): BindingDao
+    abstract fun presetBindingDao(): PresetBindingDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

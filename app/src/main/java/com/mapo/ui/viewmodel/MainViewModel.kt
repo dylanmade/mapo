@@ -562,22 +562,48 @@ class MainViewModel @Inject constructor(
 
     // ── Resize ────────────────────────────────────────────────────────────────
 
+    /** Resize from the bottom-right corner: origin (col,row) stays put. */
     fun resizeButton(buttonId: String, newColSpan: Int, newRowSpan: Int) {
         mutateLayoutContaining(buttonId) { layout ->
             val button = layout.buttons.find { it.id == buttonId }
                 ?: return@mutateLayoutContaining null
-            val colSpan = newColSpan.coerceIn(1, layout.columns - button.col)
-            val rowSpan = newRowSpan.coerceIn(1, layout.rows - button.row)
-            if (layout.wouldOverlap(buttonId, button.col, button.row, colSpan, rowSpan)) {
-                emitError("Cannot resize: overlaps another button")
-                return@mutateLayoutContaining null
-            }
-            layout.copy(
-                buttons = layout.buttons.map {
-                    if (it.id == buttonId) it.copy(colSpan = colSpan, rowSpan = rowSpan) else it
-                }
-            )
+            resizeMutation(layout, button, button.col, button.row, newColSpan, newRowSpan)
         }
+    }
+
+    /** Resize from any corner: origin (col,row) may shift in addition to the spans
+     *  changing. Used by the four-corner resize handles. */
+    fun resizeButton(buttonId: String, newCol: Int, newRow: Int, newColSpan: Int, newRowSpan: Int) {
+        mutateLayoutContaining(buttonId) { layout ->
+            val button = layout.buttons.find { it.id == buttonId }
+                ?: return@mutateLayoutContaining null
+            resizeMutation(layout, button, newCol, newRow, newColSpan, newRowSpan)
+        }
+    }
+
+    private fun resizeMutation(
+        layout: GridLayout,
+        button: GridButton,
+        newCol: Int,
+        newRow: Int,
+        newColSpan: Int,
+        newRowSpan: Int,
+    ): GridLayout? {
+        val col = newCol.coerceIn(0, layout.columns - 1)
+        val row = newRow.coerceIn(0, layout.rows - 1)
+        val colSpan = newColSpan.coerceIn(1, layout.columns - col)
+        val rowSpan = newRowSpan.coerceIn(1, layout.rows - row)
+        if (layout.wouldOverlap(button.id, col, row, colSpan, rowSpan)) {
+            emitError("Cannot resize: overlaps another button")
+            return null
+        }
+        return layout.copy(
+            buttons = layout.buttons.map {
+                if (it.id == button.id) {
+                    it.copy(col = col, row = row, colSpan = colSpan, rowSpan = rowSpan)
+                } else it
+            }
+        )
     }
 
     // ── Tab actions ───────────────────────────────────────────────────────────

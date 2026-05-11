@@ -9,11 +9,11 @@ import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.absoluteOffset
@@ -31,11 +31,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.SportsEsports
@@ -48,6 +51,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
@@ -390,12 +394,17 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         KeyboardTopBar(
                             layouts = layouts,
                             selectedIndex = selectedIndex,
+                            isEditMode = isEditMode,
                             tabContextMenuFor = tabContextMenuFor,
                             onSelectIndex = { viewModel.selectLayout(it) },
                             onLongPressMenu = { id -> viewModel.openTabMenu(id) },
                             onReorder = { from, to -> viewModel.reorderTabs(from, to) },
                             onCloseMenu = { viewModel.closeTabMenu() },
                             onMenuEditButtons = { id -> viewModel.enterEditMode(id) },
+                            onToggleEditMode = {
+                                if (isEditMode) viewModel.exitEditMode()
+                                else viewModel.enterEditMode(displayLayout.id)
+                            },
                             onMenuConfigure = { id ->
                                 val layout = layouts.find { it.id == id }
                                 if (layout != null) {
@@ -449,7 +458,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             onButtonHold = viewModel::onButtonHold,
                             onSelectButton = viewModel::selectButton,
                             onMoveButton = viewModel::moveButton,
-                            onResizeButton = viewModel::resizeButton,
+                            onResizeButton = { id, c, r, cs, rs ->
+                                viewModel.resizeButton(id, c, r, cs, rs)
+                            },
                             onDragStart = viewModel::onDragStart,
                             onMouseMove = viewModel::onMouseMove,
                             onDragEnd = viewModel::onDragEnd,
@@ -703,6 +714,7 @@ private fun ApplyMainScreenWindowBehavior(
 private fun KeyboardTopBar(
     layouts: ImmutableList<GridLayout>,
     selectedIndex: Int,
+    isEditMode: Boolean,
     tabContextMenuFor: Long?,
     onSelectIndex: (Int) -> Unit,
     onLongPressMenu: (Long) -> Unit,
@@ -714,11 +726,9 @@ private fun KeyboardTopBar(
     onMenuRemove: (Long) -> Unit,
     onMenuSaveTemplate: (Long) -> Unit,
     onOpenDrawer: () -> Unit,
-    onAddKeyboard: () -> Unit
+    onAddKeyboard: () -> Unit,
+    onToggleEditMode: () -> Unit,
 ) {
-    // Top bar is identical in normal and edit modes. All button-level CRUD now
-    // routes through the per-button long-press menu and the +icons in empty cells,
-    // so the edit-mode-only Add / Delete / Edit / Save / Cancel toolbar is gone.
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.height(40.dp)
@@ -748,6 +758,16 @@ private fun KeyboardTopBar(
                 modifier = Modifier.size(20.dp)
             )
         }
+        // Edit / done toggle. Outside edit mode this is the only way besides the per-tab
+        // long-press menu to enter edit mode; inside it, this is the only top-level exit
+        // that doesn't navigate away (tab-switch and drawer-open also exit).
+        IconButton(onClick = onToggleEditMode, modifier = Modifier.size(40.dp)) {
+            Icon(
+                if (isEditMode) Icons.Default.Check else Icons.Default.Edit,
+                contentDescription = if (isEditMode) "Exit edit mode" else "Edit buttons",
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 
@@ -761,7 +781,7 @@ private fun KeyGrid(
     onButtonHold: (GridButton) -> Unit,
     onSelectButton: (String) -> Unit,
     onMoveButton: (String, Int, Int) -> Unit,
-    onResizeButton: (String, Int, Int) -> Unit,
+    onResizeButton: (String, Int, Int, Int, Int) -> Unit,
     onDragStart: () -> Unit,
     onMouseMove: (Float, Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -835,11 +855,69 @@ private fun KeyGrid(
         // outer margin evenly: gap/2 on every side, full `gap` between buttons.
         val halfGap = gap / 2
 
+        // ── Plus-icon underlay ────────────────────────────────────────────────
+        // A complete grid of "+" affordances rendered BEFORE the buttons in source
+        // order, so buttons (at the same zIndex 0) draw on top and occlude the plus
+        // sitting beneath them. When a button is being dragged its visual is
+        // translated away from its original cell — the underlay then becomes visible
+        // there, even though the OUTER hit-test box is still anchored to the source
+        // (so taps still belong to the button, not the plus). Pluses are non-
+        // interactable while any button is being dragged or resized.
+        if (isEditMode && cellW >= 24.dp && cellH >= 24.dp) {
+            val isAnyDragging = draggingId != null
+            val interactionBlocked = isAnyDragging || isAnyResizing
+            val occupied = remember(layout.buttons) {
+                buildSet {
+                    for (btn in layout.buttons) {
+                        for (r in btn.row until btn.row + btn.rowSpan) {
+                            for (c in btn.col until btn.col + btn.colSpan) {
+                                add(c to r)
+                            }
+                        }
+                    }
+                }
+            }
+            for (r in 0 until layout.rows) {
+                for (c in 0 until layout.columns) {
+                    val cellOccupied = (c to r) in occupied
+                    val canInteract = !interactionBlocked && !cellOccupied
+                    val ix = cellW * c + halfGap
+                    val iy = cellH * r + halfGap
+                    Box(
+                        modifier = Modifier
+                            .absoluteOffset(x = ix, y = iy)
+                            .size(width = cellW - gap, height = cellH - gap)
+                            .then(
+                                if (canInteract) Modifier.pointerInput(c, r) {
+                                    detectTapGestures(
+                                        onLongPress = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onAddAtCell(c, r)
+                                        }
+                                    )
+                                } else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = if (canInteract) "Add button at $c, $r" else null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                alpha = if (interactionBlocked) 0.2f else 0.4f
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
         // ── Drop indicator ────────────────────────────────────────────────────
         val draggingButton = if (draggingId != null) layout.buttons.find { it.id == draggingId } else null
         if (isEditMode && draggingButton != null) {
-            val validColor = MaterialTheme.colorScheme.tertiary
-            val invalidColor = MaterialTheme.colorScheme.error
+            val extraColors = com.mapo.ui.theme.LocalMapoExtraColors.current
+            val validColor = extraColors.dropZoneValid
+            val invalidColor = extraColors.dropZoneInvalid
             Box(
                 modifier = Modifier
                     .absoluteOffset(
@@ -866,15 +944,28 @@ private fun KeyGrid(
             var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
             var isDragging by remember(button.id) { mutableStateOf(false) }
             var resizeDragPx by remember(button.id) { mutableStateOf(Offset.Zero) }
+            var resizeCorner by remember(button.id) { mutableStateOf<ResizeCorner?>(null) }
 
-            val bx = cellW * button.col + halfGap
-            val by = cellH * button.row + halfGap
-
-            // Live size preview while resize handle is being dragged
-            val displayColSpan = (button.colSpan + (resizeDragPx.x / cellWPx).roundToInt())
-                .coerceIn(1, layout.columns - button.col)
-            val displayRowSpan = (button.rowSpan + (resizeDragPx.y / cellHPx).roundToInt())
-                .coerceIn(1, layout.rows - button.row)
+            // Live size+position preview while a resize handle is being dragged.
+            // Each corner moves only its two adjacent edges; the opposite two edges stay
+            // pinned to their original column/row. When no resize is active, deltas are
+            // zero and the preview matches the button's persisted bounds.
+            val dCols = (resizeDragPx.x / cellWPx).roundToInt()
+            val dRows = (resizeDragPx.y / cellHPx).roundToInt()
+            val origR = button.col + button.colSpan
+            val origB = button.row + button.rowSpan
+            val moveLeft = resizeCorner == ResizeCorner.TOP_LEFT || resizeCorner == ResizeCorner.BOTTOM_LEFT
+            val moveTop = resizeCorner == ResizeCorner.TOP_LEFT || resizeCorner == ResizeCorner.TOP_RIGHT
+            val moveRight = resizeCorner == ResizeCorner.TOP_RIGHT || resizeCorner == ResizeCorner.BOTTOM_RIGHT
+            val moveBottom = resizeCorner == ResizeCorner.BOTTOM_LEFT || resizeCorner == ResizeCorner.BOTTOM_RIGHT
+            val previewL = if (moveLeft) (button.col + dCols).coerceIn(0, origR - 1) else button.col
+            val previewT = if (moveTop) (button.row + dRows).coerceIn(0, origB - 1) else button.row
+            val previewR = if (moveRight) (origR + dCols).coerceIn(button.col + 1, layout.columns) else origR
+            val previewB = if (moveBottom) (origB + dRows).coerceIn(button.row + 1, layout.rows) else origB
+            val displayColSpan = previewR - previewL
+            val displayRowSpan = previewB - previewT
+            val bx = cellW * previewL + halfGap
+            val by = cellH * previewT + halfGap
             val bw = cellW * displayColSpan - gap
             val bh = cellH * displayRowSpan - gap
 
@@ -1105,42 +1196,69 @@ private fun KeyGrid(
                 }
             }
 
-            // ── Resize handle (selected button only, not while dragging) ──────
+            // ── Resize handles (selected button only, not while dragging) ─────
+            // One circular handle per corner. Each handle's drag adjusts only its two
+            // adjacent edges; the opposite corner is the pivot. Centered on the button's
+            // corner so half the disc sits inside, half outside — standard free-transform
+            // convention. Handles are rendered after the button so they're visible above
+            // the selection ring.
             if (isEditMode && isSelected && !isDragging) {
-                Box(
-                    modifier = Modifier
-                        .absoluteOffset(
-                            x = bx + bw - handleSize + gap,
-                            y = by + bh - handleSize + gap
-                        )
-                        .size(handleSize)
-                        .zIndex(20f)
-                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))
-                        .pointerInput(button.id + "_resize") {
-                            detectDragGestures(
-                                onDragStart = { isAnyResizing = true },
-                                onDragEnd = {
-                                    val dCols = (resizeDragPx.x / cellWPx).roundToInt()
-                                    val dRows = (resizeDragPx.y / cellHPx).roundToInt()
-                                    onResizeButton(
-                                        currentButton.id,
-                                        currentButton.colSpan + dCols,
-                                        currentButton.rowSpan + dRows
-                                    )
-                                    resizeDragPx = Offset.Zero
-                                    isAnyResizing = false
-                                },
-                                onDragCancel = {
-                                    resizeDragPx = Offset.Zero
-                                    isAnyResizing = false
-                                },
-                                onDrag = { change, delta ->
-                                    change.consume()
-                                    resizeDragPx += delta
-                                }
-                            )
-                        }
-                )
+                ResizeCorner.values().forEach { corner ->
+                    val cornerX = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.BOTTOM_LEFT -> bx
+                        ResizeCorner.TOP_RIGHT, ResizeCorner.BOTTOM_RIGHT -> bx + bw
+                    }
+                    val cornerY = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.TOP_RIGHT -> by
+                        ResizeCorner.BOTTOM_LEFT, ResizeCorner.BOTTOM_RIGHT -> by + bh
+                    }
+                    Box(
+                        modifier = Modifier
+                            .absoluteOffset(x = cornerX - handleSize / 2, y = cornerY - handleSize / 2)
+                            .size(handleSize)
+                            .zIndex(20f)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape)
+                            .pointerInput(button.id, corner) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        resizeCorner = corner
+                                        isAnyResizing = true
+                                    },
+                                    onDragEnd = {
+                                        val finalDCols = (resizeDragPx.x / cellWPx).roundToInt()
+                                        val finalDRows = (resizeDragPx.y / cellHPx).roundToInt()
+                                        val ml = corner == ResizeCorner.TOP_LEFT || corner == ResizeCorner.BOTTOM_LEFT
+                                        val mt = corner == ResizeCorner.TOP_LEFT || corner == ResizeCorner.TOP_RIGHT
+                                        val mr = corner == ResizeCorner.TOP_RIGHT || corner == ResizeCorner.BOTTOM_RIGHT
+                                        val mb = corner == ResizeCorner.BOTTOM_LEFT || corner == ResizeCorner.BOTTOM_RIGHT
+                                        val origRight = currentButton.col + currentButton.colSpan
+                                        val origBottom = currentButton.row + currentButton.rowSpan
+                                        val newL = if (ml) currentButton.col + finalDCols else currentButton.col
+                                        val newT = if (mt) currentButton.row + finalDRows else currentButton.row
+                                        val newR = if (mr) origRight + finalDCols else origRight
+                                        val newB = if (mb) origBottom + finalDRows else origBottom
+                                        onResizeButton(
+                                            currentButton.id,
+                                            newL, newT,
+                                            newR - newL, newB - newT,
+                                        )
+                                        resizeDragPx = Offset.Zero
+                                        resizeCorner = null
+                                        isAnyResizing = false
+                                    },
+                                    onDragCancel = {
+                                        resizeDragPx = Offset.Zero
+                                        resizeCorner = null
+                                        isAnyResizing = false
+                                    },
+                                    onDrag = { change, delta ->
+                                        change.consume()
+                                        resizeDragPx += delta
+                                    }
+                                )
+                            }
+                    )
+                }
             }
 
             // ── Long-press contextual menu (anchored at the button's slot) ────
@@ -1195,41 +1313,6 @@ private fun KeyGrid(
             }
         }
 
-        // ── Plus icons in unoccupied 1x1 cells (edit mode, when cells are big enough) ─
-        if (isEditMode && !isAnyResizing && cellW >= 24.dp && cellH >= 24.dp) {
-            val occupied = remember(layout.buttons) {
-                buildSet {
-                    for (btn in layout.buttons) {
-                        for (r in btn.row until btn.row + btn.rowSpan) {
-                            for (c in btn.col until btn.col + btn.colSpan) {
-                                add(c to r)
-                            }
-                        }
-                    }
-                }
-            }
-            for (r in 0 until layout.rows) {
-                for (c in 0 until layout.columns) {
-                    if ((c to r) in occupied) continue
-                    val ix = cellW * c + halfGap
-                    val iy = cellH * r + halfGap
-                    Box(
-                        modifier = Modifier
-                            .absoluteOffset(x = ix, y = iy)
-                            .size(width = cellW - gap, height = cellH - gap)
-                            .clickable { onAddAtCell(c, r) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = "Add button at $c, $r",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -1238,6 +1321,9 @@ private const val TRACKPAD_SENSITIVITY = 1.5f
 private const val TAP_MOVEMENT_THRESHOLD_PX = 12f
 private const val DOUBLE_TAP_INTERVAL_MS = 250L
 private const val LONG_PRESS_DURATION_MS = 500L
+
+/** Which corner of a selected button is currently being dragged for resize. */
+private enum class ResizeCorner { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
 
 /**
  * Layered visual surface for one button. Layers, bottom-up:
@@ -1375,7 +1461,11 @@ private fun RegionView(
 ) {
     val text = region.label ?: fallbackLabel
     val labelColor = region.labelColorArgb?.let { Color(it) } ?: Color.Unspecified
-    val iconColor = region.iconColorArgb?.let { Color(it) } ?: Color.Unspecified
+    // Icon's `tint = Color.Unspecified` means "draw the source asset's intrinsic colors"
+    // (typically black for Material vector icons), unlike Text which falls back to
+    // LocalContentColor. Resolve the inheritance ourselves so an unset iconColorArgb
+    // tracks the label color instead of rendering as a flat black sprite.
+    val iconColor = region.iconColorArgb?.let { Color(it) } ?: LocalContentColor.current
     val iconVec = MapoIcons.resolve(region.icon)
     Row(
         modifier = modifier,

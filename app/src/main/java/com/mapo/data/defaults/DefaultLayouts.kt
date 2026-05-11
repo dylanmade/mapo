@@ -132,36 +132,52 @@ object DefaultLayouts {
     val keysAlt: GridLayout  = keysAltDef.toGridLayout(gridCols = 6)
     val mouse: GridLayout    = mouseDef.toGridLayout(gridCols = 6)
 
-    // Trackpad: large trackpad area (6×3) + mouse buttons row below
-    val trackpad: GridLayout = GridLayout(
-        name = "Trackpad",
-        columns = 6,
-        rows = 4,
-        buttons = listOf(
-            GridButtonDefaults.appearanceFor("trackpad").apply(
+    // Build a 10×9 trackpad layout. trackpadOnLeft = true puts the trackpad in the left
+    // 8 columns and the mouse buttons in the right 2 columns; false mirrors it.
+    private fun trackpadLayout(name: String, trackpadOnLeft: Boolean): GridLayout {
+        val trackpadCol = if (trackpadOnLeft) 0 else 2
+        val buttonsCol = if (trackpadOnLeft) 8 else 0
+        return GridLayout(
+            name = name,
+            columns = 10,
+            rows = 9,
+            buttons = listOf(
+                GridButtonDefaults.appearanceFor("trackpad").apply(
+                    GridButton(
+                        label = "Trackpad",
+                        col = trackpadCol, row = 0, colSpan = 8, rowSpan = 9,
+                        type = "trackpad",
+                        onTap = RemapTarget.Mouse("MOUSE_LEFT").encode(),
+                        onHold = RemapTarget.Mouse("MOUSE_RIGHT").encode(),
+                        sensitivity = GridButtonDefaults.TRACKPAD_SENSITIVITY,
+                    )
+                ),
                 GridButton(
-                    label = "Trackpad",
-                    col = 0, row = 0, colSpan = 6, rowSpan = 3,
-                    type = "trackpad",
+                    label = "L Click", col = buttonsCol, row = 0, colSpan = 2, rowSpan = 3,
                     onTap = RemapTarget.Mouse("MOUSE_LEFT").encode(),
-                    onHold = RemapTarget.Mouse("MOUSE_RIGHT").encode(),
-                    sensitivity = GridButtonDefaults.TRACKPAD_SENSITIVITY,
-                )
-            ),
-            GridButton(
-                label = "L Click", col = 0, row = 3, colSpan = 2,
-                onTap = RemapTarget.Mouse("MOUSE_LEFT").encode(),
-            ),
-            GridButton(
-                label = "M Click", col = 2, row = 3, colSpan = 2,
-                onTap = RemapTarget.Mouse("MOUSE_MIDDLE").encode(),
-            ),
-            GridButton(
-                label = "R Click", col = 4, row = 3, colSpan = 2,
-                onTap = RemapTarget.Mouse("MOUSE_RIGHT").encode(),
-            ),
+                ),
+                GridButton(
+                    label = "R Click", col = buttonsCol, row = 3, colSpan = 2, rowSpan = 3,
+                    onTap = RemapTarget.Mouse("MOUSE_RIGHT").encode(),
+                ),
+                GridButton(
+                    label = "M Click", col = buttonsCol, row = 6, colSpan = 2, rowSpan = 3,
+                    onTap = RemapTarget.Mouse("MOUSE_MIDDLE").encode(),
+                ),
+            )
         )
-    )
+    }
 
-    val all: List<GridLayout> = listOf(keysMain, keysAlt, mouse, trackpad)
+    // (R) variant: trackpad takes the right 8 columns, mouse buttons sit on the left.
+    val trackpadR: GridLayout = trackpadLayout(name = "Trackpad (R)", trackpadOnLeft = false)
+    // (L) variant: mirror — trackpad on the left, mouse buttons on the right. Available as
+    // a built-in template only; not seeded into a new profile's initial keyboards.
+    val trackpadL: GridLayout = trackpadLayout(name = "Trackpad (L)", trackpadOnLeft = true)
+
+    /** Layouts seeded into a new profile on first use. Order is the initial tab order. */
+    val all: List<GridLayout> = listOf(keysMain, keysAlt, mouse, trackpadR)
+
+    /** Built-in template catalog shown in the "Add from template" picker. Includes [trackpadL]
+     *  as a non-default option so users can pick the mirrored variant without it auto-seeding. */
+    val builtInTemplates: List<GridLayout> = listOf(keysMain, keysAlt, mouse, trackpadR, trackpadL)
 }

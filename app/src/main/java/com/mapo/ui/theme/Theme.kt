@@ -11,6 +11,9 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.themestudio.core.LocalThemeStudioController
 import com.themestudio.core.LocalThemeStudioVariantOverride
@@ -125,6 +128,7 @@ fun MapoTheme(
     val typography = AppTypography.applyOverrides(overrides.typography, fontResolver)
     val shapes = Shapes().applyOverrides(overrides.shapes)
 
+    val extraColors = if (effectiveDark) MapoExtraColors.Dark else MapoExtraColors.Light
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
         // Standard (critically-damped) springs instead of expressive (bouncy):
@@ -133,6 +137,31 @@ fun MapoTheme(
         motionScheme = MotionScheme.standard(),
         typography = typography,
         shapes = shapes,
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(LocalMapoExtraColors provides extraColors, content = content)
+    }
 }
+
+/**
+ * Project-specific colors that don't have a clean role in the M3 [ColorScheme]. Currently
+ * limited to drag-and-drop destination indicators, where users expect literal green / red
+ * regardless of the active theme palette (theme tertiary/error read as "another accent /
+ * destructive action," not "valid / invalid drop target").
+ */
+data class MapoExtraColors(
+    val dropZoneValid: Color,
+    val dropZoneInvalid: Color,
+) {
+    companion object {
+        val Light = MapoExtraColors(
+            dropZoneValid = Color(0xFF2E7D32),    // M-spec green 800 — readable on light fills
+            dropZoneInvalid = Color(0xFFC62828),  // M-spec red 800
+        )
+        val Dark = MapoExtraColors(
+            dropZoneValid = Color(0xFF66BB6A),    // green 400 — lifts off dark surface
+            dropZoneInvalid = Color(0xFFEF5350),  // red 400
+        )
+    }
+}
+
+val LocalMapoExtraColors = compositionLocalOf { MapoExtraColors.Light }

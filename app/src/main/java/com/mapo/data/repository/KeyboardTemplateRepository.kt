@@ -18,10 +18,12 @@ class KeyboardTemplateRepository @Inject constructor(
 ) {
 
     /**
-     * Built-in templates derived from [DefaultLayouts]. Their `key` is the default layout's name
-     * and is stable across releases.
+     * Built-in templates derived from [DefaultLayouts.builtInTemplates] (a superset of
+     * `DefaultLayouts.all` — includes catalog-only variants like Trackpad (L) that aren't
+     * seeded as default keyboards). Their `key` is the layout's name and is stable across
+     * releases.
      */
-    val builtIns: List<TemplateRef.BuiltIn> = DefaultLayouts.all.map { layout ->
+    val builtIns: List<TemplateRef.BuiltIn> = DefaultLayouts.builtInTemplates.map { layout ->
         TemplateRef.BuiltIn(
             key = layout.name,
             name = layout.name,

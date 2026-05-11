@@ -3,6 +3,11 @@ package com.mapo.data.repository
 import com.mapo.data.db.LayoutDao
 import com.mapo.data.db.ProfileDao
 import com.mapo.data.model.Profile
+import com.mapo.data.model.toGridLayout
+import com.mapo.data.model.toKeyLayout
+import com.mapo.data.model.toJson
+import com.mapo.data.model.toSnapshot
+import com.mapo.data.model.withFreshButtonIds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -66,7 +71,18 @@ class ProfileRepository @Inject constructor(
             layoutRepository.seedDefaults(newId)
         } else {
             sourceLayouts.forEach { layout ->
-                layoutDao.insert(layout.copy(id = 0, profileId = newId))
+                // Fresh UUIDs per button so the duplicated profile's keyboards don't share
+                // button ids with the source profile's keyboards. The reset-to-original
+                // snapshot is regenerated from the fresh-id state to match.
+                val fresh = layout.toGridLayout().withFreshButtonIds()
+                val snapshotJson = fresh.toSnapshot().toJson()
+                layoutDao.insert(
+                    fresh.toKeyLayout(
+                        profileId = newId,
+                        position = layout.position,
+                        originalSnapshotJson = snapshotJson
+                    )
+                )
             }
         }
         gamepadMappingRepo.copyMappings(source.id, newId)

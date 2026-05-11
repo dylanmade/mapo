@@ -6,6 +6,7 @@ import com.mapo.data.model.KeyLayout
 import com.mapo.data.model.toKeyLayout
 import com.mapo.data.model.toJson
 import com.mapo.data.model.toSnapshot
+import com.mapo.data.model.withFreshButtonIds
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -45,9 +46,14 @@ class LayoutRepository @Inject constructor(private val dao: LayoutDao) {
      */
     suspend fun seedDefaults(profileId: Long) {
         DefaultLayouts.all.forEachIndexed { index, layout ->
-            val snapshotJson = layout.toSnapshot().toJson()
+            // DefaultLayouts.all holds singleton GridLayouts whose buttons get the same
+            // UUIDs at app start; seeding from them as-is means every profile shares button
+            // ids with every other profile and with the in-memory templates. Regenerate
+            // per-profile so each seed is independent.
+            val fresh = layout.withFreshButtonIds()
+            val snapshotJson = fresh.toSnapshot().toJson()
             dao.insert(
-                layout.toKeyLayout(
+                fresh.toKeyLayout(
                     profileId = profileId,
                     position = index,
                     originalSnapshotJson = snapshotJson

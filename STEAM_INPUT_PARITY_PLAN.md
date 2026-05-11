@@ -60,7 +60,7 @@ Match the virtual-keyboard `ConfigureButtonScreen` pattern: every picker result 
 Phase 1 is split into four sub-bricks so each lands the build green:
 
 - **1.1 — Schema** ✅ COMPLETED. Entities, enums, DAOs, `SteamTypeConverters`, `AppDatabase` bump to v7, Hilt providers. Old `gamepad_mappings` + `GamepadMappingRepository` still in place; no runtime behavior change yet.
-- **1.2 — Repository + seeding.** `ControllerConfigRepository` with materialized-graph reads. Seed default config on fresh install. Translate any pre-existing `gamepad_mappings` rows.
+- **1.2 — Repository + seeding** ✅ COMPLETED. `BindingOutput` sealed wrapper, materialized-graph types (`ControllerConfig`/`ActionSetGraph`/.../`ActivatorGraph`), `ControllerConfigRepository` with `ensureSeeded` / `seedDefaultConfig` / `observeActiveConfig` / `getActiveConfigOnce` / `setBinding`. Auto-seeds on first observe. **No legacy translation** — see Deviations.
 - **1.3 — UI rewrite.** New section-grouped `RemapControlsScreen` reading the new graph. Picker writes via per-binding setter (Phase 0's commit-on-select pattern).
 - **1.4 — Cleanup.** Delete `GamepadMappingRepository`, `GamepadMappingDao`, `gamepad_mappings` entity, legacy VM methods. Backfill tests.
 
@@ -68,7 +68,10 @@ Phase 1 is split into four sub-bricks so each lands the build green:
 
 - **`group_setting` table removed.** Originally planned as a per-(group, key) row store with `valueJson`. Collapsed into a single `BindingGroup.settingsJson` column instead — matches how `Activator.settingsJson` already works, fewer joins, parser layer is the same code path for both. Net: 9 tables instead of 10. Sealed-class parsing in the repository layer makes the table-vs-column choice invisible upstream, so this is safe to revisit later if we ever need queryable settings (we don't).
 - **`BindingGroup` ownership uses two nullable FKs** (`actionSetId?` + `actionLayerId?`) rather than a polymorphic `(ownerKind, ownerId)` pair. Real FKs + cascades work; polymorphic FKs don't. Repository invariant: exactly one is non-null.
-- **Schema bump uses existing `fallbackToDestructiveMigration(dropAllTables = true)`.** No hand-written Room `Migration` block needed for the brick-1.1 land; the migration story (translating user data forward) is brick 1.2's job and runs as a one-shot in `ControllerConfigRepository` rather than at the SQL layer.
+- **Schema bump uses existing `fallbackToDestructiveMigration(dropAllTables = true)`.** No hand-written Room `Migration` block needed.
+- **Legacy `gamepad_mappings` data is wiped on v6→v7 upgrade** (decided in 1.2). Pre-release stance ([memory: project_mapo_pre_release.md](../.claude/projects/-Users-dylanbperry-projects-mapo/memory/project_mapo_pre_release.md)) said destructive OK; the user confirmed they're fine re-creating any test profiles. The repository's `ensureSeeded` path is the only seed mechanism — there is no migrator that reads old rows. If a release-ready migration path is ever needed, write a real Room `Migration(6, 7)` and the repository can stay as-is.
+- **`BindingGroup.settingsJson` defaults to `"{}"`** at seed time. Mode-specific settings (deadzones, sensitivities, etc.) parse from this string in later phases; for brick 1.2 every group has empty settings and a single default sub-input set per mode.
+- **Default seed excludes trackpads, back paddles, gyro.** The schema supports them (for VDF import compatibility) but Generic Android doesn't expose them, so seeding configurable-but-never-fireable groups would just be UI clutter. Imports can still create groups for these sources.
 
 ### Goal
 

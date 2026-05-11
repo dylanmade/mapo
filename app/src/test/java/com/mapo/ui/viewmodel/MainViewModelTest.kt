@@ -1,6 +1,7 @@
 package com.mapo.ui.viewmodel
 
 import com.mapo.data.model.AppProfileBinding
+import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.GamepadMapping
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
@@ -453,6 +454,26 @@ class MainViewModelTest {
         advanceUntilIdle()
 
         coVerify { gamepadRepo.saveMappings(5L, emptyMap()) }
+    }
+
+    @Test
+    fun setRemapMapping_noActiveProfile_isNoOp() = runTest(testDispatcher) {
+        activeProfile.value = null
+
+        subject.setRemapMapping(DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER"))
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { gamepadRepo.setMapping(any(), any(), any()) }
+    }
+
+    @Test
+    fun setRemapMapping_activeProfile_delegatesToRepository() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 5L, name = "Test")
+
+        subject.setRemapMapping(DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER"))
+        advanceUntilIdle()
+
+        coVerify { gamepadRepo.setMapping(5L, DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER")) }
     }
 
     @Test

@@ -533,14 +533,13 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     .getStateFlow<String?>(MapoRoute.PICKER_RESULT_KEY, null)
                     .collectAsStateWithLifecycle()
                 RemapControlsScreen(
-                    initialMappings = activeProfileMappings,
+                    mappings = activeProfileMappings,
                     pickerResult = pickerResult?.let { RemapTarget.decode(it) },
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
                     },
-                    onSave = { mappings ->
-                        viewModel.saveRemapMappings(mappings)
-                        navController.popBackStack()
+                    onPickResult = { button, target ->
+                        viewModel.setRemapMapping(button, target)
                     },
                     onBack = { navController.popBackStack() },
                     onOpenPicker = { title, current ->

@@ -306,6 +306,11 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch { gampadMappingRepository.saveMappings(profileId, draft) }
     }
 
+    fun setRemapMapping(button: DeviceButton, target: RemapTarget) {
+        val profileId = activeProfile.value?.id ?: return
+        viewModelScope.launch { gampadMappingRepository.setMapping(profileId, button, target) }
+    }
+
     // ── Navigation ────────────────────────────────────────────────────────────
 
     fun selectLayout(index: Int) {

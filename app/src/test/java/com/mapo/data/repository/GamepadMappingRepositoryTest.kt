@@ -90,6 +90,57 @@ class GamepadMappingRepositoryTest {
     }
 
     @Test
+    fun setMapping_insertsConcreteTarget() = runTest {
+        subject.setMapping(profileId = 1L, button = DeviceButton.BUTTON_A, target = RemapTarget.Keyboard("ENTER"))
+
+        val stored = dao.getByProfileOnce(1L)
+        assertEquals(1, stored.size)
+        assertEquals("BUTTON_A", stored[0].gamepadButton)
+        assertEquals("keyboard:ENTER", stored[0].targetEncoded)
+    }
+
+    @Test
+    fun setMapping_replacesExistingForSameButton() = runTest {
+        subject.setMapping(1L, DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER"))
+        subject.setMapping(1L, DeviceButton.BUTTON_A, RemapTarget.Mouse("LEFT"))
+
+        val stored = dao.getByProfileOnce(1L)
+        assertEquals(1, stored.size)
+        assertEquals("mouse:LEFT", stored[0].targetEncoded)
+    }
+
+    @Test
+    fun setMapping_preservesOtherButtonsInSameProfile() = runTest {
+        subject.setMapping(1L, DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER"))
+        subject.setMapping(1L, DeviceButton.BUTTON_B, RemapTarget.Keyboard("ESCAPE"))
+
+        val stored = dao.getByProfileOnce(1L).associateBy { it.gamepadButton }
+        assertEquals(2, stored.size)
+        assertEquals("keyboard:ENTER", stored["BUTTON_A"]?.targetEncoded)
+        assertEquals("keyboard:ESCAPE", stored["BUTTON_B"]?.targetEncoded)
+    }
+
+    @Test
+    fun setMapping_unbound_deletesOnlyThatButton() = runTest {
+        subject.setMapping(1L, DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER"))
+        subject.setMapping(1L, DeviceButton.BUTTON_B, RemapTarget.Keyboard("ESCAPE"))
+        subject.setMapping(1L, DeviceButton.BUTTON_A, RemapTarget.Unbound)
+
+        val stored = dao.getByProfileOnce(1L)
+        assertEquals(1, stored.size)
+        assertEquals("BUTTON_B", stored[0].gamepadButton)
+    }
+
+    @Test
+    fun setMapping_doesNotAffectOtherProfiles() = runTest {
+        subject.setMapping(1L, DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER"))
+        subject.setMapping(2L, DeviceButton.BUTTON_A, RemapTarget.Mouse("LEFT"))
+
+        assertEquals("keyboard:ENTER", dao.getByProfileOnce(1L)[0].targetEncoded)
+        assertEquals("mouse:LEFT", dao.getByProfileOnce(2L)[0].targetEncoded)
+    }
+
+    @Test
     fun copyMappings_replicatesSourceIntoDestProfile() = runTest {
         subject.saveMappings(
             profileId = 1L,
@@ -127,6 +178,10 @@ private class FakeGamepadDao : GamepadMappingDao {
         val keys = mappings.map { it.profileId to it.gamepadButton }.toSet()
         val kept = rows.value.filterNot { (it.profileId to it.gamepadButton) in keys }
         rows.value = kept + mappings
+    }
+
+    override suspend fun deleteMapping(profileId: Long, button: String) {
+        rows.value = rows.value.filterNot { it.profileId == profileId && it.gamepadButton == button }
     }
 
     override suspend fun deleteAllForProfile(profileId: Long) {

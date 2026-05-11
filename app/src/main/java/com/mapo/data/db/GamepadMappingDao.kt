@@ -19,6 +19,9 @@ interface GamepadMappingDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(mappings: List<GamepadMapping>)
 
+    @Query("DELETE FROM gamepad_mappings WHERE profileId = :profileId AND gamepadButton = :button")
+    suspend fun deleteMapping(profileId: Long, button: String)
+
     @Query("DELETE FROM gamepad_mappings WHERE profileId = :profileId")
     suspend fun deleteAllForProfile(profileId: Long)
 }

@@ -24,6 +24,14 @@ class GamepadMappingRepository @Inject constructor(
         if (rows.isNotEmpty()) dao.insertAll(rows)
     }
 
+    suspend fun setMapping(profileId: Long, button: DeviceButton, target: RemapTarget) {
+        if (target is RemapTarget.Unbound) {
+            dao.deleteMapping(profileId, button.name)
+        } else {
+            dao.insertAll(listOf(GamepadMapping(profileId, button.name, target.encode())))
+        }
+    }
+
     suspend fun copyMappings(sourceProfileId: Long, destProfileId: Long) {
         val source = dao.getByProfileOnce(sourceProfileId)
         if (source.isNotEmpty()) {

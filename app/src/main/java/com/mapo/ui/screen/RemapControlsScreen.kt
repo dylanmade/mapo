@@ -7,7 +7,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -21,9 +20,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -34,38 +32,30 @@ import com.mapo.data.model.displayLabel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RemapControlsScreen(
-    initialMappings: Map<String, RemapTarget>,
+    mappings: Map<String, RemapTarget>,
     pickerResult: RemapTarget?,
     onConsumePickerResult: () -> Unit,
-    onSave: (Map<DeviceButton, RemapTarget>) -> Unit,
+    onPickResult: (DeviceButton, RemapTarget) -> Unit,
     onBack: () -> Unit,
     onOpenPicker: (title: String, current: RemapTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val draft = remember {
-        mutableStateMapOf<DeviceButton, RemapTarget>().also { map ->
-            DeviceButton.entries.forEach { btn ->
-                map[btn] = initialMappings[btn.name] ?: RemapTarget.Unbound
-            }
-        }
-    }
-
-    // Track which physical button is awaiting a picker result; survives the picker
-    // round-trip via remember in this NavBackStackEntry-scoped composable.
-    var editingButton by remember { mutableStateOf<DeviceButton?>(null) }
+    // rememberSaveable so the in-flight edit survives the full-screen picker round-trip;
+    // a plain remember would be destroyed when this screen leaves composition while the
+    // picker is on top, dropping the result on return.
+    var editingButtonName by rememberSaveable { mutableStateOf<String?>(null) }
+    val editingButton = editingButtonName?.let { runCatching { DeviceButton.valueOf(it) }.getOrNull() }
 
     LaunchedEffect(pickerResult) {
         val target = pickerResult ?: return@LaunchedEffect
-        editingButton?.let { btn ->
-            draft[btn] = target
-            editingButton = null
-        }
+        editingButton?.let { btn -> onPickResult(btn, target) }
+        editingButtonName = null
         onConsumePickerResult()
     }
 
     val openPickerFor: (DeviceButton) -> Unit = { btn ->
-        editingButton = btn
-        val current = draft[btn] ?: RemapTarget.Unbound
+        editingButtonName = btn.name
+        val current = mappings[btn.name] ?: RemapTarget.Unbound
         onOpenPicker("Remap: ${btn.displayName}", current)
     }
 
@@ -78,18 +68,13 @@ fun RemapControlsScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                },
-                actions = {
-                    IconButton(onClick = { onSave(draft.toMap()) }) {
-                        Icon(Icons.Default.Save, contentDescription = "Save")
-                    }
                 }
             )
         }
     ) { innerPadding ->
         LazyColumn(contentPadding = innerPadding) {
             itemsIndexed(DeviceButton.entries) { index, btn ->
-                val target = draft[btn] ?: RemapTarget.Unbound
+                val target = mappings[btn.name] ?: RemapTarget.Unbound
                 ListItem(
                     headlineContent = { Text(btn.displayName) },
                     supportingContent = {

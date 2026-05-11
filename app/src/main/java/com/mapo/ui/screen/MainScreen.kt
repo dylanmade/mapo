@@ -88,6 +88,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -108,7 +109,10 @@ import com.mapo.data.model.onDoubleTapTarget
 import com.mapo.data.model.onHoldTarget
 import com.mapo.data.model.onTapTarget
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Shape
 import com.mapo.ui.component.MapoIcons
 import com.mapo.ui.util.resolveAutoColors
@@ -117,6 +121,7 @@ import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
 import com.mapo.data.model.TemplateRef
 import com.mapo.service.InputAccessibilityService
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -796,7 +801,6 @@ private fun KeyGrid(
     val density = LocalDensity.current
     val gridScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
-    val handleSize = 20.dp
     val gap = 3.dp
     val currentSelectedId by rememberUpdatedState(selectedButtonId)
 
@@ -946,10 +950,19 @@ private fun KeyGrid(
             var resizeDragPx by remember(button.id) { mutableStateOf(Offset.Zero) }
             var resizeCorner by remember(button.id) { mutableStateOf<ResizeCorner?>(null) }
 
-            // Live size+position preview while a resize handle is being dragged.
+            // Three sets of bounds coexist during a resize:
+            //   1. COMMITTED  (bx/by/bw/bh, == orig*): button.col/row/spans. The button
+            //      itself renders here and stays put during the entire drag — it commits
+            //      only on release.
+            //   2. SNAPPED PREVIEW (previewBx/By/Bw/Bh): the gridded destination the
+            //      release would commit to. Shown as a green (valid) or red (overlapping)
+            //      landing zone so the user sees exactly which cells they're claiming.
+            //   3. SMOOTH (smoothBx/By/Bw/Bh): raw finger position in px. Drives the
+            //      selection outline and the active handle's visual offset so the resize
+            //      feels physical instead of stuttery.
             // Each corner moves only its two adjacent edges; the opposite two edges stay
-            // pinned to their original column/row. When no resize is active, deltas are
-            // zero and the preview matches the button's persisted bounds.
+            // pinned. When no resize is active, all three sets collapse to the committed
+            // bounds.
             val dCols = (resizeDragPx.x / cellWPx).roundToInt()
             val dRows = (resizeDragPx.y / cellHPx).roundToInt()
             val origR = button.col + button.colSpan
@@ -962,12 +975,45 @@ private fun KeyGrid(
             val previewT = if (moveTop) (button.row + dRows).coerceIn(0, origB - 1) else button.row
             val previewR = if (moveRight) (origR + dCols).coerceIn(button.col + 1, layout.columns) else origR
             val previewB = if (moveBottom) (origB + dRows).coerceIn(button.row + 1, layout.rows) else origB
-            val displayColSpan = previewR - previewL
-            val displayRowSpan = previewB - previewT
-            val bx = cellW * previewL + halfGap
-            val by = cellH * previewT + halfGap
-            val bw = cellW * displayColSpan - gap
-            val bh = cellH * displayRowSpan - gap
+            val previewColSpan = previewR - previewL
+            val previewRowSpan = previewB - previewT
+            val previewBx = cellW * previewL + halfGap
+            val previewBy = cellH * previewT + halfGap
+            val previewBw = cellW * previewColSpan - gap
+            val previewBh = cellH * previewRowSpan - gap
+
+            // Committed bounds — button renders here, dropdown menus anchor here.
+            val origBx = cellW * button.col + halfGap
+            val origBy = cellH * button.row + halfGap
+            val origBw = cellW * button.colSpan - gap
+            val origBh = cellH * button.rowSpan - gap
+            val bx = origBx
+            val by = origBy
+            val bw = origBw
+            val bh = origBh
+            val dxDp = with(density) { resizeDragPx.x.toDp() }
+            val dyDp = with(density) { resizeDragPx.y.toDp() }
+            // Clamp so the outline can't be flipped inside-out: the moving edge can't
+            // pass the fixed opposite edge minus a one-cell minimum (matches the snapped
+            // preview's minimum span of 1).
+            val smoothBx = when {
+                moveLeft -> (origBx + dxDp).coerceIn(0.dp, origBx + origBw - cellW)
+                else -> origBx
+            }
+            val smoothBy = when {
+                moveTop -> (origBy + dyDp).coerceIn(0.dp, origBy + origBh - cellH)
+                else -> origBy
+            }
+            val smoothRight = when {
+                moveRight -> (origBx + origBw + dxDp).coerceIn(smoothBx + cellW, maxWidth)
+                else -> origBx + origBw
+            }
+            val smoothBottom = when {
+                moveBottom -> (origBy + origBh + dyDp).coerceIn(smoothBy + cellH, maxHeight)
+                else -> origBy + origBh
+            }
+            val smoothBw = smoothRight - smoothBx
+            val smoothBh = smoothBottom - smoothBy
 
             val isSelected = button.id == selectedButtonId
 
@@ -1056,7 +1102,6 @@ private fun KeyGrid(
                 ) {
                     KeyButtonShape(
                         button = button,
-                        isSelected = false,
                         keyboardThemeColor = keyboardTheme,
                         modifier = Modifier.fillMaxSize(),
                     ) {
@@ -1170,7 +1215,6 @@ private fun KeyGrid(
                     val hasHold = button.onHoldTarget !is RemapTarget.Unbound
                     KeyButtonShape(
                         button = button,
-                        isSelected = isSelected,
                         keyboardThemeColor = keyboardTheme,
                         modifier = Modifier
                             .fillMaxSize()
@@ -1196,68 +1240,154 @@ private fun KeyGrid(
                 }
             }
 
-            // ── Resize handles (selected button only, not while dragging) ─────
-            // One circular handle per corner. Each handle's drag adjusts only its two
-            // adjacent edges; the opposite corner is the pivot. Centered on the button's
-            // corner so half the disc sits inside, half outside — standard free-transform
-            // convention. Handles are rendered after the button so they're visible above
-            // the selection ring.
+            // ── Selection outline (smooth) + resize handles (selected, not dragging) ─
             if (isEditMode && isSelected && !isDragging) {
-                ResizeCorner.values().forEach { corner ->
-                    val cornerX = when (corner) {
-                        ResizeCorner.TOP_LEFT, ResizeCorner.BOTTOM_LEFT -> bx
-                        ResizeCorner.TOP_RIGHT, ResizeCorner.BOTTOM_RIGHT -> bx + bw
-                    }
-                    val cornerY = when (corner) {
-                        ResizeCorner.TOP_LEFT, ResizeCorner.TOP_RIGHT -> by
-                        ResizeCorner.BOTTOM_LEFT, ResizeCorner.BOTTOM_RIGHT -> by + bh
-                    }
+                val extraColors = com.mapo.ui.theme.LocalMapoExtraColors.current
+                val outlineShape = RoundedCornerShape(BUTTON_CORNER)
+
+                // Resize destination: the snapped cells that pressing release right now
+                // would commit to. Green = within bounds and no overlap; red = overlaps
+                // another button (commit will be rejected). Mirrors the drag-to-move
+                // drop indicator so the visual language stays consistent. Only renders
+                // while a resize is in progress.
+                if (resizeCorner != null) {
+                    val previewWouldOverlap = layout.wouldOverlap(
+                        button.id, previewL, previewT,
+                        previewColSpan, previewRowSpan,
+                    )
+                    val zoneColor = if (previewWouldOverlap) extraColors.dropZoneInvalid
+                                    else extraColors.dropZoneValid
                     Box(
                         modifier = Modifier
-                            .absoluteOffset(x = cornerX - handleSize / 2, y = cornerY - handleSize / 2)
-                            .size(handleSize)
-                            .zIndex(20f)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape)
-                            .pointerInput(button.id, corner) {
-                                detectDragGestures(
-                                    onDragStart = {
-                                        resizeCorner = corner
-                                        isAnyResizing = true
-                                    },
-                                    onDragEnd = {
-                                        val finalDCols = (resizeDragPx.x / cellWPx).roundToInt()
-                                        val finalDRows = (resizeDragPx.y / cellHPx).roundToInt()
-                                        val ml = corner == ResizeCorner.TOP_LEFT || corner == ResizeCorner.BOTTOM_LEFT
-                                        val mt = corner == ResizeCorner.TOP_LEFT || corner == ResizeCorner.TOP_RIGHT
-                                        val mr = corner == ResizeCorner.TOP_RIGHT || corner == ResizeCorner.BOTTOM_RIGHT
-                                        val mb = corner == ResizeCorner.BOTTOM_LEFT || corner == ResizeCorner.BOTTOM_RIGHT
-                                        val origRight = currentButton.col + currentButton.colSpan
-                                        val origBottom = currentButton.row + currentButton.rowSpan
-                                        val newL = if (ml) currentButton.col + finalDCols else currentButton.col
-                                        val newT = if (mt) currentButton.row + finalDRows else currentButton.row
-                                        val newR = if (mr) origRight + finalDCols else origRight
-                                        val newB = if (mb) origBottom + finalDRows else origBottom
-                                        onResizeButton(
-                                            currentButton.id,
-                                            newL, newT,
-                                            newR - newL, newB - newT,
-                                        )
-                                        resizeDragPx = Offset.Zero
-                                        resizeCorner = null
-                                        isAnyResizing = false
-                                    },
-                                    onDragCancel = {
-                                        resizeDragPx = Offset.Zero
-                                        resizeCorner = null
-                                        isAnyResizing = false
-                                    },
-                                    onDrag = { change, delta ->
-                                        change.consume()
-                                        resizeDragPx += delta
-                                    }
-                                )
-                            }
+                            .absoluteOffset(x = previewBx, y = previewBy)
+                            .size(width = previewBw, height = previewBh)
+                            .zIndex(15f)
+                            .background(zoneColor.copy(alpha = 0.38f), outlineShape)
                     )
+                }
+
+                // Selection outline at smooth (finger-tracking) bounds. The drop shadow
+                // is drawn per-line inside selectionOutline rather than as a single
+                // rectangle behind the whole box — that way the bracket reads as four
+                // thin floating elements with shadows on either side of each line,
+                // instead of a hazy fill across the button's face.
+                Box(
+                    modifier = Modifier
+                        .absoluteOffset(x = smoothBx, y = smoothBy)
+                        .size(width = smoothBw, height = smoothBh)
+                        .zIndex(25f)
+                        .selectionOutline(extraColors.selectionOutline)
+                )
+
+                // One circular handle per corner.
+                //
+                // Hit area (HANDLE_HIT_SIZE) is anchored to the button's ORIGINAL committed
+                // corner (origBx/origBy/origBw/origBh) so the pointerInput's coordinate
+                // frame stays stable for the entire drag. If we anchored to the smooth
+                // bounds instead, the gesture-source modifier would move with the finger
+                // and `detectDragGestures` would report zero-deltas in that moving frame
+                // (the classic "follow the finger" feedback loop). The visible disc lives
+                // inside the hit box and uses `graphicsLayer.translation*` to follow the
+                // smooth corner — translation is a draw-time transform that doesn't shift
+                // the pointer frame, so we get smooth visuals AND correct deltas.
+                //
+                // Handles sit at zIndex 50 (> dragging button's 10) so a neighboring button
+                // can never swallow a touch meant for a handle. While one corner is grabbed
+                // the other three fade out and drop their pointerInput so a stray touch on
+                // a faded handle can't hand the drag to the wrong corner mid-gesture.
+                ResizeCorner.values().forEach { corner ->
+                    val anchorX = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.BOTTOM_LEFT -> origBx
+                        ResizeCorner.TOP_RIGHT, ResizeCorner.BOTTOM_RIGHT -> origBx + origBw
+                    }
+                    val anchorY = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.TOP_RIGHT -> origBy
+                        ResizeCorner.BOTTOM_LEFT, ResizeCorner.BOTTOM_RIGHT -> origBy + origBh
+                    }
+                    val smoothCornerX = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.BOTTOM_LEFT -> smoothBx
+                        ResizeCorner.TOP_RIGHT, ResizeCorner.BOTTOM_RIGHT -> smoothBx + smoothBw
+                    }
+                    val smoothCornerY = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.TOP_RIGHT -> smoothBy
+                        ResizeCorner.BOTTOM_LEFT, ResizeCorner.BOTTOM_RIGHT -> smoothBy + smoothBh
+                    }
+                    val translationXDp = smoothCornerX - anchorX
+                    val translationYDp = smoothCornerY - anchorY
+                    val translationXPx = with(density) { translationXDp.toPx() }
+                    val translationYPx = with(density) { translationYDp.toPx() }
+
+                    val isThisActive = resizeCorner == corner
+                    val isAnyActive = resizeCorner != null
+                    val targetAlpha = if (!isAnyActive || isThisActive) 1f else 0f
+                    val alpha by animateFloatAsState(
+                        targetValue = targetAlpha,
+                        animationSpec = tween(durationMillis = 40),
+                        label = "resizeHandleAlpha",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .absoluteOffset(
+                                x = anchorX - HANDLE_HIT_SIZE / 2,
+                                y = anchorY - HANDLE_HIT_SIZE / 2,
+                            )
+                            .size(HANDLE_HIT_SIZE)
+                            .zIndex(50f)
+                            .then(
+                                if (!isAnyActive || isThisActive) Modifier.pointerInput(button.id, corner) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            resizeCorner = corner
+                                            isAnyResizing = true
+                                        },
+                                        onDragEnd = {
+                                            val finalDCols = (resizeDragPx.x / cellWPx).roundToInt()
+                                            val finalDRows = (resizeDragPx.y / cellHPx).roundToInt()
+                                            val ml = corner == ResizeCorner.TOP_LEFT || corner == ResizeCorner.BOTTOM_LEFT
+                                            val mt = corner == ResizeCorner.TOP_LEFT || corner == ResizeCorner.TOP_RIGHT
+                                            val mr = corner == ResizeCorner.TOP_RIGHT || corner == ResizeCorner.BOTTOM_RIGHT
+                                            val mb = corner == ResizeCorner.BOTTOM_LEFT || corner == ResizeCorner.BOTTOM_RIGHT
+                                            val origRight = currentButton.col + currentButton.colSpan
+                                            val origBottom = currentButton.row + currentButton.rowSpan
+                                            val newL = if (ml) currentButton.col + finalDCols else currentButton.col
+                                            val newT = if (mt) currentButton.row + finalDRows else currentButton.row
+                                            val newR = if (mr) origRight + finalDCols else origRight
+                                            val newB = if (mb) origBottom + finalDRows else origBottom
+                                            onResizeButton(
+                                                currentButton.id,
+                                                newL, newT,
+                                                newR - newL, newB - newT,
+                                            )
+                                            resizeDragPx = Offset.Zero
+                                            resizeCorner = null
+                                            isAnyResizing = false
+                                        },
+                                        onDragCancel = {
+                                            resizeDragPx = Offset.Zero
+                                            resizeCorner = null
+                                            isAnyResizing = false
+                                        },
+                                        onDrag = { change, delta ->
+                                            change.consume()
+                                            resizeDragPx += delta
+                                        }
+                                    )
+                                } else Modifier
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(HANDLE_VISUAL_SIZE)
+                                .graphicsLayer {
+                                    this.alpha = alpha
+                                    translationX = translationXPx
+                                    translationY = translationYPx
+                                }
+                                .circleDropShadow()
+                                .background(extraColors.selectionOutline, CircleShape)
+                        )
+                    }
                 }
             }
 
@@ -1325,6 +1455,136 @@ private const val LONG_PRESS_DURATION_MS = 500L
 /** Which corner of a selected button is currently being dragged for resize. */
 private enum class ResizeCorner { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
 
+// Resize handle: the touch target is intentionally larger than the visible disc so the
+// handle is easy to grab without the disc itself dominating the corner of a small button.
+private val HANDLE_HIT_SIZE = 32.dp
+private val HANDLE_VISUAL_SIZE = 12.dp
+
+// Soft drop shadow rendered for the selection outline. Uniform direction (purely below)
+// and Gaussian falloff. Android's built-in Modifier.shadow uses the View elevation
+// system, whose simulated light source position varies with where the View sits on the
+// screen — so the same shape would render visibly different shadows depending on which
+// button the user selected. Stamping the shadow with a BlurMaskFilter gives us a
+// position-independent, predictable result.
+private val SELECTION_SHADOW_BLUR = 10.dp
+private val SELECTION_SHADOW_OFFSET_Y = 3.dp
+private val SELECTION_SHADOW_COLOR = Color.Black.copy(alpha = 0.32f)
+
+private val SELECTION_OUTLINE_STROKE = 2.dp
+
+/**
+ * Draws the selection outline as four straight line segments running corner-to-corner.
+ * Each line gets a soft Gaussian shadow (via [android.graphics.BlurMaskFilter]) drawn
+ * BEFORE the line itself, so the shadow falls on both sides of the line — the bracket
+ * reads as a thin element floating slightly above the button face with an even overhead
+ * light, instead of as a hard rectangle pasted on top.
+ *
+ * The corner discs are drawn separately by the handle composables and get their own
+ * matching per-circle shadow via [circleDropShadow].
+ */
+private fun Modifier.selectionOutline(
+    color: Color,
+    strokeWidth: Dp = SELECTION_OUTLINE_STROKE,
+): Modifier = this.drawBehind {
+    val strokePx = strokeWidth.toPx()
+    val w = size.width
+    val h = size.height
+    val blurPx = SELECTION_SHADOW_BLUR.toPx()
+    val offsetYPx = SELECTION_SHADOW_OFFSET_Y.toPx()
+
+    val shadowPaint = android.graphics.Paint().apply {
+        this.color = SELECTION_SHADOW_COLOR.toArgb()
+        // NORMAL blur fuzzes both sides of the stroke — the shadow is visible on both
+        // sides of each thin line, like a real overhead light striking a floating wire.
+        maskFilter = android.graphics.BlurMaskFilter(blurPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        isAntiAlias = true
+        style = android.graphics.Paint.Style.STROKE
+        this.strokeWidth = strokePx
+        strokeCap = android.graphics.Paint.Cap.BUTT
+    }
+
+    drawIntoCanvas { canvas ->
+        val nc = canvas.nativeCanvas
+        // top
+        nc.drawLine(0f, offsetYPx, w, offsetYPx, shadowPaint)
+        // bottom
+        nc.drawLine(0f, h + offsetYPx, w, h + offsetYPx, shadowPaint)
+        // left
+        nc.drawLine(0f, offsetYPx, 0f, h + offsetYPx, shadowPaint)
+        // right
+        nc.drawLine(w, offsetYPx, w, h + offsetYPx, shadowPaint)
+    }
+
+    // Foreground lines (Compose's anti-aliased drawLine).
+    drawLine(color, Offset(0f, 0f), Offset(w, 0f), strokePx)
+    drawLine(color, Offset(0f, h), Offset(w, h), strokePx)
+    drawLine(color, Offset(0f, 0f), Offset(0f, h), strokePx)
+    drawLine(color, Offset(w, 0f), Offset(w, h), strokePx)
+}
+
+/**
+ * Draws a soft circular drop shadow behind a disc, matching the visual style of
+ * [selectionOutline]'s per-line shadows. Use on the corner handle discs.
+ */
+private fun Modifier.circleDropShadow(
+    color: Color = SELECTION_SHADOW_COLOR,
+    blurRadius: Dp = SELECTION_SHADOW_BLUR,
+    offsetY: Dp = SELECTION_SHADOW_OFFSET_Y,
+): Modifier = this.drawBehind {
+    val blurPx = blurRadius.toPx()
+    val offsetYPx = offsetY.toPx()
+    val radiusPx = size.minDimension / 2f
+    val paint = android.graphics.Paint().apply {
+        this.color = color.toArgb()
+        maskFilter = android.graphics.BlurMaskFilter(blurPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        isAntiAlias = true
+    }
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawCircle(
+            size.width / 2f,
+            size.height / 2f + offsetYPx,
+            radiusPx,
+            paint,
+        )
+    }
+}
+
+/**
+ * Draws a soft, blurred drop shadow behind the content using [android.graphics.BlurMaskFilter].
+ * The shadow is a rounded rect of the same size as the content, offset by [offsetY] (positive
+ * = below, simulating an overhead light source) and blurred by [blurRadius].
+ *
+ * Necessary because [Modifier.shadow] uses Android elevation, whose light source position
+ * depends on the View's location on the screen — that produces inconsistent shadow
+ * direction across multiple identical elements at different positions.
+ */
+private fun Modifier.softDropShadow(
+    cornerRadius: Dp,
+    blurRadius: Dp = SELECTION_SHADOW_BLUR,
+    offsetY: Dp = SELECTION_SHADOW_OFFSET_Y,
+    color: Color = SELECTION_SHADOW_COLOR,
+): Modifier = this.drawBehind {
+    val blurPx = blurRadius.toPx()
+    val offsetYPx = offsetY.toPx()
+    val cornerPx = cornerRadius.toPx()
+    val paint = android.graphics.Paint().apply {
+        this.color = color.toArgb()
+        // OUTER blur draws ONLY outside the shape, with the interior fully transparent.
+        // NORMAL would blur both sides of the edge, leaving a haze across the rect's
+        // interior (and thus across the selected button's face).
+        maskFilter = android.graphics.BlurMaskFilter(blurPx, android.graphics.BlurMaskFilter.Blur.OUTER)
+        isAntiAlias = true
+    }
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawRoundRect(
+            0f, offsetYPx,
+            size.width, size.height + offsetYPx,
+            cornerPx, cornerPx,
+            paint,
+        )
+    }
+}
+
 /**
  * Layered visual surface for one button. Layers, bottom-up:
  *  1. Drop shadow (when shadow slot enabled).
@@ -1344,7 +1604,6 @@ private enum class ResizeCorner { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
 @Composable
 private fun KeyButtonShape(
     button: GridButton,
-    isSelected: Boolean,
     keyboardThemeColor: Color,
     modifier: Modifier = Modifier,
     surfaceModifier: Modifier = Modifier,
@@ -1368,12 +1627,11 @@ private fun KeyButtonShape(
             modifier = Modifier
                 .fillMaxSize()
                 .then(
-                    if (resolved.shadowEnabled) Modifier.shadow(
-                        elevation = SHADOW_ELEVATION,
-                        shape = outerShape,
-                        clip = false,
-                        spotColor = resolved.shadow,
-                        ambientColor = resolved.shadow,
+                    if (resolved.shadowEnabled) Modifier.softDropShadow(
+                        cornerRadius = BUTTON_CORNER,
+                        blurRadius = BUTTON_SHADOW_BLUR,
+                        offsetY = BUTTON_SHADOW_OFFSET_Y,
+                        color = resolved.shadow,
                     ) else Modifier
                 )
                 .clip(outerShape)
@@ -1397,16 +1655,9 @@ private fun KeyButtonShape(
             )
         }
 
-        // Selection ring: sibling overlay OUTSIDE the outer clip so the 2dp stroke isn't
-        // half-clipped, and so it wraps the full button (surface + bevel). Drawn last
-        // so it sits on top of bevel/surface/content.
-        if (isSelected) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .border(2.dp, MaterialTheme.colorScheme.primary, outerShape)
-            )
-        }
+        // Selection ring lives outside this composable now (rendered separately in the
+        // per-button grid loop), so it can use SMOOTH (un-snapped) bounds during a resize
+        // while the button itself keeps its gridded preview.
     }
 }
 
@@ -1418,7 +1669,10 @@ private fun KeyButtonShape(
 // BEVEL_HEIGHT is set at the floor (== BUTTON_CORNER) to keep the bevel subtle.
 private val BUTTON_CORNER = 8.dp
 private val BEVEL_HEIGHT = 8.dp
-private val SHADOW_ELEVATION = 3.dp
+// Button drop shadow: subtler than the selection-outline shadow because keyboards have
+// many buttons and a heavy shadow on each would read as noisy.
+private val BUTTON_SHADOW_BLUR = 6.dp
+private val BUTTON_SHADOW_OFFSET_Y = 2.dp
 
 /**
  * Renders a button's nine drawable regions. CENTER falls back to [GridButton.label]

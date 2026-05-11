@@ -143,23 +143,32 @@ fun MapoTheme(
 }
 
 /**
- * Project-specific colors that don't have a clean role in the M3 [ColorScheme]. Currently
- * limited to drag-and-drop destination indicators, where users expect literal green / red
- * regardless of the active theme palette (theme tertiary/error read as "another accent /
- * destructive action," not "valid / invalid drop target").
+ * Project-specific colors that don't have a clean role in the M3 [ColorScheme]. Currently:
+ *  - drag-and-drop zone indicators, where users expect literal green / red regardless of
+ *    the active theme palette (theme tertiary/error read as "another accent / destructive
+ *    action," not "valid / invalid drop target").
+ *  - the in-editor button-selection outline, which is intentionally near-white in both
+ *    modes so it reads as a high-contrast "overlay" rather than a color-keyed accent.
  */
 data class MapoExtraColors(
     val dropZoneValid: Color,
     val dropZoneInvalid: Color,
+    val selectionOutline: Color,
 ) {
     companion object {
+        // One lightness step down from pure white — bright enough to read as luminous,
+        // not so pure that it loses anti-aliasing on light surfaces.
+        private val SelectionOutlineNearWhite = Color(0xFFF2F2F2)
+
         val Light = MapoExtraColors(
             dropZoneValid = Color(0xFF2E7D32),    // M-spec green 800 — readable on light fills
             dropZoneInvalid = Color(0xFFC62828),  // M-spec red 800
+            selectionOutline = SelectionOutlineNearWhite,
         )
         val Dark = MapoExtraColors(
             dropZoneValid = Color(0xFF66BB6A),    // green 400 — lifts off dark surface
             dropZoneInvalid = Color(0xFFEF5350),  // red 400
+            selectionOutline = SelectionOutlineNearWhite,
         )
     }
 }

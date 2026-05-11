@@ -1,5 +1,7 @@
 package com.mapo.data.model
 
+import java.util.UUID
+
 data class GridLayout(
     val id: Long = 0L,
     val name: String,
@@ -8,6 +10,17 @@ data class GridLayout(
     val buttons: List<GridButton>,
     val backgroundColorArgb: Int? = null
 )
+
+/**
+ * Returns a copy of this layout with a fresh UUID on every button. Required whenever a
+ * GridLayout is cloned to seed a new persisted keyboard (duplicate tab, instantiate from
+ * a template, copy from another profile). Without this, the copy's buttons retain the
+ * source's ids; [MainViewModel.mutateLayoutContaining] matches buttons by id across the
+ * active profile's layouts, so edits land on whichever layout it finds first — usually
+ * the original, making the copy appear "uneditable" until the source is deleted.
+ */
+fun GridLayout.withFreshButtonIds(): GridLayout =
+    copy(buttons = buttons.map { it.copy(id = UUID.randomUUID().toString()) })
 
 // Returns (col, row) of the first unoccupied 1×1 cell, or null if the grid is full.
 fun GridLayout.findFirstEmptyCell(): Pair<Int, Int>? = findFirstEmptyArea(1, 1)

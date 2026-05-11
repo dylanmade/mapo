@@ -13,6 +13,7 @@ import com.mapo.data.model.RemapTarget
 import com.mapo.data.model.TemplateRef
 import com.mapo.data.model.TrackpadGesture
 import com.mapo.data.model.buttonsExceeding
+import com.mapo.data.model.withFreshButtonIds
 import com.mapo.data.model.gestureTarget
 import com.mapo.data.model.onDoubleTapTarget
 import com.mapo.data.model.onHoldTarget
@@ -742,7 +743,10 @@ class MainViewModel @Inject constructor(
         if (sourceIdx < 0) return
         val source = _layouts.value[sourceIdx]
         val newName = nextCopyName(source.name, _layouts.value.map { it.name }.toSet())
-        val newSnapshotJson = source.copy(name = newName).toSnapshot().toJson()
+        // Fresh UUIDs so the copy's buttons don't collide with the source's — both the
+        // live draft and the reset-to-original snapshot must reference the new ids.
+        val draftLayout = source.copy(name = newName).withFreshButtonIds()
+        val newSnapshotJson = draftLayout.toSnapshot().toJson()
 
         viewModelScope.launch {
             val current = layoutRepository.getLayoutsByProfileOnce(profileId)
@@ -755,7 +759,7 @@ class MainViewModel @Inject constructor(
                 .associate { it.id to it.position + 1 }
             if (shifts.isNotEmpty()) layoutRepository.reorder(profileId, shifts)
 
-            val draft = source.copy(name = newName).toKeyLayout(
+            val draft = draftLayout.toKeyLayout(
                 profileId = profileId,
                 position = newPosition,
                 originalSnapshotJson = newSnapshotJson
@@ -846,13 +850,17 @@ class MainViewModel @Inject constructor(
         val name = if (template.name in existing)
             nextNumberedName(template.name, existing)
         else template.name
+        // Built-in templates share GridButton instances across every instantiation, and
+        // user-template JSON carries the ids the template was saved with — either way,
+        // we need fresh UUIDs so this keyboard's buttons are distinguishable from any
+        // other keyboard derived from the same template.
         val draft = GridLayout(
             name = name,
             columns = template.columns,
             rows = template.rows,
             buttons = template.buttons,
             backgroundColorArgb = template.backgroundColorArgb
-        )
+        ).withFreshButtonIds()
         appendNewLayout(draft, profileId)
     }
 
@@ -865,7 +873,9 @@ class MainViewModel @Inject constructor(
             val name = if (sourceGrid.name in existing)
                 nextNumberedName(sourceGrid.name, existing)
             else sourceGrid.name
-            val draft = sourceGrid.copy(name = name, id = 0L)
+            // Fresh UUIDs so this keyboard is editable independently of the source
+            // (whose buttons may also exist in the active profile via a prior copy).
+            val draft = sourceGrid.copy(name = name, id = 0L).withFreshButtonIds()
             appendNewLayoutSuspending(draft, profileId)
         }
     }

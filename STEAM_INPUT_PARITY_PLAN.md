@@ -55,6 +55,21 @@ Match the virtual-keyboard `ConfigureButtonScreen` pattern: every picker result 
 
 ## Phase 1 — Data model + persistence rebuild
 
+### Progress
+
+Phase 1 is split into four sub-bricks so each lands the build green:
+
+- **1.1 — Schema** ✅ COMPLETED. Entities, enums, DAOs, `SteamTypeConverters`, `AppDatabase` bump to v7, Hilt providers. Old `gamepad_mappings` + `GamepadMappingRepository` still in place; no runtime behavior change yet.
+- **1.2 — Repository + seeding.** `ControllerConfigRepository` with materialized-graph reads. Seed default config on fresh install. Translate any pre-existing `gamepad_mappings` rows.
+- **1.3 — UI rewrite.** New section-grouped `RemapControlsScreen` reading the new graph. Picker writes via per-binding setter (Phase 0's commit-on-select pattern).
+- **1.4 — Cleanup.** Delete `GamepadMappingRepository`, `GamepadMappingDao`, `gamepad_mappings` entity, legacy VM methods. Backfill tests.
+
+### Deviations from the original schema (decided during 1.1)
+
+- **`group_setting` table removed.** Originally planned as a per-(group, key) row store with `valueJson`. Collapsed into a single `BindingGroup.settingsJson` column instead — matches how `Activator.settingsJson` already works, fewer joins, parser layer is the same code path for both. Net: 9 tables instead of 10. Sealed-class parsing in the repository layer makes the table-vs-column choice invisible upstream, so this is safe to revisit later if we ever need queryable settings (we don't).
+- **`BindingGroup` ownership uses two nullable FKs** (`actionSetId?` + `actionLayerId?`) rather than a polymorphic `(ownerKind, ownerId)` pair. Real FKs + cascades work; polymorphic FKs don't. Repository invariant: exactly one is non-null.
+- **Schema bump uses existing `fallbackToDestructiveMigration(dropAllTables = true)`.** No hand-written Room `Migration` block needed for the brick-1.1 land; the migration story (translating user data forward) is brick 1.2's job and runs as a one-shot in `ControllerConfigRepository` rather than at the SQL layer.
+
 ### Goal
 
 Replace today's flat `gamepad_mappings(profileId, gamepadButton, targetEncoded)` table with a hierarchy that can express every Steam Input concept. Pre-release status means destructive schema changes are OK; we wipe and reseed on upgrade.
@@ -67,14 +82,13 @@ Replace today's flat `gamepad_mappings(profileId, gamepadButton, targetEncoded)`
 | `action_set` | Mutually-exclusive logical grouping. ≥1 per controller_profile. | `id`, `controllerProfileId`, `name`, `title`, `legacy` (inherits from controller_profile) |
 | `game_action` | Action-based mode only (legacy=false). The set's action namespace. | `id`, `actionSetId`, `category` (StickPadGyro / AnalogTrigger / Button), `name`, `inputMode` (joystick_move / absolute_mouse for StickPadGyro), `localizationToken` |
 | `action_layer` | Stacking overlay on an action_set. | `id`, `parentActionSetId`, `name`, `title` |
-| `binding_group` | A binding payload with a `mode`. Lives under either an action_set (base) or an action_layer (override). | `id`, `ownerKind` (SET / LAYER), `ownerId`, `name`, `mode` |
-| `group_setting` | Mode-specific settings for a binding_group (deadzones, sensitivities, etc.). | `id`, `bindingGroupId`, `key`, `valueJson` |
+| `binding_group` | A binding payload with a `mode`. Lives under either an action_set (base) or an action_layer (override). Mode-specific settings (deadzones, sensitivities, etc.) live in `settingsJson`. | `id`, `actionSetId` (nullable FK), `actionLayerId` (nullable FK), `name`, `mode`, `settingsJson` |
 | `group_input` | A sub-input within a binding_group (e.g., `dpad_north`, `click`, `edge`, `touch_menu_button_3`). | `id`, `bindingGroupId`, `inputKey` |
 | `activator` | One activator on a group_input. Multiple per input allowed. | `id`, `groupInputId`, `type` (Full / Soft / Long / Double / Start / Release / Chord), `settingsJson`, `orderIndex` |
 | `binding` | One output binding on an activator. Multiple per activator allowed (cycle_binding). | `id`, `activatorId`, `outputType` (key_press / xinput_button / mouse_button / mouse_wheel / game_action / controller_action / mode_shift), `args`, `label`, `iconRef`, `orderIndex` |
 | `preset_binding` | Maps physical input source → binding_group, state-qualified. | `id`, `actionSetId`, `inputSource`, `state` (active / inactive / modeshift, comma-joined per Steam), `bindingGroupId` |
 
-`activator.settingsJson` and `group_setting.valueJson` columns are JSON to keep the table count manageable while still typed (Kotlin sealed-class wrappers handle parsing). The user almost always edits a whole settings panel at once, so a JSON column is the right denormalization for write frequency.
+Settings live in JSON columns (`binding_group.settingsJson` and `activator.settingsJson`) — typed at the Kotlin layer by sealed-class wrappers in the repository. The user almost always edits a whole settings panel at once, so the JSON denormalization wins on write frequency, and a uniform pattern across the two settings stores keeps the parser surface small.
 
 ### Domain models + repositories
 

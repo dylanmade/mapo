@@ -211,29 +211,6 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         return evaluator.handleDigital(address, isDown)
     }
 
-    private fun dispatchRemapTarget(target: RemapTarget, isDown: Boolean) {
-        when (target) {
-            is RemapTarget.Keyboard -> {
-                val kc = resolveKeyCode(target.code) ?: run {
-                    Log.w(TAG, "Remap: unknown keyboard code ${target.code}")
-                    return
-                }
-                if (isDown) injectKeyDown(kc) else injectKeyUp(kc)
-            }
-            is RemapTarget.Gamepad -> {
-                val btn = DeviceButton.entries.firstOrNull { it.name == target.button } ?: return
-                val kc = DEVICE_BUTTON_TO_KEYCODE[btn] ?: return
-                if (isDown) injectKeyDown(kc) else injectKeyUp(kc)
-            }
-            is RemapTarget.Mouse -> {
-                // Mouse targets are inherently click-on-press (no separate down/up at the
-                // accessibility-gesture layer). Fire on the down edge and ignore the up.
-                if (isDown) dispatchTargetAsClick(target)
-            }
-            is RemapTarget.Unbound -> { /* unreachable */ }
-        }
-    }
-
     // ── Virtual keyboard injection (called from ViewModel) ────────────────────
 
     /** Inject a full DOWN+UP cycle for the given button code string. */

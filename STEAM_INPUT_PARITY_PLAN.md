@@ -184,12 +184,12 @@ The Action Set / Layers UI is present-but-empty for Phase 1 — no add/remove ye
 
 ### Progress
 
-Phase 2 is split into four sub-bricks so each lands the build green:
+Phase 2 ships as three sub-bricks (one moved out — see 2.3 below):
 
 - **2.1 — CompiledConfig + plumbing** ✅ COMPLETED. New `CompiledConfig` / `InputAddress` / `CompiledInput` / `CompiledActivator` types + `ControllerConfig.toCompiled()` compiler under `app/src/main/java/com/mapo/service/input/CompiledConfig.kt`. `InputDispatcher.compiledConfig` StateFlow added alongside the legacy `currentMappings` (not replacing it yet); `MainViewModel` collects `activeControllerConfig` and publishes compiled snapshots into the dispatcher. Compiler tests under `app/src/test/java/com/mapo/service/input/CompiledConfigTest.kt` cover round-trip, state-filter, multi-activator preservation, cycle-binding order, and missing-address null. Nothing fires at runtime yet — that's brick 2.2.
 - **2.2 — InputEvaluator + OutputEmitter (digital, FULL_PRESS-only)** ✅ COMPLETED. Built `OutputEmitter` (BindingOutput → dispatcher calls with press/release semantics for key+gamepad, fire-and-done for mouse/wheel, log-stubs for game_action/controller_action/mode_shift). Built `InputEvaluator` (FULL_PRESS-only state machine, `held: Map<InputAddress, List<BindingOutput>>` tracking pressed bindings, with defensive guards for duplicate DOWN and config-change-while-held). Extended `InputSink` + `InputDispatcher` with string-taking `injectKeyDown`/`injectKeyUp`. `InputAccessibilityService` injects the evaluator, exposes a `KEYCODE_TO_INPUT_ADDRESS` map matching the default seed, and `onKeyEvent` now routes every gamepad keycode through `evaluator.handleDigital(...)`. 24 new tests across `OutputEmitterTest` and `InputEvaluatorTest`. **Physical button remap is alive again on the new schema.**
-- **2.3 — Analog capture.** Override `onGenericMotionEvent`. Decode axes, normalize with deadzones from `BindingGroup.settingsJson`. Trigger axes synthesize click semantics for now (real analog modes are Phase 6).
-- **2.4 — Cleanup.** Delete `InputDispatcher.currentMappings` + `setCurrentMappings` + the old `dispatchRemapTarget` path used for physical remap. The virtual-keyboard `dispatchTargetAsClick` flow stays.
+- **2.3 — Analog capture** ⏭ DESCOPED to Phase 6. The original plan assumed we could override `onGenericMotionEvent` on `AccessibilityService`; that method **does not exist on `AccessibilityService`** — it's only on `View`. Motion events from controllers flow to focused views, not accessibility services. Practical impact is minimal: digital `KEYCODE_BUTTON_L2`/`R2` and `KEYCODE_DPAD_*` already cover triggers + dpad on the Thor (user-verified — L2 → MOUSE_RIGHT fires correctly in a native game). The first feature that genuinely needs analog values is `JOYSTICK_MOVE` mode (Phase 6), so we'll design the motion-capture mechanism then. See Phase 6 notes + Phase 3 note about `SOFT_PRESS` deferral.
+- **2.4 — Cleanup** ✅ COMPLETED. Deleted `InputDispatcher.currentMappings` + `setCurrentMappings` + the unused `DeviceButton` import; deleted `InputAccessibilityService.dispatchRemapTarget` (no longer reachable). `GAMEPAD_KEYCODE_MAP`/`DEVICE_BUTTON_TO_KEYCODE` stay alive — still used by `dispatchTargetAsClick` for trackpad-gesture → gamepad-button output in the virtual keyboard (legacy `RemapTarget.Gamepad` shape, unrelated to physical remap).
 
 #### Brick 2.1 deviations + decisions
 
@@ -206,6 +206,21 @@ Phase 2 is split into four sub-bricks so each lands the build green:
 - **Held-set lookup on release uses the snapshot of what was pressed, not a re-resolution against the current config.** Config edits while a key is held would otherwise orphan the DOWN edge; the existing behavior matches what Steam Input does on Deck.
 - **Old `dispatchRemapTarget` (private) and `currentMappings` (dispatcher) still in place** — only the call sites that fed them from `onKeyEvent` are gone. Brick 2.4 deletes the rest. Keeping them alive across 2.2 → 2.3 means analog capture (2.3) can land without touching the dead code.
 - **`InputAccessibilityService` is `@AndroidEntryPoint`** so Hilt field-injects `InputEvaluator` directly — same pattern as the existing `InputDispatcher` and `ForegroundAppMonitor` injections. No new module wiring needed.
+
+#### Brick 2.3 descope + decisions
+
+- **Root cause:** original plan assumed `AccessibilityService.onGenericMotionEvent` existed. It doesn't — that's a `View`-level callback. Probe compile confirmed: `'onGenericMotionEvent' overrides nothing`.
+- **Available paths for future motion capture** (when Phase 6 needs them):
+  - Attach a `TYPE_ACCESSIBILITY_OVERLAY` view (the project already has `OverlayManager`) and listen on `View.onGenericMotionEvent`. Adds an always-on overlay window; preferred approach when we actually need analog.
+  - Hidden `InputManager` reflection. Higher risk, breaks on Android updates. Last resort.
+- **What we lose by deferring:** nothing immediate on the Thor — every digital fallback (BUTTON_L2/R2/DPAD_*) verified working. `SOFT_PRESS` activator (Phase 3) and `JOYSTICK_MOVE`/`JOYSTICK_CAMERA`/`MOUSE_JOYSTICK`/`ABSOLUTE_MOUSE` modes (Phase 6) move with the capture work.
+- **What we gain by deferring:** when we do build motion capture, we'll know the *exact* shape required (which axes, what threshold model, what deadzone settings) instead of guessing during foundation work.
+
+#### Brick 2.4 deviations + decisions
+
+- **`GAMEPAD_KEYCODE_MAP` + `DEVICE_BUTTON_TO_KEYCODE` retained.** Still needed by `dispatchTargetAsClick`'s `RemapTarget.Gamepad` branch (used by virtual-keyboard trackpad gestures that emit a synthetic gamepad button). Renaming to e.g. `VIRTUAL_KEYBOARD_GAMEPAD_KEYCODE_MAP` would be more accurate but creates churn for zero functional gain.
+- **No test cleanup required.** Brick 1.4 already removed every test that referenced `currentMappings`/`setCurrentMappings` (the legacy gamepad-mapping pipeline tests). The dispatcher's interface is leaner now but no tests needed updating.
+- **Doc comment on `MainViewModel.activeControllerConfig` updated** to remove the "stays empty until Phase 2" caveat — Phase 2 is done, runtime evaluator reads compiled snapshots directly.
 
 ### Why now
 
@@ -281,7 +296,9 @@ No new UI. This is plumbing.
 
 ### Scope
 
-The full Steam activator catalog: `Full_Press`, `Long_Press`, `Double_Press`, `Start_Press`, `Release_Press`, `Soft_Press`, `Chorded_Press`. All universal settings (`toggle`, `fire_start_delay`, `fire_end_delay`, `haptic_intensity`, `cycle_binding`) and type-specific (`long_press_time`, `double_tap_time` / VDF `doubetap_max_duration`, `interruptable`, `hold_to_repeat`, `repeat_rate`).
+The full Steam activator catalog *minus `Soft_Press`*: `Full_Press`, `Long_Press`, `Double_Press`, `Start_Press`, `Release_Press`, `Chorded_Press`. All universal settings (`toggle`, `fire_start_delay`, `fire_end_delay`, `haptic_intensity`, `cycle_binding`) and type-specific (`long_press_time`, `double_tap_time` / VDF `doubetap_max_duration`, `interruptable`, `hold_to_repeat`, `repeat_rate`).
+
+`Soft_Press` requires analog trigger axis values that we can't currently capture from the accessibility service (see Phase 2.3 descope notes). It moves to Phase 6 with the motion-capture work — the activator type stays in `ActivatorType` enum and `RemapControlsScreen`'s disabled placeholder row, just without a runtime impl until Phase 6 lands.
 
 ### Evaluator state machine
 
@@ -464,6 +481,8 @@ In any activator's binding list: **Steam → Mode Shift**, target = (input sourc
 ### Scope
 
 Implement the per-source mode catalog. Each physical input *source* can be in exactly one mode at a time (per binding_group). The mode determines which sub-inputs (group_inputs) are valid and which settings the source accepts.
+
+**Inherited from Phase 2.3 descope**: this phase also owns the **motion-capture pipeline** (sticks, triggers as analog, dpad as analog hat). `AccessibilityService` doesn't have `onGenericMotionEvent`, so the leading-candidate approach is attaching a `TYPE_ACCESSIBILITY_OVERLAY` view to the existing `OverlayManager` and overriding `View.onGenericMotionEvent` on it. Once motion events flow, the `Soft_Press` activator (deferred from Phase 3) and every analog-mode (Joystick Move/Camera, Mouse Joystick, Absolute Mouse, Trigger soft-fire) become implementable.
 
 ### Modes shipped this phase
 

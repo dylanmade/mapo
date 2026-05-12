@@ -32,11 +32,20 @@ import com.themestudio.core.toSpFloat
 
 /**
  * Inline editor for one typography role: font size, font weight, letter
- * spacing. The base [TextStyle] supplies starting values when the role has
- * no override yet.
+ * spacing.
  *
- * The live preview line at the top shows the current effective style — it
- * updates as the user drags sliders or picks a weight chip.
+ * The slider/chip values are read directly from [baseStyle] — which is the
+ * actually-applied, post-cascade [TextStyle] from `MaterialTheme.typography`,
+ * not the raw override slot. That distinction matters when an umbrella
+ * shadows a per-role override (or vice versa): the per-role slot may store
+ * 99sp while the umbrella's 22sp is what's actually rendered. Reading from
+ * [baseStyle] keeps the adjusters honest — they always reflect what's on
+ * screen. Writes still go to whichever override slot [current] represents,
+ * via [onChange].
+ *
+ * The live preview line at the top shows that same effective style — it
+ * updates as the user drags sliders or picks a weight chip, and matches the
+ * rendered typography elsewhere in the app for the same role.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -48,9 +57,9 @@ internal fun TypographyPicker(
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val effectiveSize = (current.fontSize ?: baseStyle.fontSize).toSpFloat()
-    val effectiveWeight = current.fontWeight ?: baseStyle.fontWeight ?: FontWeight.Normal
-    val effectiveLetterSpacing = (current.letterSpacing ?: baseStyle.letterSpacing).toSpFloat()
+    val effectiveSize = baseStyle.fontSize.toSpFloat()
+    val effectiveWeight = baseStyle.fontWeight ?: FontWeight.Normal
+    val effectiveLetterSpacing = baseStyle.letterSpacing.toSpFloat()
     val isOverridden = current.fontSize != null || current.fontWeight != null ||
         current.letterSpacing != null
 
@@ -100,21 +109,24 @@ internal fun TypographyPicker(
 
         Spacer(Modifier.height(12.dp))
 
-        // Font size
+        // Font size. The label keeps a single decimal so a fractional drag
+        // (e.g. 22.4sp) is honestly displayed rather than truncated to "22sp".
         LabeledSlider(
             label = "Size",
             value = effectiveSize,
             range = 8f..72f,
-            valueLabel = "${effectiveSize.toInt()}sp",
+            valueLabel = "%.1fsp".format(effectiveSize),
             onChange = { onChange(current.copy(fontSize = it.sp)) },
         )
 
-        // Letter spacing
+        // Letter spacing. Two decimals so the M3 default tracking values
+        // (e.g. 0.15sp, 0.25sp, 0.4sp) round-trip exactly, instead of
+        // looking like 0.1sp / 0.2sp / 0.4sp due to one-decimal truncation.
         LabeledSlider(
             label = "Tracking",
             value = effectiveLetterSpacing,
             range = -2f..6f,
-            valueLabel = "%.1fsp".format(effectiveLetterSpacing),
+            valueLabel = "%.2fsp".format(effectiveLetterSpacing),
             onChange = { onChange(current.copy(letterSpacing = it.sp)) },
         )
 

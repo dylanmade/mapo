@@ -170,9 +170,8 @@ class MainViewModel @Inject constructor(
      * Auto-seeds a default config on first observation if none exists.
      * `RemapControlsScreen` reads this and writes back via [setControllerBinding].
      *
-     * Runtime input dispatch is NOT wired to this graph yet — brick 1.4 removed the
-     * legacy gamepad-mapping pipeline, so `InputDispatcher.currentMappings` stays empty
-     * until Phase 2 (runtime evaluator) reads bindings out of this graph directly.
+     * Compiled into [InputDispatcher.compiledConfig] by the collector below — that's the
+     * runtime path the evaluator reads on every key/motion event.
      */
     val activeControllerConfig: StateFlow<ControllerConfig?> =
         activeProfile.filterNotNull()

@@ -1,6 +1,5 @@
 package com.mapo.service.input
 
-import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.RemapTarget
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,22 +45,14 @@ interface InputSink {
  * rest of the app. Replaces the previous static-singleton + static-mutable-field
  * coupling so the VM/overlay can be tested without touching the service class.
  *
- * - **State** (`currentMappings`, `compiledConfig`, `remapEnabled`, `overlayFocused`)
+ * - **State** (`compiledConfig`, `remapEnabled`, `overlayFocused`, `consumeSystemBack`)
  *   is published by the ViewModel/overlay and read by the service inline (e.g. in
  *   `onKeyEvent`). Read via `.value` for synchronous access on the main thread.
  * - **Actions** (key/gesture injection, drag) are forwarded to the registered
  *   [InputSink]; when the service isn't connected the calls are silent no-ops.
- *
- * Phase 2 is in the middle of swapping the source of truth for physical-button remap:
- * `currentMappings` (legacy `RemapTarget` map) is alive until brick 2.4 deletes it;
- * `compiledConfig` (new Steam-Input graph snapshot) is published as of brick 2.1
- * but only consumed once brick 2.2 lands the evaluator.
  */
 @Singleton
 class InputDispatcher @Inject constructor() {
-
-    private val _currentMappings = MutableStateFlow<Map<DeviceButton, RemapTarget>>(emptyMap())
-    val currentMappings: StateFlow<Map<DeviceButton, RemapTarget>> = _currentMappings.asStateFlow()
 
     private val _compiledConfig = MutableStateFlow(CompiledConfig.EMPTY)
     val compiledConfig: StateFlow<CompiledConfig> = _compiledConfig.asStateFlow()
@@ -83,10 +74,6 @@ class InputDispatcher @Inject constructor() {
      */
     private val _consumeSystemBack = MutableStateFlow(false)
     val consumeSystemBack: StateFlow<Boolean> = _consumeSystemBack.asStateFlow()
-
-    fun setCurrentMappings(mappings: Map<DeviceButton, RemapTarget>) {
-        _currentMappings.value = mappings
-    }
 
     fun setCompiledConfig(config: CompiledConfig) {
         _compiledConfig.value = config

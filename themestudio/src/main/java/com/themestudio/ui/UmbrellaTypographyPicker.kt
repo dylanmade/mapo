@@ -41,6 +41,7 @@ internal fun UmbrellaPickerSheet(
     onPickFamily: () -> Unit,
     onChange: (TextStyleOverride) -> Unit,
     onClearOverrides: () -> Unit,
+    defaultFontName: String? = null,
 ) {
     Column(
         modifier = Modifier
@@ -69,6 +70,7 @@ internal fun UmbrellaPickerSheet(
             previewStyle = baseStyle,
             onTap = onPickFamily,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            defaultFontName = defaultFontName,
         )
 
         HorizontalDivider(

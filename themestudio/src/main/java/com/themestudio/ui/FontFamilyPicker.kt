@@ -42,8 +42,13 @@ import com.themestudio.core.rememberThemeFontResolver
 
 /**
  * Inline card shown in the Typography tab for one family group (Display or
- * Body). Displays the currently-applied family name (or "(default)" when
- * none is overridden) with a sample line rendered in that family.
+ * Body). Displays the currently-applied family name with a sample line
+ * rendered in that family.
+ *
+ * Resolution order for the displayed name: explicit override → consumer's
+ * baked-in theme default ([defaultFontName]) → [defaultLabel] placeholder.
+ * When the consumer provides a [defaultFontName] the card never shows the
+ * placeholder — the user always sees the real font in effect.
  *
  * The preview line uses [previewStyle] — Display callers pass titleLarge,
  * Body callers pass bodyLarge — so each card shows the chosen font at the
@@ -57,8 +62,10 @@ internal fun FamilyChooserCard(
     onTap: () -> Unit,
     previewStyle: TextStyle,
     modifier: Modifier = Modifier,
+    defaultFontName: String? = null,
 ) {
     val effectiveName = currentName?.takeIf { it.isNotBlank() }
+        ?: defaultFontName?.takeIf { it.isNotBlank() }
     val resolve = rememberThemeFontResolver()
     val previewFamily = effectiveName?.let { remember(it, resolve) { resolve(it) } }
     Column(
@@ -110,7 +117,14 @@ internal fun FontFamilyPickerSheet(
     rowStyle: TextStyle,
     onApply: (String) -> Unit,
     onClear: () -> Unit,
+    defaultFontName: String? = null,
 ) {
+    // For "selected row" purposes, treat the consumer's baked-in default as
+    // active whenever there is no explicit override — the user wanted the
+    // picker to reflect the *real* font in effect, not a separate "default"
+    // concept.
+    val highlightName = currentName?.takeIf { it.isNotBlank() }
+        ?: defaultFontName?.takeIf { it.isNotBlank() }
     var query by remember { mutableStateOf("") }
     val resolve = rememberThemeFontResolver()
     val catalog = rememberGoogleFontsCatalog()
@@ -190,7 +204,7 @@ internal fun FontFamilyPickerSheet(
                         spec = spec,
                         rowStyle = rowStyle,
                         resolve = resolve,
-                        selected = spec.displayName.equals(currentName, ignoreCase = true),
+                        selected = spec.displayName.equals(highlightName, ignoreCase = true),
                         onClick = { onApply(spec.displayName) },
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -203,7 +217,7 @@ internal fun FontFamilyPickerSheet(
                         name = name,
                         rowStyle = rowStyle,
                         resolve = resolve,
-                        selected = name.equals(currentName, ignoreCase = true),
+                        selected = name.equals(highlightName, ignoreCase = true),
                         onClick = { onApply(name) },
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

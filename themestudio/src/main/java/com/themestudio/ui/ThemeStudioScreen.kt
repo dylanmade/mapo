@@ -46,7 +46,7 @@ import com.themestudio.core.ShapeRoles
 import com.themestudio.core.TextStyleOverride
 import com.themestudio.core.TypographyRoles
 import com.themestudio.core.UmbrellaRoles
-import com.themestudio.preview.ColorRoleSwatches
+import com.themestudio.preview.ColorRoleList
 import com.themestudio.preview.MaterialComponentGallery
 import com.themestudio.preview.ShapeSpecimen
 import com.themestudio.preview.TypographySpecimen
@@ -89,8 +89,17 @@ private enum class FontFamilyKind(val title: String) {
 fun ThemeStudioScreen(
     onClose: () -> Unit,
     theme: @Composable (content: @Composable () -> Unit) -> Unit,
+    /**
+     * Consumer's baked-in default font for the Display family (display /
+     * headline / title roles). When provided, the typography pickers show
+     * this as the selected font whenever no override is set, instead of a
+     * generic "(theme default)" placeholder.
+     */
+    defaultDisplayFontName: String? = null,
+    /** Counterpart to [defaultDisplayFontName] for body / label roles. */
+    defaultBodyFontName: String? = null,
     colorsPreview: @Composable (onPickRole: (String) -> Unit) -> Unit = { onPick ->
-        ColorRoleSwatches(onPickRole = onPick)
+        ColorRoleList(onPickRole = onPick)
         MaterialComponentGallery()
     },
     typographyPreview: @Composable (onPickRole: (String) -> Unit) -> Unit = { onPick ->
@@ -204,6 +213,7 @@ fun ThemeStudioScreen(
                                     defaultLabel = "(theme default)",
                                     previewStyle = MaterialTheme.typography.titleLarge,
                                     onTap = { pickerUmbrellaKind = FontFamilyKind.Display },
+                                    defaultFontName = defaultDisplayFontName,
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -230,6 +240,7 @@ fun ThemeStudioScreen(
                                     defaultLabel = "(theme default)",
                                     previewStyle = MaterialTheme.typography.bodyLarge,
                                     onTap = { pickerUmbrellaKind = FontFamilyKind.Body },
+                                    defaultFontName = defaultBodyFontName,
                                 )
                                 typographyPreview { name -> pickerTypoRole = name }
                             }
@@ -327,6 +338,10 @@ fun ThemeStudioScreen(
             FontFamilyKind.Display -> overrides.typography.displayFontFamilyName
             FontFamilyKind.Body -> overrides.typography.bodyFontFamilyName
         }
+        val defaultFamilyName = when (kind) {
+            FontFamilyKind.Display -> defaultDisplayFontName
+            FontFamilyKind.Body -> defaultBodyFontName
+        }
         val cascadeSummary = when (kind) {
             FontFamilyKind.Display -> "Cascades to display, headline, title roles."
             FontFamilyKind.Body -> "Cascades to body, label roles."
@@ -350,6 +365,7 @@ fun ThemeStudioScreen(
                 onClearOverrides = {
                     controller.setTypographyRole(umbrellaRole, TextStyleOverride())
                 },
+                defaultFontName = defaultFamilyName,
             )
         }
     }
@@ -360,6 +376,10 @@ fun ThemeStudioScreen(
         val current = when (kind) {
             FontFamilyKind.Display -> overrides.typography.displayFontFamilyName
             FontFamilyKind.Body -> overrides.typography.bodyFontFamilyName
+        }
+        val defaultName = when (kind) {
+            FontFamilyKind.Display -> defaultDisplayFontName
+            FontFamilyKind.Body -> defaultBodyFontName
         }
         // Each row previews in the role-group's actual scale: titleLarge for
         // Display so users see headline-feel sizing, bodyLarge for Body so
@@ -390,6 +410,7 @@ fun ThemeStudioScreen(
                     }
                     pickerFontFamilyKind = null
                 },
+                defaultFontName = defaultName,
             )
         }
     }

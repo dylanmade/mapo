@@ -125,7 +125,7 @@ fun MapoTheme(
         if (effectiveDark) overrides.colors.dark else overrides.colors.light
     val colorScheme = baseScheme.applyOverrides(variantColors)
     val fontResolver = rememberThemeFontResolver()
-    val typography = AppTypography.applyOverrides(overrides.typography, fontResolver)
+    val typography = rememberAppTypography().applyOverrides(overrides.typography, fontResolver)
     val shapes = Shapes().applyOverrides(overrides.shapes)
 
     val extraColors = if (effectiveDark) MapoExtraColors.Dark else MapoExtraColors.Light

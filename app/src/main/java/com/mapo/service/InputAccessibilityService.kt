@@ -14,8 +14,11 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.RemapTarget
+import com.mapo.data.model.steam.InputSource
 import com.mapo.service.foreground.ForegroundAppMonitor
+import com.mapo.service.input.InputAddress
 import com.mapo.service.input.InputDispatcher
+import com.mapo.service.input.InputEvaluator
 import com.mapo.service.input.InputSink
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -25,6 +28,7 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
 
     @Inject lateinit var foregroundAppMonitor: ForegroundAppMonitor
     @Inject lateinit var dispatcher: InputDispatcher
+    @Inject lateinit var evaluator: InputEvaluator
 
     companion object {
         // Physical gamepad keycodes → DeviceButton enum
@@ -50,6 +54,35 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         // Reverse map — DeviceButton → keycode, for gamepad→gamepad remapping
         private val DEVICE_BUTTON_TO_KEYCODE: Map<DeviceButton, Int> =
             GAMEPAD_KEYCODE_MAP.entries.associate { (k, v) -> v to k }
+
+        /**
+         * Physical Android gamepad keycode → Steam-schema [InputAddress]
+         * ([InputSource] + sub-input key). Matches the default seed in
+         * `ControllerConfigRepository.DEFAULT_INPUT_SOURCE_SEEDS` — face buttons are
+         * sub-inputs of `BUTTON_DIAMOND`, the dpad's four directions live under
+         * `DPAD`, every bumper/trigger/stick-click is `click` on its source.
+         *
+         * Triggers are mapped from their KEYCODE_BUTTON_L2/R2 forms here (digital threshold);
+         * brick 2.3 will additionally consume the analog AXIS_LTRIGGER/AXIS_RTRIGGER values.
+         */
+        private val KEYCODE_TO_INPUT_ADDRESS: Map<Int, InputAddress> = mapOf(
+            KeyEvent.KEYCODE_BUTTON_A      to InputAddress(InputSource.BUTTON_DIAMOND, "button_a"),
+            KeyEvent.KEYCODE_BUTTON_B      to InputAddress(InputSource.BUTTON_DIAMOND, "button_b"),
+            KeyEvent.KEYCODE_BUTTON_X      to InputAddress(InputSource.BUTTON_DIAMOND, "button_x"),
+            KeyEvent.KEYCODE_BUTTON_Y      to InputAddress(InputSource.BUTTON_DIAMOND, "button_y"),
+            KeyEvent.KEYCODE_BUTTON_L1     to InputAddress(InputSource.LEFT_BUMPER, "click"),
+            KeyEvent.KEYCODE_BUTTON_R1     to InputAddress(InputSource.RIGHT_BUMPER, "click"),
+            KeyEvent.KEYCODE_BUTTON_L2     to InputAddress(InputSource.LEFT_TRIGGER, "click"),
+            KeyEvent.KEYCODE_BUTTON_R2     to InputAddress(InputSource.RIGHT_TRIGGER, "click"),
+            KeyEvent.KEYCODE_BUTTON_THUMBL to InputAddress(InputSource.LEFT_JOYSTICK, "click"),
+            KeyEvent.KEYCODE_BUTTON_THUMBR to InputAddress(InputSource.RIGHT_JOYSTICK, "click"),
+            KeyEvent.KEYCODE_DPAD_UP       to InputAddress(InputSource.DPAD, "dpad_north"),
+            KeyEvent.KEYCODE_DPAD_DOWN     to InputAddress(InputSource.DPAD, "dpad_south"),
+            KeyEvent.KEYCODE_DPAD_LEFT     to InputAddress(InputSource.DPAD, "dpad_west"),
+            KeyEvent.KEYCODE_DPAD_RIGHT    to InputAddress(InputSource.DPAD, "dpad_east"),
+            KeyEvent.KEYCODE_BUTTON_START  to InputAddress(InputSource.SWITCH_START, "click"),
+            KeyEvent.KEYCODE_BUTTON_SELECT to InputAddress(InputSource.SWITCH_SELECT, "click"),
+        )
 
         // Maps our button code strings to Android KeyEvent keycodes.
         private val CODE_ALIASES = mapOf("BACKSPACE" to KeyEvent.KEYCODE_DEL)
@@ -171,19 +204,11 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
             }
         }
         if (!dispatcher.remapEnabled.value) return false
-        val mappings = dispatcher.currentMappings.value
-        Log.d(TAG, "onKeyEvent: keyCode=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} mappings=${mappings.size}")
 
-        val deviceButton = GAMEPAD_KEYCODE_MAP[event.keyCode] ?: return false
-        val target = mappings[deviceButton]
-
-        // No mapping or explicitly Unbound → pass through to game
-        if (target == null || target is RemapTarget.Unbound) return false
-
-        Log.d(TAG, "Remapping $deviceButton → $target (isDown=${event.action == KeyEvent.ACTION_DOWN})")
+        val address = KEYCODE_TO_INPUT_ADDRESS[event.keyCode] ?: return false
         val isDown = event.action == KeyEvent.ACTION_DOWN
-        dispatchRemapTarget(target, isDown)
-        return true // consume the physical event
+        Log.d(TAG, "onKeyEvent: keyCode=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} address=$address")
+        return evaluator.handleDigital(address, isDown)
     }
 
     private fun dispatchRemapTarget(target: RemapTarget, isDown: Boolean) {
@@ -219,6 +244,30 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
             return false
         }
         injectKeyDown(keyCode)
+        injectKeyUp(keyCode)
+        return true
+    }
+
+    /** DOWN edge of a key, by code string. Called from the runtime evaluator's press path. */
+    override fun injectKeyDown(code: String): Boolean {
+        if (code in MOUSE_CODES) return false
+        val keyCode = resolveKeyCode(code) ?: run {
+            Log.w(TAG, "injectKeyDown: unknown key code $code")
+            return false
+        }
+        Log.d(TAG, "injectKeyDown code=$code keyCode=$keyCode")
+        injectKeyDown(keyCode)
+        return true
+    }
+
+    /** UP edge of a key, by code string. Paired with a prior [injectKeyDown]. */
+    override fun injectKeyUp(code: String): Boolean {
+        if (code in MOUSE_CODES) return false
+        val keyCode = resolveKeyCode(code) ?: run {
+            Log.w(TAG, "injectKeyUp: unknown key code $code")
+            return false
+        }
+        Log.d(TAG, "injectKeyUp code=$code keyCode=$keyCode")
         injectKeyUp(keyCode)
         return true
     }

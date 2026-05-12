@@ -15,7 +15,19 @@ import javax.inject.Singleton
  * returns false.
  */
 interface InputSink {
+    /** Inject a full DOWN+UP cycle for the given key code string. Used by the virtual keyboard. */
     fun injectKey(code: String): Boolean
+
+    /**
+     * Inject a key DOWN edge. Used by the physical-remap evaluator pipeline, which holds
+     * the down state until the matching [injectKeyUp]. Returns false for non-key codes
+     * (e.g. "MOUSE_LEFT") so the evaluator can skip persisting an unfilled press.
+     */
+    fun injectKeyDown(code: String): Boolean
+
+    /** Inject a key UP edge — pair with a prior [injectKeyDown] on the same code. */
+    fun injectKeyUp(code: String): Boolean
+
     fun dispatchTargetAsClick(target: RemapTarget)
     fun startMouseDrag()
     fun injectMouseMove(dx: Float, dy: Float)
@@ -107,6 +119,10 @@ class InputDispatcher @Inject constructor() {
     val isReady: Boolean get() = sink != null
 
     fun injectKey(code: String): Boolean = sink?.injectKey(code) ?: false
+
+    fun injectKeyDown(code: String): Boolean = sink?.injectKeyDown(code) ?: false
+
+    fun injectKeyUp(code: String): Boolean = sink?.injectKeyUp(code) ?: false
 
     fun dispatchTargetAsClick(target: RemapTarget) {
         sink?.dispatchTargetAsClick(target)

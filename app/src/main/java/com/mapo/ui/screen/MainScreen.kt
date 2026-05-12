@@ -558,6 +558,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 com.themestudio.ui.ThemeStudioScreen(
                     onClose = { navController.popBackStack() },
                     theme = { content -> com.mapo.ui.theme.MapoTheme { content() } },
+                    defaultDisplayFontName = com.mapo.ui.theme.DEFAULT_DISPLAY_FONT_NAME,
+                    defaultBodyFontName = com.mapo.ui.theme.DEFAULT_BODY_FONT_NAME,
                 )
             }
             composable(

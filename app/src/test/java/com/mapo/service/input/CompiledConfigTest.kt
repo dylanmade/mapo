@@ -23,7 +23,15 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+// Robolectric so org.json.JSONObject is a real implementation at test time
+// (the Android-stub JSONObject `has()` always returns false, which would defeat
+// every settings parse test). Per project_compose_ui_test_blocker.md.
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class CompiledConfigTest {
 
     @Test
@@ -224,6 +232,92 @@ class CompiledConfigTest {
         assertTrue(compiled.inputs.isEmpty())
     }
 
+    // ── Settings parsing (Brick 3.1) ──────────────────────────────────────────
+
+    @Test
+    fun settingsJson_empty_yieldsDefaults() {
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND, state = "active",
+                    group = groupWith(
+                        inputs = listOf(
+                            inputWith(
+                                "button_a",
+                                listOf(activatorWith(
+                                    type = ActivatorType.LONG_PRESS,
+                                    settingsJson = "{}",
+                                    bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ESCAPE")),
+                                )),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+        val activator = compiled.lookup(InputSource.BUTTON_DIAMOND, "button_a")!!.activators[0]
+
+        assertEquals(CompiledActivatorSettings.DEFAULT_LONG_PRESS_TIME_MS, activator.settings.longPressTimeMs)
+    }
+
+    @Test
+    fun settingsJson_longPressTime_parsedAndPropagated() {
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND, state = "active",
+                    group = groupWith(
+                        inputs = listOf(
+                            inputWith(
+                                "button_a",
+                                listOf(activatorWith(
+                                    type = ActivatorType.LONG_PRESS,
+                                    settingsJson = """{"long_press_time_ms": 1234}""",
+                                    bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ESCAPE")),
+                                )),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+        val activator = compiled.lookup(InputSource.BUTTON_DIAMOND, "button_a")!!.activators[0]
+
+        assertEquals(1234L, activator.settings.longPressTimeMs)
+    }
+
+    @Test
+    fun settingsJson_malformed_fallsBackToDefaults() {
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND, state = "active",
+                    group = groupWith(
+                        inputs = listOf(
+                            inputWith(
+                                "button_a",
+                                listOf(activatorWith(
+                                    type = ActivatorType.LONG_PRESS,
+                                    settingsJson = "not valid json",
+                                    bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ESCAPE")),
+                                )),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+        val activator = compiled.lookup(InputSource.BUTTON_DIAMOND, "button_a")!!.activators[0]
+
+        assertEquals(CompiledActivatorSettings.DEFAULT_LONG_PRESS_TIME_MS, activator.settings.longPressTimeMs)
+    }
+
     @Test
     fun multipleBindingsOnOneActivator_arePreservedInOrder() {
         // Cycle_binding (multi-binding activators) lands in Phase 3 — the runtime cycles
@@ -303,13 +397,20 @@ class CompiledConfigTest {
     private fun activatorWith(
         type: ActivatorType = ActivatorType.FULL_PRESS,
         bindings: List<Binding>,
+        settingsJson: String = "{}",
     ): ActivatorGraph {
         val activatorId = nextId++
         // Bindings stamped with a fresh activatorId so the test data round-trips through
         // BindingOutput.fromEntity correctly.
         val stamped = bindings.map { it.copy(id = nextId++, activatorId = activatorId) }
         return ActivatorGraph(
-            activator = Activator(id = activatorId, groupInputId = 1L, type = type, orderIndex = 0),
+            activator = Activator(
+                id = activatorId,
+                groupInputId = 1L,
+                type = type,
+                settingsJson = settingsJson,
+                orderIndex = 0,
+            ),
             bindings = stamped,
         )
     }

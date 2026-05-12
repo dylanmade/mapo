@@ -1,9 +1,12 @@
 package com.mapo.service.input
 
+import android.util.Log
 import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.InputSource
+import org.json.JSONException
+import org.json.JSONObject
 
 /**
  * Runtime-optimized snapshot of a [ControllerConfig], shaped for O(1) per-event lookup.
@@ -44,17 +47,65 @@ data class CompiledInput(
 )
 
 /**
- * One activator pre-resolved with its typed [BindingOutput]s.
+ * One activator pre-resolved with its typed [BindingOutput]s plus parsed [settings].
  *
- * Brick 2.1 preserves the activator's [type] verbatim; the state machine in brick 2.2
- * decides what to do with each type (initially: only [ActivatorType.FULL_PRESS] fires,
- * everything else is logged-and-dropped until Phase 3).
+ * Brick 2.1 carried only `(id, type, bindings)`; Brick 3.1 extends this with the parsed
+ * [CompiledActivatorSettings] so the evaluator's timing logic (long-press threshold, etc.)
+ * doesn't have to touch JSON at the per-event hot path.
  */
 data class CompiledActivator(
     val activatorId: Long,
     val type: ActivatorType,
     val bindings: List<BindingOutput>,
+    val settings: CompiledActivatorSettings = CompiledActivatorSettings.DEFAULTS,
 )
+
+/**
+ * Decoded view of an [com.mapo.data.model.steam.Activator]'s settingsJson, with every
+ * setting either populated from JSON or filled with the Steam-Input default.
+ *
+ * Designed as an all-defaults bag rather than a sealed class so it can grow over Phase 3:
+ *  - Brick 3.1 surfaces [longPressTimeMs].
+ *  - Brick 3.2 will add `doubleTapTimeMs`.
+ *  - Brick 3.3 will add universal settings (toggle, turbo, fire delays, cycle, chord).
+ *
+ * The evaluator reads only the fields its activator type cares about.
+ */
+data class CompiledActivatorSettings(
+    /** Steam-default 0.6 s; min hold time before [ActivatorType.LONG_PRESS] fires. */
+    val longPressTimeMs: Long,
+) {
+    companion object {
+        const val DEFAULT_LONG_PRESS_TIME_MS = 600L
+
+        val DEFAULTS = CompiledActivatorSettings(
+            longPressTimeMs = DEFAULT_LONG_PRESS_TIME_MS,
+        )
+
+        /**
+         * Parse the Activator's settingsJson into a [CompiledActivatorSettings]. Unknown
+         * keys are ignored (forward-compat); missing keys fall back to defaults; parse
+         * errors log and return [DEFAULTS] so a malformed row can't crash the evaluator.
+         */
+        fun parse(json: String): CompiledActivatorSettings {
+            if (json.isBlank() || json == "{}") return DEFAULTS
+            return try {
+                val obj = JSONObject(json)
+                CompiledActivatorSettings(
+                    longPressTimeMs = obj.optLongOrNull("long_press_time_ms") ?: DEFAULT_LONG_PRESS_TIME_MS,
+                )
+            } catch (e: JSONException) {
+                Log.w(TAG, "Failed to parse activator settings JSON: $json", e)
+                DEFAULTS
+            }
+        }
+
+        private const val TAG = "ActivatorSettings"
+    }
+}
+
+private fun JSONObject.optLongOrNull(key: String): Long? =
+    if (has(key) && !isNull(key)) optLong(key) else null
 
 /**
  * Flatten the materialized [ControllerConfig] graph into a [CompiledConfig] for the
@@ -77,6 +128,7 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                     activatorId = actGraph.activator.id,
                     type = actGraph.activator.type,
                     bindings = actGraph.bindings.map { BindingOutput.fromEntity(it.outputType, it.args) },
+                    settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson),
                 )
             }
             inputs[address] = CompiledInput(inputGraph.input.id, compiledActivators)

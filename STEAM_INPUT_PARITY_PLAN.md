@@ -363,14 +363,36 @@ Adding a binding opens the existing `RemapTargetPickerScreen` (with Phase 0's fi
 
 ### Decision points (flag before implementing)
 
-- **Activator ordering UX**: drag-to-reorder vs. fixed order by type — Steam shows them in fixed order; we'll start fixed and revisit.
-- **"Chorded Press" UX**: how the user picks the chord button — picker that says "Press the other button now" vs. a dropdown of inputs.
+- **Activator ordering UX**: drag-to-reorder vs. fixed order by type — Steam shows them in fixed order. **Decided** (3.1 prep, 2026-05-12): fixed order — Full / Soft / Long / Double / Start / Release / Chord.
+- **"Chorded Press" UX**: how the user picks the chord button. **Decided** (3.1 prep, 2026-05-12): the existing input picker. Mapo's virtual keyboard means a chord partner can be a virtual button, not only a physical one — the runtime needs to receive a "held / released" signal from the keyboard into the evaluator's chord-state table (Brick 3.3).
+- **Activator UX shape** (added during 3.1 prep): each input keeps a *list* of activators (Steam-faithful multi-activator). Per-row layout: `[binding picker] [activator-type dropdown] [⚙ settings]`, with a `[+ Add Activator]` action under the list.
+
+### Brick breakdown
+
+| Brick | Scope | Status |
+|---|---|---|
+| 3.1 | Coroutine-scoped scheduling in `InputEvaluator` + `Long_Press` + `Start_Press` + `Release_Press` (each with type-specific settings parsing) | ✅ COMPLETED 2026-05-12 |
+| 3.2 | `Double_Press` window state machine + Full/Double coexistence semantics | ⏳ pending |
+| 3.3 | `Chorded_Press` (incl. virtual-keyboard chord-partner plumbing) + universal settings (toggle, turbo / `hold_to_repeat`, `fire_start_delay` / `fire_end_delay`, `cycle_binding`, `interruptable`) | ⏳ pending |
+| 3.4 | `InputEditorScreen` — per-input activator list UI | ⏳ pending |
+| 3.5 | `ActivatorEditorScreen` + per-type settings panels | ⏳ pending |
+
+### Brick 3.1 deviations + decisions
+
+- **`CompiledActivatorSettings` is a data-class bag, not a sealed class.** Adopted to keep additive growth across 3.x bricks frictionless. Every field has a Steam-default that's used when settingsJson is empty or malformed. 3.1 surfaces `longPressTimeMs` (default 600 ms); 3.2 will add `doubleTapTimeMs`; 3.3 will add universal settings + chord partner.
+- **Parser uses `org.json.JSONObject`**. Android stdlib, no dep added. Production runs on Android so it Just Works; **JVM unit tests need Robolectric** because the Android stub jar returns `false` from `has(key)` and silently defeats the parser. `CompiledConfigTest` annotated `@RunWith(RobolectricTestRunner::class)` accordingly.
+- **`InputEvaluator` gains `@ApplicationScope CoroutineScope`** for scheduling. Pending timers stored as `Map<InputAddress, Map<Long, Job>>` (per-address, per-activator). Cancelled on UP and on duplicate-DOWN.
+- **`held` state refactored to per-activator records.** Was `Map<InputAddress, List<BindingOutput>>`; is now `Map<InputAddress, MutableList<HeldEntry>>` where each `HeldEntry` carries its source activatorId. Required because Long_Press + Full_Press can both contribute holdable bindings to the same address; release needs to fire both sets.
+- **`START_PRESS` / `RELEASE_PRESS` are taps**, not held bindings. Evaluator calls `emitter.emitPress(b); emitter.emitRelease(b)` back-to-back. For mouse-button outputs (fire-and-done), the release call is a no-op — the existing `emitPress` short-circuit handles it.
+- **Coexistence default**: a button with both `FULL_PRESS` and `LONG_PRESS` fires both when held past the threshold (FULL on DOWN, LONG on threshold). Steam's `interruptable` setting that suppresses FULL when LONG fires is universal-setting territory and lands in Brick 3.3.
+- **Long-press default is 600 ms** (Steam Input's default). Override per activator via `long_press_time_ms` in settingsJson.
+- **Test infrastructure**: `kotlinx-coroutines-test` `TestScope` + `StandardTestDispatcher` injected into the evaluator. `advanceTimeBy` / `runCurrent` drive virtual time. Existing FULL_PRESS tests unaffected.
 
 ### Verify
 
-- Bind A → Regular = ENTER, Long Press = ESCAPE. Tap A briefly → ENTER fires. Hold A 0.3s+ → ESCAPE fires, ENTER suppressed.
-- Bind A → Double Press = SPACE with 0.25s window. Two quick taps → SPACE. One tap then nothing → after window expires, the single ENTER fires.
-- Hold-to-repeat on A → ENTER pulses at the configured rate.
+- Bind A → Regular = ENTER, Long Press = ESCAPE. Tap A briefly → ENTER fires. Hold A 0.3s+ → both fire (FULL on DOWN, LONG on threshold) — adjusting that to "ESCAPE suppressed" arrives with the `interruptable` setting in Brick 3.3.
+- Bind A → Double Press = SPACE with 0.25s window. Two quick taps → SPACE. One tap then nothing → after window expires, the single ENTER fires. **(Brick 3.2)**
+- Hold-to-repeat on A → ENTER pulses at the configured rate. **(Brick 3.3)**
 - Robolectric: unit test for each activator type with simulated event timestamps.
 
 ---

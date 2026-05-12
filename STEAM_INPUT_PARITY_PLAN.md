@@ -369,13 +369,28 @@ Adding a binding opens the existing `RemapTargetPickerScreen` (with Phase 0's fi
 
 ### Brick breakdown
 
+Reordered after 3.1 to put the **per-input editor UI ahead of further runtime bricks**, so each new runtime activator can be authored + verified in-app the same day it ships. Original sequence kept all runtime first.
+
 | Brick | Scope | Status |
 |---|---|---|
 | 3.1 | Coroutine-scoped scheduling in `InputEvaluator` + `Long_Press` + `Start_Press` + `Release_Press` (each with type-specific settings parsing) | ✅ COMPLETED 2026-05-12 |
+| 3.4 | `InputEditorScreen` — per-input activator list UI + repo methods for add/remove/changeType | ✅ COMPLETED 2026-05-12 |
 | 3.2 | `Double_Press` window state machine + Full/Double coexistence semantics | ⏳ pending |
+| 3.5 | `ActivatorEditorScreen` + per-type settings panels (long_press_time slider, etc.) + universal-settings UX | ⏳ pending |
 | 3.3 | `Chorded_Press` (incl. virtual-keyboard chord-partner plumbing) + universal settings (toggle, turbo / `hold_to_repeat`, `fire_start_delay` / `fire_end_delay`, `cycle_binding`, `interruptable`) | ⏳ pending |
-| 3.4 | `InputEditorScreen` — per-input activator list UI | ⏳ pending |
-| 3.5 | `ActivatorEditorScreen` + per-type settings panels | ⏳ pending |
+
+### Brick 3.4 deviations + decisions
+
+- **Brick order reshuffled** (see table above). 3.1 (runtime) couldn't be verified end-to-end without an authoring UI — the existing Remap Controls flow only knows how to bind a FULL_PRESS. Inserted 3.4 next so 3.1's Long/Start/Release land verifiable. Subsequent runtime bricks slot back in afterwards (3.2 → 3.5 → 3.3).
+- **Picker round-trip moved into `InputEditorScreen`**. Tapping an input row on `RemapControlsScreen` now navigates to `INPUT_EDITOR(inputSource, groupInputKey)`. The activator picker (`RemapTargetPickerScreen`) is invoked from inside the editor; its result lands on the editor's `savedStateHandle`, not the controls screen's.
+- **Row preview shows "+N more"** when an input has multiple activators. The primary line still shows the FULL_PRESS binding, but the user gets a glanceable hint that there's more under the row before they tap in.
+- **Settings cog is a placeholder** (disabled `IconButton(Icons.Filled.Settings)`). 3.5 wires it to the per-activator settings sheet. Visible-now so layout doesn't shift when 3.5 lands.
+- **"Coming soon" labels** on Double / Chord / Soft in both the type dropdown and the row's helper-subtext. The user can change an activator's type to one of these — the row will save, but the evaluator will treat it as "consumed but no emission" per the 3.1 brick. Prevents the affordance from feeling broken when 3.2/3.3/Phase 6 land.
+- **Canonical activator order** (Full / Soft / Long / Double / Start / Release / Chord) is enforced in `ACTIVATOR_RENDER_ORDER` for both display sort and dropdown entries. Within the same type, sorts by `orderIndex` then `id` for stable order across edits.
+- **`addActivator` seeds an Unbound binding**. Otherwise the new row would have nothing to display in the binding-picker button and tapping it would be a noop — adding a row makes it immediately editable instead.
+- **`ActivatorType.displayLabel()`** lives in `InputEditorScreen.kt` for now; if 3.5 (or VDF import in Phase 7) needs the same labels they migrate to `data/model/steam/SteamEnums.kt` then.
+- **Repository methods bump `configDirtyTick`** like the existing `setBinding`. The `compiledConfig` flow in `MainViewModel` recompiles automatically, so a Long-Press authored in the editor takes effect on the next button press — no service restart needed.
+- **Row click on RemapControlsScreen** uses `groupInput != null` as the readiness gate instead of "has a FULL_PRESS activator." The new editor handles missing/empty activator lists gracefully (still shows "Add Activator"), so we don't need to gate the screen entry on having an activator already.
 
 ### Brick 3.1 deviations + decisions
 

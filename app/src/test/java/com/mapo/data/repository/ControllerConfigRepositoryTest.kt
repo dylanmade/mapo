@@ -226,6 +226,80 @@ class ControllerConfigRepositoryTest {
         assertEquals(BindingOutput.Unbound, updated.primaryOutput)
     }
 
+    // ── addActivator / removeActivator / updateActivatorType (Brick 3.4) ────
+
+    @Test
+    fun addActivator_appendsRowWithUnboundBinding_andHigherOrderIndex() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        val cfg = subject.getActiveConfigOnce(1L)!!
+        val buttonA = cfg.activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+        val groupInputId = buttonA.input.id
+        val originalActivatorCount = buttonA.activators.size
+
+        val newId = subject.addActivator(groupInputId, ActivatorType.LONG_PRESS)
+
+        val updated = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+        assertEquals(originalActivatorCount + 1, updated.activators.size)
+        val newActivator = updated.activators.first { it.activator.id == newId }
+        assertEquals(ActivatorType.LONG_PRESS, newActivator.activator.type)
+        assertEquals(originalActivatorCount, newActivator.activator.orderIndex)
+        assertEquals(1, newActivator.bindings.size)
+        assertEquals(BindingOutput.Unbound, newActivator.primaryOutput)
+    }
+
+    @Test
+    fun removeActivator_deletesActivatorAndItsBindings() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        val cfg = subject.getActiveConfigOnce(1L)!!
+        val buttonA = cfg.activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+        val target = buttonA.activators[0].activator.id
+
+        subject.removeActivator(target)
+
+        val updated = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+        assertTrue(updated.activators.none { it.activator.id == target })
+    }
+
+    @Test
+    fun updateActivatorType_changesTypeWithoutTouchingBindings() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        val cfg = subject.getActiveConfigOnce(1L)!!
+        val activator = cfg.activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+            .activators[0]
+        val activatorId = activator.activator.id
+        subject.setBinding(activatorId, BindingOutput.KeyPress("ENTER"))
+
+        subject.updateActivatorType(activatorId, ActivatorType.LONG_PRESS)
+
+        val updated = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+            .activators
+            .first { it.activator.id == activatorId }
+        assertEquals(ActivatorType.LONG_PRESS, updated.activator.type)
+        assertEquals(BindingOutput.KeyPress("ENTER"), updated.primaryOutput)
+    }
+
+    @Test
+    fun updateActivatorType_unknownId_isNoOp() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        subject.updateActivatorType(activatorId = 9_999_999L, type = ActivatorType.LONG_PRESS)
+        // Just verifying it doesn't throw — assertion is on completion alone.
+    }
+
     @Test
     fun copyConfig_emptySource_isNoOp() = runTest {
         subject.copyConfig(sourceProfileId = 1L, destProfileId = 2L)

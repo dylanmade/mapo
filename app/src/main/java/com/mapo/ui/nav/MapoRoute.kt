@@ -32,6 +32,21 @@ object MapoRoute {
     fun remapTargetPicker(title: String, currentEncoded: String): String =
         "remap_target_picker?$ARG_TITLE=${Uri.encode(title)}&$ARG_CURRENT=${Uri.encode(currentEncoded)}"
 
+    // ── Per-input activator editor (full-screen, instant-commit) ───────────────────
+    //
+    // Reached by tapping a row in `RemapControlsScreen`. Shows the activator list for one
+    // (inputSource, groupInputKey) pair: each activator gets a binding picker, a type
+    // dropdown, and a settings cog. Adds / removes activators on this input. Picker is
+    // invoked from within the editor — its result lands via the standard PICKER_RESULT_KEY
+    // savedStateHandle pattern, scoped to this destination's back-stack entry.
+    const val ARG_INPUT_SOURCE = "inputSource"
+    const val ARG_GROUP_INPUT_KEY = "groupInputKey"
+    const val ARG_INPUT_LABEL = "inputLabel"
+    const val INPUT_EDITOR =
+        "input_editor/{$ARG_INPUT_SOURCE}/{$ARG_GROUP_INPUT_KEY}?$ARG_INPUT_LABEL={$ARG_INPUT_LABEL}"
+    fun inputEditor(inputSource: String, groupInputKey: String, label: String): String =
+        "input_editor/${Uri.encode(inputSource)}/${Uri.encode(groupInputKey)}?$ARG_INPUT_LABEL=${Uri.encode(label)}"
+
     // ── Configure-button screen (full-screen, instant-commit) ─────────────────────
     //
     // Caller navigates with the buttonId of the button being edited. The screen reads the

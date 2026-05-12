@@ -528,11 +528,42 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            composable(MapoRoute.REMAP_CONTROLS) { entry ->
+            composable(MapoRoute.REMAP_CONTROLS) {
+                RemapControlsScreen(
+                    config = activeControllerConfig,
+                    onBack = { navController.popBackStack() },
+                    onOpenInputEditor = { inputSource, groupInputKey, label ->
+                        navController.navigate(
+                            MapoRoute.inputEditor(inputSource.name, groupInputKey, label)
+                        )
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            composable(
+                route = MapoRoute.INPUT_EDITOR,
+                arguments = listOf(
+                    navArgument(MapoRoute.ARG_INPUT_SOURCE) { type = NavType.StringType },
+                    navArgument(MapoRoute.ARG_GROUP_INPUT_KEY) { type = NavType.StringType },
+                    navArgument(MapoRoute.ARG_INPUT_LABEL) {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    },
+                ),
+            ) { entry ->
+                val inputSourceName = entry.arguments?.getString(MapoRoute.ARG_INPUT_SOURCE) ?: return@composable
+                val groupInputKey = entry.arguments?.getString(MapoRoute.ARG_GROUP_INPUT_KEY) ?: return@composable
+                val label = entry.arguments?.getString(MapoRoute.ARG_INPUT_LABEL).orEmpty()
+                val inputSource = runCatching {
+                    com.mapo.data.model.steam.InputSource.valueOf(inputSourceName)
+                }.getOrNull() ?: return@composable
                 val pickerResult by entry.savedStateHandle
                     .getStateFlow<String?>(MapoRoute.PICKER_RESULT_KEY, null)
                     .collectAsStateWithLifecycle()
-                RemapControlsScreen(
+                InputEditorScreen(
+                    inputLabel = label.ifEmpty { groupInputKey },
+                    inputSource = inputSource,
+                    groupInputKey = groupInputKey,
                     config = activeControllerConfig,
                     pickerResult = pickerResult?.let { RemapTarget.decode(it) },
                     onConsumePickerResult = {
@@ -541,11 +572,20 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onPickResult = { activatorId, output ->
                         viewModel.setControllerBinding(activatorId, output)
                     },
-                    onBack = { navController.popBackStack() },
                     onOpenPicker = { title, current ->
                         navController.navigate(MapoRoute.remapTargetPicker(title, current.encode()))
                     },
-                    modifier = Modifier.fillMaxSize()
+                    onAddActivator = { groupInputId, type ->
+                        viewModel.addControllerActivator(groupInputId, type)
+                    },
+                    onRemoveActivator = { activatorId ->
+                        viewModel.removeControllerActivator(activatorId)
+                    },
+                    onSetActivatorType = { activatorId, type ->
+                        viewModel.setControllerActivatorType(activatorId, type)
+                    },
+                    onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
             composable(MapoRoute.AUTO_SWITCH) {

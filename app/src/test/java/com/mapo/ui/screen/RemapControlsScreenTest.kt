@@ -53,10 +53,7 @@ class RemapControlsScreenTest {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
                     RemapControlsScreen(
                         config = sampleConfig(),
-                        pickerResult = null,
-                        onConsumePickerResult = {},
-                        onPickResult = { _, _ -> },
-                        onOpenPicker = { _, _ -> },
+                        onOpenInputEditor = { _, _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -78,10 +75,7 @@ class RemapControlsScreenTest {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
                     RemapControlsScreen(
                         config = sampleConfig(),
-                        pickerResult = null,
-                        onConsumePickerResult = {},
-                        onPickResult = { _, _ -> },
-                        onOpenPicker = { _, _ -> },
+                        onOpenInputEditor = { _, _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -110,10 +104,7 @@ class RemapControlsScreenTest {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
                     RemapControlsScreen(
                         config = sampleConfig(),
-                        pickerResult = null,
-                        onConsumePickerResult = {},
-                        onPickResult = { _, _ -> },
-                        onOpenPicker = { _, _ -> },
+                        onOpenInputEditor = { _, _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -131,17 +122,18 @@ class RemapControlsScreenTest {
     }
 
     @Test
-    fun clickingBoundRow_invokesOnOpenPicker() {
-        var pickerOpenedWith: String? = null
+    fun clickingBoundRow_invokesOnOpenInputEditor() {
+        var openedKey: String? = null
+        var openedLabel: String? = null
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
                     RemapControlsScreen(
                         config = sampleConfig(boundButtonA = BindingOutput.KeyPress("ENTER")),
-                        pickerResult = null,
-                        onConsumePickerResult = {},
-                        onPickResult = { _, _ -> },
-                        onOpenPicker = { title, _ -> pickerOpenedWith = title },
+                        onOpenInputEditor = { _, key, label ->
+                            openedKey = key
+                            openedLabel = label
+                        },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -151,8 +143,8 @@ class RemapControlsScreenTest {
 
         composeRule.onNodeWithText("A").performClick()
 
-        assert(pickerOpenedWith == "Remap: A") {
-            "Expected picker title 'Remap: A', got '$pickerOpenedWith'"
+        assert(openedKey == "button_a" && openedLabel == "A") {
+            "Expected input editor open with key='button_a' label='A', got key='$openedKey' label='$openedLabel'"
         }
     }
 
@@ -163,10 +155,7 @@ class RemapControlsScreenTest {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
                     RemapControlsScreen(
                         config = sampleConfig(),
-                        pickerResult = null,
-                        onConsumePickerResult = {},
-                        onPickResult = { _, _ -> },
-                        onOpenPicker = { _, _ -> },
+                        onOpenInputEditor = { _, _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -191,10 +180,7 @@ class RemapControlsScreenTest {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
                     RemapControlsScreen(
                         config = sampleConfig(boundButtonA = BindingOutput.KeyPress("ENTER")),
-                        pickerResult = null,
-                        onConsumePickerResult = {},
-                        onPickResult = { _, _ -> },
-                        onOpenPicker = { _, _ -> },
+                        onOpenInputEditor = { _, _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )

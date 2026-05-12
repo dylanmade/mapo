@@ -81,3 +81,16 @@ fun ControllerConfig.findActivator(
     ?.group
     ?.inputByKey(inputKey)
     ?.firstActivatorOfType(activatorType)
+
+/**
+ * Resolve `(input source, sub-input)` to its [GroupInputGraph], carrying every activator
+ * configured on that input. Used by the per-input editor (Brick 3.4+) where the user
+ * sees the full activator list, not just one type.
+ */
+fun ControllerConfig.findGroupInput(
+    inputSource: InputSource,
+    inputKey: String,
+): GroupInputGraph? = activeActionSet
+    ?.presetFor(inputSource)
+    ?.group
+    ?.inputByKey(inputKey)

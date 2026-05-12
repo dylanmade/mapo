@@ -308,6 +308,55 @@ class ControllerConfigRepository @Inject constructor(
     }
 
     /**
+     * Insert a new [Activator] of [type] on [groupInputId], seeded with one Unbound
+     * binding so the activator is immediately editable in the UI. Returns the new id.
+     *
+     * Order is appended to the end of the group_input's existing activators.
+     * Multi-binding (cycle_binding) is Brick 3.3 territory — for now every activator
+     * carries one binding.
+     */
+    suspend fun addActivator(groupInputId: Long, type: ActivatorType): Long {
+        val existing = activatorDao.getByGroupInputs(listOf(groupInputId))
+        val nextOrder = (existing.maxOfOrNull { it.orderIndex } ?: -1) + 1
+        val newActivatorId = activatorDao.insert(
+            Activator(
+                groupInputId = groupInputId,
+                type = type,
+                settingsJson = "{}",
+                orderIndex = nextOrder,
+            )
+        )
+        bindingDao.insert(
+            Binding(
+                activatorId = newActivatorId,
+                outputType = BindingOutputType.UNBOUND,
+                args = "",
+                orderIndex = 0,
+            )
+        )
+        configDirtyTick.value = configDirtyTick.value + 1
+        return newActivatorId
+    }
+
+    /** Delete [activatorId]. Bindings cascade-delete via the schema foreign key. */
+    suspend fun removeActivator(activatorId: Long) {
+        activatorDao.deleteById(activatorId)
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
+     * Change [activatorId]'s [ActivatorType] without disturbing its bindings or
+     * settingsJson. Type-specific settings that no longer apply stay in the JSON blob
+     * for forward-compat — the evaluator only reads fields its current type cares about.
+     */
+    suspend fun updateActivatorType(activatorId: Long, type: ActivatorType) {
+        val existing = activatorDao.getById(activatorId) ?: return
+        if (existing.type == type) return
+        activatorDao.update(existing.copy(type = type))
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
      * Replace the bindings on [activatorId] with a single binding from [output].
      * Multi-binding (cycle_binding) editing lands in Phase 3 — for now every
      * activator carries at most one binding.

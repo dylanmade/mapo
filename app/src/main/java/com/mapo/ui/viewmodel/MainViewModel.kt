@@ -321,6 +321,27 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch { controllerConfigRepository.setBinding(activatorId, output) }
     }
 
+    /**
+     * Append a new activator of [type] to the input identified by [groupInputId].
+     * Used by the per-input editor screen's `[+ Add Activator]` action.
+     */
+    fun addControllerActivator(groupInputId: Long, type: com.mapo.data.model.steam.ActivatorType) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.addActivator(groupInputId, type) }
+    }
+
+    /** Delete an activator from the active config. */
+    fun removeControllerActivator(activatorId: Long) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.removeActivator(activatorId) }
+    }
+
+    /** Change an activator's [com.mapo.data.model.steam.ActivatorType]. Bindings preserved. */
+    fun setControllerActivatorType(activatorId: Long, type: com.mapo.data.model.steam.ActivatorType) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.updateActivatorType(activatorId, type) }
+    }
+
     // ── Navigation ────────────────────────────────────────────────────────────
 
     fun selectLayout(index: Int) {

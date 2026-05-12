@@ -32,10 +32,8 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,14 +42,10 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
-import com.mapo.data.model.RemapTarget
-import com.mapo.data.model.displayLabel
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.displayLabel
 import com.mapo.data.model.steam.displayName
-import com.mapo.data.model.steam.findActivator
-import com.mapo.data.model.steam.toRemapTarget
 import com.mapo.ui.component.layout.SectionedListDetailPane
 import com.mapo.ui.screen.remap.RemapPaneItem
 import com.mapo.ui.screen.remap.RemapSections
@@ -60,26 +54,11 @@ import com.mapo.ui.screen.remap.RemapSections
 @Composable
 fun RemapControlsScreen(
     config: ControllerConfig?,
-    pickerResult: RemapTarget?,
-    onConsumePickerResult: () -> Unit,
-    onPickResult: (activatorId: Long, output: BindingOutput) -> Unit,
-    onOpenPicker: (title: String, current: RemapTarget) -> Unit,
+    onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
-    // rememberSaveable so the in-flight edit survives the full-screen picker round-trip.
-    var editingActivatorId by rememberSaveable { mutableStateOf<Long?>(null) }
-
-    LaunchedEffect(pickerResult) {
-        val target = pickerResult ?: return@LaunchedEffect
-        val activatorId = editingActivatorId
-        if (activatorId != null) {
-            onPickResult(activatorId, BindingOutput.fromRemapTarget(target))
-        }
-        editingActivatorId = null
-        onConsumePickerResult()
-    }
 
     Scaffold(
         modifier = modifier,
@@ -109,10 +88,7 @@ fun RemapControlsScreen(
                 sectionId = sectionId,
                 config = config,
                 firstRowFocusRequester = firstRowFocusRequester,
-                onRequestPicker = { activatorId, currentOutput, label ->
-                    editingActivatorId = activatorId
-                    onOpenPicker("Remap: $label", currentOutput.toRemapTarget())
-                },
+                onOpenInputEditor = onOpenInputEditor,
             )
         }
     }
@@ -179,7 +155,7 @@ private fun RemapDetailPane(
     sectionId: String,
     config: ControllerConfig?,
     firstRowFocusRequester: FocusRequester,
-    onRequestPicker: (activatorId: Long, current: BindingOutput, rowLabel: String) -> Unit,
+    onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
 ) {
     val items = RemapSections.contentBySection[sectionId]
 
@@ -206,7 +182,7 @@ private fun RemapDetailPane(
                     item = item,
                     config = config,
                     modifier = focusModifier,
-                    onRequestPicker = onRequestPicker,
+                    onOpenInputEditor = onOpenInputEditor,
                 )
                 is RemapPaneItem.DisabledRow -> DisabledRowItem(item)
             }
@@ -265,17 +241,26 @@ private fun BindingRowItem(
     item: RemapPaneItem.BindingRow,
     config: ControllerConfig?,
     modifier: Modifier = Modifier,
-    onRequestPicker: (activatorId: Long, current: BindingOutput, rowLabel: String) -> Unit,
+    onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
 ) {
-    val activator = config?.findActivator(item.inputSource, item.groupInputKey, item.activatorType)
-    val output = activator?.primaryOutput ?: BindingOutput.Unbound
-    val ready = activator != null
+    // The row preview shows the FULL_PRESS binding; the per-input editor (Brick 3.4) is
+    // where the full activator list lives. When multiple activators are configured we
+    // append "+N more" so the user can tell at a glance the row holds more than they see.
+    val groupInput = config?.let { cfg ->
+        cfg.activeActionSet?.presetFor(item.inputSource)?.group?.inputByKey(item.groupInputKey)
+    }
+    val activators = groupInput?.activators.orEmpty()
+    val primary = activators.firstOrNull { it.activator.type == item.activatorType }
+        ?: activators.firstOrNull()
+    val output = primary?.primaryOutput ?: BindingOutput.Unbound
+    val extraCount = (activators.size - 1).coerceAtLeast(0)
+    val ready = groupInput != null
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clickable(enabled = ready) {
-                activator?.activator?.id?.let { onRequestPicker(it, output, item.label) }
+                onOpenInputEditor(item.inputSource, item.groupInputKey, item.label)
             }
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -294,13 +279,22 @@ private fun BindingRowItem(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Text(
-            text = output.displayLabel(),
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (output == BindingOutput.Unbound)
-                MaterialTheme.colorScheme.onSurfaceVariant
-            else MaterialTheme.colorScheme.primary,
-        )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = output.displayLabel(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (output == BindingOutput.Unbound)
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.primary,
+            )
+            if (extraCount > 0) {
+                Text(
+                    text = "+$extraCount more",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 }

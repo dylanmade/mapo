@@ -11,7 +11,10 @@ import com.mapo.data.model.Profile
 import com.mapo.data.model.RemapTarget
 import com.mapo.data.model.TemplateRef
 import com.mapo.data.model.toKeyLayout
+import com.mapo.data.model.steam.BindingOutput
+import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.repository.AppProfileBindingRepository
+import com.mapo.data.repository.ControllerConfigRepository
 import com.mapo.data.repository.GamepadMappingRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
@@ -53,6 +56,7 @@ class MainViewModelTest {
     private lateinit var layoutRepo: LayoutRepository
     private lateinit var profileRepo: ProfileRepository
     private lateinit var gamepadRepo: GamepadMappingRepository
+    private lateinit var controllerConfigRepo: ControllerConfigRepository
     private lateinit var bindingRepo: AppProfileBindingRepository
     private lateinit var settings: AutoSwitchSettings
     private lateinit var autoSwitcher: ProfileAutoSwitcher
@@ -82,6 +86,7 @@ class MainViewModelTest {
         layoutRepo = mockk(relaxed = true)
         profileRepo = mockk(relaxed = true)
         gamepadRepo = mockk(relaxed = true)
+        controllerConfigRepo = mockk(relaxed = true)
         bindingRepo = mockk(relaxed = true)
         settings = mockk(relaxed = true)
         autoSwitcher = mockk(relaxed = true)
@@ -100,11 +105,13 @@ class MainViewModelTest {
         every { autoSwitcher.events } returns autoSwitchEvents
         every { templateRepo.builtIns } returns emptyList()
         every { templateRepo.allTemplates } returns allTemplates
+        every { controllerConfigRepo.observeActiveConfig(any()) } returns MutableStateFlow<ControllerConfig?>(null)
 
         subject = MainViewModel(
             layoutRepository = layoutRepo,
             profileRepository = profileRepo,
             gampadMappingRepository = gamepadRepo,
+            controllerConfigRepository = controllerConfigRepo,
             appProfileBindingRepository = bindingRepo,
             autoSwitchSettings = settings,
             autoSwitcher = autoSwitcher,
@@ -474,6 +481,26 @@ class MainViewModelTest {
         advanceUntilIdle()
 
         coVerify { gamepadRepo.setMapping(5L, DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER")) }
+    }
+
+    @Test
+    fun setControllerBinding_noActiveProfile_isNoOp() = runTest(testDispatcher) {
+        activeProfile.value = null
+
+        subject.setControllerBinding(activatorId = 42L, output = BindingOutput.KeyPress("ENTER"))
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { controllerConfigRepo.setBinding(any(), any()) }
+    }
+
+    @Test
+    fun setControllerBinding_activeProfile_delegatesToRepository() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 5L, name = "Test")
+
+        subject.setControllerBinding(activatorId = 42L, output = BindingOutput.KeyPress("ENTER"))
+        advanceUntilIdle()
+
+        coVerify { controllerConfigRepo.setBinding(42L, BindingOutput.KeyPress("ENTER")) }
     }
 
     @Test

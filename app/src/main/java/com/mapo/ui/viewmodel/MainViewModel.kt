@@ -26,7 +26,10 @@ import com.mapo.data.model.toJson
 import com.mapo.data.model.toKeyLayout
 import com.mapo.data.model.toSnapshot
 import com.mapo.data.model.wouldOverlap
+import com.mapo.data.model.steam.BindingOutput
+import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.repository.AppProfileBindingRepository
+import com.mapo.data.repository.ControllerConfigRepository
 import com.mapo.data.repository.GamepadMappingRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
@@ -85,6 +88,7 @@ class MainViewModel @Inject constructor(
     private val layoutRepository: LayoutRepository,
     private val profileRepository: ProfileRepository,
     private val gampadMappingRepository: GamepadMappingRepository,
+    private val controllerConfigRepository: ControllerConfigRepository,
     private val appProfileBindingRepository: AppProfileBindingRepository,
     private val autoSwitchSettings: AutoSwitchSettings,
     private val autoSwitcher: ProfileAutoSwitcher,
@@ -167,6 +171,16 @@ class MainViewModel @Inject constructor(
             .flatMapLatest { gampadMappingRepository.getMappingsForProfile(it.id) }
             .map { list -> list.associate { it.gamepadButton to RemapTarget.decode(it.targetEncoded) } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /**
+     * The materialized binding graph for the active profile's active controller.
+     * Auto-seeds a default config on first observation if none exists.
+     * Brick 1.3 uses this in `RemapControlsScreen` and writes back via [setControllerBinding].
+     */
+    val activeControllerConfig: StateFlow<ControllerConfig?> =
+        activeProfile.filterNotNull()
+            .flatMapLatest { controllerConfigRepository.observeActiveConfig(it.id) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val templates: StateFlow<ImmutableList<TemplateRef>> = keyboardTemplateRepository.allTemplates
         .map { it.toImmutableList() }
@@ -310,6 +324,16 @@ class MainViewModel @Inject constructor(
     fun setRemapMapping(button: DeviceButton, target: RemapTarget) {
         val profileId = activeProfile.value?.id ?: return
         viewModelScope.launch { gampadMappingRepository.setMapping(profileId, button, target) }
+    }
+
+    /**
+     * Brick 1.3 binding write path. Replaces the single binding on [activatorId] with [output].
+     * Active-profile guard mirrors [setRemapMapping] — picker round-trips that fire after the
+     * profile is gone become no-ops rather than throwing.
+     */
+    fun setControllerBinding(activatorId: Long, output: BindingOutput) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.setBinding(activatorId, output) }
     }
 
     // ── Navigation ────────────────────────────────────────────────────────────

@@ -61,7 +61,7 @@ Phase 1 is split into four sub-bricks so each lands the build green:
 
 - **1.1 — Schema** ✅ COMPLETED. Entities, enums, DAOs, `SteamTypeConverters`, `AppDatabase` bump to v7, Hilt providers. Old `gamepad_mappings` + `GamepadMappingRepository` still in place; no runtime behavior change yet.
 - **1.2 — Repository + seeding** ✅ COMPLETED. `BindingOutput` sealed wrapper, materialized-graph types (`ControllerConfig`/`ActionSetGraph`/.../`ActivatorGraph`), `ControllerConfigRepository` with `ensureSeeded` / `seedDefaultConfig` / `observeActiveConfig` / `getActiveConfigOnce` / `setBinding`. Auto-seeds on first observe. **No legacy translation** — see Deviations.
-- **1.3 — UI rewrite.** New section-grouped `RemapControlsScreen` reading the new graph. Picker writes via per-binding setter (Phase 0's commit-on-select pattern).
+- **1.3 — UI rewrite** ✅ COMPLETED. `SectionedListDetailPane` reusable master-detail composable with gamepad focus + wraparound. `RemapSections` registry maps the user's Buttons/D-Pad/Triggers/Joysticks/Gyro hierarchy onto the data model. `RemapControlsScreen` rewritten using both, reading from `ControllerConfigRepository` via the new VM surface (`activeControllerConfig` + `setControllerBinding`). Inert Action Set tabs + Layers chip at the top.
 - **1.4 — Cleanup.** Delete `GamepadMappingRepository`, `GamepadMappingDao`, `gamepad_mappings` entity, legacy VM methods. Backfill tests.
 
 ### Deviations from the original schema (decided during 1.1)
@@ -72,6 +72,16 @@ Phase 1 is split into four sub-bricks so each lands the build green:
 - **Legacy `gamepad_mappings` data is wiped on v6→v7 upgrade** (decided in 1.2). Pre-release stance ([memory: project_mapo_pre_release.md](../.claude/projects/-Users-dylanbperry-projects-mapo/memory/project_mapo_pre_release.md)) said destructive OK; the user confirmed they're fine re-creating any test profiles. The repository's `ensureSeeded` path is the only seed mechanism — there is no migrator that reads old rows. If a release-ready migration path is ever needed, write a real Room `Migration(6, 7)` and the repository can stay as-is.
 - **`BindingGroup.settingsJson` defaults to `"{}"`** at seed time. Mode-specific settings (deadzones, sensitivities, etc.) parse from this string in later phases; for brick 1.2 every group has empty settings and a single default sub-input set per mode.
 - **Default seed excludes trackpads, back paddles, gyro.** The schema supports them (for VDF import compatibility) but Generic Android doesn't expose them, so seeding configurable-but-never-fireable groups would just be UI clutter. Imports can still create groups for these sources.
+
+#### Brick 1.3 deviations + decisions
+
+- **Master-detail layout is custom, not `ListDetailPaneScaffold`.** M3's adaptive scaffold is designed for phone↔tablet adaptation; we always want both panes. Built a `SectionedListDetailPane` composable in `app/src/main/java/com/mapo/ui/component/layout/` instead — 30/70 split, M3-styled rail (`surfaceContainer` background, `surfaceContainerHighest` for selection), gamepad focus with wraparound, cross-pane focus handoff via shared `FocusRequester`.
+- **Section hierarchy reorganized from Steam's input-source taxonomy** into Buttons (face + bumpers + menu) / D-Pad / Triggers / Joysticks / Gyro. Lives in `RemapSections.kt` as a typed registry, not in the data layer — section grouping is a UI concept and the user wants flexibility to evolve it independently.
+- **Soft Pull / Analog Output Trigger / Behavior dropdowns / Gyro section ship as disabled placeholders.** Visible in the UI now (so the eventual feature lands without re-doing layout); none have wire-up. SOFT_PRESS activator is Phase 3, behavior-dropdown mode picker is Phase 6, gyro requires Phase 2 motion capture + AYN Thor IMU validation.
+- **Back / Home buttons are NOT added to `DeviceButton` / `InputSource`.** They're inconsistent across Android devices and the user explicitly opted out of including them in 1.3's data layer. Revisit when device-specific capability detection lands.
+- **Action Set tab strip + Layers chip render at the top, fully disabled.** Tab clicks no-op until Phase 4 plumbs `CHANGE_PRESET`; the Layers chip is just a `(no layers)` AssistChip until Phase 5.
+- **The picker stays unchanged.** `RemapTargetPickerScreen` still speaks `RemapTarget`. The bridge happens in `RemapControlsScreen` via `BindingOutput.toRemapTarget()` (opening picker) and `BindingOutput.fromRemapTarget()` (consuming result). New picker categories for `GameAction` / `ControllerAction` / `ModeShift` get added when those phases land.
+- **`GamepadMappingRepository` + the legacy `setRemapMapping` VM method stay in place during 1.3.** Brick 1.4 deletes them once nothing references them outside tests.
 
 ### Goal
 

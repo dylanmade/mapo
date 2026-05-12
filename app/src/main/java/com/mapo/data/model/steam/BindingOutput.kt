@@ -84,3 +84,32 @@ sealed class BindingOutput {
         }
     }
 }
+
+/** One-line display label for a binding output, suitable for trailing row text. */
+fun BindingOutput.displayLabel(): String = when (this) {
+    BindingOutput.Unbound          -> "— Unbound —"
+    is BindingOutput.KeyPress      -> "KB: $keyCode"
+    is BindingOutput.XInputButton  -> "GP: $button"
+    is BindingOutput.MouseButton   -> "MS: $button"
+    is BindingOutput.MouseWheel    -> "MS: $direction"
+    is BindingOutput.GameAction    -> "Action: $setName/$actionName"
+    is BindingOutput.ControllerAction -> "Verb: $verb"
+    is BindingOutput.ModeShift     -> "Mode shift: ${inputSource.name}"
+}
+
+/**
+ * Bridge for the legacy [RemapTarget]-based picker. Steam-Input-only outputs
+ * (GameAction / ControllerAction / ModeShift) have no picker UI yet and collapse
+ * to [RemapTarget.Unbound] — they'll get their own picker categories in
+ * Phases 4 / 5 when the verbs become live.
+ */
+fun BindingOutput.toRemapTarget(): RemapTarget = when (this) {
+    BindingOutput.Unbound        -> RemapTarget.Unbound
+    is BindingOutput.KeyPress    -> RemapTarget.Keyboard(keyCode)
+    is BindingOutput.MouseButton -> RemapTarget.Mouse(button)
+    is BindingOutput.MouseWheel  -> RemapTarget.Mouse(direction)
+    is BindingOutput.XInputButton -> RemapTarget.Gamepad(button)
+    is BindingOutput.GameAction,
+    is BindingOutput.ControllerAction,
+    is BindingOutput.ModeShift   -> RemapTarget.Unbound
+}

@@ -224,6 +224,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     }
 
     val activeProfileMappings by viewModel.activeProfileMappings.collectAsStateWithLifecycle()
+    val activeControllerConfig by viewModel.activeControllerConfig.collectAsStateWithLifecycle()
     val remapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -533,13 +534,13 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     .getStateFlow<String?>(MapoRoute.PICKER_RESULT_KEY, null)
                     .collectAsStateWithLifecycle()
                 RemapControlsScreen(
-                    mappings = activeProfileMappings,
+                    config = activeControllerConfig,
                     pickerResult = pickerResult?.let { RemapTarget.decode(it) },
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
                     },
-                    onPickResult = { button, target ->
-                        viewModel.setRemapMapping(button, target)
+                    onPickResult = { activatorId, output ->
+                        viewModel.setControllerBinding(activatorId, output)
                     },
                     onBack = { navController.popBackStack() },
                     onOpenPicker = { title, current ->

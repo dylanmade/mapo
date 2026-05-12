@@ -88,3 +88,21 @@ enum class InputSource {
     SWITCH_BACK_RIGHT,
     GYRO,
 }
+
+fun InputSource.displayName(): String = when (this) {
+    InputSource.BUTTON_DIAMOND -> "Face Buttons"
+    InputSource.DPAD -> "D-Pad"
+    InputSource.LEFT_BUMPER -> "Left Bumper"
+    InputSource.RIGHT_BUMPER -> "Right Bumper"
+    InputSource.LEFT_TRIGGER -> "Left Trigger"
+    InputSource.RIGHT_TRIGGER -> "Right Trigger"
+    InputSource.LEFT_JOYSTICK -> "Left Joystick"
+    InputSource.RIGHT_JOYSTICK -> "Right Joystick"
+    InputSource.LEFT_TRACKPAD -> "Left Trackpad"
+    InputSource.RIGHT_TRACKPAD -> "Right Trackpad"
+    InputSource.SWITCH_START -> "Start"
+    InputSource.SWITCH_SELECT -> "Select"
+    InputSource.SWITCH_BACK_LEFT -> "Back Paddle (L)"
+    InputSource.SWITCH_BACK_RIGHT -> "Back Paddle (R)"
+    InputSource.GYRO -> "Gyro"
+}

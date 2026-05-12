@@ -66,3 +66,18 @@ data class ActivatorGraph(
             ?.let { BindingOutput.fromEntity(it.outputType, it.args) }
             ?: BindingOutput.Unbound
 }
+
+/**
+ * Resolve `(input source, sub-input, activator type)` on the active action set to a
+ * specific [ActivatorGraph]. Returns null if any step doesn't exist (e.g. the seed
+ * didn't create that group, or the activator type isn't attached).
+ */
+fun ControllerConfig.findActivator(
+    inputSource: InputSource,
+    inputKey: String,
+    activatorType: ActivatorType = ActivatorType.FULL_PRESS,
+): ActivatorGraph? = activeActionSet
+    ?.presetFor(inputSource)
+    ?.group
+    ?.inputByKey(inputKey)
+    ?.firstActivatorOfType(activatorType)

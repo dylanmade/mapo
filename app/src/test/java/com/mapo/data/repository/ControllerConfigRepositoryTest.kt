@@ -54,6 +54,7 @@ class ControllerConfigRepositoryTest {
             controllerProfileDao,
             actionSetDao,
             actionLayerDao,
+            gameActionDao,
             bindingGroupDao,
             groupInputDao,
             activatorDao,
@@ -223,6 +224,87 @@ class ControllerConfigRepositoryTest {
         assertEquals(1, updated.bindings.size)
         assertEquals(BindingOutputType.UNBOUND, updated.bindings[0].outputType)
         assertEquals(BindingOutput.Unbound, updated.primaryOutput)
+    }
+
+    @Test
+    fun copyConfig_emptySource_isNoOp() = runTest {
+        subject.copyConfig(sourceProfileId = 1L, destProfileId = 2L)
+
+        assertTrue(controllerProfileDao.getByProfile(2L).isEmpty())
+    }
+
+    @Test
+    fun copyConfig_seededSource_producesEquivalentGraphForDest() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        val sourceCfg = subject.getActiveConfigOnce(1L)!!
+
+        subject.copyConfig(sourceProfileId = 1L, destProfileId = 2L)
+        val destCfg = subject.getActiveConfigOnce(2L)!!
+
+        assertEquals(sourceCfg.controllerProfile.name, destCfg.controllerProfile.name)
+        assertEquals(sourceCfg.actionSets.size, destCfg.actionSets.size)
+        val sourceFace = sourceCfg.activeActionSet!!.presetFor(InputSource.BUTTON_DIAMOND)!!.group
+        val destFace = destCfg.activeActionSet!!.presetFor(InputSource.BUTTON_DIAMOND)!!.group
+        assertEquals(
+            sourceFace.inputs.map { it.input.inputKey },
+            destFace.inputs.map { it.input.inputKey },
+        )
+    }
+
+    @Test
+    fun copyConfig_clonedGraphHasFreshIds() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        subject.copyConfig(sourceProfileId = 1L, destProfileId = 2L)
+
+        // The "duplicates own their data" invariant: every cloned row gets a new PK and the
+        // source's PKs must not appear under the destination.
+        val sourceCp = controllerProfileDao.getByProfile(1L).single()
+        val destCp = controllerProfileDao.getByProfile(2L).single()
+        assertFalse(sourceCp.id == destCp.id)
+
+        val sourceSetIds = actionSetDao.getByControllerProfile(sourceCp.id).map { it.id }.toSet()
+        val destSetIds = actionSetDao.getByControllerProfile(destCp.id).map { it.id }.toSet()
+        assertTrue("Cloned action sets must use new PKs", (sourceSetIds intersect destSetIds).isEmpty())
+    }
+
+    @Test
+    fun copyConfig_preservesBindings() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        val sourceCfg = subject.getActiveConfigOnce(1L)!!
+        val aActivator = sourceCfg.activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+            .activators[0].activator.id
+        subject.setBinding(aActivator, BindingOutput.KeyPress("ENTER"))
+
+        subject.copyConfig(sourceProfileId = 1L, destProfileId = 2L)
+
+        val destAOutput = subject.getActiveConfigOnce(2L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+            .activators[0].primaryOutput
+        assertEquals(BindingOutput.KeyPress("ENTER"), destAOutput)
+    }
+
+    @Test
+    fun copyConfig_editsToDestDoNotAffectSource() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        subject.copyConfig(sourceProfileId = 1L, destProfileId = 2L)
+
+        val destAActivator = subject.getActiveConfigOnce(2L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+            .activators[0].activator.id
+        subject.setBinding(destAActivator, BindingOutput.KeyPress("ESCAPE"))
+
+        val sourceAOutput = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+            .activators[0].primaryOutput
+        assertEquals(BindingOutput.Unbound, sourceAOutput)
     }
 
     @Test

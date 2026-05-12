@@ -23,7 +23,7 @@ import org.junit.Test
 /**
  * Hand-rolled fakes for the DAOs (interfaces). [LayoutRepository] is real,
  * wrapping the fake LayoutDao, so [ProfileRepository.addProfile]'s seedDefaults
- * call exercises the real seeding logic. [GamepadMappingRepository] is mocked
+ * call exercises the real seeding logic. [ControllerConfigRepository] is mocked
  * since its internals aren't relevant to these tests.
  */
 class ProfileRepositoryTest {
@@ -31,7 +31,7 @@ class ProfileRepositoryTest {
     private lateinit var profileDao: FakeProfileDao
     private lateinit var layoutDao: FakeLayoutDao
     private lateinit var layoutRepo: LayoutRepository
-    private lateinit var gamepadRepo: GamepadMappingRepository
+    private lateinit var controllerConfigRepo: ControllerConfigRepository
     private lateinit var subject: ProfileRepository
 
     @Before
@@ -39,14 +39,14 @@ class ProfileRepositoryTest {
         profileDao = FakeProfileDao()
         layoutDao = FakeLayoutDao()
         layoutRepo = LayoutRepository(layoutDao)
-        gamepadRepo = mockk(relaxed = true)
-        coEvery { gamepadRepo.copyMappings(any(), any()) } returns Unit
+        controllerConfigRepo = mockk(relaxed = true)
+        coEvery { controllerConfigRepo.copyConfig(any(), any()) } returns Unit
 
         subject = ProfileRepository(
             profileDao = profileDao,
             layoutDao = layoutDao,
             layoutRepository = layoutRepo,
-            gamepadMappingRepo = gamepadRepo,
+            controllerConfigRepository = controllerConfigRepo,
         )
     }
 
@@ -99,7 +99,7 @@ class ProfileRepositoryTest {
 
         val copyId = profileDao.allOnce().first { it.name == "Copy" }.id
         assertEquals(seededCount, layoutDao.getByProfileOnce(copyId).size)
-        coVerify { gamepadRepo.copyMappings(sourceProfileId = sourceId, destProfileId = copyId) }
+        coVerify { controllerConfigRepo.copyConfig(sourceProfileId = sourceId, destProfileId = copyId) }
     }
 
     @Test

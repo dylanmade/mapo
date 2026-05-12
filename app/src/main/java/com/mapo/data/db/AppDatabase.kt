@@ -17,7 +17,6 @@ import com.mapo.data.db.steam.GroupInputDao
 import com.mapo.data.db.steam.PresetBindingDao
 import com.mapo.data.db.steam.SteamTypeConverters
 import com.mapo.data.model.AppProfileBinding
-import com.mapo.data.model.GamepadMapping
 import com.mapo.data.model.KeyLayout
 import com.mapo.data.model.KeyboardTemplate
 import com.mapo.data.model.Profile
@@ -35,7 +34,6 @@ import com.mapo.data.model.steam.PresetBinding
     entities = [
         KeyLayout::class,
         Profile::class,
-        GamepadMapping::class,
         AppProfileBinding::class,
         KeyboardTemplate::class,
         ControllerProfile::class,
@@ -48,7 +46,7 @@ import com.mapo.data.model.steam.PresetBinding
         Binding::class,
         PresetBinding::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(SteamTypeConverters::class)
@@ -56,7 +54,6 @@ abstract class AppDatabase : RoomDatabase() {
 
     abstract fun layoutDao(): LayoutDao
     abstract fun profileDao(): ProfileDao
-    abstract fun gamepadMappingDao(): GamepadMappingDao
     abstract fun appProfileBindingDao(): AppProfileBindingDao
     abstract fun keyboardTemplateDao(): KeyboardTemplateDao
 

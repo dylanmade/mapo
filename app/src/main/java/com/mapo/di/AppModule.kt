@@ -3,7 +3,6 @@ package com.mapo.di
 import android.content.Context
 import com.mapo.data.db.AppDatabase
 import com.mapo.data.db.AppProfileBindingDao
-import com.mapo.data.db.GamepadMappingDao
 import com.mapo.data.db.KeyboardTemplateDao
 import com.mapo.data.db.LayoutDao
 import com.mapo.data.db.ProfileDao
@@ -39,10 +38,6 @@ object AppModule {
     @Provides
     @Singleton
     fun provideProfileDao(db: AppDatabase): ProfileDao = db.profileDao()
-
-    @Provides
-    @Singleton
-    fun provideGamepadMappingDao(db: AppDatabase): GamepadMappingDao = db.gamepadMappingDao()
 
     @Provides
     @Singleton

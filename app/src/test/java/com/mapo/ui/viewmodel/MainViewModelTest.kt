@@ -1,8 +1,6 @@
 package com.mapo.ui.viewmodel
 
 import com.mapo.data.model.AppProfileBinding
-import com.mapo.data.model.DeviceButton
-import com.mapo.data.model.GamepadMapping
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.onTapTarget
@@ -15,7 +13,6 @@ import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.repository.AppProfileBindingRepository
 import com.mapo.data.repository.ControllerConfigRepository
-import com.mapo.data.repository.GamepadMappingRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
@@ -55,7 +52,6 @@ class MainViewModelTest {
 
     private lateinit var layoutRepo: LayoutRepository
     private lateinit var profileRepo: ProfileRepository
-    private lateinit var gamepadRepo: GamepadMappingRepository
     private lateinit var controllerConfigRepo: ControllerConfigRepository
     private lateinit var bindingRepo: AppProfileBindingRepository
     private lateinit var settings: AutoSwitchSettings
@@ -67,7 +63,6 @@ class MainViewModelTest {
     private val activeProfile = MutableStateFlow<Profile?>(null)
     private val allProfiles = MutableStateFlow<List<Profile>>(emptyList())
     private val allBindings = MutableStateFlow<List<AppProfileBinding>>(emptyList())
-    private val allMappings = MutableStateFlow<List<GamepadMapping>>(emptyList())
     private val allLayouts = MutableStateFlow<List<KeyLayout>>(emptyList())
     private val allTemplates = MutableStateFlow<List<TemplateRef>>(emptyList())
     private val autoSwitchEvents = MutableSharedFlow<ProfileAutoSwitcher.UiEvent>(
@@ -85,7 +80,6 @@ class MainViewModelTest {
 
         layoutRepo = mockk(relaxed = true)
         profileRepo = mockk(relaxed = true)
-        gamepadRepo = mockk(relaxed = true)
         controllerConfigRepo = mockk(relaxed = true)
         bindingRepo = mockk(relaxed = true)
         settings = mockk(relaxed = true)
@@ -97,7 +91,6 @@ class MainViewModelTest {
         every { profileRepo.activeProfile } returns activeProfile
         every { profileRepo.getAllProfiles() } returns allProfiles
         every { bindingRepo.getAll() } returns allBindings
-        every { gamepadRepo.getMappingsForProfile(any()) } returns allMappings
         every { layoutRepo.getLayoutsByProfile(any()) } returns allLayouts
         every { settings.autoSwitchEnabled } returns autoSwitchEnabled
         every { settings.autoCreateProfilesEnabled } returns autoCreateEnabled
@@ -110,7 +103,6 @@ class MainViewModelTest {
         subject = MainViewModel(
             layoutRepository = layoutRepo,
             profileRepository = profileRepo,
-            gampadMappingRepository = gamepadRepo,
             controllerConfigRepository = controllerConfigRepo,
             appProfileBindingRepository = bindingRepo,
             autoSwitchSettings = settings,
@@ -444,46 +436,6 @@ class MainViewModelTest {
     }
 
     @Test
-    fun saveRemapMappings_noActiveProfile_isNoOp() = runTest(testDispatcher) {
-        activeProfile.value = null
-
-        subject.saveRemapMappings(emptyMap())
-        advanceUntilIdle()
-
-        coVerify(exactly = 0) { gamepadRepo.saveMappings(any(), any()) }
-    }
-
-    @Test
-    fun saveRemapMappings_activeProfile_delegatesToRepository() = runTest(testDispatcher) {
-        activeProfile.value = Profile(id = 5L, name = "Test")
-
-        subject.saveRemapMappings(emptyMap())
-        advanceUntilIdle()
-
-        coVerify { gamepadRepo.saveMappings(5L, emptyMap()) }
-    }
-
-    @Test
-    fun setRemapMapping_noActiveProfile_isNoOp() = runTest(testDispatcher) {
-        activeProfile.value = null
-
-        subject.setRemapMapping(DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER"))
-        advanceUntilIdle()
-
-        coVerify(exactly = 0) { gamepadRepo.setMapping(any(), any(), any()) }
-    }
-
-    @Test
-    fun setRemapMapping_activeProfile_delegatesToRepository() = runTest(testDispatcher) {
-        activeProfile.value = Profile(id = 5L, name = "Test")
-
-        subject.setRemapMapping(DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER"))
-        advanceUntilIdle()
-
-        coVerify { gamepadRepo.setMapping(5L, DeviceButton.BUTTON_A, RemapTarget.Keyboard("ENTER")) }
-    }
-
-    @Test
     fun setControllerBinding_noActiveProfile_isNoOp() = runTest(testDispatcher) {
         activeProfile.value = null
 
@@ -677,25 +629,6 @@ class MainViewModelTest {
     fun onDragEnd_alwaysDelegatesToDispatcher() {
         subject.onDragEnd()
         verify { inputDispatcher.endMouseDrag() }
-    }
-
-    @Test
-    fun activeProfileMappings_pushesDeviceButtonMapToDispatcher() = runTest(testDispatcher) {
-        val profile = Profile(id = 1L, name = "Test")
-        activeProfile.value = profile
-        // Stub the gamepad mappings flow with one valid + one invalid (unparseable) entry
-        // to verify mapNotNull discards the bad one before pushing to the dispatcher.
-        allMappings.value = listOf(
-            GamepadMapping(profileId = 1L, gamepadButton = "BUTTON_A", targetEncoded = "keyboard:ENTER"),
-            GamepadMapping(profileId = 1L, gamepadButton = "NOT_A_DEVICE_BUTTON", targetEncoded = "keyboard:X"),
-        )
-        advanceUntilIdle()
-
-        verify {
-            inputDispatcher.setCurrentMappings(
-                mapOf(com.mapo.data.model.DeviceButton.BUTTON_A to RemapTarget.Keyboard("ENTER")),
-            )
-        }
     }
 
     // ── Button CRUD ───────────────────────────────────────────────────────────

@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapo.data.defaults.DefaultLayouts
 import com.mapo.data.model.AppProfileBinding
-import com.mapo.data.model.DeviceButton
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.LayoutSnapshot
@@ -30,7 +29,6 @@ import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.repository.AppProfileBindingRepository
 import com.mapo.data.repository.ControllerConfigRepository
-import com.mapo.data.repository.GamepadMappingRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
@@ -87,7 +85,6 @@ sealed class TabUiEvent {
 class MainViewModel @Inject constructor(
     private val layoutRepository: LayoutRepository,
     private val profileRepository: ProfileRepository,
-    private val gampadMappingRepository: GamepadMappingRepository,
     private val controllerConfigRepository: ControllerConfigRepository,
     private val appProfileBindingRepository: AppProfileBindingRepository,
     private val autoSwitchSettings: AutoSwitchSettings,
@@ -166,16 +163,14 @@ class MainViewModel @Inject constructor(
 
     val autoSwitchEvents: SharedFlow<ProfileAutoSwitcher.UiEvent> = autoSwitcher.events
 
-    val activeProfileMappings: StateFlow<Map<String, RemapTarget>> =
-        activeProfile.filterNotNull()
-            .flatMapLatest { gampadMappingRepository.getMappingsForProfile(it.id) }
-            .map { list -> list.associate { it.gamepadButton to RemapTarget.decode(it.targetEncoded) } }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
-
     /**
      * The materialized binding graph for the active profile's active controller.
      * Auto-seeds a default config on first observation if none exists.
-     * Brick 1.3 uses this in `RemapControlsScreen` and writes back via [setControllerBinding].
+     * `RemapControlsScreen` reads this and writes back via [setControllerBinding].
+     *
+     * Runtime input dispatch is NOT wired to this graph yet — brick 1.4 removed the
+     * legacy gamepad-mapping pipeline, so `InputDispatcher.currentMappings` stays empty
+     * until Phase 2 (runtime evaluator) reads bindings out of this graph directly.
      */
     val activeControllerConfig: StateFlow<ControllerConfig?> =
         activeProfile.filterNotNull()
@@ -214,17 +209,6 @@ class MainViewModel @Inject constructor(
                 if (_selectedIndex.value >= roomLayouts.size) {
                     _selectedIndex.value = (roomLayouts.size - 1).coerceAtLeast(0)
                 }
-            }
-        }
-        viewModelScope.launch {
-            activeProfileMappings.collect { rawMappings ->
-                val mapped = rawMappings
-                    .mapNotNull { (key, value) ->
-                        runCatching { DeviceButton.valueOf(key) }.getOrNull()?.let { it to value }
-                    }
-                    .toMap()
-                inputDispatcher.setCurrentMappings(mapped)
-                android.util.Log.d("MainViewModel", "Pushed ${mapped.size} remap entries to dispatcher: $mapped")
             }
         }
         viewModelScope.launch {
@@ -316,20 +300,10 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch { appProfileBindingRepository.unbind(packageName, subId) }
     }
 
-    fun saveRemapMappings(draft: Map<DeviceButton, RemapTarget>) {
-        val profileId = activeProfile.value?.id ?: return
-        viewModelScope.launch { gampadMappingRepository.saveMappings(profileId, draft) }
-    }
-
-    fun setRemapMapping(button: DeviceButton, target: RemapTarget) {
-        val profileId = activeProfile.value?.id ?: return
-        viewModelScope.launch { gampadMappingRepository.setMapping(profileId, button, target) }
-    }
-
     /**
-     * Brick 1.3 binding write path. Replaces the single binding on [activatorId] with [output].
-     * Active-profile guard mirrors [setRemapMapping] — picker round-trips that fire after the
-     * profile is gone become no-ops rather than throwing.
+     * Replaces the single binding on [activatorId] with [output]. Active-profile guard
+     * means picker round-trips that fire after the profile is gone become no-ops
+     * rather than throwing.
      */
     fun setControllerBinding(activatorId: Long, output: BindingOutput) {
         if (activeProfile.value == null) return

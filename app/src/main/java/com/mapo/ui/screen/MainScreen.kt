@@ -223,7 +223,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         }
     }
 
-    val activeProfileMappings by viewModel.activeProfileMappings.collectAsStateWithLifecycle()
     val activeControllerConfig by viewModel.activeControllerConfig.collectAsStateWithLifecycle()
     val remapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
 

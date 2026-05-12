@@ -24,7 +24,7 @@ class ProfileRepository @Inject constructor(
     private val profileDao: ProfileDao,
     private val layoutDao: LayoutDao,
     private val layoutRepository: LayoutRepository,
-    private val gamepadMappingRepo: GamepadMappingRepository
+    private val controllerConfigRepository: ControllerConfigRepository,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -85,7 +85,7 @@ class ProfileRepository @Inject constructor(
                 )
             }
         }
-        gamepadMappingRepo.copyMappings(source.id, newId)
+        controllerConfigRepository.copyConfig(source.id, newId)
     }
 
     suspend fun deleteProfile(profile: Profile) {

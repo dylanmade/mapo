@@ -36,7 +36,9 @@ import com.mapo.data.settings.AutoSwitchSettings
 import com.mapo.di.IoDispatcher
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
+import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.InputDispatcher
+import com.mapo.service.input.toCompiled
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.BufferOverflow
@@ -209,6 +211,16 @@ class MainViewModel @Inject constructor(
                 if (_selectedIndex.value >= roomLayouts.size) {
                     _selectedIndex.value = (roomLayouts.size - 1).coerceAtLeast(0)
                 }
+            }
+        }
+        viewModelScope.launch {
+            activeControllerConfig.collect { config ->
+                val compiled = config?.toCompiled() ?: CompiledConfig.EMPTY
+                inputDispatcher.setCompiledConfig(compiled)
+                android.util.Log.d(
+                    "MainViewModel",
+                    "Published CompiledConfig: activeSet=${compiled.activeActionSetId} inputs=${compiled.inputs.size}",
+                )
             }
         }
         viewModelScope.launch {

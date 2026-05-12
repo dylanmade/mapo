@@ -182,6 +182,22 @@ The Action Set / Layers UI is present-but-empty for Phase 1 — no add/remove ye
 
 ## Phase 2 — Input pipeline upgrade (analog capture + runtime evaluator)
 
+### Progress
+
+Phase 2 is split into four sub-bricks so each lands the build green:
+
+- **2.1 — CompiledConfig + plumbing** ✅ COMPLETED. New `CompiledConfig` / `InputAddress` / `CompiledInput` / `CompiledActivator` types + `ControllerConfig.toCompiled()` compiler under `app/src/main/java/com/mapo/service/input/CompiledConfig.kt`. `InputDispatcher.compiledConfig` StateFlow added alongside the legacy `currentMappings` (not replacing it yet); `MainViewModel` collects `activeControllerConfig` and publishes compiled snapshots into the dispatcher. Compiler tests under `app/src/test/java/com/mapo/service/input/CompiledConfigTest.kt` cover round-trip, state-filter, multi-activator preservation, cycle-binding order, and missing-address null. Nothing fires at runtime yet — that's brick 2.2.
+- **2.2 — InputEvaluator + OutputEmitter (digital, FULL_PRESS-only).** Build the state machine scaffold for FULL_PRESS. OutputEmitter handles KeyPress / MouseButton / MouseWheel / XInputButton / Unbound; stubs/logs for GameAction / ControllerAction / ModeShift. Service `onKeyEvent` routes through the evaluator when remap is on. **End of 2.2: physical button remap is alive again on the new schema.**
+- **2.3 — Analog capture.** Override `onGenericMotionEvent`. Decode axes, normalize with deadzones from `BindingGroup.settingsJson`. Trigger axes synthesize click semantics for now (real analog modes are Phase 6).
+- **2.4 — Cleanup.** Delete `InputDispatcher.currentMappings` + `setCurrentMappings` + the old `dispatchRemapTarget` path used for physical remap. The virtual-keyboard `dispatchTargetAsClick` flow stays.
+
+#### Brick 2.1 deviations + decisions
+
+- **Layer overrides not yet honored.** Phase 2.1 compiles only the base action set; layers come online in Phase 5. The compiler comment marks this explicitly.
+- **State qualifier filter is exact-match "active".** Real Steam configs comma-join state qualifiers (`"active,modeshift"`) but our seed never produces those; defer compound-state parsing to whenever a config actually carries one.
+- **`CompiledConfig.EMPTY` is a shared singleton.** Cheaper than re-allocating for null configs (which happens transiently during seeding). Also exported as the dispatcher's default so the service never sees a null compiled config.
+- **The compiler is a pure extension function**, not a method on the repository. Compilation runs on the same dispatcher the VM uses (the collector's coroutine); the materialized graph is already in memory by the time it's called.
+
 ### Why now
 
 Steam Input semantics (activators with timing, layer stacks, mode-shift, mode-based interpretation) can't be implemented by tweaking the current `currentMappings: Map<DeviceButton, RemapTarget>` lookup in `InputAccessibilityService.onKeyEvent` — they require a stateful per-frame evaluator. Build it once now, on top of the Phase 1 data model, so every later feature plugs in cleanly.

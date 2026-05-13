@@ -9,32 +9,10 @@ import com.mapo.data.model.TemplateRef
  */
 sealed class TabActionDialog {
 
-    data class Configure(
-        val layoutId: Long,
-        val name: String,
-        val cols: Int,
-        val rows: Int,
-        val bgColor: Int?,
-        val originalName: String?
-    ) : TabActionDialog()
-
-    data class ResetConfirm(
-        val layoutId: Long,
-        val currentName: String,
-        val originalName: String,
-        val configDraft: Configure
-    ) : TabActionDialog()
-
     data class RemoveConfirm(
         val layoutId: Long,
         val name: String,
         val profileName: String
-    ) : TabActionDialog()
-
-    data class ResizeConflict(
-        val layoutId: Long,
-        val draft: Configure,
-        val offendingLabels: List<String>
     ) : TabActionDialog()
 
     data class SaveTemplateChooser(

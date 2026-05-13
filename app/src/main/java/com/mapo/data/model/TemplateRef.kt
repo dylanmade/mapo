@@ -5,7 +5,22 @@ sealed class TemplateRef {
     abstract val columns: Int
     abstract val rows: Int
     abstract val buttons: List<GridButton>
-    abstract val backgroundColorArgb: Int?
+
+    abstract val fillEnabled: Boolean
+    abstract val fillColorArgb: Int?
+    abstract val fillIsAuto: Boolean
+
+    abstract val outlineEnabled: Boolean
+    abstract val outlineColorArgb: Int?
+    abstract val outlineIsAuto: Boolean
+
+    abstract val bevelEnabled: Boolean
+    abstract val bevelColorArgb: Int?
+    abstract val bevelIsAuto: Boolean
+
+    abstract val shadowEnabled: Boolean
+    abstract val shadowColorArgb: Int?
+    abstract val shadowIsAuto: Boolean
 
     data class BuiltIn(
         val key: String,
@@ -13,7 +28,18 @@ sealed class TemplateRef {
         override val columns: Int,
         override val rows: Int,
         override val buttons: List<GridButton>,
-        override val backgroundColorArgb: Int? = null
+        override val fillEnabled: Boolean = true,
+        override val fillColorArgb: Int? = null,
+        override val fillIsAuto: Boolean = true,
+        override val outlineEnabled: Boolean = false,
+        override val outlineColorArgb: Int? = null,
+        override val outlineIsAuto: Boolean = true,
+        override val bevelEnabled: Boolean = false,
+        override val bevelColorArgb: Int? = null,
+        override val bevelIsAuto: Boolean = true,
+        override val shadowEnabled: Boolean = false,
+        override val shadowColorArgb: Int? = null,
+        override val shadowIsAuto: Boolean = true,
     ) : TemplateRef()
 
     data class User(
@@ -22,7 +48,18 @@ sealed class TemplateRef {
         override val columns: Int,
         override val rows: Int,
         override val buttons: List<GridButton>,
-        override val backgroundColorArgb: Int?
+        override val fillEnabled: Boolean = true,
+        override val fillColorArgb: Int? = null,
+        override val fillIsAuto: Boolean = true,
+        override val outlineEnabled: Boolean = false,
+        override val outlineColorArgb: Int? = null,
+        override val outlineIsAuto: Boolean = true,
+        override val bevelEnabled: Boolean = false,
+        override val bevelColorArgb: Int? = null,
+        override val bevelIsAuto: Boolean = true,
+        override val shadowEnabled: Boolean = false,
+        override val shadowColorArgb: Int? = null,
+        override val shadowIsAuto: Boolean = true,
     ) : TemplateRef()
 }
 
@@ -32,13 +69,35 @@ fun TemplateRef.toGridLayout(id: Long = 0L): GridLayout = GridLayout(
     columns = columns,
     rows = rows,
     buttons = buttons,
-    backgroundColorArgb = backgroundColorArgb
+    fillEnabled = fillEnabled,
+    fillColorArgb = fillColorArgb,
+    fillIsAuto = fillIsAuto,
+    outlineEnabled = outlineEnabled,
+    outlineColorArgb = outlineColorArgb,
+    outlineIsAuto = outlineIsAuto,
+    bevelEnabled = bevelEnabled,
+    bevelColorArgb = bevelColorArgb,
+    bevelIsAuto = bevelIsAuto,
+    shadowEnabled = shadowEnabled,
+    shadowColorArgb = shadowColorArgb,
+    shadowIsAuto = shadowIsAuto,
 )
 
 fun TemplateRef.toSnapshot(): LayoutSnapshot = LayoutSnapshot(
     name = name,
     columns = columns,
     rows = rows,
-    backgroundColorArgb = backgroundColorArgb,
-    buttons = buttons
+    buttons = buttons,
+    fillEnabled = fillEnabled,
+    fillColorArgb = fillColorArgb,
+    fillIsAuto = fillIsAuto,
+    outlineEnabled = outlineEnabled,
+    outlineColorArgb = outlineColorArgb,
+    outlineIsAuto = outlineIsAuto,
+    bevelEnabled = bevelEnabled,
+    bevelColorArgb = bevelColorArgb,
+    bevelIsAuto = bevelIsAuto,
+    shadowEnabled = shadowEnabled,
+    shadowColorArgb = shadowColorArgb,
+    shadowIsAuto = shadowIsAuto,
 )

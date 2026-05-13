@@ -115,7 +115,9 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Shape
 import com.mapo.ui.component.MapoIcons
+import com.mapo.ui.util.keyboardButtonParentColor
 import com.mapo.ui.util.resolveAutoColors
+import com.mapo.ui.util.resolveAutoLayoutColors
 import com.mapo.data.model.isTrackpad
 import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
@@ -195,21 +197,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     LaunchedEffect(Unit) {
         viewModel.tabUiEvents.collect { event ->
             when (event) {
-                is TabUiEvent.ConfigureConflict -> {
-                    val draft = TabActionDialog.Configure(
-                        layoutId = event.layoutId,
-                        name = event.name,
-                        cols = event.cols,
-                        rows = event.rows,
-                        bgColor = event.bgColor,
-                        originalName = (tabActionDialog as? TabActionDialog.Configure)?.originalName
-                    )
-                    tabActionDialog = TabActionDialog.ResizeConflict(
-                        layoutId = event.layoutId,
-                        draft = draft,
-                        offendingLabels = event.offendingLabels
-                    )
-                }
                 is TabUiEvent.TemplateNameConflict -> {
                     tabActionDialog = TabActionDialog.TemplateNameConflict(
                         layoutId = event.layoutId,
@@ -411,17 +398,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                                 else viewModel.enterEditMode(displayLayout.id)
                             },
                             onMenuConfigure = { id ->
-                                val layout = layouts.find { it.id == id }
-                                if (layout != null) {
-                                    tabActionDialog = TabActionDialog.Configure(
-                                        layoutId = id,
-                                        name = layout.name,
-                                        cols = layout.columns,
-                                        rows = layout.rows,
-                                        bgColor = layout.backgroundColorArgb,
-                                        originalName = viewModel.originalNames.value[id]
-                                    )
-                                }
+                                navController.navigate(MapoRoute.configureKeyboard(id))
                             },
                             onMenuDuplicate = { id -> viewModel.duplicateKeyboard(id) },
                             onMenuRemove = { id ->
@@ -454,57 +431,63 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser }
                         )
 
-                        KeyGrid(
+                        KeyboardSurface(
                             layout = displayLayout,
-                            isEditMode = isEditMode,
-                            selectedButtonId = selectedButtonId,
-                            onButtonTap = viewModel::onButtonTap,
-                            onButtonDoubleTap = viewModel::onButtonDoubleTap,
-                            onButtonHold = viewModel::onButtonHold,
-                            onSelectButton = viewModel::selectButton,
-                            onMoveButton = viewModel::moveButton,
-                            onResizeButton = { id, c, r, cs, rs ->
-                                viewModel.resizeButton(id, c, r, cs, rs)
-                            },
-                            onDragStart = viewModel::onDragStart,
-                            onMouseMove = viewModel::onMouseMove,
-                            onDragEnd = viewModel::onDragEnd,
-                            onTrackpadGesture = viewModel::onTrackpadGesture,
-                            onConfigureButton = { id ->
-                                val btn = displayLayout.buttons.find { it.id == id }
-                                if (btn != null) {
-                                    // The configure screen is instant-commit; setting selectedButtonId
-                                    // here makes viewModel.updateSelectedButton apply to the right one.
-                                    viewModel.selectButtonOnly(id)
-                                    navController.navigate(MapoRoute.configureButton(id))
-                                }
-                            },
-                            onDuplicateButton = { id -> viewModel.duplicateButton(id) },
-                            onRemoveButton = { id ->
-                                val btn = displayLayout.buttons.find { it.id == id }
-                                if (btn != null) {
-                                    tabActionDialog = TabActionDialog.RemoveButtonConfirm(
-                                        buttonId = id,
-                                        buttonLabel = btn.label
-                                    )
-                                }
-                            },
-                            onAddAtCell = { col, row ->
-                                // Instant-commit add: create a default key-button at the cell first,
-                                // then navigate to its config screen for further editing. Backing out
-                                // leaves the button in place; the user removes it via long-press if
-                                // they didn't actually want it.
-                                viewModel.addButtonAt(col, row, GridButton(col = col, row = row, type = "key"))
-                                viewModel.selectedButtonId.value?.let { newId ->
-                                    navController.navigate(MapoRoute.configureButton(newId))
-                                }
-                            },
-                            onLongPressEmptyArea = { viewModel.enterEditMode(displayLayout.id) },
+                            themeFallback = MaterialTheme.colorScheme.surface,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
-                                .padding(4.dp)
-                        )
+                                .padding(4.dp),
+                        ) {
+                            KeyGrid(
+                                layout = displayLayout,
+                                isEditMode = isEditMode,
+                                selectedButtonId = selectedButtonId,
+                                onButtonTap = viewModel::onButtonTap,
+                                onButtonDoubleTap = viewModel::onButtonDoubleTap,
+                                onButtonHold = viewModel::onButtonHold,
+                                onSelectButton = viewModel::selectButton,
+                                onMoveButton = viewModel::moveButton,
+                                onResizeButton = { id, c, r, cs, rs ->
+                                    viewModel.resizeButton(id, c, r, cs, rs)
+                                },
+                                onDragStart = viewModel::onDragStart,
+                                onMouseMove = viewModel::onMouseMove,
+                                onDragEnd = viewModel::onDragEnd,
+                                onTrackpadGesture = viewModel::onTrackpadGesture,
+                                onConfigureButton = { id ->
+                                    val btn = displayLayout.buttons.find { it.id == id }
+                                    if (btn != null) {
+                                        // The configure screen is instant-commit; setting selectedButtonId
+                                        // here makes viewModel.updateSelectedButton apply to the right one.
+                                        viewModel.selectButtonOnly(id)
+                                        navController.navigate(MapoRoute.configureButton(id))
+                                    }
+                                },
+                                onDuplicateButton = { id -> viewModel.duplicateButton(id) },
+                                onRemoveButton = { id ->
+                                    val btn = displayLayout.buttons.find { it.id == id }
+                                    if (btn != null) {
+                                        tabActionDialog = TabActionDialog.RemoveButtonConfirm(
+                                            buttonId = id,
+                                            buttonLabel = btn.label
+                                        )
+                                    }
+                                },
+                                onAddAtCell = { col, row ->
+                                    // Instant-commit add: create a default key-button at the cell first,
+                                    // then navigate to its config screen for further editing. Backing out
+                                    // leaves the button in place; the user removes it via long-press if
+                                    // they didn't actually want it.
+                                    viewModel.addButtonAt(col, row, GridButton(col = col, row = row, type = "key"))
+                                    viewModel.selectedButtonId.value?.let { newId ->
+                                        navController.navigate(MapoRoute.configureButton(newId))
+                                    }
+                                },
+                                onLongPressEmptyArea = { viewModel.enterEditMode(displayLayout.id) },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                         BottomBar(
                             remapEnabled = remapEnabled,
                             onToggleRemap = { viewModel.toggleRemap() },
@@ -619,7 +602,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     .collectAsStateWithLifecycle()
                 ConfigureButtonScreen(
                     button = button,
-                    keyboardThemeColorArgb = displayLayout.backgroundColorArgb,
+                    keyboardThemeColor = keyboardButtonParentColor(
+                        layout = displayLayout,
+                        themeFallback = MaterialTheme.colorScheme.surface,
+                    ),
                     pickerResult = pickerResult?.let { RemapTarget.decode(it) },
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
@@ -633,6 +619,28 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onOpenPicker = { title, current ->
                         navController.navigate(MapoRoute.remapTargetPicker(title, current.encode()))
                     },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(
+                route = MapoRoute.CONFIGURE_KEYBOARD,
+                arguments = listOf(navArgument(MapoRoute.ARG_LAYOUT_ID) { type = NavType.LongType }),
+            ) { entry ->
+                val layoutId = entry.arguments?.getLong(MapoRoute.ARG_LAYOUT_ID) ?: return@composable
+                val configuredLayout = layouts.find { it.id == layoutId }
+                if (configuredLayout == null) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                    return@composable
+                }
+                ConfigureKeyboardScreen(
+                    layout = configuredLayout,
+                    themeFallback = MaterialTheme.colorScheme.surface,
+                    onUpdate = { viewModel.updateLayoutInstant(it) },
+                    onTryResize = { cols, rows -> viewModel.tryResizeLayout(layoutId, cols, rows) },
+                    onApplyResizeWithAutoFit = { cols, rows ->
+                        viewModel.applyResizeWithAutoFit(layoutId, cols, rows)
+                    },
+                    onReset = { viewModel.resetKeyboard(layoutId) },
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -672,13 +680,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         profiles = profiles,
         activeProfileId = activeProfile?.id,
         onStateChange = { tabActionDialog = it },
-        onApplyConfigure = { id, name, cols, rows, bgColor ->
-            viewModel.configureKeyboard(id, name, cols, rows, bgColor)
-        },
-        onApplyAutoResize = { id, name, cols, rows, bgColor ->
-            viewModel.applyConfigureWithAutoResize(id, name, cols, rows, bgColor)
-        },
-        onConfirmReset = { id -> viewModel.resetKeyboard(id) },
         onConfirmRemove = { id -> viewModel.removeKeyboard(id) },
         onSaveAsNewTemplate = { id, templateName ->
             viewModel.saveAsNewTemplate(id, templateName)
@@ -1060,8 +1061,10 @@ private fun KeyGrid(
 
             if (!isEditMode && button.isTrackpad) {
                 // ── Trackpad (normal mode) ────────────────────────────────────
-                val keyboardTheme = layout.backgroundColorArgb?.let { Color(it) }
-                    ?: MaterialTheme.colorScheme.surface
+                val keyboardTheme = keyboardButtonParentColor(
+                    layout = layout,
+                    themeFallback = MaterialTheme.colorScheme.surface,
+                )
                 Box(
                     modifier = Modifier
                         .absoluteOffset(x = bx, y = by)
@@ -1247,8 +1250,10 @@ private fun KeyGrid(
                             } else Modifier
                         )
                 ) {
-                    val keyboardTheme = layout.backgroundColorArgb?.let { Color(it) }
-                        ?: MaterialTheme.colorScheme.surface
+                    val keyboardTheme = keyboardButtonParentColor(
+                        layout = layout,
+                        themeFallback = MaterialTheme.colorScheme.surface,
+                    )
                     // Only register double/long handlers when targets are configured —
                     // an idle onDoubleClick handler would delay every single tap by the
                     // double-tap window, even on buttons without a configured double-tap.
@@ -1714,6 +1719,64 @@ private val BEVEL_HEIGHT = 8.dp
 // many buttons and a heavy shadow on each would read as noisy.
 private val BUTTON_SHADOW_BLUR = 6.dp
 private val BUTTON_SHADOW_OFFSET_Y = 2.dp
+
+// Keyboard-scale equivalents for [KeyboardSurface]. Larger than the button constants
+// because the surface is the full grid area; subtle button-scale shadows/bevels would
+// disappear at this size.
+private val KEYBOARD_CORNER = 16.dp
+private val KEYBOARD_BEVEL_HEIGHT = 16.dp
+private val KEYBOARD_SHADOW_BLUR = 18.dp
+private val KEYBOARD_SHADOW_OFFSET_Y = 6.dp
+
+/**
+ * Layered visual surface for the keyboard's outer container. Mirrors [KeyButtonShape]
+ * one level up: shadow → bevel → fill+outline → content. The content is the [KeyGrid].
+ * All four slots are independently toggleable; with defaults (fill on+auto, others off)
+ * the surface paints exactly the M3 theme surface — matching pre-refactor visuals.
+ *
+ * The themeFallback parameter is the color used when fill is in auto mode; pass
+ * `MaterialTheme.colorScheme.surface` to match the bottom-screen background.
+ */
+@Composable
+private fun KeyboardSurface(
+    layout: GridLayout,
+    themeFallback: Color,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+) {
+    val resolved = resolveAutoLayoutColors(layout, themeFallback)
+    val outerShape: Shape = RoundedCornerShape(KEYBOARD_CORNER)
+
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (resolved.shadowEnabled) Modifier.softDropShadow(
+                        cornerRadius = KEYBOARD_CORNER,
+                        blurRadius = KEYBOARD_SHADOW_BLUR,
+                        offsetY = KEYBOARD_SHADOW_OFFSET_Y,
+                        color = resolved.shadow,
+                    ) else Modifier
+                )
+                .clip(outerShape)
+                .then(if (resolved.bevelEnabled) Modifier.background(resolved.bevel) else Modifier),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (resolved.bevelEnabled) Modifier.padding(bottom = KEYBOARD_BEVEL_HEIGHT) else Modifier)
+                    .clip(outerShape)
+                    .then(if (resolved.fillEnabled) Modifier.background(resolved.fill) else Modifier)
+                    .then(
+                        if (resolved.outlineEnabled) Modifier.border(1.dp, resolved.outline, outerShape)
+                        else Modifier
+                    ),
+                content = content,
+            )
+        }
+    }
+}
 
 /**
  * Renders a button's nine drawable regions. CENTER falls back to [GridButton.label]

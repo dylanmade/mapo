@@ -8,7 +8,32 @@ data class GridLayout(
     val columns: Int,
     val rows: Int,
     val buttons: List<GridButton>,
-    val backgroundColorArgb: Int? = null
+
+    // Appearance — four parallel "color slots" (fill, outline, bevel, shadow), mirroring
+    // [GridButton]'s appearance fields. The semantics are identical: *Enabled is the
+    // master switch, *ColorArgb is the user's last manually-picked color (preserved
+    // across switch toggles), and *IsAuto means the color is derived from the parent
+    // in the hierarchy (M3 theme surface → fill → outline/bevel/shadow). See
+    // [com.mapo.ui.util.resolveAutoLayoutColors] for the resolver.
+    //
+    // Default for new keyboards: only fill ON (auto), matching the pre-refactor visual
+    // (a keyboard with the M3 surface as its background). Outline/bevel/shadow OFF so
+    // they don't appear unless the user opts in.
+    val fillEnabled: Boolean = true,
+    val fillColorArgb: Int? = null,
+    val fillIsAuto: Boolean = true,
+
+    val outlineEnabled: Boolean = false,
+    val outlineColorArgb: Int? = null,
+    val outlineIsAuto: Boolean = true,
+
+    val bevelEnabled: Boolean = false,
+    val bevelColorArgb: Int? = null,
+    val bevelIsAuto: Boolean = true,
+
+    val shadowEnabled: Boolean = false,
+    val shadowColorArgb: Int? = null,
+    val shadowIsAuto: Boolean = true,
 )
 
 /**

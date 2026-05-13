@@ -2,6 +2,7 @@ package com.mapo.ui.util
 
 import androidx.compose.ui.graphics.Color
 import com.mapo.data.model.GridButton
+import com.mapo.data.model.GridLayout
 import kotlin.math.max
 import kotlin.math.min
 
@@ -103,6 +104,84 @@ fun resolveAutoColors(button: GridButton, keyboardTheme: Color): ResolvedButtonC
         bevelEnabled = button.bevelEnabled, bevel = bevel,
         shadowEnabled = button.shadowEnabled, shadow = shadow,
     )
+}
+
+// ── Layout (keyboard surface) ─────────────────────────────────────────────────
+
+/**
+ * Final per-slot colors for one keyboard layout's outer surface, with auto-resolution
+ * applied. Mirrors [ResolvedButtonColors]; the keyboard renderer and the swatch UI
+ * in ConfigureKeyboardScreen both read from this so they agree on what the surface
+ * actually looks like.
+ */
+data class ResolvedLayoutColors(
+    val fillEnabled: Boolean,
+    val fill: Color,
+    val outlineEnabled: Boolean,
+    val outline: Color,
+    val bevelEnabled: Boolean,
+    val bevel: Color,
+    val shadowEnabled: Boolean,
+    val shadow: Color,
+)
+
+/**
+ * Resolve every color slot on the keyboard [layout]'s outer surface, using
+ * [themeFallback] (typically `MaterialTheme.colorScheme.surface`) as the top of the
+ * hierarchy. The auto-derivation rules mirror [resolveAutoColors] for buttons,
+ * except the layout's auto fill is the theme color *identity* (no contrast-shift):
+ * a brand-new keyboard with all defaults paints exactly the M3 surface, matching
+ * the pre-refactor appearance.
+ *
+ *  - Auto fill   ← themeFallback (identity)
+ *  - Auto outline ← fill (or themeFallback if fill disabled), contrast-shifted
+ *  - Auto bevel  ← fill (or themeFallback if fill disabled), darkened
+ *  - Auto shadow ← fill (or themeFallback if fill disabled), shadowified
+ */
+fun resolveAutoLayoutColors(layout: GridLayout, themeFallback: Color): ResolvedLayoutColors {
+    val fill = if (layout.fillIsAuto || layout.fillColorArgb == null) {
+        themeFallback
+    } else {
+        Color(layout.fillColorArgb)
+    }
+
+    val parent = if (layout.fillEnabled) fill else themeFallback
+
+    val outline = if (layout.outlineIsAuto || layout.outlineColorArgb == null) {
+        parent.contrastShift()
+    } else {
+        Color(layout.outlineColorArgb)
+    }
+
+    val bevel = if (layout.bevelIsAuto || layout.bevelColorArgb == null) {
+        parent.darkened(amount = 0.08f)
+    } else {
+        Color(layout.bevelColorArgb)
+    }
+
+    val shadow = if (layout.shadowIsAuto || layout.shadowColorArgb == null) {
+        parent.toShadowColor()
+    } else {
+        Color(layout.shadowColorArgb)
+    }
+
+    return ResolvedLayoutColors(
+        fillEnabled = layout.fillEnabled, fill = fill,
+        outlineEnabled = layout.outlineEnabled, outline = outline,
+        bevelEnabled = layout.bevelEnabled, bevel = bevel,
+        shadowEnabled = layout.shadowEnabled, shadow = shadow,
+    )
+}
+
+/**
+ * The color that buttons should treat as their parent in the auto-color hierarchy.
+ * When the keyboard's fill slot is enabled, this is the resolved fill (auto or manual).
+ * When fill is disabled, the keyboard surface is transparent and the bottom-screen
+ * surface shows through — so buttons should derive from [themeFallback] instead.
+ */
+fun keyboardButtonParentColor(layout: GridLayout, themeFallback: Color): Color {
+    val resolved = resolveAutoLayoutColors(layout, themeFallback)
+    return if (resolved.fillEnabled) resolved.fill else themeFallback
 }
 
 // ── HSL conversion ────────────────────────────────────────────────────────────

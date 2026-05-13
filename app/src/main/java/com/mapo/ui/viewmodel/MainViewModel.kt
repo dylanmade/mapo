@@ -66,15 +66,6 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed class TabUiEvent {
-    data class ConfigureConflict(
-        val layoutId: Long,
-        val name: String,
-        val cols: Int,
-        val rows: Int,
-        val bgColor: Int?,
-        val offendingLabels: List<String>
-    ) : TabUiEvent()
-
     data class TemplateNameConflict(
         val layoutId: Long,
         val templateName: String,
@@ -101,9 +92,6 @@ class MainViewModel @Inject constructor(
     // (every DefaultLayouts entry has id=0 since they're code-only).
     private val _layouts = MutableStateFlow<ImmutableList<GridLayout>>(persistentListOf())
     val layouts: StateFlow<ImmutableList<GridLayout>> = _layouts.asStateFlow()
-
-    private val _originalNames = MutableStateFlow<Map<Long, String>>(emptyMap())
-    val originalNames: StateFlow<Map<Long, String>> = _originalNames.asStateFlow()
 
     private val _selectedIndex = MutableStateFlow(0)
     val selectedIndex: StateFlow<Int> = _selectedIndex.asStateFlow()
@@ -204,9 +192,6 @@ class MainViewModel @Inject constructor(
                 }
             }.collect { roomLayouts ->
                 _layouts.value = roomLayouts.map { it.toGridLayout() }.toImmutableList()
-                _originalNames.value = roomLayouts.mapNotNull { row ->
-                    row.parseOriginalSnapshot()?.let { snap -> row.id to snap.name }
-                }.toMap()
                 if (_selectedIndex.value >= roomLayouts.size) {
                     _selectedIndex.value = (roomLayouts.size - 1).coerceAtLeast(0)
                 }
@@ -666,53 +651,43 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch { layoutRepository.reorder(profileId, idToPosition) }
     }
 
-    fun configureKeyboard(layoutId: Long, name: String, columns: Int, rows: Int, bgColor: Int?) {
+    /**
+     * Instant-commit pathway used by [ConfigureKeyboardScreen] for non-dimensional edits
+     * (name, color slots). Persists [updated] directly. Dimensional changes (columns/rows)
+     * must go through [tryResizeLayout] so an overflow check has a chance to fire.
+     */
+    fun updateLayoutInstant(updated: GridLayout) {
         val profileId = activeProfile.value?.id ?: return
-        val layout = _layouts.value.find { it.id == layoutId } ?: return
-        val offending = layout.buttonsExceeding(columns, rows)
-        if (offending.isNotEmpty()) {
-            viewModelScope.launch {
-                _tabUiEvents.emit(
-                    TabUiEvent.ConfigureConflict(
-                        layoutId = layoutId,
-                        name = name,
-                        cols = columns,
-                        rows = rows,
-                        bgColor = bgColor,
-                        offendingLabels = offending.map { it.label.ifBlank { "(unnamed)" } }
-                    )
-                )
-            }
-            return
-        }
-        val updated = layout.copy(
-            name = name,
-            columns = columns,
-            rows = rows,
-            backgroundColorArgb = bgColor
-        )
         persistLayoutFields(updated, profileId)
     }
 
-    fun applyConfigureWithAutoResize(
-        layoutId: Long,
-        name: String,
-        columns: Int,
-        rows: Int,
-        bgColor: Int?
-    ) {
+    /**
+     * Try to apply a new grid size in-place. Returns null after successful persist, or the
+     * labels of the buttons that wouldn't fit when the requested size is smaller than the
+     * occupied extent. The caller surfaces those labels and may follow up with
+     * [applyResizeWithAutoFit] if the user opts to drop the offending buttons.
+     */
+    fun tryResizeLayout(layoutId: Long, columns: Int, rows: Int): List<String>? {
+        val profileId = activeProfile.value?.id ?: return null
+        val layout = _layouts.value.find { it.id == layoutId } ?: return null
+        val offending = layout.buttonsExceeding(columns, rows)
+        if (offending.isNotEmpty()) {
+            return offending.map { it.label.ifBlank { "(unnamed)" } }
+        }
+        persistLayoutFields(layout.copy(columns = columns, rows = rows), profileId)
+        return null
+    }
+
+    /**
+     * Accept a [tryResizeLayout] conflict: drop the buttons that no longer fit and apply
+     * the requested dimensions. Emits a toast with the drop count.
+     */
+    fun applyResizeWithAutoFit(layoutId: Long, columns: Int, rows: Int) {
         val profileId = activeProfile.value?.id ?: return
         val layout = _layouts.value.find { it.id == layoutId } ?: return
         val resized = autoFitButtons(layout.buttons, columns, rows)
         val dropped = layout.buttons.size - resized.size
-        val updated = layout.copy(
-            name = name,
-            columns = columns,
-            rows = rows,
-            backgroundColorArgb = bgColor,
-            buttons = resized
-        )
-        persistLayoutFields(updated, profileId)
+        persistLayoutFields(layout.copy(columns = columns, rows = rows, buttons = resized), profileId)
         if (dropped > 0) {
             emitToast("$dropped ${if (dropped == 1) "button" else "buttons"} removed")
         }
@@ -889,7 +864,18 @@ class MainViewModel @Inject constructor(
             columns = template.columns,
             rows = template.rows,
             buttons = template.buttons,
-            backgroundColorArgb = template.backgroundColorArgb
+            fillEnabled = template.fillEnabled,
+            fillColorArgb = template.fillColorArgb,
+            fillIsAuto = template.fillIsAuto,
+            outlineEnabled = template.outlineEnabled,
+            outlineColorArgb = template.outlineColorArgb,
+            outlineIsAuto = template.outlineIsAuto,
+            bevelEnabled = template.bevelEnabled,
+            bevelColorArgb = template.bevelColorArgb,
+            bevelIsAuto = template.bevelIsAuto,
+            shadowEnabled = template.shadowEnabled,
+            shadowColorArgb = template.shadowColorArgb,
+            shadowIsAuto = template.shadowIsAuto,
         ).withFreshButtonIds()
         appendNewLayout(draft, profileId)
     }

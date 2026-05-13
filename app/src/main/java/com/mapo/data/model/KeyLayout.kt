@@ -25,8 +25,24 @@ data class KeyLayout(
     val rows: Int,
     val buttonsJson: String,
     val position: Int = 0,
-    val backgroundColorArgb: Int? = null,
-    val originalSnapshotJson: String? = null
+
+    val fillEnabled: Boolean = true,
+    val fillColorArgb: Int? = null,
+    val fillIsAuto: Boolean = true,
+
+    val outlineEnabled: Boolean = false,
+    val outlineColorArgb: Int? = null,
+    val outlineIsAuto: Boolean = true,
+
+    val bevelEnabled: Boolean = false,
+    val bevelColorArgb: Int? = null,
+    val bevelIsAuto: Boolean = true,
+
+    val shadowEnabled: Boolean = false,
+    val shadowColorArgb: Int? = null,
+    val shadowIsAuto: Boolean = true,
+
+    val originalSnapshotJson: String? = null,
 )
 
 private val gson = Gson()
@@ -38,7 +54,18 @@ fun KeyLayout.toGridLayout(): GridLayout = GridLayout(
     columns = columns,
     rows = rows,
     buttons = gson.fromJson(buttonsJson, buttonsType),
-    backgroundColorArgb = backgroundColorArgb
+    fillEnabled = fillEnabled,
+    fillColorArgb = fillColorArgb,
+    fillIsAuto = fillIsAuto,
+    outlineEnabled = outlineEnabled,
+    outlineColorArgb = outlineColorArgb,
+    outlineIsAuto = outlineIsAuto,
+    bevelEnabled = bevelEnabled,
+    bevelColorArgb = bevelColorArgb,
+    bevelIsAuto = bevelIsAuto,
+    shadowEnabled = shadowEnabled,
+    shadowColorArgb = shadowColorArgb,
+    shadowIsAuto = shadowIsAuto,
 )
 
 fun GridLayout.toKeyLayout(
@@ -53,8 +80,19 @@ fun GridLayout.toKeyLayout(
     rows = rows,
     buttonsJson = gson.toJson(buttons),
     position = position,
-    backgroundColorArgb = backgroundColorArgb,
-    originalSnapshotJson = originalSnapshotJson
+    fillEnabled = fillEnabled,
+    fillColorArgb = fillColorArgb,
+    fillIsAuto = fillIsAuto,
+    outlineEnabled = outlineEnabled,
+    outlineColorArgb = outlineColorArgb,
+    outlineIsAuto = outlineIsAuto,
+    bevelEnabled = bevelEnabled,
+    bevelColorArgb = bevelColorArgb,
+    bevelIsAuto = bevelIsAuto,
+    shadowEnabled = shadowEnabled,
+    shadowColorArgb = shadowColorArgb,
+    shadowIsAuto = shadowIsAuto,
+    originalSnapshotJson = originalSnapshotJson,
 )
 
 fun KeyLayout.parseOriginalSnapshot(): LayoutSnapshot? =

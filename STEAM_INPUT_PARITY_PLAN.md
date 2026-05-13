@@ -750,6 +750,12 @@ Mapo is pre-release; destructive changes are OK. Phase 1's schema rebuild wipes 
 - Controller HUD / debug overlay
 - Gyro capture + flickstick mode (Phase 6 ships without)
 
+### Post-parity Mapo extensions (deferred until parity work is done)
+
+Mapo-specific enhancements that go *beyond* Steam Input parity. Recorded here so we don't lose them; not in scope until the parity roadmap is largely complete.
+
+- **Long_Press "fire as tap" mode** — per-activator toggle to emit DOWN+UP at threshold instead of holding while the physical button is held. Current Steam-parity behavior holds the key, which on Wine/Windows targets (GameNative) produces OS-level key auto-repeat — undesirable for menu keys like ESC. User verified (2026-05-12) that Steam Deck exhibits identical Wine-repeat behavior with the same config, so this is true Steam parity, not a Mapo bug. The extension would add an opt-in alternative mode. See `project_fire_as_tap_post_parity.md` in memory.
+
 ---
 
 ## Critical files index

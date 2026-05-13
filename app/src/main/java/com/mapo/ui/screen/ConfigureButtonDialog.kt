@@ -67,7 +67,8 @@ import com.mapo.data.model.isTrackpad
 import com.mapo.data.model.onDoubleTapTarget
 import com.mapo.data.model.onHoldTarget
 import com.mapo.data.model.onTapTarget
-import com.mapo.ui.component.ColorPicker
+import com.mapo.ui.component.ColorPickerInDialog
+import com.mapo.ui.component.ColorSlotGroup
 import com.mapo.ui.component.IconPickerDialog
 import com.mapo.ui.component.MapoIcons
 import com.mapo.ui.component.SizeDropdown
@@ -95,7 +96,7 @@ import com.mapo.ui.util.resolveAutoColors
 @Composable
 fun ConfigureButtonScreen(
     button: GridButton,
-    keyboardThemeColorArgb: Int?,
+    keyboardThemeColor: Color,
     pickerResult: RemapTarget?,
     onConsumePickerResult: () -> Unit,
     onUpdate: (GridButton) -> Unit,
@@ -109,8 +110,6 @@ fun ConfigureButtonScreen(
     var editingGesture by remember { mutableStateOf<TrackpadGesture?>(null) }
     var editingSlot by remember { mutableStateOf<ColorSlot?>(null) }
     var editingRegion by remember { mutableStateOf<RegionPosition?>(null) }
-    val keyboardThemeColor = keyboardThemeColorArgb?.let { Color(it) }
-        ?: MaterialTheme.colorScheme.surface
 
     val commit: (GridButton) -> Unit = { next -> onUpdate(autoDeriveLabel(next)) }
 
@@ -420,19 +419,8 @@ private fun GestureRow(label: String, target: RemapTarget, onClick: () -> Unit) 
 }
 
 /**
- * One slot in the "Colors" section, rendered as a master M3 list item plus three
- * conditional sub-list-items when enabled. The shape mirrors the Android Settings
- * convention of "feature row with a Switch, dependent options nested below":
- *
- *   [ Button fill                            ●─ ]   master row, tap-to-toggle
- *   [   Color           #FF8888              ▣  ]   sub-row, opens picker
- *   [   Auto            (helper text)       [✓] ]   sub-row, toggles auto-derive
- *   [   Reset to default (helper text)       ↻  ]   sub-row, resets this slot only
- *
- * Toggling the master switch off preserves the slot's stored color and auto state,
- * so flipping it back on restores the row's previous configuration. Sub-rows are
- * indented via `start = 24.dp` so the M3 ListItem internal padding still applies on
- * top of the indent.
+ * One slot in the "Colors" section. Master + sub-rows are rendered by [ColorSlotGroup];
+ * this wrapper threads the per-slot accessors so the screen stays declarative.
  */
 @Composable
 private fun ColorSlotRow(
@@ -442,74 +430,17 @@ private fun ColorSlotRow(
     onChange: (GridButton) -> Unit,
     onEditColor: (ColorSlot) -> Unit,
 ) {
-    val enabled = slot.enabled(button)
-    Column {
-        // Master row. M3 convention is the feature label alone (e.g. "Button fill"),
-        // not "Enable button fill" — the trailing Switch already implies the verb.
-        ListItem(
-            headlineContent = { Text(slot.title) },
-            supportingContent = { Text(slot.description) },
-            trailingContent = {
-                Switch(
-                    checked = enabled,
-                    // Parent ListItem (via the clickable modifier) owns the toggle so
-                    // the whole row is tappable; null prevents the Switch from also
-                    // competing for click handling.
-                    onCheckedChange = null,
-                )
-            },
-            modifier = Modifier.clickable {
-                onChange(slot.setEnabled(button, !enabled))
-            },
-        )
-        if (enabled) {
-            val shown = slot.resolvedColor(resolved)
-            // Color sub-row — opens the picker. Hex value as supporting text; swatch
-            // in trailing for at-a-glance feedback. Whole row click opens picker.
-            ListItem(
-                headlineContent = { Text("Color") },
-                supportingContent = { Text("#%08X".format(shown.toArgb())) },
-                trailingContent = { ColorSwatch(argb = shown.toArgb()) },
-                modifier = Modifier
-                    .padding(start = 24.dp)
-                    .clickable { onEditColor(slot) },
-            )
-            // Auto sub-row — toggles whether the color is derived from the theme
-            // hierarchy (theme → fill → bevel/outline/shadow) or read from the
-            // user's stored manual choice.
-            ListItem(
-                headlineContent = { Text("Auto") },
-                supportingContent = { Text("Derive color from the theme and fill") },
-                trailingContent = {
-                    Checkbox(
-                        checked = slot.isAuto(button),
-                        onCheckedChange = null,
-                    )
-                },
-                modifier = Modifier
-                    .padding(start = 24.dp)
-                    .clickable {
-                        onChange(slot.setAuto(button, !slot.isAuto(button)))
-                    },
-            )
-            // Reset sub-row — restores defaults for just this slot. The tab also
-            // has a "Reset Appearance" button below; this is the per-slot version.
-            ListItem(
-                headlineContent = { Text("Reset to default") },
-                supportingContent = { Text("Restore the default settings for this slot") },
-                trailingContent = {
-                    Icon(
-                        Icons.Filled.RestartAlt,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                    )
-                },
-                modifier = Modifier
-                    .padding(start = 24.dp)
-                    .clickable { onChange(slot.reset(button)) },
-            )
-        }
-    }
+    ColorSlotGroup(
+        title = slot.title,
+        description = slot.description,
+        enabled = slot.enabled(button),
+        isAuto = slot.isAuto(button),
+        resolvedColor = slot.resolvedColor(resolved),
+        onToggleEnabled = { onChange(slot.setEnabled(button, !slot.enabled(button))) },
+        onEditColor = { onEditColor(slot) },
+        onToggleAuto = { onChange(slot.setAuto(button, !slot.isAuto(button))) },
+        onReset = { onChange(slot.reset(button)) },
+    )
 }
 
 /**
@@ -624,35 +555,6 @@ private fun ResetButton(label: String, onClick: () -> Unit) {
 }
 
 // ── Sub-dialogs ───────────────────────────────────────────────────────────────
-
-@Composable
-private fun ColorPickerInDialog(
-    title: String,
-    initial: Color,
-    onConfirm: (Color) -> Unit,
-    onClear: (() -> Unit)?,
-    onDismiss: () -> Unit,
-) {
-    var picked by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            ColorPicker(
-                color = picked,
-                onChange = { picked = it },
-                onClearOverride = onClear,
-                pickerKey = title,
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(picked) }) { Text("OK") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
-}
 
 @Composable
 private fun RegionEditDialog(

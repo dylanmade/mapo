@@ -36,14 +36,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mapo.R
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.Profile
 import com.mapo.data.model.TemplateRef
-import com.mapo.ui.components.ColorSwatchPicker
-import com.mapo.ui.components.SteppedSliderWithNumberInput
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.collections.immutable.ImmutableList
 
@@ -61,9 +58,6 @@ fun TabActionDialogHost(
     profiles: ImmutableList<Profile>,
     activeProfileId: Long?,
     onStateChange: (TabActionDialog?) -> Unit,
-    onApplyConfigure: (layoutId: Long, name: String, cols: Int, rows: Int, bgColor: Int?) -> Unit,
-    onApplyAutoResize: (layoutId: Long, name: String, cols: Int, rows: Int, bgColor: Int?) -> Unit,
-    onConfirmReset: (layoutId: Long) -> Unit,
     onConfirmRemove: (layoutId: Long) -> Unit,
     onSaveAsNewTemplate: (layoutId: Long, templateName: String) -> Unit,
     onUpdateExistingTemplate: (layoutId: Long, target: TemplateRef.User) -> Unit,
@@ -76,51 +70,6 @@ fun TabActionDialogHost(
 ) {
     when (val s = state) {
         null -> Unit
-        is TabActionDialog.Configure -> ConfigureKeyboardDialog(
-            state = s,
-            onDismiss = { onStateChange(null) },
-            onApply = { name, cols, rows, bgColor ->
-                onApplyConfigure(s.layoutId, name, cols, rows, bgColor)
-                onStateChange(null)
-            },
-            onResetTapped = { name, cols, rows, bgColor ->
-                val draft = s.copy(name = name, cols = cols, rows = rows, bgColor = bgColor)
-                onStateChange(
-                    TabActionDialog.ResetConfirm(
-                        layoutId = s.layoutId,
-                        currentName = name,
-                        originalName = s.originalName ?: name,
-                        configDraft = draft
-                    )
-                )
-            }
-        )
-        is TabActionDialog.ResetConfirm -> AlertDialog(
-            onDismissRequest = { onStateChange(s.configDraft) },
-            title = { Text(stringResource(R.string.tab_dialog_reset_title, s.currentName)) },
-            text = {
-                Text(stringResource(R.string.tab_dialog_reset_text, s.currentName, s.originalName))
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onConfirmReset(s.layoutId)
-                        onStateChange(null)
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) { Text(stringResource(R.string.tab_dialog_reset_confirm, s.currentName)) }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { onStateChange(s.configDraft) },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) { Text(stringResource(R.string.dialog_cancel)) }
-            }
-        )
         is TabActionDialog.RemoveConfirm -> AlertDialog(
             onDismissRequest = { onStateChange(null) },
             title = { Text(stringResource(R.string.tab_dialog_remove_title, s.name)) },
@@ -145,43 +94,6 @@ fun TabActionDialogHost(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 ) { Text(stringResource(R.string.dialog_cancel)) }
-            }
-        )
-        is TabActionDialog.ResizeConflict -> AlertDialog(
-            onDismissRequest = { onStateChange(s.draft) },
-            title = { Text(stringResource(R.string.tab_dialog_resize_conflict_title)) },
-            text = {
-                Text(
-                    stringResource(
-                        R.string.tab_dialog_resize_conflict_text,
-                        s.offendingLabels.joinToString(", "),
-                    )
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onApplyAutoResize(
-                            s.draft.layoutId,
-                            s.draft.name,
-                            s.draft.cols,
-                            s.draft.rows,
-                            s.draft.bgColor
-                        )
-                        onStateChange(null)
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) { Text(stringResource(R.string.tab_dialog_resize_conflict_try)) }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { onStateChange(s.draft) },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) { Text(stringResource(R.string.tab_dialog_resize_conflict_cancel)) }
             }
         )
         is TabActionDialog.SaveTemplateChooser -> AlertDialog(
@@ -657,93 +569,3 @@ private fun templateKey(ref: TemplateRef): String = when (ref) {
     is TemplateRef.User -> "user:${ref.id}"
 }
 
-@Composable
-private fun ConfigureKeyboardDialog(
-    state: TabActionDialog.Configure,
-    onDismiss: () -> Unit,
-    onApply: (name: String, cols: Int, rows: Int, bgColor: Int?) -> Unit,
-    onResetTapped: (name: String, cols: Int, rows: Int, bgColor: Int?) -> Unit
-) {
-    var name by remember(state.layoutId) { mutableStateOf(state.name) }
-    var cols by remember(state.layoutId) { mutableStateOf(state.cols.coerceIn(1, 20)) }
-    var rows by remember(state.layoutId) { mutableStateOf(state.rows.coerceIn(1, 20)) }
-    var bgColor by remember(state.layoutId) { mutableStateOf(state.bgColor) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.tab_dialog_configure_title)) },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState())
-            ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(stringResource(R.string.tab_dialog_configure_name_label)) },
-                    singleLine = true,
-                    trailingIcon = {
-                        if (name.isNotEmpty()) {
-                            IconButton(onClick = { name = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.dialog_clear))
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        stringResource(R.string.tab_dialog_configure_background_color),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    ColorSwatchPicker(
-                        selectedArgb = bgColor,
-                        onSelect = { bgColor = it }
-                    )
-                }
-                SteppedSliderWithNumberInput(
-                    label = stringResource(R.string.tab_dialog_configure_rows),
-                    value = rows,
-                    onValueChange = { rows = it },
-                    min = 1,
-                    max = 20
-                )
-                SteppedSliderWithNumberInput(
-                    label = stringResource(R.string.tab_dialog_configure_columns),
-                    value = cols,
-                    onValueChange = { cols = it },
-                    min = 1,
-                    max = 20
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(
-                        onClick = { onResetTapped(name.trim().ifBlank { state.name }, cols, rows, bgColor) },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Text(stringResource(R.string.tab_dialog_configure_reset), fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = name.isNotBlank(),
-                onClick = { onApply(name.trim(), cols, rows, bgColor) }
-            ) { Text(stringResource(R.string.tab_dialog_configure_apply)) }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            ) { Text(stringResource(R.string.dialog_cancel)) }
-        }
-    )
-}

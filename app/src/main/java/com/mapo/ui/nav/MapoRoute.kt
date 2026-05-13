@@ -55,4 +55,14 @@ object MapoRoute {
     const val ARG_BUTTON_ID = "buttonId"
     const val CONFIGURE_BUTTON = "configure_button/{$ARG_BUTTON_ID}"
     fun configureButton(buttonId: String): String = "configure_button/${Uri.encode(buttonId)}"
+
+    // ── Configure-keyboard screen (full-screen, instant-commit) ───────────────────
+    //
+    // Caller navigates with the layoutId of the keyboard being edited. The screen reads
+    // the layout live from the ViewModel and dispatches edits via [MainViewModel.updateLayoutInstant]
+    // / [MainViewModel.tryResizeLayout]. The shrink-conflict prompt lives inside the
+    // screen as a sub-dialog (no out-of-screen dialog routing required).
+    const val ARG_LAYOUT_ID = "layoutId"
+    const val CONFIGURE_KEYBOARD = "configure_keyboard/{$ARG_LAYOUT_ID}"
+    fun configureKeyboard(layoutId: Long): String = "configure_keyboard/$layoutId"
 }

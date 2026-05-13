@@ -274,7 +274,7 @@ fun KeyboardTabBar(
                         TabSurface(
                             label = layout.name,
                             selected = index == selectedIndex,
-                            backgroundOverride = layout.backgroundColorArgb?.let { Color(it) }
+                            backgroundOverride = layout.fillColorArgb?.let { Color(it) }
                         )
                     }
 

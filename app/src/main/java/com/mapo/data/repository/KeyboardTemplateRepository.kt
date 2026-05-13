@@ -30,7 +30,18 @@ class KeyboardTemplateRepository @Inject constructor(
             columns = layout.columns,
             rows = layout.rows,
             buttons = layout.buttons,
-            backgroundColorArgb = layout.backgroundColorArgb
+            fillEnabled = layout.fillEnabled,
+            fillColorArgb = layout.fillColorArgb,
+            fillIsAuto = layout.fillIsAuto,
+            outlineEnabled = layout.outlineEnabled,
+            outlineColorArgb = layout.outlineColorArgb,
+            outlineIsAuto = layout.outlineIsAuto,
+            bevelEnabled = layout.bevelEnabled,
+            bevelColorArgb = layout.bevelColorArgb,
+            bevelIsAuto = layout.bevelIsAuto,
+            shadowEnabled = layout.shadowEnabled,
+            shadowColorArgb = layout.shadowColorArgb,
+            shadowIsAuto = layout.shadowIsAuto,
         )
     }
 
@@ -61,7 +72,18 @@ class KeyboardTemplateRepository @Inject constructor(
             columns = layout.columns,
             rows = layout.rows,
             buttonsJson = layout.toNewTemplateEntity("").buttonsJson,
-            backgroundColorArgb = layout.backgroundColorArgb
+            fillEnabled = layout.fillEnabled,
+            fillColorArgb = layout.fillColorArgb,
+            fillIsAuto = layout.fillIsAuto,
+            outlineEnabled = layout.outlineEnabled,
+            outlineColorArgb = layout.outlineColorArgb,
+            outlineIsAuto = layout.outlineIsAuto,
+            bevelEnabled = layout.bevelEnabled,
+            bevelColorArgb = layout.bevelColorArgb,
+            bevelIsAuto = layout.bevelIsAuto,
+            shadowEnabled = layout.shadowEnabled,
+            shadowColorArgb = layout.shadowColorArgb,
+            shadowIsAuto = layout.shadowIsAuto,
         )
         dao.update(updated)
     }

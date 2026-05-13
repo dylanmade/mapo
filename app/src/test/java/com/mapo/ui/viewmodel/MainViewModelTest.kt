@@ -917,24 +917,24 @@ class MainViewModelTest {
     }
 
     @Test
-    fun configureKeyboard_noOverflow_persistsConfig() = runTest(testDispatcher) {
+    fun tryResizeLayout_noOverflow_persistsAndReturnsNull() = runTest(testDispatcher) {
         val layout = sampleLayout(
             id = 10L, cols = 3, rows = 2,
             buttons = listOf(GridButton(label = "A", col = 0, row = 0)),
         )
         seedLayouts(listOf(layout))
 
-        subject.configureKeyboard(layoutId = 10L, name = "New", columns = 4, rows = 3, bgColor = null)
+        val conflict = subject.tryResizeLayout(layoutId = 10L, columns = 4, rows = 3)
         advanceUntilIdle()
 
+        assertEquals(null, conflict)
         val updated = subject.layouts.value.first()
-        assertEquals("New", updated.name)
         assertEquals(4, updated.columns)
         assertEquals(3, updated.rows)
     }
 
     @Test
-    fun configureKeyboard_buttonsExceedNewBounds_emitsConflictEvent() = runTest(testDispatcher) {
+    fun tryResizeLayout_buttonsExceedBounds_returnsLabelsWithoutPersisting() = runTest(testDispatcher) {
         val layout = sampleLayout(
             id = 10L, cols = 4, rows = 4,
             buttons = listOf(
@@ -943,20 +943,16 @@ class MainViewModelTest {
         )
         seedLayouts(listOf(layout))
 
-        subject.tabUiEvents.test {
-            subject.configureKeyboard(
-                layoutId = 10L, name = "Smaller", columns = 2, rows = 2, bgColor = null,
-            )
-            val conflict = awaitItem() as TabUiEvent.ConfigureConflict
-            assertEquals(10L, conflict.layoutId)
-            assertEquals(listOf("Big"), conflict.offendingLabels)
-        }
-        // Layout config NOT applied because of the conflict.
+        val conflict = subject.tryResizeLayout(layoutId = 10L, columns = 2, rows = 2)
+        advanceUntilIdle()
+
+        assertEquals(listOf("Big"), conflict)
+        // Resize NOT applied because of the conflict.
         assertEquals(4, subject.layouts.value.first().columns)
     }
 
     @Test
-    fun applyConfigureWithAutoResize_dropsButtonsThatCannotFit() = runTest(testDispatcher) {
+    fun applyResizeWithAutoFit_dropsButtonsThatCannotFit() = runTest(testDispatcher) {
         val layout = sampleLayout(
             id = 10L, cols = 4, rows = 4,
             buttons = listOf(
@@ -967,9 +963,7 @@ class MainViewModelTest {
         seedLayouts(listOf(layout))
 
         subject.toastMessage.test {
-            subject.applyConfigureWithAutoResize(
-                layoutId = 10L, name = "Smaller", columns = 2, rows = 2, bgColor = null,
-            )
+            subject.applyResizeWithAutoFit(layoutId = 10L, columns = 2, rows = 2)
             val toast = awaitItem()
             assertTrue("expected drop toast, got '$toast'", toast.contains("removed"))
         }
@@ -1043,7 +1037,6 @@ class MainViewModelTest {
         val existing = TemplateRef.User(
             id = 99L, name = "MyTemplate",
             columns = 3, rows = 2, buttons = emptyList(),
-            backgroundColorArgb = null,
         )
         coEvery { templateRepo.findByName("MyTemplate") } returns existing
 
@@ -1059,7 +1052,7 @@ class MainViewModelTest {
     fun updateExistingTemplate_passesLayoutAndId() = runTest(testDispatcher) {
         val layout = sampleLayout(id = 10L, name = "Custom")
         seedLayouts(listOf(layout))
-        val ref = TemplateRef.User(id = 42L, name = "Old", columns = 3, rows = 2, buttons = emptyList(), backgroundColorArgb = null)
+        val ref = TemplateRef.User(id = 42L, name = "Old", columns = 3, rows = 2, buttons = emptyList())
 
         subject.updateExistingTemplate(layoutId = 10L, ref = ref)
         advanceUntilIdle()
@@ -1090,7 +1083,6 @@ class MainViewModelTest {
         val template = TemplateRef.User(
             id = 42L, name = "FromTpl",
             columns = 2, rows = 2, buttons = emptyList(),
-            backgroundColorArgb = null,
         )
         coEvery { layoutRepo.getLayoutsByProfileOnce(1L) } returnsMany listOf(
             listOf(sampleLayout(id = 10L, name = "Existing").toKeyLayout(1L, 0)),
@@ -1112,7 +1104,6 @@ class MainViewModelTest {
         val template = TemplateRef.User(
             id = 42L, name = "Tpl",
             columns = 2, rows = 2, buttons = emptyList(),
-            backgroundColorArgb = null,
         )
         coEvery { layoutRepo.getLayoutsByProfileOnce(1L) } returnsMany listOf(
             listOf(sampleLayout(id = 10L, name = "Tpl").toKeyLayout(1L, 0)),

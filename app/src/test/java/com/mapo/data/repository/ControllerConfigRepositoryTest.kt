@@ -504,4 +504,197 @@ class ControllerConfigRepositoryTest {
         assert(updated.bindings.any { it.id == thirdId }) { "Third binding should still be present" }
         assert(updated.bindings.none { it.id == secondId }) { "Second binding should be removed" }
     }
+
+    // ── Action set CRUD (Brick 4.1) ─────────────────────────────────────────
+
+    @Test
+    fun seedDefaultConfig_setsDefaultActionSetIdToTheSeededSet() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val cp = controllerProfileDao.getById(cpId)!!
+        val seededSet = actionSetDao.getByControllerProfile(cpId).single()
+
+        assertEquals(seededSet.id, cp.defaultActionSetId)
+    }
+
+    @Test
+    fun addActionSet_blank_seedsDefaultGroupsAndPresets() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+
+        val newSetId = subject.addActionSet(cpId, name = "menu", title = "Menu")
+
+        val sets = actionSetDao.getByControllerProfile(cpId)
+        assertEquals(2, sets.size)
+        // Sets ordered: default (0), new (1)
+        assertEquals(1, sets.first { it.id == newSetId }.orderIndex)
+
+        // New set has its own preset_bindings + groups (not shared with default set).
+        val newSetPresets = presetBindingDao.rows.value.filter { it.actionSetId == newSetId }
+        assertTrue("New set should have its own presets", newSetPresets.size >= 10)
+        val newSetGroupIds = newSetPresets.map { it.bindingGroupId }.toSet()
+        val defaultSetPresets = presetBindingDao.rows.value
+            .filter { it.actionSetId != newSetId && it.actionSetId in sets.map { s -> s.id } }
+        val defaultGroupIds = defaultSetPresets.map { it.bindingGroupId }.toSet()
+        assertTrue(
+            "Groups must not be shared between sets",
+            newSetGroupIds.intersect(defaultGroupIds).isEmpty(),
+        )
+    }
+
+    @Test
+    fun addActionSet_inherit_clonesGroupsBindingsAndPresetsFromSource() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val defaultSet = actionSetDao.getByControllerProfile(cpId).single()
+        // Customize the source so we can verify the clone copied it.
+        val aActivatorId = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0].activator.id
+        subject.setBinding(aActivatorId, BindingOutput.KeyPress("ENTER"))
+
+        val clonedSetId = subject.addActionSet(
+            cpId, name = "gameplay-copy", title = "Gameplay Copy",
+            inheritFromSetId = defaultSet.id,
+        )
+
+        // Resolve the cloned set's button_a binding.
+        val cfg = subject.getActiveConfigOnce(1L)!!
+        val clonedSet = cfg.actionSets.first { it.actionSet.id == clonedSetId }
+        val clonedActivator = clonedSet
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0]
+        assertEquals(BindingOutputType.KEY_PRESS, clonedActivator.bindings[0].outputType)
+        assertEquals("ENTER", clonedActivator.bindings[0].args)
+        // Fresh ids (per feedback_duplicates_own_their_data).
+        assertTrue(
+            "Cloned activator must have a different id than the source activator",
+            clonedActivator.activator.id != aActivatorId,
+        )
+    }
+
+    @Test
+    fun duplicateActionSet_independentlyEditable() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val sourceSet = actionSetDao.getByControllerProfile(cpId).single()
+        // Set source's button_a to ENTER, then duplicate.
+        val sourceActivatorId = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0].activator.id
+        subject.setBinding(sourceActivatorId, BindingOutput.KeyPress("ENTER"))
+
+        val dupSetId = subject.duplicateActionSet(sourceSet.id, "menu", "Menu")
+
+        // Now edit the duplicate's button_a to SPACE.
+        val cfg = subject.getActiveConfigOnce(1L)!!
+        val dupActivatorId = cfg.actionSets.first { it.actionSet.id == dupSetId }
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0].activator.id
+        subject.setBinding(dupActivatorId, BindingOutput.KeyPress("SPACE"))
+
+        // Source must remain ENTER; duplicate must be SPACE.
+        val sourceBinding = bindingDao.getByActivators(listOf(sourceActivatorId)).single()
+        assertEquals("ENTER", sourceBinding.args)
+        val dupBinding = bindingDao.getByActivators(listOf(dupActivatorId)).single()
+        assertEquals("SPACE", dupBinding.args)
+    }
+
+    @Test
+    fun renameActionSet_updatesNameAndTitle() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val set = actionSetDao.getByControllerProfile(cpId).single()
+
+        subject.renameActionSet(set.id, name = "menu", title = "Menu Set")
+
+        val updated = actionSetDao.getById(set.id)!!
+        assertEquals("menu", updated.name)
+        assertEquals("Menu Set", updated.title)
+    }
+
+    @Test
+    fun renameActionSet_unknownId_isNoOp() = runTest {
+        subject.renameActionSet(actionSetId = 999L, name = "x", title = "X")
+        // No exception; nothing inserted.
+        assertEquals(0, actionSetDao.rows.value.size)
+    }
+
+    @Test
+    fun deleteActionSet_lastSet_isGuardedAndDoesNothing() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val onlySet = actionSetDao.getByControllerProfile(cpId).single()
+
+        val result = subject.deleteActionSet(onlySet.id)
+
+        assertFalse("Deleting the last set must be refused", result)
+        assertEquals(1, actionSetDao.getByControllerProfile(cpId).size)
+    }
+
+    @Test
+    fun deleteActionSet_nonLastSet_succeeds() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val newSetId = subject.addActionSet(cpId, "menu", "Menu")
+
+        val result = subject.deleteActionSet(newSetId)
+
+        assertTrue(result)
+        val remaining = actionSetDao.getByControllerProfile(cpId)
+        assertEquals(1, remaining.size)
+        assertTrue(remaining.none { it.id == newSetId })
+    }
+
+    @Test
+    fun deleteActionSet_default_reassignsToFirstRemaining() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val defaultSet = actionSetDao.getByControllerProfile(cpId).single()
+        val newSetId = subject.addActionSet(cpId, "menu", "Menu")
+
+        // Promote new set as default, then delete it.
+        subject.setDefaultActionSet(cpId, newSetId)
+        subject.deleteActionSet(newSetId)
+
+        val cp = controllerProfileDao.getById(cpId)!!
+        assertEquals(
+            "Deleting the default set should re-point the default at the first remaining set",
+            defaultSet.id, cp.defaultActionSetId,
+        )
+    }
+
+    @Test
+    fun setDefaultActionSet_updatesControllerProfile() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val newSetId = subject.addActionSet(cpId, "menu", "Menu")
+
+        subject.setDefaultActionSet(cpId, newSetId)
+
+        assertEquals(newSetId, controllerProfileDao.getById(cpId)!!.defaultActionSetId)
+    }
+
+    @Test
+    fun setDefaultActionSet_setFromAnotherProfile_isNoOp() = runTest {
+        val cpAId = subject.seedDefaultConfig(profileId = 1L)
+        val cpBId = subject.seedDefaultConfig(profileId = 2L)
+        val setUnderB = actionSetDao.getByControllerProfile(cpBId).single()
+        val originalDefaultForA = controllerProfileDao.getById(cpAId)!!.defaultActionSetId
+
+        subject.setDefaultActionSet(cpAId, setUnderB.id)
+
+        assertEquals(
+            "Setting a foreign set as default must be rejected",
+            originalDefaultForA, controllerProfileDao.getById(cpAId)!!.defaultActionSetId,
+        )
+    }
+
+    @Test
+    fun copyConfig_remapsDefaultActionSetIdToClonedSet() = runTest {
+        val srcCpId = subject.seedDefaultConfig(profileId = 1L)
+        val srcSetId = actionSetDao.getByControllerProfile(srcCpId).single().id
+
+        subject.copyConfig(sourceProfileId = 1L, destProfileId = 2L)
+
+        val destCp = controllerProfileDao.getByProfile(2L).single()
+        val destSet = actionSetDao.getByControllerProfile(destCp.id).single()
+        assertTrue(
+            "Cloned controller_profile's defaultActionSetId must point at the cloned set, not the source",
+            destCp.defaultActionSetId == destSet.id && destCp.defaultActionSetId != srcSetId,
+        )
+    }
 }

@@ -500,6 +500,27 @@ A new binding output category in the picker: **Steam → Switch Action Set**, ta
 - Two sets: "Gameplay" / "Menu". In Gameplay, A=ENTER. In Menu, A=SPACE. Bind B in Gameplay → `Switch Action Set: Menu`. Press B → A subsequently emits SPACE.
 - Switching back via another binding clears layers (verified in Phase 5).
 
+### Brick breakdown
+
+| Brick | Scope | Status |
+|---|---|---|
+| 4.1 | Repo CRUD: `addActionSet` (blank + inherit), `renameActionSet`, `duplicateActionSet`, `deleteActionSet` (with last-set guard), `setDefaultActionSet`; `ControllerProfile.defaultActionSetId` field + db v10→v11 bump; `ControllerConfig.activeActionSet` honors the new pointer | ✅ COMPLETED 2026-05-13 |
+| 4.2 | Runtime: `InputEvaluator` tracks `activeActionSetId`; `CHANGE_PRESET` controller_action verb swaps the active set + releases bindings held from the old set; `CompiledConfig` keys widened to `(ActionSetId, InputAddress)` | pending |
+| 4.3 | UI: live Action Set tabs in `RemapControlsScreen` (viewing selector — editor preview, distinct from runtime active set); view-state persisted in `MainViewModel`; default set highlighted | pending |
+| 4.4 | UI: set management (long-press → Rename / Duplicate / Delete / Set as default; `[+]` dialog with name + optional "inherit from existing set"); last-set delete guard surfaced in UI | pending |
+| 4.5 | Picker: `BindingOutput.ChangePreset(setId)`; new picker category **Controller → Switch Action Set** | pending |
+
+### Brick 4.1 deviations + decisions
+
+- **Default-set tracking.** Added `defaultActionSetId: Long?` to `ControllerProfile` rather than `isDefault: Boolean` on `ActionSet`. The pointer lives on the parent → at-most-one-default is enforced by data shape, and "which set is default" is a property of the controller_profile, not of any individual set. **No FK declared** on the column — declaring one would create a cyclic FK between `controller_profile` and `action_set` (both tables already cross-reference each other), and Room's migration story for circular FKs is fragile. Repo maintains integrity instead: `deleteActionSet` clears/reassigns the pointer on delete, `setDefaultActionSet` rejects sets that don't belong to the named controller_profile, and `ControllerConfig.activeActionSet` falls back to "first set by orderIndex" if the pointer is null or stale.
+- **`activeActionSet` semantics.** Updated `ControllerConfig.activeActionSet` to prefer `controllerProfile.defaultActionSetId`, falling back to `actionSets.firstOrNull()`. "Active" here means *default-active at config load time*; **runtime set switching** (which set is *currently* in effect after a `CHANGE_PRESET` fired) is Brick 4.2 territory, lives in the evaluator's mutable state, and is not reflected in the materialized graph.
+- **Db version bump.** `AppDatabase` v10 → v11. Pre-release `fallbackToDestructiveMigration(dropAllTables = true)` (per `project_mapo_pre_release.md`) means no manual migration code — the field arrives via destructive wipe on first launch after upgrade.
+- **`copyConfig` default-pointer remap.** `copyConfig` was previously copying `defaultActionSetId` verbatim — which left the cloned controller_profile pointing at the *source* set's id, not the clone's. Fixed by remapping through the `setIdMap` after the per-set clone loop. Test `copyConfig_remapsDefaultActionSetIdToClonedSet` covers it.
+- **Add / duplicate consolidation.** `addActionSet(controllerProfileId, name, title, inheritFromSetId = null)` handles both "blank seeded set" and "inherit from existing set"; `duplicateActionSet(sourceSetId, name, title)` is a one-line wrapper that resolves the source's parent + delegates. UI layer can call either depending on which dialog flow the user is in (Brick 4.4).
+- **Set-content seeding refactored.** Extracted `seedDefaultSetContents(actionSetId)` out of `seedDefaultConfig`; `addActionSet`'s blank path calls the same helper. Avoids duplicating the default-input-source seed loop. `cloneSetContents(sourceSetId, destSetId)` is the parallel helper for the inherit path — adapts the per-set portion of `copyConfig`'s logic to a single set.
+- **Delete guards: last-set + cascade.** `deleteActionSet` refuses to delete when only one set remains under a controller_profile (returns `false` — UI is expected to disable the Delete affordance in that case). Cascades through Room's FK ON DELETE for group/input/activator/binding/preset/layer cleanup — the unit-test fakes don't model cascades, but every assertion checks the canonical row (`action_set`) so the test pass doesn't depend on cascade behavior. If a future test needs to assert on orphan cleanup we'll thread explicit deletes through the repo.
+- **Test count.** 13 new tests in `ControllerConfigRepositoryTest` (39 total in that file): seed-sets-default, addActionSet blank/inherit, rename, duplicate independence, delete guards (last-set, non-last, default reassignment), setDefault (happy path + cross-profile rejection), copyConfig default remap.
+
 ---
 
 ## Phase 5 — Action layers + mode-shift

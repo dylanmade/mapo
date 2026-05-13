@@ -12,8 +12,18 @@ data class ControllerConfig(
     val controllerProfile: ControllerProfile,
     val actionSets: List<ActionSetGraph>,
 ) {
-    /** First action set is the default-active set in legacy configs. */
-    val activeActionSet: ActionSetGraph? get() = actionSets.firstOrNull()
+    /**
+     * The controller_profile's persisted default set, or the first by orderIndex if
+     * the default pointer is null or stale. "Active" here means *default-active at
+     * load time*; runtime set-switching (Brick 4.2) is layered on top of this in the
+     * evaluator, not in the materialized graph.
+     */
+    val activeActionSet: ActionSetGraph?
+        get() {
+            val explicit = controllerProfile.defaultActionSetId
+                ?.let { id -> actionSets.firstOrNull { it.actionSet.id == id } }
+            return explicit ?: actionSets.firstOrNull()
+        }
 }
 
 data class ActionSetGraph(

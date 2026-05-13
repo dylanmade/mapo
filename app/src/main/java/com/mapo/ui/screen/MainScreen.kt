@@ -552,8 +552,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
                     },
-                    onPickResult = { activatorId, output ->
-                        viewModel.setControllerBinding(activatorId, output)
+                    onPickResult = { bindingId, output ->
+                        viewModel.setControllerCommand(bindingId, output)
                     },
                     onOpenPicker = { title, current ->
                         navController.navigate(MapoRoute.remapTargetPicker(title, current.encode()))
@@ -569,6 +569,12 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     },
                     onOpenActivatorSettings = { activatorId, label ->
                         navController.navigate(MapoRoute.activatorEditor(activatorId, label))
+                    },
+                    onAddCommand = { activatorId ->
+                        viewModel.addControllerCommand(activatorId)
+                    },
+                    onRemoveCommand = { bindingId ->
+                        viewModel.removeControllerCommand(bindingId)
                     },
                     onBack = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize(),

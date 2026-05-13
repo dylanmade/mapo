@@ -154,7 +154,7 @@ fun ActivatorEditorScreen(
             )
             SettingsSwitchRow(
                 label = "Hold-to-repeat (Turbo)",
-                helper = "Pulses the binding repeatedly while held.",
+                helper = "Pulses the command repeatedly while held.",
                 checked = settings.holdToRepeat,
                 onCheckedChange = { newValue ->
                     onSettingsChange(activatorId, settings.copy(holdToRepeat = newValue))
@@ -173,7 +173,7 @@ fun ActivatorEditorScreen(
             }
             TimingSlider(
                 label = "Fire start delay",
-                helper = "Delay before the binding fires once activation conditions are met.",
+                helper = "Delay before the command fires once activation conditions are met.",
                 currentMs = settings.fireStartDelayMs,
                 rangeMs = 0f..2000f,
                 onCommit = { newMs ->
@@ -182,7 +182,7 @@ fun ActivatorEditorScreen(
             )
             TimingSlider(
                 label = "Fire end delay",
-                helper = "Keeps the binding active past its physical release.",
+                helper = "Keeps the command active past its physical release.",
                 currentMs = settings.fireEndDelayMs,
                 rangeMs = 0f..2000f,
                 onCommit = { newMs ->
@@ -190,8 +190,8 @@ fun ActivatorEditorScreen(
                 },
             )
             SettingsSwitchRow(
-                label = "Cycle bindings",
-                helper = "Cycles through multiple bindings sequentially on each fire.",
+                label = "Cycle commands",
+                helper = "Cycles through this activator's commands sequentially on each fire.",
                 checked = settings.cycleBindings,
                 onCheckedChange = { newValue ->
                     onSettingsChange(activatorId, settings.copy(cycleBindings = newValue))

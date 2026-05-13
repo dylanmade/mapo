@@ -369,9 +369,10 @@ class ControllerConfigRepository @Inject constructor(
     }
 
     /**
-     * Replace the bindings on [activatorId] with a single binding from [output].
-     * Multi-binding (cycle_binding) editing lands in Phase 3 — for now every
-     * activator carries at most one binding.
+     * Replace the bindings on [activatorId] with a single binding from [output]. Convenience
+     * for the legacy single-command-per-activator path; still used by callers that haven't
+     * been migrated to the multi-command UI. Prefer [setCommand] when you have a
+     * specific bindingId.
      */
     suspend fun setBinding(activatorId: Long, output: BindingOutput) {
         bindingDao.deleteByActivator(activatorId)
@@ -384,6 +385,50 @@ class ControllerConfigRepository @Inject constructor(
                 orderIndex = 0,
             )
         )
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
+     * Update a specific [Binding] row in place. Used by the multi-command UI (Brick 3.6):
+     * each command row carries its bindingId, so the picker writes through to that exact
+     * row instead of replacing all bindings on the activator.
+     */
+    suspend fun setCommand(bindingId: Long, output: BindingOutput) {
+        val existing = bindingDao.getById(bindingId) ?: return
+        val (type, args) = output.toEntity()
+        if (existing.outputType == type && existing.args == args) return
+        bindingDao.update(existing.copy(outputType = type, args = args))
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
+     * Append a new command (Binding row) to [activatorId] at the next orderIndex. The new
+     * command is created as Unbound — the user picks its output via the standard picker
+     * flow on the freshly-added row. Returns the new bindingId so the UI can scroll to /
+     * focus the new row if desired.
+     */
+    suspend fun addCommand(activatorId: Long): Long {
+        val existing = bindingDao.getByActivators(listOf(activatorId))
+        val nextOrder = (existing.maxOfOrNull { it.orderIndex } ?: -1) + 1
+        val newId = bindingDao.insert(
+            Binding(
+                activatorId = activatorId,
+                outputType = BindingOutputType.UNBOUND,
+                args = "",
+                orderIndex = nextOrder,
+            )
+        )
+        configDirtyTick.value = configDirtyTick.value + 1
+        return newId
+    }
+
+    /**
+     * Delete a specific command (Binding row). The UI guards against removing the last
+     * command on an activator — at least one binding per activator is an invariant the
+     * `primaryOutput` accessor and `addActivator` setup both assume.
+     */
+    suspend fun removeCommand(bindingId: Long) {
+        bindingDao.deleteById(bindingId)
         configDirtyTick.value = configDirtyTick.value + 1
     }
 

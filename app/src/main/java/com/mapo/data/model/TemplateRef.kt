@@ -22,6 +22,29 @@ sealed class TemplateRef {
     abstract val shadowColorArgb: Int?
     abstract val shadowIsAuto: Boolean
 
+    // Default-button template carried through save-as-template / instantiate so a
+    // keyboard's customized "Buttons tab" defaults survive the round-trip.
+    abstract val defaultButtonColSpan: Int
+    abstract val defaultButtonRowSpan: Int
+
+    abstract val defaultButtonFillEnabled: Boolean
+    abstract val defaultButtonFillColorArgb: Int?
+    abstract val defaultButtonFillIsAuto: Boolean
+
+    abstract val defaultButtonOutlineEnabled: Boolean
+    abstract val defaultButtonOutlineColorArgb: Int?
+    abstract val defaultButtonOutlineIsAuto: Boolean
+
+    abstract val defaultButtonBevelEnabled: Boolean
+    abstract val defaultButtonBevelColorArgb: Int?
+    abstract val defaultButtonBevelIsAuto: Boolean
+
+    abstract val defaultButtonShadowEnabled: Boolean
+    abstract val defaultButtonShadowColorArgb: Int?
+    abstract val defaultButtonShadowIsAuto: Boolean
+
+    abstract val defaultButtonRegions: Map<String, ButtonRegion>
+
     data class BuiltIn(
         val key: String,
         override val name: String,
@@ -40,6 +63,21 @@ sealed class TemplateRef {
         override val shadowEnabled: Boolean = false,
         override val shadowColorArgb: Int? = null,
         override val shadowIsAuto: Boolean = true,
+        override val defaultButtonColSpan: Int = 1,
+        override val defaultButtonRowSpan: Int = 1,
+        override val defaultButtonFillEnabled: Boolean = true,
+        override val defaultButtonFillColorArgb: Int? = null,
+        override val defaultButtonFillIsAuto: Boolean = true,
+        override val defaultButtonOutlineEnabled: Boolean = false,
+        override val defaultButtonOutlineColorArgb: Int? = null,
+        override val defaultButtonOutlineIsAuto: Boolean = true,
+        override val defaultButtonBevelEnabled: Boolean = true,
+        override val defaultButtonBevelColorArgb: Int? = null,
+        override val defaultButtonBevelIsAuto: Boolean = true,
+        override val defaultButtonShadowEnabled: Boolean = true,
+        override val defaultButtonShadowColorArgb: Int? = null,
+        override val defaultButtonShadowIsAuto: Boolean = true,
+        override val defaultButtonRegions: Map<String, ButtonRegion> = emptyMap(),
     ) : TemplateRef()
 
     data class User(
@@ -60,6 +98,21 @@ sealed class TemplateRef {
         override val shadowEnabled: Boolean = false,
         override val shadowColorArgb: Int? = null,
         override val shadowIsAuto: Boolean = true,
+        override val defaultButtonColSpan: Int = 1,
+        override val defaultButtonRowSpan: Int = 1,
+        override val defaultButtonFillEnabled: Boolean = true,
+        override val defaultButtonFillColorArgb: Int? = null,
+        override val defaultButtonFillIsAuto: Boolean = true,
+        override val defaultButtonOutlineEnabled: Boolean = false,
+        override val defaultButtonOutlineColorArgb: Int? = null,
+        override val defaultButtonOutlineIsAuto: Boolean = true,
+        override val defaultButtonBevelEnabled: Boolean = true,
+        override val defaultButtonBevelColorArgb: Int? = null,
+        override val defaultButtonBevelIsAuto: Boolean = true,
+        override val defaultButtonShadowEnabled: Boolean = true,
+        override val defaultButtonShadowColorArgb: Int? = null,
+        override val defaultButtonShadowIsAuto: Boolean = true,
+        override val defaultButtonRegions: Map<String, ButtonRegion> = emptyMap(),
     ) : TemplateRef()
 }
 
@@ -81,6 +134,21 @@ fun TemplateRef.toGridLayout(id: Long = 0L): GridLayout = GridLayout(
     shadowEnabled = shadowEnabled,
     shadowColorArgb = shadowColorArgb,
     shadowIsAuto = shadowIsAuto,
+    defaultButtonColSpan = defaultButtonColSpan,
+    defaultButtonRowSpan = defaultButtonRowSpan,
+    defaultButtonFillEnabled = defaultButtonFillEnabled,
+    defaultButtonFillColorArgb = defaultButtonFillColorArgb,
+    defaultButtonFillIsAuto = defaultButtonFillIsAuto,
+    defaultButtonOutlineEnabled = defaultButtonOutlineEnabled,
+    defaultButtonOutlineColorArgb = defaultButtonOutlineColorArgb,
+    defaultButtonOutlineIsAuto = defaultButtonOutlineIsAuto,
+    defaultButtonBevelEnabled = defaultButtonBevelEnabled,
+    defaultButtonBevelColorArgb = defaultButtonBevelColorArgb,
+    defaultButtonBevelIsAuto = defaultButtonBevelIsAuto,
+    defaultButtonShadowEnabled = defaultButtonShadowEnabled,
+    defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
+    defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonRegions = defaultButtonRegions,
 )
 
 fun TemplateRef.toSnapshot(): LayoutSnapshot = LayoutSnapshot(
@@ -100,4 +168,19 @@ fun TemplateRef.toSnapshot(): LayoutSnapshot = LayoutSnapshot(
     shadowEnabled = shadowEnabled,
     shadowColorArgb = shadowColorArgb,
     shadowIsAuto = shadowIsAuto,
+    defaultButtonColSpan = defaultButtonColSpan,
+    defaultButtonRowSpan = defaultButtonRowSpan,
+    defaultButtonFillEnabled = defaultButtonFillEnabled,
+    defaultButtonFillColorArgb = defaultButtonFillColorArgb,
+    defaultButtonFillIsAuto = defaultButtonFillIsAuto,
+    defaultButtonOutlineEnabled = defaultButtonOutlineEnabled,
+    defaultButtonOutlineColorArgb = defaultButtonOutlineColorArgb,
+    defaultButtonOutlineIsAuto = defaultButtonOutlineIsAuto,
+    defaultButtonBevelEnabled = defaultButtonBevelEnabled,
+    defaultButtonBevelColorArgb = defaultButtonBevelColorArgb,
+    defaultButtonBevelIsAuto = defaultButtonBevelIsAuto,
+    defaultButtonShadowEnabled = defaultButtonShadowEnabled,
+    defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
+    defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonRegions = defaultButtonRegions,
 )

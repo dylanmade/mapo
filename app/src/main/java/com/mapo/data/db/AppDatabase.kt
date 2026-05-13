@@ -46,7 +46,7 @@ import com.mapo.data.model.steam.PresetBinding
         Binding::class,
         PresetBinding::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 @TypeConverters(SteamTypeConverters::class)

@@ -23,6 +23,28 @@ data class LayoutSnapshot(
     val shadowEnabled: Boolean = false,
     val shadowColorArgb: Int? = null,
     val shadowIsAuto: Boolean = true,
+
+    // Default-button template — see [GridLayout] for semantics.
+    val defaultButtonColSpan: Int = 1,
+    val defaultButtonRowSpan: Int = 1,
+
+    val defaultButtonFillEnabled: Boolean = true,
+    val defaultButtonFillColorArgb: Int? = null,
+    val defaultButtonFillIsAuto: Boolean = true,
+
+    val defaultButtonOutlineEnabled: Boolean = false,
+    val defaultButtonOutlineColorArgb: Int? = null,
+    val defaultButtonOutlineIsAuto: Boolean = true,
+
+    val defaultButtonBevelEnabled: Boolean = true,
+    val defaultButtonBevelColorArgb: Int? = null,
+    val defaultButtonBevelIsAuto: Boolean = true,
+
+    val defaultButtonShadowEnabled: Boolean = true,
+    val defaultButtonShadowColorArgb: Int? = null,
+    val defaultButtonShadowIsAuto: Boolean = true,
+
+    val defaultButtonRegions: Map<String, ButtonRegion> = emptyMap(),
 )
 
 private val gson = Gson()
@@ -44,6 +66,21 @@ fun GridLayout.toSnapshot(): LayoutSnapshot = LayoutSnapshot(
     shadowEnabled = shadowEnabled,
     shadowColorArgb = shadowColorArgb,
     shadowIsAuto = shadowIsAuto,
+    defaultButtonColSpan = defaultButtonColSpan,
+    defaultButtonRowSpan = defaultButtonRowSpan,
+    defaultButtonFillEnabled = defaultButtonFillEnabled,
+    defaultButtonFillColorArgb = defaultButtonFillColorArgb,
+    defaultButtonFillIsAuto = defaultButtonFillIsAuto,
+    defaultButtonOutlineEnabled = defaultButtonOutlineEnabled,
+    defaultButtonOutlineColorArgb = defaultButtonOutlineColorArgb,
+    defaultButtonOutlineIsAuto = defaultButtonOutlineIsAuto,
+    defaultButtonBevelEnabled = defaultButtonBevelEnabled,
+    defaultButtonBevelColorArgb = defaultButtonBevelColorArgb,
+    defaultButtonBevelIsAuto = defaultButtonBevelIsAuto,
+    defaultButtonShadowEnabled = defaultButtonShadowEnabled,
+    defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
+    defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonRegions = defaultButtonRegions,
 )
 
 fun LayoutSnapshot.toGridLayout(id: Long = 0L): GridLayout = GridLayout(
@@ -64,6 +101,21 @@ fun LayoutSnapshot.toGridLayout(id: Long = 0L): GridLayout = GridLayout(
     shadowEnabled = shadowEnabled,
     shadowColorArgb = shadowColorArgb,
     shadowIsAuto = shadowIsAuto,
+    defaultButtonColSpan = defaultButtonColSpan,
+    defaultButtonRowSpan = defaultButtonRowSpan,
+    defaultButtonFillEnabled = defaultButtonFillEnabled,
+    defaultButtonFillColorArgb = defaultButtonFillColorArgb,
+    defaultButtonFillIsAuto = defaultButtonFillIsAuto,
+    defaultButtonOutlineEnabled = defaultButtonOutlineEnabled,
+    defaultButtonOutlineColorArgb = defaultButtonOutlineColorArgb,
+    defaultButtonOutlineIsAuto = defaultButtonOutlineIsAuto,
+    defaultButtonBevelEnabled = defaultButtonBevelEnabled,
+    defaultButtonBevelColorArgb = defaultButtonBevelColorArgb,
+    defaultButtonBevelIsAuto = defaultButtonBevelIsAuto,
+    defaultButtonShadowEnabled = defaultButtonShadowEnabled,
+    defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
+    defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonRegions = defaultButtonRegions,
 )
 
 fun LayoutSnapshot.toJson(): String = gson.toJson(this)

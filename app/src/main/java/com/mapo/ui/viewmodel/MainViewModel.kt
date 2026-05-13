@@ -19,6 +19,8 @@ import com.mapo.data.model.onHoldTarget
 import com.mapo.data.model.onTapTarget
 import com.mapo.data.model.findFirstEmptyArea
 import com.mapo.data.model.findFirstEmptyCell
+import com.mapo.data.model.isTrackpad
+import com.mapo.data.model.seedNewButton
 import com.mapo.data.model.parseOriginalSnapshot
 import com.mapo.data.model.toGridLayout
 import com.mapo.data.model.toJson
@@ -320,6 +322,28 @@ class MainViewModel @Inject constructor(
     }
 
     /**
+     * Brick 3.6 multi-command path: update a specific binding row by its [bindingId]
+     * rather than replacing all bindings on the activator. Called from the per-input
+     * editor when each command row owns its own picker result.
+     */
+    fun setControllerCommand(bindingId: Long, output: BindingOutput) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.setCommand(bindingId, output) }
+    }
+
+    /** Append a new Unbound command to [activatorId]. See `addCommand` in the repository. */
+    fun addControllerCommand(activatorId: Long) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.addCommand(activatorId) }
+    }
+
+    /** Delete a specific command (Binding row). The UI guards against removing the last. */
+    fun removeControllerCommand(bindingId: Long) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.removeCommand(bindingId) }
+    }
+
+    /**
      * Append a new activator of [type] to the input identified by [groupInputId].
      * Used by the per-input editor screen's `[+ Add Activator]` action.
      */
@@ -576,18 +600,47 @@ class MainViewModel @Inject constructor(
             if (col !in 0 until layout.columns || row !in 0 until layout.rows) {
                 return@mutateDisplayedLayout null
             }
-            if (layout.wouldOverlap("__new__", col, row, 1, 1)) {
+            // Seed from the keyboard's Buttons-tab defaults (size + appearance + regions)
+            // for normal buttons. Trackpads bypass this — their appearance comes from the
+            // trackpad-specific preset, not from per-keyboard button defaults.
+            val seeded = if (spec.isTrackpad) spec else layout.seedNewButton(spec)
+            // The default size may not fit at the tapped anchor (against grid edge or
+            // adjacent to another button). Shrink to the largest rectangle that does fit,
+            // preserving user intent better than always falling back to 1×1.
+            val (cs, rs) = fitSizeAtAnchor(layout, col, row, seeded.colSpan, seeded.rowSpan)
+            if (layout.wouldOverlap("__new__", col, row, cs, rs)) {
                 emitError("Cell already occupied")
                 return@mutateDisplayedLayout null
             }
-            val placed = spec.copy(
+            val placed = seeded.copy(
                 id = java.util.UUID.randomUUID().toString(),
                 col = col,
                 row = row,
+                colSpan = cs,
+                rowSpan = rs,
             )
             _selectedButtonId.value = placed.id
             layout.copy(buttons = layout.buttons + placed)
         }
+    }
+
+    /**
+     * Largest rectangle anchored at (col,row) that fits in the grid AND doesn't overlap
+     * any existing button. Shrinks the longer dimension first (ties shrink colSpan).
+     * Returns (1,1) as the floor; the caller still checks wouldOverlap to detect a fully
+     * occupied anchor cell.
+     */
+    private fun fitSizeAtAnchor(layout: GridLayout, col: Int, row: Int, cs: Int, rs: Int): Pair<Int, Int> {
+        val maxCs = (layout.columns - col).coerceAtLeast(1)
+        val maxRs = (layout.rows - row).coerceAtLeast(1)
+        var c = cs.coerceIn(1, maxCs)
+        var r = rs.coerceIn(1, maxRs)
+        while (c >= 1 && r >= 1) {
+            if (!layout.wouldOverlap("__new__", col, row, c, r)) return c to r
+            if (c == 1 && r == 1) break
+            if (c >= r) c -= 1 else r -= 1
+        }
+        return 1 to 1
     }
 
     // ── Drag to move ──────────────────────────────────────────────────────────
@@ -702,7 +755,15 @@ class MainViewModel @Inject constructor(
         if (offending.isNotEmpty()) {
             return offending.map { it.label.ifBlank { "(unnamed)" } }
         }
-        persistLayoutFields(layout.copy(columns = columns, rows = rows), profileId)
+        val (clamped, defaultsShrunk) = clampDefaultButtonSize(
+            layout.copy(columns = columns, rows = rows),
+            columns,
+            rows,
+        )
+        persistLayoutFields(clamped, profileId)
+        if (defaultsShrunk) {
+            emitToast("Default button size adjusted to fit new Keyboard dimensions")
+        }
         return null
     }
 
@@ -715,10 +776,37 @@ class MainViewModel @Inject constructor(
         val layout = _layouts.value.find { it.id == layoutId } ?: return
         val resized = autoFitButtons(layout.buttons, columns, rows)
         val dropped = layout.buttons.size - resized.size
-        persistLayoutFields(layout.copy(columns = columns, rows = rows, buttons = resized), profileId)
+        val (clamped, defaultsShrunk) = clampDefaultButtonSize(
+            layout.copy(columns = columns, rows = rows, buttons = resized),
+            columns,
+            rows,
+        )
+        persistLayoutFields(clamped, profileId)
         if (dropped > 0) {
             emitToast("$dropped ${if (dropped == 1) "button" else "buttons"} removed")
         }
+        if (defaultsShrunk) {
+            emitToast("Default button size adjusted to fit new Keyboard dimensions")
+        }
+    }
+
+    /**
+     * Returns [layout] with its default-button width/height clamped to fit within
+     * [columns] × [rows], plus a flag indicating whether a clamp actually happened.
+     * Caller surfaces a toast when the flag is true.
+     */
+    private fun clampDefaultButtonSize(
+        layout: GridLayout,
+        columns: Int,
+        rows: Int,
+    ): Pair<GridLayout, Boolean> {
+        val newCs = layout.defaultButtonColSpan.coerceIn(1, columns.coerceAtLeast(1))
+        val newRs = layout.defaultButtonRowSpan.coerceIn(1, rows.coerceAtLeast(1))
+        val changed = newCs != layout.defaultButtonColSpan || newRs != layout.defaultButtonRowSpan
+        return layout.copy(
+            defaultButtonColSpan = newCs,
+            defaultButtonRowSpan = newRs,
+        ) to changed
     }
 
     internal fun autoFitButtons(buttons: List<GridButton>, cols: Int, rows: Int): List<GridButton> {
@@ -904,6 +992,21 @@ class MainViewModel @Inject constructor(
             shadowEnabled = template.shadowEnabled,
             shadowColorArgb = template.shadowColorArgb,
             shadowIsAuto = template.shadowIsAuto,
+            defaultButtonColSpan = template.defaultButtonColSpan,
+            defaultButtonRowSpan = template.defaultButtonRowSpan,
+            defaultButtonFillEnabled = template.defaultButtonFillEnabled,
+            defaultButtonFillColorArgb = template.defaultButtonFillColorArgb,
+            defaultButtonFillIsAuto = template.defaultButtonFillIsAuto,
+            defaultButtonOutlineEnabled = template.defaultButtonOutlineEnabled,
+            defaultButtonOutlineColorArgb = template.defaultButtonOutlineColorArgb,
+            defaultButtonOutlineIsAuto = template.defaultButtonOutlineIsAuto,
+            defaultButtonBevelEnabled = template.defaultButtonBevelEnabled,
+            defaultButtonBevelColorArgb = template.defaultButtonBevelColorArgb,
+            defaultButtonBevelIsAuto = template.defaultButtonBevelIsAuto,
+            defaultButtonShadowEnabled = template.defaultButtonShadowEnabled,
+            defaultButtonShadowColorArgb = template.defaultButtonShadowColorArgb,
+            defaultButtonShadowIsAuto = template.defaultButtonShadowIsAuto,
+            defaultButtonRegions = template.defaultButtonRegions,
         ).withFreshButtonIds()
         appendNewLayout(draft, profileId)
     }

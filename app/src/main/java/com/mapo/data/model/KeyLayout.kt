@@ -42,11 +42,36 @@ data class KeyLayout(
     val shadowColorArgb: Int? = null,
     val shadowIsAuto: Boolean = true,
 
+    // Default-button template fields — see [GridLayout] for semantics.
+    val defaultButtonColSpan: Int = 1,
+    val defaultButtonRowSpan: Int = 1,
+
+    val defaultButtonFillEnabled: Boolean = true,
+    val defaultButtonFillColorArgb: Int? = null,
+    val defaultButtonFillIsAuto: Boolean = true,
+
+    val defaultButtonOutlineEnabled: Boolean = false,
+    val defaultButtonOutlineColorArgb: Int? = null,
+    val defaultButtonOutlineIsAuto: Boolean = true,
+
+    val defaultButtonBevelEnabled: Boolean = true,
+    val defaultButtonBevelColorArgb: Int? = null,
+    val defaultButtonBevelIsAuto: Boolean = true,
+
+    val defaultButtonShadowEnabled: Boolean = true,
+    val defaultButtonShadowColorArgb: Int? = null,
+    val defaultButtonShadowIsAuto: Boolean = true,
+
+    // Regions are a Map keyed by RegionPosition.name; persisted as JSON like buttonsJson
+    // since Room doesn't natively support Map columns.
+    val defaultButtonRegionsJson: String = "{}",
+
     val originalSnapshotJson: String? = null,
 )
 
 private val gson = Gson()
 private val buttonsType = object : TypeToken<List<GridButton>>() {}.type
+private val regionsType = object : TypeToken<Map<String, ButtonRegion>>() {}.type
 
 fun KeyLayout.toGridLayout(): GridLayout = GridLayout(
     id = id,
@@ -66,6 +91,21 @@ fun KeyLayout.toGridLayout(): GridLayout = GridLayout(
     shadowEnabled = shadowEnabled,
     shadowColorArgb = shadowColorArgb,
     shadowIsAuto = shadowIsAuto,
+    defaultButtonColSpan = defaultButtonColSpan,
+    defaultButtonRowSpan = defaultButtonRowSpan,
+    defaultButtonFillEnabled = defaultButtonFillEnabled,
+    defaultButtonFillColorArgb = defaultButtonFillColorArgb,
+    defaultButtonFillIsAuto = defaultButtonFillIsAuto,
+    defaultButtonOutlineEnabled = defaultButtonOutlineEnabled,
+    defaultButtonOutlineColorArgb = defaultButtonOutlineColorArgb,
+    defaultButtonOutlineIsAuto = defaultButtonOutlineIsAuto,
+    defaultButtonBevelEnabled = defaultButtonBevelEnabled,
+    defaultButtonBevelColorArgb = defaultButtonBevelColorArgb,
+    defaultButtonBevelIsAuto = defaultButtonBevelIsAuto,
+    defaultButtonShadowEnabled = defaultButtonShadowEnabled,
+    defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
+    defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonRegions = gson.fromJson(defaultButtonRegionsJson, regionsType) ?: emptyMap(),
 )
 
 fun GridLayout.toKeyLayout(
@@ -92,6 +132,21 @@ fun GridLayout.toKeyLayout(
     shadowEnabled = shadowEnabled,
     shadowColorArgb = shadowColorArgb,
     shadowIsAuto = shadowIsAuto,
+    defaultButtonColSpan = defaultButtonColSpan,
+    defaultButtonRowSpan = defaultButtonRowSpan,
+    defaultButtonFillEnabled = defaultButtonFillEnabled,
+    defaultButtonFillColorArgb = defaultButtonFillColorArgb,
+    defaultButtonFillIsAuto = defaultButtonFillIsAuto,
+    defaultButtonOutlineEnabled = defaultButtonOutlineEnabled,
+    defaultButtonOutlineColorArgb = defaultButtonOutlineColorArgb,
+    defaultButtonOutlineIsAuto = defaultButtonOutlineIsAuto,
+    defaultButtonBevelEnabled = defaultButtonBevelEnabled,
+    defaultButtonBevelColorArgb = defaultButtonBevelColorArgb,
+    defaultButtonBevelIsAuto = defaultButtonBevelIsAuto,
+    defaultButtonShadowEnabled = defaultButtonShadowEnabled,
+    defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
+    defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonRegionsJson = gson.toJson(defaultButtonRegions),
     originalSnapshotJson = originalSnapshotJson,
 )
 

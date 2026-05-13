@@ -34,6 +34,104 @@ data class GridLayout(
     val shadowEnabled: Boolean = false,
     val shadowColorArgb: Int? = null,
     val shadowIsAuto: Boolean = true,
+
+    // Default-button template — seeds newly-added buttons in this keyboard.
+    // Existing buttons are NOT touched when these change; this is purely a stamp-out
+    // template. Size is auto-clamped to fit within columns/rows on keyboard resize.
+    // Color-slot defaults mirror [GridButton]'s field defaults (fill+bevel+shadow on,
+    // outline off, all auto) so a freshly-created keyboard stamps out buttons that
+    // look exactly like a pre-refactor default button.
+    val defaultButtonColSpan: Int = 1,
+    val defaultButtonRowSpan: Int = 1,
+
+    val defaultButtonFillEnabled: Boolean = true,
+    val defaultButtonFillColorArgb: Int? = null,
+    val defaultButtonFillIsAuto: Boolean = true,
+
+    val defaultButtonOutlineEnabled: Boolean = false,
+    val defaultButtonOutlineColorArgb: Int? = null,
+    val defaultButtonOutlineIsAuto: Boolean = true,
+
+    val defaultButtonBevelEnabled: Boolean = true,
+    val defaultButtonBevelColorArgb: Int? = null,
+    val defaultButtonBevelIsAuto: Boolean = true,
+
+    val defaultButtonShadowEnabled: Boolean = true,
+    val defaultButtonShadowColorArgb: Int? = null,
+    val defaultButtonShadowIsAuto: Boolean = true,
+
+    val defaultButtonRegions: Map<String, ButtonRegion> = emptyMap(),
+)
+
+/**
+ * Synthesizes a [GridButton] from this layout's default-button fields. The Buttons
+ * tab in `ConfigureKeyboardScreen` edits this synthesized template via the same
+ * composables that power `ConfigureButtonScreen`; commits go back through
+ * [withDefaultButtonFrom]. `col`/`row` are placeholders — only the size + appearance
+ * + regions fields are read.
+ */
+fun GridLayout.defaultButtonTemplate(): GridButton = GridButton(
+    col = 0,
+    row = 0,
+    colSpan = defaultButtonColSpan,
+    rowSpan = defaultButtonRowSpan,
+    type = "key",
+    fillEnabled = defaultButtonFillEnabled,
+    fillColorArgb = defaultButtonFillColorArgb,
+    fillIsAuto = defaultButtonFillIsAuto,
+    outlineEnabled = defaultButtonOutlineEnabled,
+    outlineColorArgb = defaultButtonOutlineColorArgb,
+    outlineIsAuto = defaultButtonOutlineIsAuto,
+    bevelEnabled = defaultButtonBevelEnabled,
+    bevelColorArgb = defaultButtonBevelColorArgb,
+    bevelIsAuto = defaultButtonBevelIsAuto,
+    shadowEnabled = defaultButtonShadowEnabled,
+    shadowColorArgb = defaultButtonShadowColorArgb,
+    shadowIsAuto = defaultButtonShadowIsAuto,
+    regions = defaultButtonRegions,
+)
+
+/** Inverse of [defaultButtonTemplate]: write a synthesized template back into the layout. */
+fun GridLayout.withDefaultButtonFrom(template: GridButton): GridLayout = copy(
+    defaultButtonColSpan = template.colSpan,
+    defaultButtonRowSpan = template.rowSpan,
+    defaultButtonFillEnabled = template.fillEnabled,
+    defaultButtonFillColorArgb = template.fillColorArgb,
+    defaultButtonFillIsAuto = template.fillIsAuto,
+    defaultButtonOutlineEnabled = template.outlineEnabled,
+    defaultButtonOutlineColorArgb = template.outlineColorArgb,
+    defaultButtonOutlineIsAuto = template.outlineIsAuto,
+    defaultButtonBevelEnabled = template.bevelEnabled,
+    defaultButtonBevelColorArgb = template.bevelColorArgb,
+    defaultButtonBevelIsAuto = template.bevelIsAuto,
+    defaultButtonShadowEnabled = template.shadowEnabled,
+    defaultButtonShadowColorArgb = template.shadowColorArgb,
+    defaultButtonShadowIsAuto = template.shadowIsAuto,
+    defaultButtonRegions = template.regions,
+)
+
+/**
+ * Returns a copy of [base] (a fresh `GridButton(col, row, type)` from the caller)
+ * seeded with this layout's default-button template — size, color slots, and regions.
+ * Used by add-button paths so newly-placed buttons inherit the keyboard's Buttons-tab
+ * defaults.
+ */
+fun GridLayout.seedNewButton(base: GridButton): GridButton = base.copy(
+    colSpan = defaultButtonColSpan,
+    rowSpan = defaultButtonRowSpan,
+    fillEnabled = defaultButtonFillEnabled,
+    fillColorArgb = defaultButtonFillColorArgb,
+    fillIsAuto = defaultButtonFillIsAuto,
+    outlineEnabled = defaultButtonOutlineEnabled,
+    outlineColorArgb = defaultButtonOutlineColorArgb,
+    outlineIsAuto = defaultButtonOutlineIsAuto,
+    bevelEnabled = defaultButtonBevelEnabled,
+    bevelColorArgb = defaultButtonBevelColorArgb,
+    bevelIsAuto = defaultButtonBevelIsAuto,
+    shadowEnabled = defaultButtonShadowEnabled,
+    shadowColorArgb = defaultButtonShadowColorArgb,
+    shadowIsAuto = defaultButtonShadowIsAuto,
+    regions = defaultButtonRegions,
 )
 
 /**

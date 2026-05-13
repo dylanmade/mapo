@@ -32,10 +32,33 @@ data class KeyboardTemplate(
     val shadowEnabled: Boolean = false,
     val shadowColorArgb: Int? = null,
     val shadowIsAuto: Boolean = true,
+
+    // Default-button template — see [GridLayout] for semantics.
+    val defaultButtonColSpan: Int = 1,
+    val defaultButtonRowSpan: Int = 1,
+
+    val defaultButtonFillEnabled: Boolean = true,
+    val defaultButtonFillColorArgb: Int? = null,
+    val defaultButtonFillIsAuto: Boolean = true,
+
+    val defaultButtonOutlineEnabled: Boolean = false,
+    val defaultButtonOutlineColorArgb: Int? = null,
+    val defaultButtonOutlineIsAuto: Boolean = true,
+
+    val defaultButtonBevelEnabled: Boolean = true,
+    val defaultButtonBevelColorArgb: Int? = null,
+    val defaultButtonBevelIsAuto: Boolean = true,
+
+    val defaultButtonShadowEnabled: Boolean = true,
+    val defaultButtonShadowColorArgb: Int? = null,
+    val defaultButtonShadowIsAuto: Boolean = true,
+
+    val defaultButtonRegionsJson: String = "{}",
 )
 
 private val gson = Gson()
 private val buttonsType = object : TypeToken<List<GridButton>>() {}.type
+private val regionsType = object : TypeToken<Map<String, ButtonRegion>>() {}.type
 
 fun KeyboardTemplate.toUserTemplateRef(): TemplateRef.User = TemplateRef.User(
     id = id,
@@ -55,6 +78,21 @@ fun KeyboardTemplate.toUserTemplateRef(): TemplateRef.User = TemplateRef.User(
     shadowEnabled = shadowEnabled,
     shadowColorArgb = shadowColorArgb,
     shadowIsAuto = shadowIsAuto,
+    defaultButtonColSpan = defaultButtonColSpan,
+    defaultButtonRowSpan = defaultButtonRowSpan,
+    defaultButtonFillEnabled = defaultButtonFillEnabled,
+    defaultButtonFillColorArgb = defaultButtonFillColorArgb,
+    defaultButtonFillIsAuto = defaultButtonFillIsAuto,
+    defaultButtonOutlineEnabled = defaultButtonOutlineEnabled,
+    defaultButtonOutlineColorArgb = defaultButtonOutlineColorArgb,
+    defaultButtonOutlineIsAuto = defaultButtonOutlineIsAuto,
+    defaultButtonBevelEnabled = defaultButtonBevelEnabled,
+    defaultButtonBevelColorArgb = defaultButtonBevelColorArgb,
+    defaultButtonBevelIsAuto = defaultButtonBevelIsAuto,
+    defaultButtonShadowEnabled = defaultButtonShadowEnabled,
+    defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
+    defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonRegions = gson.fromJson(defaultButtonRegionsJson, regionsType) ?: emptyMap(),
 )
 
 fun TemplateRef.User.toEntity(): KeyboardTemplate = KeyboardTemplate(
@@ -75,6 +113,21 @@ fun TemplateRef.User.toEntity(): KeyboardTemplate = KeyboardTemplate(
     shadowEnabled = shadowEnabled,
     shadowColorArgb = shadowColorArgb,
     shadowIsAuto = shadowIsAuto,
+    defaultButtonColSpan = defaultButtonColSpan,
+    defaultButtonRowSpan = defaultButtonRowSpan,
+    defaultButtonFillEnabled = defaultButtonFillEnabled,
+    defaultButtonFillColorArgb = defaultButtonFillColorArgb,
+    defaultButtonFillIsAuto = defaultButtonFillIsAuto,
+    defaultButtonOutlineEnabled = defaultButtonOutlineEnabled,
+    defaultButtonOutlineColorArgb = defaultButtonOutlineColorArgb,
+    defaultButtonOutlineIsAuto = defaultButtonOutlineIsAuto,
+    defaultButtonBevelEnabled = defaultButtonBevelEnabled,
+    defaultButtonBevelColorArgb = defaultButtonBevelColorArgb,
+    defaultButtonBevelIsAuto = defaultButtonBevelIsAuto,
+    defaultButtonShadowEnabled = defaultButtonShadowEnabled,
+    defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
+    defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonRegionsJson = gson.toJson(defaultButtonRegions),
 )
 
 fun GridLayout.toNewTemplateEntity(templateName: String): KeyboardTemplate = KeyboardTemplate(
@@ -95,4 +148,19 @@ fun GridLayout.toNewTemplateEntity(templateName: String): KeyboardTemplate = Key
     shadowEnabled = shadowEnabled,
     shadowColorArgb = shadowColorArgb,
     shadowIsAuto = shadowIsAuto,
+    defaultButtonColSpan = defaultButtonColSpan,
+    defaultButtonRowSpan = defaultButtonRowSpan,
+    defaultButtonFillEnabled = defaultButtonFillEnabled,
+    defaultButtonFillColorArgb = defaultButtonFillColorArgb,
+    defaultButtonFillIsAuto = defaultButtonFillIsAuto,
+    defaultButtonOutlineEnabled = defaultButtonOutlineEnabled,
+    defaultButtonOutlineColorArgb = defaultButtonOutlineColorArgb,
+    defaultButtonOutlineIsAuto = defaultButtonOutlineIsAuto,
+    defaultButtonBevelEnabled = defaultButtonBevelEnabled,
+    defaultButtonBevelColorArgb = defaultButtonBevelColorArgb,
+    defaultButtonBevelIsAuto = defaultButtonBevelIsAuto,
+    defaultButtonShadowEnabled = defaultButtonShadowEnabled,
+    defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
+    defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonRegionsJson = gson.toJson(defaultButtonRegions),
 )

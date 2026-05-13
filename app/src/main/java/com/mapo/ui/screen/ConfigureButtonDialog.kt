@@ -466,7 +466,7 @@ private fun ColorSwatch(argb: Int?) {
 }
 
 @Composable
-private fun RegionRowItem(
+internal fun RegionRowItem(
     position: RegionPosition,
     region: ButtonRegion?,
     onTapPreview: String,
@@ -557,7 +557,7 @@ private fun ResetButton(label: String, onClick: () -> Unit) {
 // ── Sub-dialogs ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun RegionEditDialog(
+internal fun RegionEditDialog(
     position: RegionPosition,
     initial: ButtonRegion,
     labelPlaceholder: String,
@@ -733,7 +733,7 @@ private fun RegionEditDialog(
  * Manual color picks always set `IsAuto = false`; toggling Auto on doesn't clear the
  * stored manual color so the user can flip back without losing their work.
  */
-private enum class ColorSlot(
+internal enum class ColorSlot(
     val title: String,
     val description: String,
     val defaultEnabled: Boolean,
@@ -819,7 +819,7 @@ private enum class ColorSlot(
     }
 }
 
-private fun RegionPosition.displayName(): String = when (this) {
+internal fun RegionPosition.displayName(): String = when (this) {
     RegionPosition.CENTER        -> "Center"
     RegionPosition.TOP_LEFT      -> "Top left"
     RegionPosition.TOP_CENTER    -> "Top center"

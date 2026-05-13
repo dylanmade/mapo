@@ -378,7 +378,17 @@ Reordered after 3.1 to put the **per-input editor UI ahead of further runtime br
 | 3.2 | `Double_Press` window state machine + Full/Double coexistence semantics (hardcoded interruptable=true) | ✅ COMPLETED 2026-05-12 |
 | 3.5 | `ActivatorEditorScreen` + per-type settings panels (long_press_time slider, double_tap_time slider) — universal settings as placeholders | ✅ COMPLETED 2026-05-12 |
 | 3.3 | `Chorded_Press` (physical partner) + universal settings (toggle, turbo / `hold_to_repeat`, `fire_start_delay` / `fire_end_delay`, `cycle_binding`, `interruptable`) | ✅ COMPLETED 2026-05-13 |
-| 3.6 | **Multi-binding authoring** per activator (`[+ Add Binding]` list under each activator row) — required for `cycle_bindings` to be user-exercisable. Steam exposes this as "Cycle Commands" with sub-command rows; same data shape as Mapo's. Data model and runtime are ready; only the UI is missing. | ⏳ pending (Phase 3 follow-up) |
+| 3.6 | **Multi-command authoring** per activator (`[+ Add Command]` list under each activator row) — required for `cycle_bindings` to be user-exercisable. Steam exposes this as "Cycle Commands" with sub-command rows; same data shape as Mapo's. Data model and runtime were ready since Phase 1 / Brick 3.3; only the UI was missing. | ✅ COMPLETED 2026-05-13 |
+
+### Brick 3.6 deviations + decisions
+
+- **User-facing terminology: "binding" → "command"** per user direction. The word "input" was first floated and rejected because the codebase already uses `Input*` throughout for *physical* input (InputAddress, InputEvaluator, InputEditorScreen, GroupInput). "Command" reads natively, has no clash, and matches Steam's "Cycle Commands" UX. **Code identifiers stay `Binding` / `BindingOutput` / `addCommand` / `setCommand`** — the rename is UI-text-only. New repo methods deliberately named `addCommand` / `removeCommand` / `setCommand` (not `addBinding` etc.) to signal the user-facing concept in API shape too.
+- **Activator always has ≥1 command** invariant maintained by `addActivator` (seeds one Unbound binding) + UI guard (the [×] on each command row is only enabled when `bindings.size > 1`). `removeCommand` itself doesn't refuse — the UI is the enforcer. Tests cover the multi-row case.
+- **Picker round-trip now targets bindingId.** Previously `onPickResult(activatorId, output)` replaced all bindings on the activator. Now `onPickResult(bindingId, output)` writes to one specific Binding row via `setCommand`. The legacy `setBinding(activatorId, output)` still exists but is unused by the multi-command UI; kept around for callers that haven't migrated.
+- **`[+ Add Command]` is a `TextButton` (subordinate visual weight) vs `[+ Add Activator]`'s `FilledTonalButton` (top-level).** Conveys hierarchy: commands belong to an activator, activators belong to an input.
+- **No reorder UI in 3.6.** `orderIndex` is preserved in the DB and respected by the runtime cycle, but the user can't drag-reorder commands today. Files as a future polish if cycle ordering becomes a common edit. Steam-faithful: Steam doesn't expose drag-reorder either; commands cycle in insertion order.
+- **String renames in `ActivatorEditorScreen`**: "Cycle bindings" → "Cycle commands"; helper text for `hold_to_repeat` / `fire_start_delay` / `fire_end_delay` swaps "binding" → "command"; the helper line under each CommandRow says "Tap to choose what this command emits."
+- **Tests**: 3 new repo tests (addCommand returns id + appends at next orderIndex; setCommand updates a specific row only; removeCommand targets one row only) + 1 new screen test (Add Command button fires the callback with the right activatorId). Existing InputEditor + ActivatorEditor screen tests updated for the new callback signature.
 
 ### Brick 3.3 deviations + decisions
 

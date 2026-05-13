@@ -30,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,13 +57,18 @@ import com.mapo.data.model.steam.toRemapTarget
  * Per-input activator editor. Reached from `RemapControlsScreen` by tapping any input row.
  *
  * One screen per `(inputSource, groupInputKey)` pair. The user sees every activator
- * configured on that input as its own row — `[binding | type dropdown | ⚙]` — plus a
- * `[+ Add Activator]` action at the bottom. Each activator is independently editable
- * and (Brick 3.5) will own its own settings panel via the cog.
+ * configured on that input as its own row — `[type dropdown | ⚙ | ×]` on top, then a
+ * list of command rows underneath (one per Binding), then `[+ Add Command]`. The whole
+ * page ends with `[+ Add Activator]`.
  *
  * Per the user's M3 direction (multi-activator-per-input, Steam-faithful), the rows
  * sort by canonical activator order: Full / Soft / Long / Double / Start / Release / Chord.
  * Within the same type, by `orderIndex` (the user's insertion sequence).
+ *
+ * Brick 3.6 introduces the multi-command list per activator. The picker round-trip now
+ * targets a specific bindingId (not activatorId) so each command row writes to its own
+ * Binding row in the DB. Activators always have ≥1 command (enforced by hiding [×] on
+ * the last one).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,26 +79,28 @@ fun InputEditorScreen(
     config: ControllerConfig?,
     pickerResult: RemapTarget?,
     onConsumePickerResult: () -> Unit,
-    onPickResult: (activatorId: Long, output: BindingOutput) -> Unit,
+    onPickResult: (bindingId: Long, output: BindingOutput) -> Unit,
     onOpenPicker: (title: String, current: RemapTarget) -> Unit,
     onAddActivator: (groupInputId: Long, type: ActivatorType) -> Unit,
     onRemoveActivator: (activatorId: Long) -> Unit,
     onSetActivatorType: (activatorId: Long, type: ActivatorType) -> Unit,
     onOpenActivatorSettings: (activatorId: Long, label: String) -> Unit,
+    onAddCommand: (activatorId: Long) -> Unit,
+    onRemoveCommand: (bindingId: Long) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Survives the full-screen picker round-trip — picker pops back here and we apply
-    // the result to whichever activator was being edited.
-    var editingActivatorId by rememberSaveable { mutableStateOf<Long?>(null) }
+    // the result to whichever command was being edited.
+    var editingBindingId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(pickerResult) {
         val target = pickerResult ?: return@LaunchedEffect
-        val activatorId = editingActivatorId
-        if (activatorId != null) {
-            onPickResult(activatorId, BindingOutput.fromRemapTarget(target))
+        val bindingId = editingBindingId
+        if (bindingId != null) {
+            onPickResult(bindingId, BindingOutput.fromRemapTarget(target))
         }
-        editingActivatorId = null
+        editingBindingId = null
         onConsumePickerResult()
     }
 
@@ -137,10 +145,10 @@ fun InputEditorScreen(
                 val graph = activators[idx]
                 ActivatorRow(
                     graph = graph,
-                    onTapBinding = {
-                        editingActivatorId = graph.activator.id
+                    onTapCommand = { bindingId, currentOutput ->
+                        editingBindingId = bindingId
                         val title = "$inputLabel · ${graph.activator.type.displayLabel()}"
-                        onOpenPicker(title, graph.primaryOutput.toRemapTarget())
+                        onOpenPicker(title, currentOutput.toRemapTarget())
                     },
                     onChangeType = { newType ->
                         onSetActivatorType(graph.activator.id, newType)
@@ -149,8 +157,10 @@ fun InputEditorScreen(
                         val label = "$inputLabel · ${graph.activator.type.displayLabel()}"
                         onOpenActivatorSettings(graph.activator.id, label)
                     },
-                    onRemove = { onRemoveActivator(graph.activator.id) },
-                    canRemove = activators.size > 1,
+                    onRemoveActivator = { onRemoveActivator(graph.activator.id) },
+                    onAddCommand = { onAddCommand(graph.activator.id) },
+                    onRemoveCommand = onRemoveCommand,
+                    canRemoveActivator = activators.size > 1,
                 )
                 if (idx < activators.size - 1) {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -213,24 +223,24 @@ private val UNIMPLEMENTED_ACTIVATORS = setOf(
 @Composable
 private fun ActivatorRow(
     graph: ActivatorGraph,
-    onTapBinding: () -> Unit,
+    onTapCommand: (bindingId: Long, current: BindingOutput) -> Unit,
     onChangeType: (ActivatorType) -> Unit,
     onOpenSettings: () -> Unit,
-    onRemove: () -> Unit,
-    canRemove: Boolean,
+    onRemoveActivator: () -> Unit,
+    onAddCommand: () -> Unit,
+    onRemoveCommand: (bindingId: Long) -> Unit,
+    canRemoveActivator: Boolean,
 ) {
-    val output = graph.primaryOutput
     val unimplemented = graph.activator.type in UNIMPLEMENTED_ACTIVATORS
+    val bindings = graph.bindings
 
-    // Two-line layout: type/cog/remove on the top line, binding + helper subtext below.
-    // Keeps each row tap-target generous and lets the helper text wrap without squeezing
-    // the dropdown.
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // Type / settings / remove-activator row.
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -245,38 +255,84 @@ private fun ActivatorRow(
                 Icon(Icons.Filled.Settings, contentDescription = "Activator settings")
             }
             IconButton(
-                onClick = onRemove,
-                enabled = canRemove,
+                onClick = onRemoveActivator,
+                enabled = canRemoveActivator,
             ) {
                 Icon(Icons.Filled.Close, contentDescription = "Remove activator")
             }
         }
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = MaterialTheme.shapes.medium,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(enabled = !unimplemented, onClick = onTapBinding),
+
+        // Commands list — one row per Binding. The activator always has ≥1 command (the
+        // initial Unbound seed in addActivator); the [×] is only enabled when len > 1.
+        bindings.forEach { binding ->
+            val output = BindingOutput.fromEntity(binding.outputType, binding.args)
+            CommandRow(
+                output = output,
+                unimplemented = unimplemented,
+                canRemove = bindings.size > 1,
+                onTap = { onTapCommand(binding.id, output) },
+                onRemove = { onRemoveCommand(binding.id) },
+            )
+        }
+
+        // [+ Add Command]
+        TextButton(
+            onClick = onAddCommand,
+            enabled = !unimplemented,
+            modifier = Modifier.padding(start = 4.dp),
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = output.displayLabel(),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (output == BindingOutput.Unbound)
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        text = if (unimplemented)
-                            "Runtime support coming soon — saved settings won't fire yet."
-                        else "Tap to choose what this activator emits.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text("Add Command", style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+/**
+ * Single command row inside an activator. Tap the surface to open the picker for this
+ * binding; tap the trailing [×] to remove it. The trailing icon button is only
+ * interactive when removal is allowed (i.e., there's more than one command on the
+ * activator) — at-least-one-command is an invariant maintained by [addActivator] and
+ * the UI together.
+ */
+@Composable
+private fun CommandRow(
+    output: BindingOutput,
+    unimplemented: Boolean,
+    canRemove: Boolean,
+    onTap: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !unimplemented, onClick = onTap),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = output.displayLabel(),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (output == BindingOutput.Unbound)
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = if (unimplemented)
+                        "Runtime support coming soon — saved settings won't fire yet."
+                    else "Tap to choose what this command emits.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (canRemove) {
+                IconButton(onClick = onRemove) {
+                    Icon(Icons.Filled.Close, contentDescription = "Remove command")
                 }
             }
         }

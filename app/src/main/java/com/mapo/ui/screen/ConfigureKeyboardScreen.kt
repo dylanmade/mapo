@@ -24,7 +24,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -38,28 +40,35 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
+import com.mapo.data.model.ButtonRegion
+import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
+import com.mapo.data.model.RegionPosition
+import com.mapo.data.model.defaultButtonTemplate
+import com.mapo.data.model.withDefaultButtonFrom
 import com.mapo.ui.component.ColorPickerInDialog
 import com.mapo.ui.component.ColorSlotGroup
-import com.mapo.ui.components.SteppedSliderWithNumberInput
+import com.mapo.ui.components.TwoNumberInputRow
 import com.mapo.ui.util.ResolvedLayoutColors
+import com.mapo.ui.util.resolveAutoColors
 import com.mapo.ui.util.resolveAutoLayoutColors
 
 /**
- * Full-screen instant-commit editor for one [GridLayout] (a keyboard). Mirrors
- * [ConfigureButtonScreen]'s shape: name + dimensions + four color slots
- * (fill, outline, bevel, shadow), plus a Reset button. Defaults: only fill is enabled,
- * so a brand-new keyboard paints exactly the M3 surface color — matching pre-refactor
- * visuals.
+ * Two-tab full-screen editor for a [GridLayout]. The Keyboard tab covers name, size,
+ * and the keyboard's own surface colors. The Buttons tab covers the per-keyboard
+ * default-button template — size, color slots, and regions — used to seed newly-added
+ * buttons in this keyboard. Existing buttons are not affected by changes on the
+ * Buttons tab; defaults are template-only.
  *
- * The dimension sliders are the only fields that can produce a conflict (shrink that
- * would clip occupied cells). When [onTryResize] returns offending labels, this screen
- * opens an in-flight resize-conflict sub-dialog asking whether to auto-drop the
- * offending buttons; accept fires [onApplyResizeWithAutoFit].
+ * Keyboard-size changes use the same overflow-conflict flow as before. Default-button
+ * width/height are constrained to the keyboard's current size; resizing the keyboard
+ * smaller auto-clamps the defaults in the ViewModel and surfaces a toast — this UI
+ * just renders the already-clamped values.
  *
- * Color slots reuse the shared [ColorSlotGroup] from ConfigureButtonScreen so the two
- * configure surfaces stay visually identical — tweak the slot composable in one place
- * and both screens pick up the change.
+ * The Buttons tab reuses ConfigureButtonScreen's [ColorSlot], [RegionRowItem], and
+ * [RegionEditDialog] (exposed as `internal`) by synthesizing a [GridButton] template
+ * from the layout via [defaultButtonTemplate] and writing it back via
+ * [withDefaultButtonFrom]. Keeps the two surfaces visually identical for free.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,20 +81,28 @@ fun ConfigureKeyboardScreen(
     onReset: () -> Unit,
     onBack: () -> Unit,
 ) {
+    var tab by remember { mutableStateOf(0) }
     var editingSlot by remember { mutableStateOf<KeyboardColorSlot?>(null) }
+    var editingButtonsSlot by remember { mutableStateOf<ColorSlot?>(null) }
+    var editingRegion by remember { mutableStateOf<RegionPosition?>(null) }
     var pendingResize by remember { mutableStateOf<PendingResize?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
 
-    // Local name draft — committed via onUpdate on every keystroke (when non-blank), and
-    // re-synced when the underlying layout name changes (e.g. after onReset).
     var nameDraft by remember(layout.id) { mutableStateOf(layout.name) }
     LaunchedEffect(layout.name) { nameDraft = layout.name }
 
-    // Cols/rows reflect the live layout, EXCEPT while a resize conflict dialog is up:
-    // then we render the user's attempted (escrow) value so the slider doesn't snap back
-    // mid-question.
+    // While a resize conflict dialog is up, render the user's attempted (escrow) value
+    // so the input doesn't snap back mid-question.
     val effectiveCols = pendingResize?.columns ?: layout.columns
     val effectiveRows = pendingResize?.rows ?: layout.rows
+
+    // Synthesized template GridButton — read by the Buttons tab to drive the same
+    // composables that ConfigureButtonScreen uses, then written back into the layout.
+    val template = layout.defaultButtonTemplate()
+    // Color resolution for default-button swatches uses the keyboard's resolved fill
+    // as the "background" — same input the renderer uses for real buttons in this layout.
+    val resolvedLayoutColors = resolveAutoLayoutColors(layout, themeFallback)
+    val buttonsTabContextColor = resolvedLayoutColors.fill
 
     Scaffold(
         topBar = {
@@ -102,124 +119,60 @@ fun ConfigureKeyboardScreen(
         Column(
             modifier = Modifier
                 .padding(contentPadding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .fillMaxSize(),
         ) {
-            Spacer(Modifier.height(4.dp))
-
-            // ── Name ─────────────────────────────────────────────────────────────
-            OutlinedTextField(
-                value = nameDraft,
-                onValueChange = { v ->
-                    nameDraft = v
-                    val trimmed = v.trim()
-                    if (trimmed.isNotEmpty()) {
-                        onUpdate(layout.copy(name = trimmed))
-                    }
-                },
-                label = { Text("Name") },
-                singleLine = true,
-                trailingIcon = {
-                    if (nameDraft.isNotEmpty()) {
-                        IconButton(onClick = { nameDraft = "" }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear")
-                        }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-            )
-
-            // ── Size ─────────────────────────────────────────────────────────────
-            Text(
-                "Size",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            SteppedSliderWithNumberInput(
-                label = "Rows",
-                value = effectiveRows,
-                onValueChange = { newRows ->
-                    val conflict = onTryResize(effectiveCols, newRows)
-                    if (conflict != null) {
-                        pendingResize = PendingResize(effectiveCols, newRows, conflict)
-                    }
-                },
-                min = 1,
-                max = 20,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            SteppedSliderWithNumberInput(
-                label = "Columns",
-                value = effectiveCols,
-                onValueChange = { newCols ->
-                    val conflict = onTryResize(newCols, effectiveRows)
-                    if (conflict != null) {
-                        pendingResize = PendingResize(newCols, effectiveRows, conflict)
-                    }
-                },
-                min = 1,
-                max = 20,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-
-            // ── Colors ───────────────────────────────────────────────────────────
-            Text(
-                "Colors",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            val resolved = resolveAutoLayoutColors(layout, themeFallback)
-            KeyboardColorSlot.values().forEach { slot ->
-                ColorSlotGroup(
-                    title = slot.title,
-                    description = slot.description,
-                    enabled = slot.enabled(layout),
-                    isAuto = slot.isAuto(layout),
-                    resolvedColor = slot.resolvedColor(resolved),
-                    onToggleEnabled = {
-                        onUpdate(slot.setEnabled(layout, !slot.enabled(layout)))
-                    },
-                    onEditColor = { editingSlot = slot },
-                    onToggleAuto = {
-                        onUpdate(slot.setAuto(layout, !slot.isAuto(layout)))
-                    },
-                    onReset = { onUpdate(slot.reset(layout)) },
+            PrimaryTabRow(selectedTabIndex = tab) {
+                Tab(
+                    selected = tab == 0,
+                    onClick = { tab = 0 },
+                    text = { Text("Keyboard") },
                 )
-            }
-
-            Spacer(Modifier.height(4.dp))
-            OutlinedButton(
-                onClick = { confirmReset = true },
-                shape = RoundedCornerShape(6.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-            ) {
-                Icon(
-                    Icons.Filled.RestartAlt,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                Tab(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    text = { Text("Buttons") },
                 )
-                Spacer(Modifier.width(8.dp))
-                Text("Reset Keyboard", style = MaterialTheme.typography.labelLarge)
             }
             Spacer(Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                when (tab) {
+                    0 -> KeyboardTab(
+                        layout = layout,
+                        resolvedLayoutColors = resolvedLayoutColors,
+                        nameDraft = nameDraft,
+                        onNameDraftChange = { nameDraft = it },
+                        effectiveCols = effectiveCols,
+                        effectiveRows = effectiveRows,
+                        onUpdate = onUpdate,
+                        onTryResize = onTryResize,
+                        onPendingResize = { pendingResize = it },
+                        onEditSlot = { editingSlot = it },
+                        onResetRequested = { confirmReset = true },
+                    )
+                    else -> ButtonsTab(
+                        layout = layout,
+                        template = template,
+                        contextColor = buttonsTabContextColor,
+                        onUpdate = onUpdate,
+                        onEditSlot = { editingButtonsSlot = it },
+                        onEditRegion = { editingRegion = it },
+                    )
+                }
+            }
         }
     }
 
+    // ── Keyboard-tab color picker ────────────────────────────────────────────────
     editingSlot?.let { slot ->
-        val resolved = resolveAutoLayoutColors(layout, themeFallback)
         ColorPickerInDialog(
             title = slot.title,
-            initial = slot.resolvedColor(resolved),
+            initial = slot.resolvedColor(resolvedLayoutColors),
             onConfirm = { color ->
                 onUpdate(slot.setManualColor(layout, color))
                 editingSlot = null
@@ -229,6 +182,50 @@ fun ConfigureKeyboardScreen(
                 editingSlot = null
             },
             onDismiss = { editingSlot = null },
+        )
+    }
+
+    // ── Buttons-tab color picker (operates on the synthesized template) ─────────
+    editingButtonsSlot?.let { slot ->
+        val resolved = resolveAutoColors(template, buttonsTabContextColor)
+        ColorPickerInDialog(
+            title = slot.title,
+            initial = slot.resolvedColor(resolved),
+            onConfirm = { color ->
+                onUpdate(layout.withDefaultButtonFrom(slot.setManualColor(template, color)))
+                editingButtonsSlot = null
+            },
+            onClear = {
+                val next = slot.setAuto(template, true).let { slot.clearColor(it) }
+                onUpdate(layout.withDefaultButtonFrom(next))
+                editingButtonsSlot = null
+            },
+            onDismiss = { editingButtonsSlot = null },
+        )
+    }
+
+    // ── Buttons-tab region edit (operates on the synthesized template) ──────────
+    editingRegion?.let { pos ->
+        val current = template.regions[pos.name] ?: ButtonRegion(sizeSp = pos.defaultSizeSp())
+        // No onTap to derive a placeholder from — the template has no behavior wired up.
+        // Placeholder text is empty; user types whatever they want.
+        RegionEditDialog(
+            position = pos,
+            initial = current,
+            labelPlaceholder = "",
+            onConfirm = { updated ->
+                val nextRegions = template.regions.toMutableMap()
+                if (updated.isRegionEmpty()) nextRegions.remove(pos.name) else nextRegions[pos.name] = updated
+                onUpdate(layout.withDefaultButtonFrom(template.copy(regions = nextRegions)))
+                editingRegion = null
+            },
+            onClear = {
+                val nextRegions = template.regions.toMutableMap()
+                nextRegions.remove(pos.name)
+                onUpdate(layout.withDefaultButtonFrom(template.copy(regions = nextRegions)))
+                editingRegion = null
+            },
+            onDismiss = { editingRegion = null },
         )
     }
 
@@ -296,6 +293,212 @@ fun ConfigureKeyboardScreen(
         )
     }
 }
+
+// ── Keyboard tab ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun KeyboardTab(
+    layout: GridLayout,
+    resolvedLayoutColors: ResolvedLayoutColors,
+    nameDraft: String,
+    onNameDraftChange: (String) -> Unit,
+    effectiveCols: Int,
+    effectiveRows: Int,
+    onUpdate: (GridLayout) -> Unit,
+    onTryResize: (columns: Int, rows: Int) -> List<String>?,
+    onPendingResize: (PendingResize) -> Unit,
+    onEditSlot: (KeyboardColorSlot) -> Unit,
+    onResetRequested: () -> Unit,
+) {
+    Spacer(Modifier.height(4.dp))
+
+    OutlinedTextField(
+        value = nameDraft,
+        onValueChange = { v ->
+            onNameDraftChange(v)
+            val trimmed = v.trim()
+            if (trimmed.isNotEmpty()) {
+                onUpdate(layout.copy(name = trimmed))
+            }
+        },
+        label = { Text("Name") },
+        singleLine = true,
+        trailingIcon = {
+            if (nameDraft.isNotEmpty()) {
+                IconButton(onClick = { onNameDraftChange("") }) {
+                    Icon(Icons.Default.Clear, contentDescription = "Clear")
+                }
+            }
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+    )
+
+    Text(
+        "Size",
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+    TwoNumberInputRow(
+        label = "Keyboard size",
+        width = effectiveCols,
+        height = effectiveRows,
+        onChange = { newCols, newRows ->
+            val conflict = onTryResize(newCols, newRows)
+            if (conflict != null) {
+                onPendingResize(PendingResize(newCols, newRows, conflict))
+            }
+        },
+        minWidth = 1, maxWidth = 20,
+        minHeight = 1, maxHeight = 20,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+
+    Text(
+        "Colors",
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+    KeyboardColorSlot.values().forEach { slot ->
+        ColorSlotGroup(
+            title = slot.title,
+            description = slot.description,
+            enabled = slot.enabled(layout),
+            isAuto = slot.isAuto(layout),
+            resolvedColor = slot.resolvedColor(resolvedLayoutColors),
+            onToggleEnabled = { onUpdate(slot.setEnabled(layout, !slot.enabled(layout))) },
+            onEditColor = { onEditSlot(slot) },
+            onToggleAuto = { onUpdate(slot.setAuto(layout, !slot.isAuto(layout))) },
+            onReset = { onUpdate(slot.reset(layout)) },
+        )
+    }
+
+    Spacer(Modifier.height(4.dp))
+    OutlinedButton(
+        onClick = onResetRequested,
+        shape = RoundedCornerShape(6.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = MaterialTheme.colorScheme.error,
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+    ) {
+        Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Reset Keyboard", style = MaterialTheme.typography.labelLarge)
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+// ── Buttons tab ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun ButtonsTab(
+    layout: GridLayout,
+    template: GridButton,
+    contextColor: Color,
+    onUpdate: (GridLayout) -> Unit,
+    onEditSlot: (ColorSlot) -> Unit,
+    onEditRegion: (RegionPosition) -> Unit,
+) {
+    Spacer(Modifier.height(4.dp))
+
+    // Default button size — first item, capped at the keyboard's current dimensions.
+    Text(
+        "Size",
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+    TwoNumberInputRow(
+        label = "Default button size",
+        width = template.colSpan,
+        height = template.rowSpan,
+        onChange = { newCs, newRs ->
+            onUpdate(
+                layout.withDefaultButtonFrom(
+                    template.copy(colSpan = newCs, rowSpan = newRs)
+                )
+            )
+        },
+        minWidth = 1, maxWidth = layout.columns.coerceAtLeast(1),
+        minHeight = 1, maxHeight = layout.rows.coerceAtLeast(1),
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+
+    Text(
+        "Colors",
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+    val resolved = resolveAutoColors(template, contextColor)
+    ColorSlot.values().forEach { slot ->
+        ColorSlotGroup(
+            title = slot.title,
+            description = slot.description,
+            enabled = slot.enabled(template),
+            isAuto = slot.isAuto(template),
+            resolvedColor = slot.resolvedColor(resolved),
+            onToggleEnabled = {
+                onUpdate(layout.withDefaultButtonFrom(slot.setEnabled(template, !slot.enabled(template))))
+            },
+            onEditColor = { onEditSlot(slot) },
+            onToggleAuto = {
+                onUpdate(layout.withDefaultButtonFrom(slot.setAuto(template, !slot.isAuto(template))))
+            },
+            onReset = {
+                onUpdate(layout.withDefaultButtonFrom(slot.reset(template)))
+            },
+        )
+    }
+
+    Spacer(Modifier.height(4.dp))
+    Text(
+        "Regions",
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
+    RegionPosition.values().forEach { pos ->
+        RegionRowItem(
+            position = pos,
+            region = template.regions[pos.name],
+            onTapPreview = "",
+            onClick = { onEditRegion(pos) },
+        )
+    }
+
+    Spacer(Modifier.height(4.dp))
+    OutlinedButton(
+        onClick = {
+            // Reset only the default-button fields to the GridLayout-constructor defaults
+            // (which themselves mirror GridButton's constructor defaults: fill+bevel+shadow
+            // on, outline off, all auto, size 1×1, no regions). Existing buttons are not
+            // touched — defaults are template-only.
+            val fresh = GridLayout(name = "", columns = 1, rows = 1, buttons = emptyList())
+            onUpdate(layout.withDefaultButtonFrom(fresh.defaultButtonTemplate()))
+        },
+        shape = RoundedCornerShape(6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+    ) {
+        Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Reset Button Defaults", style = MaterialTheme.typography.labelLarge)
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+private fun ButtonRegion.isRegionEmpty(): Boolean =
+    icon == null && label == null && labelColorArgb == null && iconColorArgb == null
 
 private data class PendingResize(
     val columns: Int,

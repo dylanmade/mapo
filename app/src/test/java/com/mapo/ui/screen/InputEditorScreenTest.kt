@@ -57,6 +57,8 @@ class InputEditorScreenTest {
                         onRemoveActivator = {},
                         onSetActivatorType = { _, _ -> },
                         onOpenActivatorSettings = { _, _ -> },
+                        onAddCommand = {},
+                        onRemoveCommand = {},
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -67,6 +69,8 @@ class InputEditorScreenTest {
         composeRule.onNodeWithText("A").assertIsDisplayed()
         composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
         composeRule.onNodeWithText("Regular Press", useUnmergedTree = true).assertExists()
+        // Brick 3.6: Add Command appears under each activator.
+        composeRule.onNodeWithText("Add Command", useUnmergedTree = true).assertExists()
     }
 
     @Test
@@ -92,6 +96,8 @@ class InputEditorScreenTest {
                         onRemoveActivator = {},
                         onSetActivatorType = { _, _ -> },
                         onOpenActivatorSettings = { _, _ -> },
+                        onAddCommand = {},
+                        onRemoveCommand = {},
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -127,6 +133,8 @@ class InputEditorScreenTest {
                         onRemoveActivator = {},
                         onSetActivatorType = { _, _ -> },
                         onOpenActivatorSettings = { _, _ -> },
+                        onAddCommand = {},
+                        onRemoveCommand = {},
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -136,6 +144,42 @@ class InputEditorScreenTest {
 
         composeRule.onNodeWithText("This input isn't part of the active config.", useUnmergedTree = true)
             .assertExists()
+    }
+
+    @Test
+    fun addCommand_invokesCallbackWithActivatorId() {
+        var addedForActivator: Long? = null
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1000.dp, 1400.dp)) {
+                    InputEditorScreen(
+                        inputLabel = "A",
+                        inputSource = InputSource.BUTTON_DIAMOND,
+                        groupInputKey = "button_a",
+                        config = sampleConfig(BindingOutput.KeyPress("ENTER"), ActivatorType.FULL_PRESS),
+                        pickerResult = null,
+                        onConsumePickerResult = {},
+                        onPickResult = { _, _ -> },
+                        onOpenPicker = { _, _ -> },
+                        onAddActivator = { _, _ -> },
+                        onRemoveActivator = {},
+                        onSetActivatorType = { _, _ -> },
+                        onOpenActivatorSettings = { _, _ -> },
+                        onAddCommand = { activatorId -> addedForActivator = activatorId },
+                        onRemoveCommand = {},
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Add Command", useUnmergedTree = true).performClick()
+
+        // sampleConfig sets activatorId = 100L
+        assert(addedForActivator == 100L) {
+            "Expected onAddCommand(100L) but got $addedForActivator"
+        }
     }
 
     /**

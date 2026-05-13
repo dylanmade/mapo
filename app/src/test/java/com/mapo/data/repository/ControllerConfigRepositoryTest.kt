@@ -436,4 +436,72 @@ class ControllerConfigRepositoryTest {
             updated.inputByKey("button_b")!!.activators[0].primaryOutput,
         )
     }
+
+    // ── Brick 3.6 multi-command ──────────────────────────────────────────────
+
+    @Test
+    fun addCommand_appendsNewBindingAtNextOrderIndex() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        val cfg = subject.getActiveConfigOnce(1L)!!
+        val aActivator = cfg.activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0]
+
+        val originalSize = aActivator.bindings.size
+        val newId = subject.addCommand(aActivator.activator.id)
+        assert(newId > 0L) { "addCommand should return a non-zero ID" }
+
+        val updated = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0]
+        assertEquals(originalSize + 1, updated.bindings.size)
+        // New row is Unbound; original primary still intact at orderIndex 0.
+        val newBinding = updated.bindings.first { it.id == newId }
+        assertEquals(BindingOutput.Unbound, BindingOutput.fromEntity(newBinding.outputType, newBinding.args))
+    }
+
+    @Test
+    fun setCommand_updatesOneRowOnly() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        val aActivator = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0]
+        val firstBindingId = aActivator.bindings[0].id
+        val newBindingId = subject.addCommand(aActivator.activator.id)
+
+        subject.setCommand(firstBindingId, BindingOutput.KeyPress("ENTER"))
+        subject.setCommand(newBindingId, BindingOutput.KeyPress("ESCAPE"))
+
+        val updated = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0]
+        val first = updated.bindings.first { it.id == firstBindingId }
+        val second = updated.bindings.first { it.id == newBindingId }
+        assertEquals(BindingOutput.KeyPress("ENTER"), BindingOutput.fromEntity(first.outputType, first.args))
+        assertEquals(BindingOutput.KeyPress("ESCAPE"), BindingOutput.fromEntity(second.outputType, second.args))
+    }
+
+    @Test
+    fun removeCommand_deletesOnlyTargetedRow() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        val aActivator = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0]
+        val secondId = subject.addCommand(aActivator.activator.id)
+        val thirdId = subject.addCommand(aActivator.activator.id)
+
+        subject.removeCommand(secondId)
+
+        val updated = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!.activators[0]
+        assertEquals(2, updated.bindings.size)
+        assert(updated.bindings.any { it.id == thirdId }) { "Third binding should still be present" }
+        assert(updated.bindings.none { it.id == secondId }) { "Second binding should be removed" }
+    }
 }

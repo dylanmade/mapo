@@ -148,7 +148,7 @@ class InputEvaluatorTest {
             BUTTON_A to listOf(
                 CompiledActivator(1L, ActivatorType.FULL_PRESS, listOf(ENTER), CompiledActivatorSettings.DEFAULTS),
                 CompiledActivator(2L, ActivatorType.LONG_PRESS, listOf(ESCAPE),
-                    CompiledActivatorSettings(longPressTimeMs = 300L)),
+                    CompiledActivatorSettings(longPressTimeMs = 300L, doubleTapTimeMs = 250L)),
             ),
         )
 
@@ -247,14 +247,144 @@ class InputEvaluatorTest {
         verify(exactly = 1) { emitter.emitRelease(SPACE) }  // and ended its own tap
     }
 
-    // ── Non-FULL_PRESS activator types (Phase 3.2/3.3 territory) ─────────────
+    // ── DOUBLE_PRESS (Brick 3.2) ─────────────────────────────────────────────
 
     @Test
-    fun press_doublePressActivator_isSkippedThisBrick() {
-        // 3.1 doesn't implement DOUBLE_PRESS yet. The event is still consumed (we don't
-        // want it leaking to the foreground app) but no emission happens.
+    fun doublePress_only_singleTap_firesNothing() = testScope.runTest {
+        // No Regular configured — a single tap should produce no emission even after the
+        // window expires. The DOUBLE_PRESS only fires on a successful double-tap.
         compiledConfig.value = configWith(
-            BUTTON_A to activator(ActivatorType.DOUBLE_PRESS, ENTER),
+            BUTTON_A to activator(ActivatorType.DOUBLE_PRESS, SPACE, doubleTapTimeMs = 250L),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        advanceTimeBy(300L)
+        runCurrent()
+
+        verify(exactly = 0) { emitter.emitPress(any()) }
+        assertEquals(0, subject.doubleTapWindowCount())
+    }
+
+    @Test
+    fun doublePress_only_doubleTapFiresDoubleOnSecondDown_releasesOnUp() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to activator(ActivatorType.DOUBLE_PRESS, SPACE, doubleTapTimeMs = 250L),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        advanceTimeBy(100L)  // well within the window
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(SPACE) }
+        verify(exactly = 0) { emitter.emitRelease(SPACE) }
+        assertEquals(0, subject.doubleTapWindowCount())
+
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(SPACE) }
+    }
+
+    @Test
+    fun doublePress_secondTapAfterWindowExpires_doesNotFireDouble() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to activator(ActivatorType.DOUBLE_PRESS, SPACE, doubleTapTimeMs = 250L),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        advanceTimeBy(300L)  // past the window
+        runCurrent()
+        subject.handleDigital(BUTTON_A, isDown = true)  // arrives too late — new sequence
+
+        verify(exactly = 0) { emitter.emitPress(SPACE) }  // Double doesn't fire
+        // And the new DOWN started a fresh window (consumed but no immediate emit).
+        assertEquals(1, subject.doubleTapWindowCount())
+    }
+
+    // ── Regular + Double coexistence (3.2 hardcoded interruptable=true) ───────
+
+    @Test
+    fun regular_andDouble_singleTap_firesRegularAsTapAfterWindow() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.FULL_PRESS, listOf(ENTER), CompiledActivatorSettings.DEFAULTS),
+                CompiledActivator(2L, ActivatorType.DOUBLE_PRESS, listOf(SPACE),
+                    CompiledActivatorSettings(longPressTimeMs = 600L, doubleTapTimeMs = 250L)),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        // Regular is deferred — no emission yet.
+        verify(exactly = 0) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitPress(SPACE) }
+
+        subject.handleDigital(BUTTON_A, isDown = false)
+        // Still no emission — window still alive, Regular still deferred.
+        verify(exactly = 0) { emitter.emitPress(any()) }
+
+        advanceTimeBy(300L)
+        runCurrent()
+        // Window expired with no second tap. Regular fires as a tap (button already up).
+        verifyOrder {
+            emitter.emitPress(ENTER)
+            emitter.emitRelease(ENTER)
+        }
+        verify(exactly = 0) { emitter.emitPress(SPACE) }
+        assertEquals(0, subject.doubleTapWindowCount())
+    }
+
+    @Test
+    fun regular_andDouble_doubleTap_firesDoubleOnly_suppressesRegular() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.FULL_PRESS, listOf(ENTER), CompiledActivatorSettings.DEFAULTS),
+                CompiledActivator(2L, ActivatorType.DOUBLE_PRESS, listOf(SPACE),
+                    CompiledActivatorSettings(longPressTimeMs = 600L, doubleTapTimeMs = 250L)),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        advanceTimeBy(100L)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        advanceTimeBy(500L)  // well past window — confirm no late-deferred-Regular
+        runCurrent()
+
+        verify(exactly = 1) { emitter.emitPress(SPACE) }
+        verify(exactly = 1) { emitter.emitRelease(SPACE) }
+        verify(exactly = 0) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitRelease(ENTER) }
+    }
+
+    @Test
+    fun regular_andDouble_firstTapHeldPastWindow_firesRegularAsHeld() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.FULL_PRESS, listOf(ENTER), CompiledActivatorSettings.DEFAULTS),
+                CompiledActivator(2L, ActivatorType.DOUBLE_PRESS, listOf(SPACE),
+                    CompiledActivatorSettings(longPressTimeMs = 600L, doubleTapTimeMs = 250L)),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        advanceTimeBy(300L)  // user is still holding the button when the window expires
+        runCurrent()
+        // Regular fires as held — DOWN edge only, release will come on physical UP.
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitRelease(ENTER) }
+        assertEquals(1, subject.heldAddressCount())
+
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+    }
+
+    // ── Non-FULL_PRESS activator types (Brick 3.3 territory) ─────────────────
+
+    @Test
+    fun press_chordedPressActivator_isSkippedThisBrick() {
+        compiledConfig.value = configWith(
+            BUTTON_A to activator(ActivatorType.CHORDED_PRESS, ENTER),
         )
 
         val consumed = subject.handleDigital(BUTTON_A, isDown = true)
@@ -320,12 +450,16 @@ class InputEvaluatorTest {
         type: ActivatorType,
         vararg bindings: BindingOutput,
         longPressTimeMs: Long = CompiledActivatorSettings.DEFAULT_LONG_PRESS_TIME_MS,
+        doubleTapTimeMs: Long = CompiledActivatorSettings.DEFAULT_DOUBLE_TAP_TIME_MS,
     ) = listOf(
         CompiledActivator(
             activatorId = 0L,
             type = type,
             bindings = bindings.toList(),
-            settings = CompiledActivatorSettings(longPressTimeMs = longPressTimeMs),
+            settings = CompiledActivatorSettings(
+                longPressTimeMs = longPressTimeMs,
+                doubleTapTimeMs = doubleTapTimeMs,
+            ),
         ),
     )
 

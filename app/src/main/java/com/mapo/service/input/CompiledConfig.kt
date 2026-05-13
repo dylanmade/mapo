@@ -74,12 +74,16 @@ data class CompiledActivator(
 data class CompiledActivatorSettings(
     /** Steam-default 0.6 s; min hold time before [ActivatorType.LONG_PRESS] fires. */
     val longPressTimeMs: Long,
+    /** Steam-default 0.19 s; max interval between the two taps of a [ActivatorType.DOUBLE_PRESS]. */
+    val doubleTapTimeMs: Long,
 ) {
     companion object {
         const val DEFAULT_LONG_PRESS_TIME_MS = 600L
+        const val DEFAULT_DOUBLE_TAP_TIME_MS = 190L
 
         val DEFAULTS = CompiledActivatorSettings(
             longPressTimeMs = DEFAULT_LONG_PRESS_TIME_MS,
+            doubleTapTimeMs = DEFAULT_DOUBLE_TAP_TIME_MS,
         )
 
         /**
@@ -93,6 +97,7 @@ data class CompiledActivatorSettings(
                 val obj = JSONObject(json)
                 CompiledActivatorSettings(
                     longPressTimeMs = obj.optLongOrNull("long_press_time_ms") ?: DEFAULT_LONG_PRESS_TIME_MS,
+                    doubleTapTimeMs = obj.optLongOrNull("double_tap_time_ms") ?: DEFAULT_DOUBLE_TAP_TIME_MS,
                 )
             } catch (e: JSONException) {
                 Log.w(TAG, "Failed to parse activator settings JSON: $json", e)

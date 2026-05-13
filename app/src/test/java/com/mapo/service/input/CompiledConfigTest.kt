@@ -291,6 +291,35 @@ class CompiledConfigTest {
     }
 
     @Test
+    fun settingsJson_doubleTapTime_parsedAndPropagated() {
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND, state = "active",
+                    group = groupWith(
+                        inputs = listOf(
+                            inputWith(
+                                "button_a",
+                                listOf(activatorWith(
+                                    type = ActivatorType.DOUBLE_PRESS,
+                                    settingsJson = """{"double_tap_time_ms": 180}""",
+                                    bindings = listOf(binding(BindingOutputType.KEY_PRESS, "SPACE")),
+                                )),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+        val activator = compiled.lookup(InputSource.BUTTON_DIAMOND, "button_a")!!.activators[0]
+
+        assertEquals(180L, activator.settings.doubleTapTimeMs)
+        assertEquals(CompiledActivatorSettings.DEFAULT_LONG_PRESS_TIME_MS, activator.settings.longPressTimeMs)
+    }
+
+    @Test
     fun settingsJson_malformed_fallsBackToDefaults() {
         val cfg = configWith(
             preset = listOf(

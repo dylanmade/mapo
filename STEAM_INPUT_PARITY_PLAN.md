@@ -375,9 +375,20 @@ Reordered after 3.1 to put the **per-input editor UI ahead of further runtime br
 |---|---|---|
 | 3.1 | Coroutine-scoped scheduling in `InputEvaluator` + `Long_Press` + `Start_Press` + `Release_Press` (each with type-specific settings parsing) | ✅ COMPLETED 2026-05-12 |
 | 3.4 | `InputEditorScreen` — per-input activator list UI + repo methods for add/remove/changeType | ✅ COMPLETED 2026-05-12 |
-| 3.2 | `Double_Press` window state machine + Full/Double coexistence semantics | ⏳ pending |
+| 3.2 | `Double_Press` window state machine + Full/Double coexistence semantics (hardcoded interruptable=true) | ✅ COMPLETED 2026-05-12 |
 | 3.5 | `ActivatorEditorScreen` + per-type settings panels (long_press_time slider, etc.) + universal-settings UX | ⏳ pending |
 | 3.3 | `Chorded_Press` (incl. virtual-keyboard chord-partner plumbing) + universal settings (toggle, turbo / `hold_to_repeat`, `fire_start_delay` / `fire_end_delay`, `cycle_binding`, `interruptable`) | ⏳ pending |
+
+### Brick 3.2 deviations + decisions
+
+- **Hardcoded `interruptable=true` for Full_Press when Double_Press coexists** (Steam's default). The proper read of `interruptable` off `CompiledActivatorSettings` lands in Brick 3.3. For 3.2, Regular gets deferred whenever Double exists on the same input — matches what user verified on Steam Deck.
+- **Deferred-Regular fires either as a tap or as held depending on physical state at window expiration.** Steam-faithful: if the user releases the button before the double-tap window closes, Regular fires as a tap (DOWN+UP back-to-back); if the user is still holding the button at expiration, Regular emits its DOWN edge and lands in `held` so the eventual UP releases it normally. There's a small late-binding cost in the "held past window" case (Regular's DOWN arrives ~250 ms late by default) — accepted as parity behavior.
+- **Double_Press second-tap-window timing is keyed off `doubleTapTimeMs`** (default **190 ms**, matching what user observed as Steam Deck's actual default on 2026-05-12 — adjusted from the initial 250 ms guess). The VDF spelling is the famous `doubetap_max_duration` typo; Phase 7 (VDF import) will map it on the way in. We store the value in our settings JSON with the correct `double_tap_time_ms` key so the data layer can be free of the typo.
+- **Other activator types fire independently during the Double window.** Long_Press still schedules its threshold timer; Start_Press still fires on the first DOWN; Release_Press still fires on first UP. Steam's interruption rules nominally would have Long_Press also block Regular (and Double, in some cases), but the full priority/interruption matrix lands in 3.3.
+- **Triple-tap starts a fresh sequence.** On the third DOWN — past the window of the second-tap-hold — the address has no active window. We open a new Double window. This makes "tap-tap-pause-tap" behave reasonably: first two fire Double, third becomes a new deferred-Regular candidate. UX-tested only via unit tests so far.
+- **`doubleTapWindows` does NOT need to coexist with `held` for the same address simultaneously.** First-tap-in-window → no `held` entry yet (Regular deferred); second-tap-hold → `held` entry for Double's bindings, no window; deferred-Regular fires held → window cleared, `held` entry for Regular. The state machine never overlaps, which keeps cleanup simple.
+- **InputEditorScreen** removes DOUBLE_PRESS from the "Coming soon" set in `UNIMPLEMENTED_ACTIVATORS`. The dropdown now treats Double like a fully-supported type.
+- **Verified in tests** (not yet in-game — user verification step): all 7 new evaluator scenarios (Double-only single/double/late-second, Regular+Double single tap/double tap/held-past-window) + 1 settings-parse test. 50 unit tests total green.
 
 ### Brick 3.4 deviations + decisions
 

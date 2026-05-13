@@ -196,15 +196,13 @@ fun ActivatorType.displayLabel(): String = when (this) {
 
 /**
  * Activators whose runtime impl hasn't landed yet. UI lets the user pick them so the
- * affordance is visible, but we surface a "Coming soon" hint and disable saving.
+ * affordance is visible, but we surface a "Coming soon" hint.
  *
  *  - SOFT_PRESS: needs analog trigger capture (Phase 6 — see Phase 2.3 descope).
- *  - DOUBLE_PRESS: Brick 3.2 (next).
  *  - CHORDED_PRESS: Brick 3.3.
  */
 private val UNIMPLEMENTED_ACTIVATORS = setOf(
     ActivatorType.SOFT_PRESS,
-    ActivatorType.DOUBLE_PRESS,
     ActivatorType.CHORDED_PRESS,
 )
 

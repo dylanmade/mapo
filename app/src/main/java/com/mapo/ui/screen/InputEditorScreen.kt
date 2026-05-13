@@ -26,6 +26,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -331,8 +332,15 @@ private fun CommandRow(
                 )
             }
             if (canRemove) {
-                IconButton(onClick = onRemove) {
-                    Icon(Icons.Filled.Close, contentDescription = "Remove command")
+                IconButton(
+                    onClick = onRemove,
+                    modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Remove command",
+                        modifier = Modifier.size(IconButtonDefaults.smallIconSize),
+                    )
                 }
             }
         }

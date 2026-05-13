@@ -56,6 +56,7 @@ class InputEditorScreenTest {
                         onAddActivator = { _, _ -> },
                         onRemoveActivator = {},
                         onSetActivatorType = { _, _ -> },
+                        onOpenActivatorSettings = { _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -90,6 +91,7 @@ class InputEditorScreenTest {
                         },
                         onRemoveActivator = {},
                         onSetActivatorType = { _, _ -> },
+                        onOpenActivatorSettings = { _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )
@@ -124,6 +126,7 @@ class InputEditorScreenTest {
                         onAddActivator = { _, _ -> },
                         onRemoveActivator = {},
                         onSetActivatorType = { _, _ -> },
+                        onOpenActivatorSettings = { _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
                     )

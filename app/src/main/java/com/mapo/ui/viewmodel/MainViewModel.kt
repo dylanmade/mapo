@@ -327,6 +327,21 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch { controllerConfigRepository.updateActivatorType(activatorId, type) }
     }
 
+    /**
+     * Replace an activator's settings (long_press_time, double_tap_time, etc.). Driven by
+     * the per-activator editor screen on slider drag-end. Serializes [settings] to JSON via
+     * its `toJson()` so the persisted shape stays in sync with the parser.
+     */
+    fun setControllerActivatorSettings(
+        activatorId: Long,
+        settings: com.mapo.service.input.CompiledActivatorSettings,
+    ) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            controllerConfigRepository.updateActivatorSettings(activatorId, settings.toJson())
+        }
+    }
+
     // ── Navigation ────────────────────────────────────────────────────────────
 
     fun selectLayout(index: Int) {

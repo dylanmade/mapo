@@ -78,6 +78,7 @@ fun InputEditorScreen(
     onAddActivator: (groupInputId: Long, type: ActivatorType) -> Unit,
     onRemoveActivator: (activatorId: Long) -> Unit,
     onSetActivatorType: (activatorId: Long, type: ActivatorType) -> Unit,
+    onOpenActivatorSettings: (activatorId: Long, label: String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -143,6 +144,10 @@ fun InputEditorScreen(
                     },
                     onChangeType = { newType ->
                         onSetActivatorType(graph.activator.id, newType)
+                    },
+                    onOpenSettings = {
+                        val label = "$inputLabel · ${graph.activator.type.displayLabel()}"
+                        onOpenActivatorSettings(graph.activator.id, label)
                     },
                     onRemove = { onRemoveActivator(graph.activator.id) },
                     canRemove = activators.size > 1,
@@ -211,6 +216,7 @@ private fun ActivatorRow(
     graph: ActivatorGraph,
     onTapBinding: () -> Unit,
     onChangeType: (ActivatorType) -> Unit,
+    onOpenSettings: () -> Unit,
     onRemove: () -> Unit,
     canRemove: Boolean,
 ) {
@@ -236,10 +242,7 @@ private fun ActivatorRow(
                 onSelected = onChangeType,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(
-                onClick = { /* Brick 3.5: per-activator settings sheet */ },
-                enabled = false,  // placeholder; cog comes alive in 3.5
-            ) {
+            IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Filled.Settings, contentDescription = "Activator settings")
             }
             IconButton(

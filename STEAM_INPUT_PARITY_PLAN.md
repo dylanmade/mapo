@@ -376,8 +376,19 @@ Reordered after 3.1 to put the **per-input editor UI ahead of further runtime br
 | 3.1 | Coroutine-scoped scheduling in `InputEvaluator` + `Long_Press` + `Start_Press` + `Release_Press` (each with type-specific settings parsing) | ✅ COMPLETED 2026-05-12 |
 | 3.4 | `InputEditorScreen` — per-input activator list UI + repo methods for add/remove/changeType | ✅ COMPLETED 2026-05-12 |
 | 3.2 | `Double_Press` window state machine + Full/Double coexistence semantics (hardcoded interruptable=true) | ✅ COMPLETED 2026-05-12 |
-| 3.5 | `ActivatorEditorScreen` + per-type settings panels (long_press_time slider, etc.) + universal-settings UX | ⏳ pending |
+| 3.5 | `ActivatorEditorScreen` + per-type settings panels (long_press_time slider, double_tap_time slider) — universal settings as placeholders | ✅ COMPLETED 2026-05-12 |
 | 3.3 | `Chorded_Press` (incl. virtual-keyboard chord-partner plumbing) + universal settings (toggle, turbo / `hold_to_repeat`, `fire_start_delay` / `fire_end_delay`, `cycle_binding`, `interruptable`) | ⏳ pending |
+
+### Brick 3.5 deviations + decisions
+
+- **Universal settings are placeholders that visibly say "Coming in 3.3."** Every universal row (toggle, hold-to-repeat, fire_start_delay, fire_end_delay, cycle_binding, interruptable) renders as a disabled Switch with the typical label/helper-subtext layout but with `alpha = 0.6f` and a `Coming in 3.3` micro-label underneath. Lets the layout land now so the 3.3 diff is "remove alpha + the Coming-soon line + wire the control to state." Setting cog enables for *every* activator type — even ones that won't have type-specific sliders — because the universal panel is universally relevant.
+- **`Interruptable` is type-gated** (FULL / RELEASE only), matching Steam's docs. Per `reference_steam_input_activators.md` it's a type-specific setting on Regular and Release Press, not universal.
+- **`SOFT_PRESS` and `CHORDED_PRESS` show only the universal panel** (no type-specific section). The screen still opens cleanly when the user has selected one of those types — the placeholder universal section is the message.
+- **Sliders commit on `onValueChangeFinished`, not `onValueChange`.** Per-frame writes would hammer the DB during drag and aren't the actual cadence of user intent (the lift-off is the commit edge). The dragged value lives in local Compose state keyed off the persisted value so a re-navigation or external write resets the slider cleanly.
+- **Slider values round to 10 ms granularity** on commit. Clean storage; no `423.7…` ms persisted from a continuous slider. Min/max enforced via `.coerceIn`.
+- **`CompiledActivatorSettings.toJson()`** is the inverse of `parse()`. Default-valued fields are still written so the row round-trips byte-stably. Unknown keys from the prior stored JSON aren't preserved — that fidelity isn't needed yet; if it becomes needed for VDF round-tripping in Phase 7, we'll switch to a merge-write pattern.
+- **`Column + verticalScroll` over `LazyColumn`.** The section count is small and fixed (max ~8 items); LazyColumn's below-the-viewport lazy composition broke a Robolectric `assertExists()` on the FULL_PRESS test because the Interruption section didn't compose. Column is more appropriate per `feedback_robolectric_compose_pitfalls.md`.
+- **Repository write is the verbatim JSON string** (`updateActivatorSettings(activatorId, settingsJson)`) rather than the typed settings object. Keeps the repo layer free of any `service.input` dependency; the VM is the only place that calls `settings.toJson()`. Slight repetition of the JSON shape in tests (full literal-string assertions instead of structural ones) accepted as a tradeoff.
 
 ### Brick 3.2 deviations + decisions
 

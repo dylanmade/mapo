@@ -567,6 +567,32 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onSetActivatorType = { activatorId, type ->
                         viewModel.setControllerActivatorType(activatorId, type)
                     },
+                    onOpenActivatorSettings = { activatorId, label ->
+                        navController.navigate(MapoRoute.activatorEditor(activatorId, label))
+                    },
+                    onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            composable(
+                route = MapoRoute.ACTIVATOR_EDITOR,
+                arguments = listOf(
+                    navArgument(MapoRoute.ARG_ACTIVATOR_ID) { type = NavType.LongType },
+                    navArgument(MapoRoute.ARG_ACTIVATOR_LABEL) {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    },
+                ),
+            ) { entry ->
+                val activatorId = entry.arguments?.getLong(MapoRoute.ARG_ACTIVATOR_ID) ?: return@composable
+                val label = entry.arguments?.getString(MapoRoute.ARG_ACTIVATOR_LABEL).orEmpty()
+                ActivatorEditorScreen(
+                    activatorId = activatorId,
+                    title = label.ifEmpty { "Activator" },
+                    config = activeControllerConfig,
+                    onSettingsChange = { id, settings ->
+                        viewModel.setControllerActivatorSettings(id, settings)
+                    },
                     onBack = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize(),
                 )

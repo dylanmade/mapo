@@ -32,6 +32,19 @@ object MapoRoute {
     fun remapTargetPicker(title: String, currentEncoded: String): String =
         "remap_target_picker?$ARG_TITLE=${Uri.encode(title)}&$ARG_CURRENT=${Uri.encode(currentEncoded)}"
 
+    // ── Per-activator settings editor (full-screen, instant-commit) ───────────────
+    //
+    // Reached by tapping the cog (⚙) on any activator row in `InputEditorScreen`. Shows the
+    // settings panel for that single activator — type-specific (long_press_time slider,
+    // double_tap_time slider) plus universal placeholders for the 3.3 settings. Slider
+    // drag-end commits to the repo; back navigates without an explicit save.
+    const val ARG_ACTIVATOR_ID = "activatorId"
+    const val ARG_ACTIVATOR_LABEL = "activatorLabel"
+    const val ACTIVATOR_EDITOR =
+        "activator_editor/{$ARG_ACTIVATOR_ID}?$ARG_ACTIVATOR_LABEL={$ARG_ACTIVATOR_LABEL}"
+    fun activatorEditor(activatorId: Long, label: String): String =
+        "activator_editor/$activatorId?$ARG_ACTIVATOR_LABEL=${Uri.encode(label)}"
+
     // ── Per-input activator editor (full-screen, instant-commit) ───────────────────
     //
     // Reached by tapping a row in `RemapControlsScreen`. Shows the activator list for one

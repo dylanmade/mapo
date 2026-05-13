@@ -107,6 +107,18 @@ data class CompiledActivatorSettings(
 
         private const val TAG = "ActivatorSettings"
     }
+
+    /**
+     * Serialize back to a settingsJson string. Inverse of [parse]. Default-valued fields
+     * are still written so the row round-trips byte-stably; unrecognized keys from the
+     * stored JSON aren't preserved — Brick 3.5 doesn't need that fidelity yet.
+     */
+    fun toJson(): String {
+        val obj = JSONObject()
+        obj.put("long_press_time_ms", longPressTimeMs)
+        obj.put("double_tap_time_ms", doubleTapTimeMs)
+        return obj.toString()
+    }
 }
 
 private fun JSONObject.optLongOrNull(key: String): Long? =

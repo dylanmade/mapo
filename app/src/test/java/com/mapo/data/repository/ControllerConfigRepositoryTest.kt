@@ -301,6 +301,39 @@ class ControllerConfigRepositoryTest {
     }
 
     @Test
+    fun updateActivatorSettings_replacesJsonBlob() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        val activatorId = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+            .activators[0].activator.id
+
+        subject.updateActivatorSettings(
+            activatorId,
+            """{"long_press_time_ms":900,"double_tap_time_ms":200}""",
+        )
+
+        val updated = subject.getActiveConfigOnce(1L)!!
+            .activeActionSet!!
+            .presetFor(InputSource.BUTTON_DIAMOND)!!.group
+            .inputByKey("button_a")!!
+            .activators[0]
+            .activator
+        assertEquals(
+            """{"long_press_time_ms":900,"double_tap_time_ms":200}""",
+            updated.settingsJson,
+        )
+    }
+
+    @Test
+    fun updateActivatorSettings_unknownId_isNoOp() = runTest {
+        subject.seedDefaultConfig(profileId = 1L)
+        subject.updateActivatorSettings(activatorId = 9_999_999L, settingsJson = """{"x":1}""")
+        // Just verifying it doesn't throw.
+    }
+
+    @Test
     fun copyConfig_emptySource_isNoOp() = runTest {
         subject.copyConfig(sourceProfileId = 1L, destProfileId = 2L)
 

@@ -357,6 +357,18 @@ class ControllerConfigRepository @Inject constructor(
     }
 
     /**
+     * Replace [activatorId]'s settingsJson with [settingsJson] verbatim. Called from the
+     * activator settings editor; the editor builds the JSON via
+     * `CompiledActivatorSettings.toJson()` so the keys stay in sync with the parser.
+     */
+    suspend fun updateActivatorSettings(activatorId: Long, settingsJson: String) {
+        val existing = activatorDao.getById(activatorId) ?: return
+        if (existing.settingsJson == settingsJson) return
+        activatorDao.update(existing.copy(settingsJson = settingsJson))
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
      * Replace the bindings on [activatorId] with a single binding from [output].
      * Multi-binding (cycle_binding) editing lands in Phase 3 — for now every
      * activator carries at most one binding.

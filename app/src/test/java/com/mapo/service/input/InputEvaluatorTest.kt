@@ -141,14 +141,15 @@ class InputEvaluatorTest {
     }
 
     @Test
-    fun longPress_andFullPress_bothFireWhenHeldPastThreshold() = testScope.runTest {
-        // Steam default: a FULL + LONG on the same input both fire when the user holds —
-        // FULL on DOWN edge, LONG once the threshold elapses. Both release on UP.
+    fun longPress_andFullPress_nonInterruptable_bothFireWhenHeldPastThreshold() = testScope.runTest {
+        // With interruptable=false, FULL_PRESS fires immediately on DOWN regardless of any
+        // coexisting LONG. Both fire when the user holds past the threshold.
         compiledConfig.value = configWith(
             BUTTON_A to listOf(
-                CompiledActivator(1L, ActivatorType.FULL_PRESS, listOf(ENTER), CompiledActivatorSettings.DEFAULTS),
+                CompiledActivator(1L, ActivatorType.FULL_PRESS, listOf(ENTER),
+                    CompiledActivatorSettings(interruptable = false)),
                 CompiledActivator(2L, ActivatorType.LONG_PRESS, listOf(ESCAPE),
-                    CompiledActivatorSettings(longPressTimeMs = 300L, doubleTapTimeMs = 250L)),
+                    CompiledActivatorSettings(longPressTimeMs = 300L)),
             ),
         )
 
@@ -163,6 +164,62 @@ class InputEvaluatorTest {
         subject.handleDigital(BUTTON_A, isDown = false)
         verify(exactly = 1) { emitter.emitRelease(ENTER) }
         verify(exactly = 1) { emitter.emitRelease(ESCAPE) }
+    }
+
+    @Test
+    fun longPress_andFullPress_interruptable_longSuppressesRegular() = testScope.runTest {
+        // Steam default: with interruptable=true (the default), FULL is deferred while
+        // LONG's threshold elapses. If LONG fires, FULL is suppressed entirely.
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.FULL_PRESS, listOf(ENTER),
+                    CompiledActivatorSettings.DEFAULTS),
+                CompiledActivator(2L, ActivatorType.LONG_PRESS, listOf(ESCAPE),
+                    CompiledActivatorSettings(longPressTimeMs = 300L)),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        // FULL is deferred — no emission on DOWN.
+        verify(exactly = 0) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }
+
+        advanceTimeBy(350L)
+        runCurrent()
+        // LONG fires, suppressing FULL. ENTER never fires.
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+        verify(exactly = 0) { emitter.emitPress(ENTER) }
+
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(ESCAPE) }
+        verify(exactly = 0) { emitter.emitRelease(ENTER) }
+    }
+
+    @Test
+    fun longPress_andFullPress_interruptable_upBeforeThresholdFiresRegularAsTap() = testScope.runTest {
+        // The flip side: with interruptable=true, if the user releases before LONG threshold,
+        // the deferred FULL fires retroactively as a tap (DOWN+UP back-to-back).
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.FULL_PRESS, listOf(ENTER),
+                    CompiledActivatorSettings.DEFAULTS),
+                CompiledActivator(2L, ActivatorType.LONG_PRESS, listOf(ESCAPE),
+                    CompiledActivatorSettings(longPressTimeMs = 300L)),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        advanceTimeBy(150L)  // halfway to threshold
+        subject.handleDigital(BUTTON_A, isDown = false)
+        advanceTimeBy(500L)  // confirm no late LONG fire
+        runCurrent()
+
+        // FULL fires as a tap on the UP edge; LONG never fires.
+        verifyOrder {
+            emitter.emitPress(ENTER)
+            emitter.emitRelease(ENTER)
+        }
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }
     }
 
     @Test
@@ -382,7 +439,9 @@ class InputEvaluatorTest {
     // ── Non-FULL_PRESS activator types (Brick 3.3 territory) ─────────────────
 
     @Test
-    fun press_chordedPressActivator_isSkippedThisBrick() {
+    fun chord_partnerNotConfigured_doesNotFire() {
+        // CHORDED_PRESS with chord_partner=null is the freshly-added-activator state. The
+        // press should consume but not fire.
         compiledConfig.value = configWith(
             BUTTON_A to activator(ActivatorType.CHORDED_PRESS, ENTER),
         )
@@ -391,6 +450,284 @@ class InputEvaluatorTest {
 
         assertTrue(consumed)
         verify(exactly = 0) { emitter.emitPress(any()) }
+        assertEquals(0, subject.activeChordCount())
+    }
+
+    @Test
+    fun chord_partnerNotHeld_doesNotFire() = testScope.runTest {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(chordActivator(ENTER, partner = BUTTON_B)),
+        )
+
+        // Press chord without partner held first → nothing fires.
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 0) { emitter.emitPress(any()) }
+        assertEquals(0, subject.activeChordCount())
+    }
+
+    @Test
+    fun chord_partnerHeldThenChord_fires_releasesOnChordUp() = testScope.runTest {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(chordActivator(ENTER, partner = BUTTON_B)),
+            // Partner needs a real CompiledInput entry so its press registers as
+            // physically held — give it a no-op Regular binding.
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, SPACE),
+        )
+
+        // Press partner first
+        subject.handleDigital(BUTTON_B, isDown = true)
+        // Then press chord input → chord fires
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        assertEquals(1, subject.activeChordCount())
+
+        // Release chord input → chord output releases
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+        assertEquals(0, subject.activeChordCount())
+
+        // Release partner → no extra emission
+        subject.handleDigital(BUTTON_B, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+    }
+
+    @Test
+    fun chord_partnerReleasedFirst_releasesChord() = testScope.runTest {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(chordActivator(ENTER, partner = BUTTON_B)),
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, SPACE),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+
+        // User lets go of the *partner* while still holding the chord input — the chord
+        // output must release (Steam-faithful: chord needs both held).
+        subject.handleDigital(BUTTON_B, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+        assertEquals(0, subject.activeChordCount())
+
+        // Subsequent release of the chord input is a no-op for ENTER.
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+    }
+
+    @Test
+    fun chord_pressedBeforePartner_doesNotFire_evenIfPartnerLater() = testScope.runTest {
+        // Order matters: chord must be pressed AFTER partner. Pressing chord first and
+        // partner second does not retroactively fire the chord.
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(chordActivator(ENTER, partner = BUTTON_B)),
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, SPACE),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)  // chord first — too early
+        verify(exactly = 0) { emitter.emitPress(ENTER) }
+
+        subject.handleDigital(BUTTON_B, isDown = true)  // partner arrives later
+        // Even though both are now held, we don't retroactively fire — Steam-faithful.
+        verify(exactly = 0) { emitter.emitPress(ENTER) }
+        assertEquals(0, subject.activeChordCount())
+    }
+
+    // ── Universal settings (Brick 3.3) ───────────────────────────────────────
+
+    @Test
+    fun toggle_firstPress_latchesPressed_releaseDoesNothing() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(activatorWith(ActivatorType.FULL_PRESS, ENTER, toggle = true)),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitRelease(ENTER) }
+
+        // UP must not release the latched binding — that's the whole point of toggle.
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 0) { emitter.emitRelease(ENTER) }
+        assertTrue(subject.isToggledOn(activatorId = 0L))
+    }
+
+    @Test
+    fun toggle_secondPress_releasesLatchedBindings() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(activatorWith(ActivatorType.FULL_PRESS, ENTER, toggle = true)),
+        )
+
+        // First press → latch
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+
+        // Second press → release
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+        assertFalse(subject.isToggledOn(activatorId = 0L))
+
+        // Second UP is a no-op (no held entries left).
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+    }
+
+    @Test
+    fun holdToRepeat_pulsesAtConfiguredRate_stopsOnRelease() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(activatorWith(
+                ActivatorType.FULL_PRESS, ENTER,
+                holdToRepeat = true,
+                repeatRateMs = 100L,
+            )),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }  // initial press
+
+        advanceTimeBy(350L)  // expect 3 pulses (100, 200, 300)
+        runCurrent()
+        // initial + 3 turbo pulses = 4 total press calls. Each turbo pulse is a tap, so
+        // emitPress count == 1 (initial held) + 3 (turbo) = 4; emitRelease == 3 (turbo).
+        verify(exactly = 4) { emitter.emitPress(ENTER) }
+        verify(exactly = 3) { emitter.emitRelease(ENTER) }
+        assertEquals(1, subject.activeRepeatJobCount())
+
+        subject.handleDigital(BUTTON_A, isDown = false)
+        // The initial held press releases on UP; the turbo job is cancelled.
+        verify(exactly = 4) { emitter.emitRelease(ENTER) }
+
+        advanceTimeBy(500L)
+        runCurrent()
+        // No further pulses after release.
+        verify(exactly = 4) { emitter.emitPress(ENTER) }
+        assertEquals(0, subject.activeRepeatJobCount())
+    }
+
+    @Test
+    fun fireStartDelay_releaseBeforeElapsed_cancelsEmission() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(activatorWith(
+                ActivatorType.FULL_PRESS, ENTER,
+                fireStartDelayMs = 200L,
+            )),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        // Delay still pending — no emit yet.
+        verify(exactly = 0) { emitter.emitPress(any()) }
+
+        advanceTimeBy(100L)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        advanceTimeBy(500L)
+        runCurrent()
+
+        // Start-delay cancelled by the release. Nothing ever fired.
+        verify(exactly = 0) { emitter.emitPress(any()) }
+    }
+
+    @Test
+    fun fireStartDelay_heldPastDelay_firesAfterDelay() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(activatorWith(
+                ActivatorType.FULL_PRESS, ENTER,
+                fireStartDelayMs = 200L,
+            )),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        advanceTimeBy(250L)
+        runCurrent()
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+    }
+
+    @Test
+    fun fireEndDelay_keepsBindingActivePastUp() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(activatorWith(
+                ActivatorType.FULL_PRESS, ENTER,
+                fireEndDelayMs = 300L,
+            )),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+
+        subject.handleDigital(BUTTON_A, isDown = false)
+        // Release deferred — emitter.emitRelease NOT called yet.
+        verify(exactly = 0) { emitter.emitRelease(ENTER) }
+
+        advanceTimeBy(350L)
+        runCurrent()
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+    }
+
+    @Test
+    fun cycleBindings_advancesIndexEachFire() = testScope.runTest {
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(
+                    activatorId = 0L,
+                    type = ActivatorType.START_PRESS,
+                    bindings = listOf(ENTER, ESCAPE, SPACE),
+                    settings = CompiledActivatorSettings(cycleBindings = true),
+                )
+            ),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        subject.handleDigital(BUTTON_A, isDown = true)  // 4th: wraps back to ENTER
+        subject.handleDigital(BUTTON_A, isDown = false)
+
+        verifyOrder {
+            emitter.emitPress(ENTER)
+            emitter.emitPress(ESCAPE)
+            emitter.emitPress(SPACE)
+            emitter.emitPress(ENTER)
+        }
+    }
+
+    @Test
+    fun interruptable_false_regularFiresImmediately_alongsideDouble() = testScope.runTest {
+        // When the Regular activator is interruptable=false, the DOUBLE_PRESS does NOT
+        // suppress it. Both effectively coexist (Regular fires at DOWN like normal).
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(
+                    activatorId = 1L,
+                    type = ActivatorType.FULL_PRESS,
+                    bindings = listOf(ENTER),
+                    settings = CompiledActivatorSettings(interruptable = false),
+                ),
+                CompiledActivator(
+                    activatorId = 2L,
+                    type = ActivatorType.DOUBLE_PRESS,
+                    bindings = listOf(SPACE),
+                    settings = CompiledActivatorSettings(doubleTapTimeMs = 250L),
+                ),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        // With interruptable=false, Regular fires immediately on DOWN.
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitPress(SPACE) }
+
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+        advanceTimeBy(300L)
+        runCurrent()
+        // Double's window still expires cleanly with nothing left to fire.
+        verify(exactly = 0) { emitter.emitPress(SPACE) }
     }
 
     // ── Fire-and-done bindings (emitter returned false) ───────────────────────
@@ -460,6 +797,45 @@ class InputEvaluatorTest {
                 longPressTimeMs = longPressTimeMs,
                 doubleTapTimeMs = doubleTapTimeMs,
             ),
+        ),
+    )
+
+    /** 3.3 helper: a single CHORDED_PRESS activator with a configured partner. */
+    private fun chordActivator(binding: BindingOutput, partner: InputAddress): CompiledActivator =
+        CompiledActivator(
+            activatorId = 0L,
+            type = ActivatorType.CHORDED_PRESS,
+            bindings = listOf(binding),
+            settings = CompiledActivatorSettings(
+                chordPartnerSource = partner.source,
+                chordPartnerKey = partner.inputKey,
+            ),
+        )
+
+    /**
+     * 3.3 helper: single-activator config with a chosen universal setting toggled on.
+     * Other settings stay at default so each test exercises exactly one knob.
+     */
+    private fun activatorWith(
+        type: ActivatorType,
+        binding: BindingOutput,
+        toggle: Boolean = false,
+        holdToRepeat: Boolean = false,
+        repeatRateMs: Long = 150L,
+        fireStartDelayMs: Long = 0L,
+        fireEndDelayMs: Long = 0L,
+        cycleBindings: Boolean = false,
+    ): CompiledActivator = CompiledActivator(
+        activatorId = 0L,
+        type = type,
+        bindings = listOf(binding),
+        settings = CompiledActivatorSettings(
+            toggle = toggle,
+            holdToRepeat = holdToRepeat,
+            repeatRateMs = repeatRateMs,
+            fireStartDelayMs = fireStartDelayMs,
+            fireEndDelayMs = fireEndDelayMs,
+            cycleBindings = cycleBindings,
         ),
     )
 

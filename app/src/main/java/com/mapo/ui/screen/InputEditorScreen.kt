@@ -204,11 +204,10 @@ fun ActivatorType.displayLabel(): String = when (this) {
  * affordance is visible, but we surface a "Coming soon" hint.
  *
  *  - SOFT_PRESS: needs analog trigger capture (Phase 6 — see Phase 2.3 descope).
- *  - CHORDED_PRESS: Brick 3.3.
+ *  - CHORDED_PRESS landed in Brick 3.3.
  */
 private val UNIMPLEMENTED_ACTIVATORS = setOf(
     ActivatorType.SOFT_PRESS,
-    ActivatorType.CHORDED_PRESS,
 )
 
 @Composable

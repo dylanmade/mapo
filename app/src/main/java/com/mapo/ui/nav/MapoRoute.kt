@@ -60,6 +60,17 @@ object MapoRoute {
     fun inputEditor(inputSource: String, groupInputKey: String, label: String): String =
         "input_editor/${Uri.encode(inputSource)}/${Uri.encode(groupInputKey)}?$ARG_INPUT_LABEL=${Uri.encode(label)}"
 
+    // ── Chord partner picker (full-screen, listen-for-press) ──────────────────────
+    //
+    // Reached from `ActivatorEditorScreen` when the activator type is CHORDED_PRESS. While
+    // the screen is on top, the accessibility service is in capture mode — the next
+    // physical button DOWN is captured and returned via savedStateHandle under
+    // [CHORD_PARTNER_RESULT_KEY] as "<InputSource>|<inputKey>". Caller writes through to
+    // the activator's chord_partner_source / chord_partner_key settings.
+    const val CHORD_PARTNER_RESULT_KEY = "chord_partner_picker_result"
+    const val CHORD_PARTNER_PICKER = "chord_partner_picker/{$ARG_ACTIVATOR_ID}"
+    fun chordPartnerPicker(activatorId: Long): String = "chord_partner_picker/$activatorId"
+
     // ── Configure-button screen (full-screen, instant-commit) ─────────────────────
     //
     // Caller navigates with the buttonId of the button being edited. The screen reads the

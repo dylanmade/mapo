@@ -1,8 +1,12 @@
 package com.mapo.service.input
 
 import com.mapo.data.model.RemapTarget
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -75,6 +79,28 @@ class InputDispatcher @Inject constructor() {
     private val _consumeSystemBack = MutableStateFlow(false)
     val consumeSystemBack: StateFlow<Boolean> = _consumeSystemBack.asStateFlow()
 
+    /**
+     * Listen-for-press capture mode. When true, the accessibility service short-circuits
+     * its normal evaluation: physical button DOWN edges are forwarded to
+     * [capturedInputs] instead of going through the remap evaluator. Used by the chord
+     * partner picker (Brick 3.3.e) to let the user pick a partner by pressing it. Cleared
+     * by the picker when it pops back.
+     */
+    private val _captureMode = MutableStateFlow(false)
+    val captureMode: StateFlow<Boolean> = _captureMode.asStateFlow()
+
+    /**
+     * Captured physical-input DOWN edges emitted while [captureMode] is true. Single-shot
+     * conflated buffer — if multiple presses arrive before the consumer reads, only the
+     * most recent survives. The picker collects the first emission and exits capture mode.
+     */
+    private val _capturedInputs = MutableSharedFlow<InputAddress>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val capturedInputs: SharedFlow<InputAddress> = _capturedInputs.asSharedFlow()
+
     fun setCompiledConfig(config: CompiledConfig) {
         _compiledConfig.value = config
     }
@@ -89,6 +115,15 @@ class InputDispatcher @Inject constructor() {
 
     fun setConsumeSystemBack(consume: Boolean) {
         _consumeSystemBack.value = consume
+    }
+
+    fun setCaptureMode(enabled: Boolean) {
+        _captureMode.value = enabled
+    }
+
+    /** Service-side: emit a captured physical-input DOWN edge while capture mode is on. */
+    fun emitCapturedInput(address: InputAddress) {
+        _capturedInputs.tryEmit(address)
     }
 
     @Volatile private var sink: InputSink? = null

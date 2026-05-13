@@ -320,6 +320,104 @@ class CompiledConfigTest {
     }
 
     @Test
+    fun settingsJson_universalSettings_parsedAndPropagated() {
+        // Brick 3.3 universal settings round-trip through the compiler.
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND, state = "active",
+                    group = groupWith(
+                        inputs = listOf(
+                            inputWith(
+                                "button_a",
+                                listOf(activatorWith(
+                                    type = ActivatorType.FULL_PRESS,
+                                    settingsJson = """{
+                                        "toggle": true,
+                                        "hold_to_repeat": true,
+                                        "repeat_rate_ms": 80,
+                                        "fire_start_delay_ms": 50,
+                                        "fire_end_delay_ms": 100,
+                                        "cycle_bindings": true,
+                                        "interruptable": false
+                                    }""".trimIndent(),
+                                    bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER")),
+                                )),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+        val settings = compiled.lookup(InputSource.BUTTON_DIAMOND, "button_a")!!.activators[0].settings
+
+        assertEquals(true, settings.toggle)
+        assertEquals(true, settings.holdToRepeat)
+        assertEquals(80L, settings.repeatRateMs)
+        assertEquals(50L, settings.fireStartDelayMs)
+        assertEquals(100L, settings.fireEndDelayMs)
+        assertEquals(true, settings.cycleBindings)
+        assertEquals(false, settings.interruptable)
+    }
+
+    @Test
+    fun settingsJson_chordPartner_parsedAndPropagated() {
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND, state = "active",
+                    group = groupWith(
+                        inputs = listOf(
+                            inputWith(
+                                "button_a",
+                                listOf(activatorWith(
+                                    type = ActivatorType.CHORDED_PRESS,
+                                    settingsJson = """{
+                                        "chord_partner_source": "BUTTON_DIAMOND",
+                                        "chord_partner_key": "button_b"
+                                    }""".trimIndent(),
+                                    bindings = listOf(binding(BindingOutputType.KEY_PRESS, "SPACE")),
+                                )),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+        val settings = compiled.lookup(InputSource.BUTTON_DIAMOND, "button_a")!!.activators[0].settings
+
+        assertEquals(InputSource.BUTTON_DIAMOND, settings.chordPartnerSource)
+        assertEquals("button_b", settings.chordPartnerKey)
+        assertEquals(
+            InputAddress(InputSource.BUTTON_DIAMOND, "button_b"),
+            settings.chordPartner,
+        )
+    }
+
+    @Test
+    fun settings_toJson_roundTrips() {
+        val original = CompiledActivatorSettings(
+            longPressTimeMs = 750L,
+            doubleTapTimeMs = 220L,
+            toggle = true,
+            holdToRepeat = true,
+            repeatRateMs = 90L,
+            fireStartDelayMs = 40L,
+            fireEndDelayMs = 60L,
+            cycleBindings = true,
+            interruptable = false,
+            chordPartnerSource = InputSource.DPAD,
+            chordPartnerKey = "dpad_north",
+        )
+        val roundTripped = CompiledActivatorSettings.parse(original.toJson())
+        assertEquals(original, roundTripped)
+    }
+
+    @Test
     fun settingsJson_malformed_fallsBackToDefaults() {
         val cfg = configWith(
             preset = listOf(

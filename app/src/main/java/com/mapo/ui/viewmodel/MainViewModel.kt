@@ -265,6 +265,19 @@ class MainViewModel @Inject constructor(
         inputDispatcher.setConsumeSystemBack(consume)
     }
 
+    /**
+     * Listen-for-press capture mode used by the chord partner picker (Brick 3.3.e). While
+     * true, the accessibility service forwards the next physical button DOWN to
+     * [capturedInputs] instead of running it through the remap evaluator.
+     */
+    fun setCaptureMode(enabled: Boolean) {
+        inputDispatcher.setCaptureMode(enabled)
+    }
+
+    /** Captured physical inputs while [setCaptureMode] is on. Picker subscribes; takes first. */
+    val capturedInputs: kotlinx.coroutines.flow.SharedFlow<com.mapo.service.input.InputAddress>
+        get() = inputDispatcher.capturedInputs
+
     // ── Auto-switch ───────────────────────────────────────────────────────────
 
     fun setAutoSwitchEnabled(enabled: Boolean) {

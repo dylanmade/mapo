@@ -9,11 +9,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,21 +33,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.ControllerConfig
+import com.mapo.data.model.steam.displayName
 import com.mapo.service.input.CompiledActivatorSettings
 import kotlin.math.roundToLong
 
 /**
  * Per-activator settings editor. Reached from the cog button on each row in
- * `InputEditorScreen`. Shows the per-type timing controls that are live today plus the
- * universal-settings panel as disabled placeholders that come alive in Brick 3.3.
+ * `InputEditorScreen`. Shows the per-type timing controls plus the universal-settings
+ * panel (toggle, hold-to-repeat / turbo, fire start/end delays, cycle bindings) and
+ * interruption controls (FULL_PRESS / RELEASE_PRESS only).
  *
- * Instant-commit: slider drag-end calls [onSettingsChange] which writes through to the
- * repo. No draft / Save / Cancel layer — the rest of Mapo's editing screens behave the
- * same way (per `RemapControlsScreen` and `InputEditorScreen`).
+ * Instant-commit: every slider drag-end or switch toggle calls [onSettingsChange] which
+ * writes through to the repo. No draft / Save / Cancel layer — the rest of Mapo's editing
+ * screens behave the same way (per `RemapControlsScreen` and `InputEditorScreen`).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,6 +57,7 @@ fun ActivatorEditorScreen(
     title: String,
     config: ControllerConfig?,
     onSettingsChange: (Long, CompiledActivatorSettings) -> Unit,
+    onPickChordPartner: (Long) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -99,6 +103,16 @@ fun ActivatorEditorScreen(
                 .padding(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // ── Chord partner (CHORDED_PRESS only) ─────────────────────────────
+            if (type == ActivatorType.CHORDED_PRESS) {
+                SectionHeader("Chord partner")
+                ChordPartnerRow(
+                    partnerSourceLabel = settings.chordPartnerSource?.displayName(),
+                    partnerKey = settings.chordPartnerKey,
+                    onPick = { onPickChordPartner(activatorId) },
+                )
+            }
+
             // ── Type-specific timing (live in 3.5) ─────────────────────────────
             when (type) {
                 ActivatorType.LONG_PRESS -> {
@@ -128,35 +142,72 @@ fun ActivatorEditorScreen(
                 else -> { /* No type-specific timing for FULL/START/RELEASE/SOFT/CHORDED. */ }
             }
 
-            // ── Universal settings (placeholders for 3.3) ──────────────────────
+            // ── Universal settings (Brick 3.3 — live) ─────────────────────────
             SectionHeader("Universal settings")
-            ComingSoonRow(
+            SettingsSwitchRow(
                 label = "Toggle",
                 helper = "Stays active after release until pressed again.",
+                checked = settings.toggle,
+                onCheckedChange = { newValue ->
+                    onSettingsChange(activatorId, settings.copy(toggle = newValue))
+                },
             )
-            ComingSoonRow(
+            SettingsSwitchRow(
                 label = "Hold-to-repeat (Turbo)",
                 helper = "Pulses the binding repeatedly while held.",
+                checked = settings.holdToRepeat,
+                onCheckedChange = { newValue ->
+                    onSettingsChange(activatorId, settings.copy(holdToRepeat = newValue))
+                },
             )
-            ComingSoonRow(
+            if (settings.holdToRepeat) {
+                TimingSlider(
+                    label = "Repeat rate",
+                    helper = "Time between turbo pulses.",
+                    currentMs = settings.repeatRateMs,
+                    rangeMs = 20f..1000f,
+                    onCommit = { newMs ->
+                        onSettingsChange(activatorId, settings.copy(repeatRateMs = newMs))
+                    },
+                )
+            }
+            TimingSlider(
                 label = "Fire start delay",
                 helper = "Delay before the binding fires once activation conditions are met.",
+                currentMs = settings.fireStartDelayMs,
+                rangeMs = 0f..2000f,
+                onCommit = { newMs ->
+                    onSettingsChange(activatorId, settings.copy(fireStartDelayMs = newMs))
+                },
             )
-            ComingSoonRow(
+            TimingSlider(
                 label = "Fire end delay",
                 helper = "Keeps the binding active past its physical release.",
+                currentMs = settings.fireEndDelayMs,
+                rangeMs = 0f..2000f,
+                onCommit = { newMs ->
+                    onSettingsChange(activatorId, settings.copy(fireEndDelayMs = newMs))
+                },
             )
-            ComingSoonRow(
+            SettingsSwitchRow(
                 label = "Cycle bindings",
                 helper = "Cycles through multiple bindings sequentially on each fire.",
+                checked = settings.cycleBindings,
+                onCheckedChange = { newValue ->
+                    onSettingsChange(activatorId, settings.copy(cycleBindings = newValue))
+                },
             )
 
             // Interruptable: only valid on FULL_PRESS / RELEASE_PRESS per Steam.
             if (type == ActivatorType.FULL_PRESS || type == ActivatorType.RELEASE_PRESS) {
                 SectionHeader("Interruption")
-                ComingSoonRow(
+                SettingsSwitchRow(
                     label = "Interruptable",
                     helper = "Lets longer/double activators suppress this one when they fire.",
+                    checked = settings.interruptable,
+                    onCheckedChange = { newValue ->
+                        onSettingsChange(activatorId, settings.copy(interruptable = newValue))
+                    },
                 )
             }
         }
@@ -257,16 +308,67 @@ private fun TimingSlider(
 private fun formatSeconds(ms: Long): String = "%.2f s".format(ms / 1000.0)
 
 /**
- * Disabled-placeholder row for universal settings that 3.3 will wire to runtime. Renders
- * a switch (always off, not interactive) + label + "Coming in 3.3" helper subtext. Stays
- * visually consistent with the live rows so 3.3's diff is just "remove the alpha and the
- * Coming-soon line."
+ * Chord-partner row. Shows the current partner (source · key) and a "Pick / Change"
+ * button that opens the listen-for-press capture screen. While that screen is up, the
+ * next physical button DOWN becomes the new partner.
  */
 @Composable
-private fun ComingSoonRow(label: String, helper: String) {
+private fun ChordPartnerRow(
+    partnerSourceLabel: String?,
+    partnerKey: String?,
+    onPick: () -> Unit,
+) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth().alpha(0.6f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (partnerSourceLabel != null && partnerKey != null)
+                        "$partnerSourceLabel · $partnerKey"
+                    else "Not set",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (partnerSourceLabel != null)
+                        MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "The chord activator only fires when this partner is currently held.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            FilledTonalButton(onClick = onPick) {
+                Text(
+                    text = if (partnerSourceLabel == null) "Set" else "Change",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Live universal-settings row: M3 switch on the right, label + helper subtext on the left.
+ * Tapping anywhere on the row toggles the switch (matches M3 settings-screen idiom; tap
+ * target is the whole row, not just the switch thumb).
+ */
+@Composable
+private fun SettingsSwitchRow(
+    label: String,
+    helper: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth(),
+        onClick = { onCheckedChange(!checked) },
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -282,17 +384,11 @@ private fun ComingSoonRow(label: String, helper: String) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    text = "Coming in 3.3",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
             Spacer(Modifier.height(8.dp))
             Switch(
-                checked = false,
-                onCheckedChange = null,
-                enabled = false,
+                checked = checked,
+                onCheckedChange = onCheckedChange,
             )
         }
     }

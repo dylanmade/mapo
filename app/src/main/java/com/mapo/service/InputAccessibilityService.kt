@@ -207,6 +207,18 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
 
         val address = KEYCODE_TO_INPUT_ADDRESS[event.keyCode] ?: return false
         val isDown = event.action == KeyEvent.ACTION_DOWN
+
+        // Capture mode (Brick 3.3.e): when the chord-partner picker is open we hijack
+        // physical inputs and emit them to the picker instead of running the evaluator.
+        // We consume both edges so a partial press during capture can't leak the binding.
+        if (dispatcher.captureMode.value) {
+            if (isDown) {
+                Log.d(TAG, "onKeyEvent[capture]: captured $address")
+                dispatcher.emitCapturedInput(address)
+            }
+            return true
+        }
+
         Log.d(TAG, "onKeyEvent: keyCode=${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)}) action=${event.action} address=$address")
         return evaluator.handleDigital(address, isDown)
     }

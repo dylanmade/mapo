@@ -586,6 +586,30 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             ) { entry ->
                 val activatorId = entry.arguments?.getLong(MapoRoute.ARG_ACTIVATOR_ID) ?: return@composable
                 val label = entry.arguments?.getString(MapoRoute.ARG_ACTIVATOR_LABEL).orEmpty()
+                // Brick 3.3.e: chord-partner picker writes its result here and pops back.
+                // Apply via VM, then clear the savedStateHandle so recomposition doesn't re-apply.
+                val chordResult by entry.savedStateHandle
+                    .getStateFlow<String?>(MapoRoute.CHORD_PARTNER_RESULT_KEY, null)
+                    .collectAsStateWithLifecycle()
+                LaunchedEffect(chordResult, activeControllerConfig) {
+                    val encoded = chordResult ?: return@LaunchedEffect
+                    val parts = encoded.split("|", limit = 2)
+                    if (parts.size != 2) return@LaunchedEffect
+                    val source = runCatching {
+                        com.mapo.data.model.steam.InputSource.valueOf(parts[0])
+                    }.getOrNull() ?: return@LaunchedEffect
+                    // Resolve current settings off the active config so we don't clobber other knobs.
+                    val current = activeControllerConfig?.activeActionSet?.preset
+                        ?.flatMap { p -> p.group.inputs.flatMap { it.activators } }
+                        ?.firstOrNull { it.activator.id == activatorId }
+                        ?.let { com.mapo.service.input.CompiledActivatorSettings.parse(it.activator.settingsJson) }
+                        ?: com.mapo.service.input.CompiledActivatorSettings.DEFAULTS
+                    viewModel.setControllerActivatorSettings(
+                        activatorId,
+                        current.copy(chordPartnerSource = source, chordPartnerKey = parts[1]),
+                    )
+                    entry.savedStateHandle.remove<String>(MapoRoute.CHORD_PARTNER_RESULT_KEY)
+                }
                 ActivatorEditorScreen(
                     activatorId = activatorId,
                     title = label.ifEmpty { "Activator" },
@@ -593,7 +617,29 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onSettingsChange = { id, settings ->
                         viewModel.setControllerActivatorSettings(id, settings)
                     },
+                    onPickChordPartner = { id ->
+                        navController.navigate(MapoRoute.chordPartnerPicker(id))
+                    },
                     onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            composable(
+                route = MapoRoute.CHORD_PARTNER_PICKER,
+                arguments = listOf(
+                    navArgument(MapoRoute.ARG_ACTIVATOR_ID) { type = NavType.LongType },
+                ),
+            ) { _ ->
+                ChordPartnerPickerScreen(
+                    capturedInputs = viewModel.capturedInputs,
+                    setCaptureMode = { viewModel.setCaptureMode(it) },
+                    onPartnerCaptured = { address ->
+                        navController.previousBackStackEntry
+                            ?.savedStateHandle
+                            ?.set(MapoRoute.CHORD_PARTNER_RESULT_KEY, "${address.source.name}|${address.inputKey}")
+                        navController.popBackStack()
+                    },
+                    onCancel = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize(),
                 )
             }

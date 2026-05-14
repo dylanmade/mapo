@@ -20,11 +20,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,7 +35,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,12 +71,19 @@ fun RemapControlsScreen(
     onRenameActionSet: (actionSetId: Long, newTitle: String) -> Unit = { _, _ -> },
     onDuplicateActionSet: (sourceSetId: Long, newTitle: String) -> Unit = { _, _ -> },
     onDeleteActionSet: (actionSetId: Long) -> Unit = {},
+    viewingLayerId: Long? = null,
+    onSelectLayer: (Long?) -> Unit = {},
+    onAddLayer: (actionSetId: Long, title: String) -> Unit = { _, _ -> },
+    onRenameLayer: (layerId: Long, newTitle: String) -> Unit = { _, _ -> },
+    onDuplicateLayer: (sourceLayerId: Long, newTitle: String) -> Unit = { _, _ -> },
+    onDeleteLayer: (layerId: Long) -> Unit = {},
 ) {
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
 
     // Brick 4.4: which management dialog is currently open. Plain `remember` —
     // dialogs are short-lived; rotation-survival isn't worth a custom Saver.
     var dialog by remember { mutableStateOf<ActionSetDialogState>(ActionSetDialogState.None) }
+    var layerDialog by remember { mutableStateOf<LayerDialogState>(LayerDialogState.None) }
 
     // Resolve which set is currently being viewed in the editor. The viewing pointer is
     // user-driven (tab tap); when null, fall back to the controller_profile default so the
@@ -107,6 +115,13 @@ fun RemapControlsScreen(
                     onRequestRenameSet = { dialog = ActionSetDialogState.Rename },
                     onRequestDuplicateSet = { dialog = ActionSetDialogState.Duplicate },
                     onRequestDeleteSet = { dialog = ActionSetDialogState.Delete },
+                    layers = viewingSet?.layers?.map { it.layer } ?: emptyList(),
+                    viewingLayerId = viewingLayerId,
+                    onSelectLayer = onSelectLayer,
+                    onRequestAddLayer = { layerDialog = LayerDialogState.Add },
+                    onRequestRenameLayer = { layerDialog = LayerDialogState.Rename },
+                    onRequestDuplicateLayer = { layerDialog = LayerDialogState.Duplicate },
+                    onRequestDeleteLayer = { layerDialog = LayerDialogState.Delete },
                 )
             }
         },
@@ -174,6 +189,55 @@ fun RemapControlsScreen(
             )
         } ?: run { dialog = ActionSetDialogState.None }
     }
+
+    // Brick 5.4: layer management dialogs. Same hoisting pattern as action sets.
+    // Layer operations are scoped to the currently-focused layer (viewingLayerId)
+    // within the currently-viewing set — the overflow button is disabled when no
+    // layer is focused (handled in LayersPillRow), so a non-null viewing layer is
+    // a precondition for Rename/Duplicate/Delete here.
+    val viewingLayer = viewingSet?.layers?.firstOrNull { it.layer.id == viewingLayerId }?.layer
+    when (layerDialog) {
+        LayerDialogState.None -> Unit
+        LayerDialogState.Add -> viewingActionSet?.let { parentSet ->
+            AddLayerDialog(
+                onConfirm = { title ->
+                    onAddLayer(parentSet.id, title)
+                    layerDialog = LayerDialogState.None
+                },
+                onDismiss = { layerDialog = LayerDialogState.None },
+            )
+        } ?: run { layerDialog = LayerDialogState.None }
+        LayerDialogState.Rename -> viewingLayer?.let { target ->
+            RenameLayerDialog(
+                target = target,
+                onConfirm = { newTitle ->
+                    onRenameLayer(target.id, newTitle)
+                    layerDialog = LayerDialogState.None
+                },
+                onDismiss = { layerDialog = LayerDialogState.None },
+            )
+        } ?: run { layerDialog = LayerDialogState.None }
+        LayerDialogState.Duplicate -> viewingLayer?.let { source ->
+            DuplicateLayerDialog(
+                source = source,
+                onConfirm = { newTitle ->
+                    onDuplicateLayer(source.id, newTitle)
+                    layerDialog = LayerDialogState.None
+                },
+                onDismiss = { layerDialog = LayerDialogState.None },
+            )
+        } ?: run { layerDialog = LayerDialogState.None }
+        LayerDialogState.Delete -> viewingLayer?.let { target ->
+            DeleteLayerConfirmDialog(
+                target = target,
+                onConfirm = {
+                    onDeleteLayer(target.id)
+                    layerDialog = LayerDialogState.None
+                },
+                onDismiss = { layerDialog = LayerDialogState.None },
+            )
+        } ?: run { layerDialog = LayerDialogState.None }
+    }
 }
 
 /** Which management dialog is currently open. Hoisted in [RemapControlsScreen]. */
@@ -185,12 +249,22 @@ private sealed class ActionSetDialogState {
     object Delete : ActionSetDialogState()
 }
 
+/** Layer-management dialog state. Parallel sealed class to [ActionSetDialogState]. */
+private sealed class LayerDialogState {
+    object None : LayerDialogState()
+    object Add : LayerDialogState()
+    object Rename : LayerDialogState()
+    object Duplicate : LayerDialogState()
+    object Delete : LayerDialogState()
+}
+
 /**
- * Top bar: action-set tabs + (inert) layer chips. As of Brick 4.3 the tabs are live —
- * tapping a tab swaps the editor's viewing set (M3 PrimaryTabRow `selectedTabIndex`
- * follows `viewingSetId`). The runtime-active set is *not* what these tabs control —
- * that's evaluator-side, swapped by `CHANGE_PRESET` bindings (Brick 4.2). Layer chips
- * stay inert until Phase 5.
+ * Top bar: action-set tabs + layer pill row. Brick 4.3 made the tabs live; Brick 5.4
+ * makes the layer row live — tapping a pill flips the editor's focused layer (5.5
+ * will fill in overlay-edit visuals). Re-tapping the focused pill drops back to base
+ * (`viewingLayerId == null`). The runtime-active set/layer stack is *not* what these
+ * controls touch — that's evaluator-side, swapped by `CHANGE_PRESET` / `add_layer`
+ * bindings (Bricks 4.2, 5.1).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -202,6 +276,13 @@ private fun ActionSetAndLayersBar(
     onRequestRenameSet: () -> Unit,
     onRequestDuplicateSet: () -> Unit,
     onRequestDeleteSet: () -> Unit,
+    layers: List<com.mapo.data.model.steam.ActionLayer>,
+    viewingLayerId: Long?,
+    onSelectLayer: (Long?) -> Unit,
+    onRequestAddLayer: () -> Unit,
+    onRequestRenameLayer: () -> Unit,
+    onRequestDuplicateLayer: () -> Unit,
+    onRequestDeleteLayer: () -> Unit,
 ) {
     val sets = config?.actionSets.orEmpty()
     val viewingIndex = sets.indexOfFirst { it.actionSet.id == viewingSetId }.coerceAtLeast(0)
@@ -254,26 +335,158 @@ private fun ActionSetAndLayersBar(
                     Spacer(Modifier.width(8.dp))
                 }
             }
+            LayersPillRow(
+                layers = layers,
+                viewingLayerId = viewingLayerId,
+                hasViewingSet = viewingSetId != null,
+                onSelectLayer = onSelectLayer,
+                onRequestAddLayer = onRequestAddLayer,
+                onRequestRenameLayer = onRequestRenameLayer,
+                onRequestDuplicateLayer = onRequestDuplicateLayer,
+                onRequestDeleteLayer = onRequestDeleteLayer,
+            )
+        }
+    }
+}
+
+/**
+ * Horizontal pill row beside the action-set tabs (Brick 5.4).
+ *
+ * Empty-state ([layers] empty): shows "Layers: (none)" + a `[+]` button — keeps the
+ * affordance discoverable even before any layers exist.
+ *
+ * Populated state: FilterChip per layer + `[+]` + an overflow `[⋮]` that operates on
+ * the currently-focused layer. Mirrors the action-set row's deviation from the parity
+ * plan's "long-press a pill" design — row-level overflow is more discoverable and
+ * avoids gesture conflicts (the action-set tabs hit a `Tab` selectable wrapper issue
+ * that doesn't apply to FilterChips, but consistency with the set row wins).
+ *
+ * Tapping the focused pill re-fires `onSelectLayer(null)` — explicit toggle back to
+ * base-set editing. There's no separate "Base" pill (Steam doesn't have one; the set
+ * is the base).
+ */
+@Composable
+private fun LayersPillRow(
+    layers: List<com.mapo.data.model.steam.ActionLayer>,
+    viewingLayerId: Long?,
+    hasViewingSet: Boolean,
+    onSelectLayer: (Long?) -> Unit,
+    onRequestAddLayer: () -> Unit,
+    onRequestRenameLayer: () -> Unit,
+    onRequestDuplicateLayer: () -> Unit,
+    onRequestDeleteLayer: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Layers:",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(8.dp))
+        if (layers.isEmpty()) {
+            Text(
+                text = "(none)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Layers:",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.width(8.dp))
-                AssistChip(
-                    onClick = { /* no-op until Phase 5 */ },
-                    enabled = false,
-                    label = { Text("(no layers)") },
-                    colors = AssistChipDefaults.assistChipColors(),
-                )
+                layers.forEach { layer ->
+                    val selected = layer.id == viewingLayerId
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            // Toggle: tapping the focused pill drops focus back to base.
+                            onSelectLayer(if (selected) null else layer.id)
+                        },
+                        label = {
+                            Text(
+                                text = layer.title,
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                        },
+                    )
+                }
             }
         }
+        IconButton(
+            onClick = onRequestAddLayer,
+            enabled = hasViewingSet,
+            modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
+        ) {
+            Icon(
+                Icons.Filled.Add,
+                contentDescription = "Add layer",
+                modifier = Modifier.size(IconButtonDefaults.smallIconSize),
+            )
+        }
+        if (layers.isNotEmpty()) {
+            Spacer(Modifier.width(4.dp))
+            LayerOverflowMenu(
+                focusedLayerTitle = layers.firstOrNull { it.id == viewingLayerId }?.title,
+                onRename = onRequestRenameLayer,
+                onDuplicate = onRequestDuplicateLayer,
+                onDelete = onRequestDeleteLayer,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+    }
+}
+
+/**
+ * Overflow menu for the layer row (Brick 5.4). Operates on the currently-focused
+ * layer; disabled when none is focused (the items themselves are gated separately
+ * for redundancy). Parallel to `ActionSetOverflowMenu`.
+ */
+@Composable
+private fun LayerOverflowMenu(
+    focusedLayerTitle: String?,
+    onRename: () -> Unit,
+    onDuplicate: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val titleSuffix = focusedLayerTitle?.let { " \"$it\"" }.orEmpty()
+    val enabled = focusedLayerTitle != null
+    IconButton(
+        onClick = { expanded = true },
+        modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
+        enabled = enabled,
+    ) {
+        Icon(
+            Icons.Filled.MoreVert,
+            contentDescription = "Layer actions",
+            modifier = Modifier.size(IconButtonDefaults.smallIconSize),
+        )
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenuItem(
+            text = { Text("Rename$titleSuffix") },
+            enabled = enabled,
+            onClick = { expanded = false; onRename() },
+        )
+        DropdownMenuItem(
+            text = { Text("Duplicate$titleSuffix") },
+            enabled = enabled,
+            onClick = { expanded = false; onDuplicate() },
+        )
+        DropdownMenuItem(
+            text = { Text("Delete$titleSuffix") },
+            enabled = enabled,
+            onClick = { expanded = false; onDelete() },
+        )
     }
 }
 

@@ -215,6 +215,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 
     val activeControllerConfig by viewModel.activeControllerConfig.collectAsStateWithLifecycle()
     val viewingActionSetId by viewModel.viewingActionSetId.collectAsStateWithLifecycle()
+    val viewingLayerId by viewModel.viewingLayerId.collectAsStateWithLifecycle()
     val remapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -542,6 +543,30 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         )
                     },
                     onDeleteActionSet = viewModel::deleteControllerActionSet,
+                    viewingLayerId = viewingLayerId,
+                    onSelectLayer = viewModel::setViewingLayer,
+                    onAddLayer = { actionSetId, title ->
+                        viewModel.addControllerActionLayer(
+                            actionSetId = actionSetId,
+                            name = com.mapo.ui.screen.deriveActionLayerName(title),
+                            title = title,
+                        )
+                    },
+                    onRenameLayer = { layerId, newTitle ->
+                        viewModel.renameControllerActionLayer(
+                            layerId = layerId,
+                            name = com.mapo.ui.screen.deriveActionLayerName(newTitle),
+                            title = newTitle,
+                        )
+                    },
+                    onDuplicateLayer = { sourceLayerId, newTitle ->
+                        viewModel.duplicateControllerActionLayer(
+                            sourceLayerId = sourceLayerId,
+                            name = com.mapo.ui.screen.deriveActionLayerName(newTitle),
+                            title = newTitle,
+                        )
+                    },
+                    onDeleteLayer = viewModel::deleteControllerActionLayer,
                     onBack = { navController.popBackStack() },
                     onOpenInputEditor = { inputSource, groupInputKey, label ->
                         navController.navigate(

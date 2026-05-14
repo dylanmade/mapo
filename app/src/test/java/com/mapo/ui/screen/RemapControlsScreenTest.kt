@@ -15,6 +15,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.mapo.data.model.steam.ActionLayer
+import com.mapo.data.model.steam.ActionLayerGraph
 import com.mapo.data.model.steam.ActionSet
 import com.mapo.data.model.steam.ActionSetGraph
 import com.mapo.data.model.steam.Activator
@@ -374,6 +376,276 @@ class RemapControlsScreenTest {
         }
 
         composeRule.onNodeWithText("Switch to: Menu").assertIsDisplayed()
+    }
+
+    // ── Layers pill row (Brick 5.4) ───────────────────────────────────────────
+
+    @Test
+    fun layersRow_emptyState_showsNoneAndAddIsEnabled() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = sampleConfig(),
+                        viewingActionSetId = 1L,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Layers:").assertExists()
+        composeRule.onNodeWithText("(none)").assertExists()
+        composeRule.onNodeWithContentDescription("Add layer").assertIsEnabled()
+    }
+
+    @Test
+    fun layersRow_rendersPillPerLayer_andSelectionFollowsViewingLayerId() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = singleSetConfigWithLayers(
+                            layers = listOf(10L to "Scope", 11L to "Vehicle"),
+                        ),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = 11L,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Scope").assertExists()
+        composeRule.onNodeWithText("Vehicle").assertExists()
+        // Selected FilterChip exposes selected=true via semantics — we don't probe that
+        // (Robolectric's chip semantics are version-noisy); covered by the toggle test.
+    }
+
+    @Test
+    fun tappingLayerPill_invokesOnSelectLayer_withId() {
+        var selectedLayerId: Long? = -1L  // sentinel; null is a meaningful value
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = singleSetConfigWithLayers(
+                            layers = listOf(10L to "Scope", 11L to "Vehicle"),
+                        ),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = null,
+                        onSelectLayer = { selectedLayerId = it },
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Vehicle").performClick()
+
+        assert(selectedLayerId == 11L) {
+            "Expected onSelectLayer(11L), got $selectedLayerId"
+        }
+    }
+
+    @Test
+    fun tappingFocusedLayerPill_togglesBackToBase_withNull() {
+        var lastSelected: Long? = -1L
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = singleSetConfigWithLayers(
+                            layers = listOf(10L to "Scope"),
+                        ),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = 10L,
+                        onSelectLayer = { lastSelected = it },
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Scope").performClick()
+
+        assert(lastSelected == null) {
+            "Expected toggle-off to fire onSelectLayer(null), got $lastSelected"
+        }
+    }
+
+    @Test
+    fun addLayerButton_opensAddLayerDialog() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = sampleConfig(),
+                        viewingActionSetId = 1L,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Add layer").performClick()
+        composeRule.onNodeWithText("Add Layer", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun layerOverflowMenu_showsManagementItems_forFocusedLayer() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = singleSetConfigWithLayers(
+                            layers = listOf(10L to "Scope"),
+                        ),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = 10L,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Layer actions").performClick()
+        composeRule.onNodeWithText("Rename \"Scope\"").assertIsEnabled()
+        composeRule.onNodeWithText("Duplicate \"Scope\"").assertIsEnabled()
+        composeRule.onNodeWithText("Delete \"Scope\"").assertIsEnabled()
+    }
+
+    @Test
+    fun layerOverflowMenu_disabled_whenNoLayerFocused() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = singleSetConfigWithLayers(
+                            layers = listOf(10L to "Scope"),
+                        ),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = null,  // editing the base set
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        // Button is disabled — assertIsNotEnabled is enough; we don't need to expand.
+        composeRule.onNodeWithContentDescription("Layer actions").assertIsNotEnabled()
+    }
+
+    @Test
+    fun layerOverflowMenu_absent_whenZeroLayers() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = sampleConfig(),  // no layers
+                        viewingActionSetId = 1L,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        // The overflow [⋮] only renders once layers exist — otherwise the empty-state
+        // layout just shows "(none)" + [+]. The corresponding contentDescription must
+        // therefore have zero matches in the merged tree.
+        composeRule.onAllNodesWithText("Layer actions").assertCountEquals(0)
+    }
+
+    @Test
+    fun layerRow_perSet_pillsReflectViewingSet() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = twoSetConfigWithLayers(
+                            setALayers = listOf(10L to "ScopeA"),
+                            setBLayers = listOf(20L to "ScopeB"),
+                        ),
+                        viewingActionSetId = 2L,  // viewing set B
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("ScopeB").assertExists()
+        composeRule.onAllNodesWithText("ScopeA").assertCountEquals(0)
+    }
+
+    /** Single-set config with [layers] attached (id+title pairs, in order). */
+    private fun singleSetConfigWithLayers(
+        layers: List<Pair<Long, String>>,
+    ): ControllerConfig {
+        val base = sampleConfig()
+        val setWithLayers = base.actionSets.first().copy(
+            layers = layers.mapIndexed { idx, (id, title) ->
+                ActionLayerGraph(
+                    layer = ActionLayer(
+                        id = id,
+                        parentActionSetId = base.actionSets.first().actionSet.id,
+                        name = title.lowercase(),
+                        title = title,
+                        orderIndex = idx,
+                    ),
+                    bindingGroups = emptyList(),
+                )
+            },
+        )
+        return base.copy(actionSets = listOf(setWithLayers))
+    }
+
+    /** Two-set config where each set carries its own layer list. */
+    private fun twoSetConfigWithLayers(
+        setALayers: List<Pair<Long, String>>,
+        setBLayers: List<Pair<Long, String>>,
+    ): ControllerConfig {
+        val base = twoSetConfig(
+            setAButtonA = BindingOutput.Unbound,
+            setBButtonA = BindingOutput.Unbound,
+        )
+        fun attach(graph: ActionSetGraph, layers: List<Pair<Long, String>>) = graph.copy(
+            layers = layers.mapIndexed { idx, (id, title) ->
+                ActionLayerGraph(
+                    layer = ActionLayer(
+                        id = id,
+                        parentActionSetId = graph.actionSet.id,
+                        name = title.lowercase(),
+                        title = title,
+                        orderIndex = idx,
+                    ),
+                    bindingGroups = emptyList(),
+                )
+            },
+        )
+        return base.copy(
+            actionSets = listOf(
+                attach(base.actionSets[0], setALayers),
+                attach(base.actionSets[1], setBLayers),
+            ),
+        )
     }
 
     /**

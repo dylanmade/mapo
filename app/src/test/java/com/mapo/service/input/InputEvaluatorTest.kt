@@ -781,6 +781,174 @@ class InputEvaluatorTest {
         verify(exactly = 0) { emitter.emitRelease(ESCAPE) }
     }
 
+    // ── Action set switching (Brick 4.2) ──────────────────────────────────────
+
+    private fun changePresetTo(setId: Long): BindingOutput.ControllerAction =
+        BindingOutput.ControllerAction(verb = "CHANGE_PRESET", args = listOf(setId.toString(), "1", "1"))
+
+    @Test
+    fun activeSet_lazyInitializes_toDefault_onFirstPress() {
+        compiledConfig.value = configWithTwoSets(
+            defaultSetId = 1L,
+            setA = 1L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER)),
+            setB = 2L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }
+        assertEquals(1L, subject.currentActiveSetId())
+    }
+
+    @Test
+    fun changePreset_swapsActiveSet_andSubsequentPressesEmitFromNewSet() {
+        // Set 1: BUTTON_A → CHANGE_PRESET(2). Set 2: BUTTON_A → ESCAPE.
+        compiledConfig.value = configWithTwoSets(
+            defaultSetId = 1L,
+            setA = 1L to listOf(
+                BUTTON_A to listOf(
+                    CompiledActivator(
+                        activatorId = 0L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(changePresetTo(2L)),
+                    )
+                )
+            ),
+            setB = 2L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+        )
+
+        // Press + release BUTTON_A in set 1 — fires CHANGE_PRESET, swaps to set 2.
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        assertEquals(2L, subject.currentActiveSetId())
+
+        // Now BUTTON_A in set 2 should emit ESCAPE.
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+        // CHANGE_PRESET itself never goes through the emitter.
+        verify(exactly = 0) { emitter.emitPress(match { it is BindingOutput.ControllerAction }) }
+    }
+
+    @Test
+    fun changePreset_invalidTarget_isNoOp() {
+        compiledConfig.value = configWithTwoSets(
+            defaultSetId = 1L,
+            setA = 1L to listOf(
+                BUTTON_A to listOf(
+                    CompiledActivator(
+                        activatorId = 0L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(changePresetTo(999L)),  // not in compiled config
+                    )
+                )
+            ),
+            setB = 2L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+
+        assertEquals("Invalid CHANGE_PRESET target must not change the active set",
+            1L, subject.currentActiveSetId())
+    }
+
+    @Test
+    fun changePreset_releasesHeldBindingsFromOldSet() {
+        // Set 1: BUTTON_A → ENTER (FULL_PRESS), BUTTON_B → CHANGE_PRESET(2).
+        // Press BUTTON_A (ENTER held), then press BUTTON_B (fires CHANGE_PRESET).
+        // The swap should release ENTER even though BUTTON_A is still physically held.
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWithTwoSets(
+            defaultSetId = 1L,
+            setA = 1L to listOf(
+                BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER),
+                BUTTON_B to listOf(
+                    CompiledActivator(
+                        activatorId = 0L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(changePresetTo(2L)),
+                    )
+                ),
+            ),
+            setB = 2L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_B, isDown = true)
+
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+        assertEquals(0, subject.heldAddressCount())
+        assertEquals(2L, subject.currentActiveSetId())
+    }
+
+    @Test
+    fun configChange_whichRemovesActiveSet_fallsBackToDefault_onNextEvent() {
+        // Start in set 1; CHANGE_PRESET to set 2; then config swaps to a new config
+        // that only has set 3. Next press should resolve via set 3 (the new default).
+        compiledConfig.value = configWithTwoSets(
+            defaultSetId = 1L,
+            setA = 1L to listOf(
+                BUTTON_A to listOf(
+                    CompiledActivator(
+                        activatorId = 0L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(changePresetTo(2L)),
+                    )
+                )
+            ),
+            setB = 2L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+        )
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        assertEquals(2L, subject.currentActiveSetId())
+
+        // User deletes both sets via the editor; new config has only set 3.
+        compiledConfig.value = configWithSet(
+            setId = 3L,
+            BUTTON_A to activator(ActivatorType.FULL_PRESS, SPACE),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(SPACE) }
+        assertEquals(3L, subject.currentActiveSetId())
+    }
+
+    @Test
+    fun changePreset_clearsToggleLatchFromOldSet() {
+        // Set 1: BUTTON_A → ENTER (toggle=true), BUTTON_B → CHANGE_PRESET(2).
+        // Press BUTTON_A → toggle on (ENTER latched). Press BUTTON_B → swap. Toggle should
+        // release ENTER (not stay latched in the new set).
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        val toggleActivator = activatorWith(ActivatorType.FULL_PRESS, ENTER, toggle = true)
+        compiledConfig.value = configWithTwoSets(
+            defaultSetId = 1L,
+            setA = 1L to listOf(
+                BUTTON_A to listOf(toggleActivator),
+                BUTTON_B to listOf(
+                    CompiledActivator(
+                        activatorId = 0L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(changePresetTo(2L)),
+                    )
+                ),
+            ),
+            setB = 2L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)  // latched on; physical release does nothing
+        assertTrue(subject.isToggledOn(toggleActivator.activatorId))
+
+        subject.handleDigital(BUTTON_B, isDown = true)
+
+        verify(exactly = 1) { emitter.emitRelease(ENTER) }
+        assertFalse(
+            "Toggle latch from the old set must be cleared after CHANGE_PRESET",
+            subject.isToggledOn(toggleActivator.activatorId),
+        )
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun activator(
@@ -839,10 +1007,49 @@ class InputEvaluatorTest {
         ),
     )
 
-    private fun configWith(vararg entries: Pair<InputAddress, List<CompiledActivator>>): CompiledConfig {
+    private fun configWith(vararg entries: Pair<InputAddress, List<CompiledActivator>>): CompiledConfig =
+        configWithSet(setId = 1L, *entries)
+
+    /**
+     * Build a [CompiledConfig] with a single action set at [setId], holding the
+     * supplied address→activators mapping. [setId] becomes the snapshot's
+     * `defaultActionSetId`, so evaluator lookups land on these inputs by default.
+     */
+    private fun configWithSet(
+        setId: Long,
+        vararg entries: Pair<InputAddress, List<CompiledActivator>>,
+    ): CompiledConfig {
         val inputs = entries.associate { (addr, activators) ->
             addr to CompiledInput(groupInputId = 0L, activators = activators)
         }
-        return CompiledConfig(activeActionSetId = 1L, inputs = inputs)
+        return CompiledConfig(
+            defaultActionSetId = setId,
+            sets = mapOf(setId to CompiledActionSet(setId, inputs)),
+        )
+    }
+
+    /**
+     * Build a [CompiledConfig] with two action sets, both populated. [defaultSetId]
+     * picks which becomes the snapshot's default. Used by Brick 4.2 set-switching tests.
+     */
+    private fun configWithTwoSets(
+        defaultSetId: Long,
+        setA: Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>,
+        setB: Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>,
+    ): CompiledConfig {
+        fun build(setId: Long, entries: List<Pair<InputAddress, List<CompiledActivator>>>) =
+            CompiledActionSet(
+                setId,
+                entries.associate { (addr, activators) ->
+                    addr to CompiledInput(groupInputId = 0L, activators = activators)
+                },
+            )
+        return CompiledConfig(
+            defaultActionSetId = defaultSetId,
+            sets = mapOf(
+                setA.first to build(setA.first, setA.second),
+                setB.first to build(setB.first, setB.second),
+            ),
+        )
     }
 }

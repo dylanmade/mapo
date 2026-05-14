@@ -111,6 +111,16 @@ class InputEvaluator @Inject constructor(
     private val activeChords = mutableListOf<ChordLink>()
 
     /**
+     * Currently-active action set id (Brick 4.2). 0L means "uninitialized — lazy-resolve
+     * from `compiledConfig.defaultActionSetId` on first event." A `CHANGE_PRESET`
+     * controller_action verb mutates this; [flushAllRuntime] runs first so no held
+     * binding or pending timer from the old set bleeds into the new one. When a config
+     * swap removes the active set, [resolveActiveSet] silently falls back to the new
+     * config's default.
+     */
+    private var activeSetId: Long = 0L
+
+    /**
      * FULL_PRESS activators that have been deferred by a coexisting LONG_PRESS on the same
      * address (with `interruptable=true`). On LONG fire: suppressed (popped, discarded). On
      * UP before LONG threshold: popped and fired as a tap. The DOUBLE deferral lives on
@@ -120,6 +130,28 @@ class InputEvaluator @Inject constructor(
 
     private fun stateFor(id: Long): ActivatorRuntimeState =
         activatorState.getOrPut(id) { ActivatorRuntimeState() }
+
+    /**
+     * Resolve the currently-active [CompiledActionSet]. Lazy-initializes [activeSetId]
+     * from the snapshot's default on the first call after a fresh config. If the active
+     * set was removed (e.g. user deleted it via the editor), falls back to the new
+     * default without releasing anything — held entries are already snapshotted bindings
+     * and release normally on UP.
+     */
+    private fun resolveActiveSet(): CompiledActionSet? {
+        val cfg = dispatcher.compiledConfig.value
+        if (cfg.sets.isEmpty()) return null
+        if (activeSetId == 0L || activeSetId !in cfg.sets) {
+            if (activeSetId != 0L) {
+                Log.d(TAG, "active set $activeSetId missing from current config; falling back to default ${cfg.defaultActionSetId}")
+            }
+            activeSetId = cfg.defaultActionSetId
+        }
+        return cfg.sets[activeSetId]
+    }
+
+    private fun lookupActive(address: InputAddress): CompiledInput? =
+        resolveActiveSet()?.inputs?.get(address)
 
     /**
      * Handle a digital press/release at [address]. Returns true if the event was consumed
@@ -155,7 +187,7 @@ class InputEvaluator @Inject constructor(
             forceReleaseAddress(address)
         }
 
-        val compiledInput = dispatcher.compiledConfig.value.lookup(address.source, address.inputKey)
+        val compiledInput = lookupActive(address)
         if (compiledInput == null) {
             Log.d(TAG, "onPress: no compiled input for $address — passing through")
             return false
@@ -274,7 +306,7 @@ class InputEvaluator @Inject constructor(
         // whether the deferred Regular fires as a tap or as held.
         doubleTapWindows[address]?.physicallyHeld = false
 
-        val compiledInput = dispatcher.compiledConfig.value.lookup(address.source, address.inputKey)
+        val compiledInput = lookupActive(address)
         compiledInput?.activators?.forEach { activator ->
             // Cancel any in-flight fire_start_delay timer — user released before it fired.
             if (activator.settings.fireStartDelayMs > 0) {
@@ -429,6 +461,7 @@ class InputEvaluator @Inject constructor(
     ): Boolean {
         val holdable = mutableListOf<BindingOutput>()
         for (binding in bindings) {
+            if (tryHandleControllerAction(binding)) continue
             if (emitter.emitPress(binding)) holdable += binding
         }
 
@@ -469,6 +502,7 @@ class InputEvaluator @Inject constructor(
             while (isActive) {
                 delay(rate)
                 for (binding in bindings) {
+                    if (tryHandleControllerAction(binding)) continue
                     val holdable = emitter.emitPress(binding)
                     if (holdable) emitter.emitRelease(binding)
                 }
@@ -490,6 +524,7 @@ class InputEvaluator @Inject constructor(
         val st = stateFor(activator.activatorId)
         val bindings = pickBindings(activator, st)
         for (binding in bindings) {
+            if (tryHandleControllerAction(binding)) continue
             val holdable = emitter.emitPress(binding)
             if (holdable) emitter.emitRelease(binding)
         }
@@ -543,6 +578,90 @@ class InputEvaluator @Inject constructor(
             }
         }
     }
+
+    /**
+     * Intercept evaluator-managed controller verbs *before* they're handed to
+     * [OutputEmitter]. Returns true when the binding was consumed by the evaluator,
+     * in which case the caller should skip the normal emit path. Today this is just
+     * `CHANGE_PRESET` (Brick 4.2); Phase 5 will add layer verbs (`add_layer`,
+     * `remove_layer`, `hold_layer`, mode-shift).
+     */
+    private fun tryHandleControllerAction(output: BindingOutput): Boolean {
+        if (output !is BindingOutput.ControllerAction) return false
+        return when (output.verb) {
+            "CHANGE_PRESET" -> {
+                val targetId = output.args.firstOrNull()?.toLongOrNull()
+                if (targetId == null) {
+                    Log.w(TAG, "CHANGE_PRESET has no valid target set id: ${output.args}")
+                } else {
+                    setActiveSet(targetId)
+                }
+                true
+            }
+            else -> false
+        }
+    }
+
+    /**
+     * Swap the runtime active set. Steam semantics: switching clears all transient
+     * runtime state from the old set so a bound key currently held in set A doesn't
+     * keep emitting in set B. [physicallyHeld] is preserved — it tracks physical
+     * state, independent of which set is active, so a chord queried right after the
+     * switch sees the user's actual buttons.
+     */
+    private fun setActiveSet(newSetId: Long) {
+        if (newSetId == activeSetId) return
+        val cfg = dispatcher.compiledConfig.value
+        if (newSetId !in cfg.sets) {
+            Log.w(TAG, "CHANGE_PRESET target set $newSetId not in compiled config; ignoring")
+            return
+        }
+        val previous = activeSetId
+        flushAllRuntime()
+        activeSetId = newSetId
+        Log.d(TAG, "active set: $previous -> $newSetId")
+    }
+
+    /**
+     * Release everything currently in flight: held bindings (with their releases sent),
+     * pending timers, in-flight double-tap windows, long-press deferrals, toggle latches,
+     * hold-to-repeat jobs, fire-start-delay jobs, active chords. Called on set-switch
+     * (Brick 4.2) and reusable by Phase 5's layer-clearing path. Physical state
+     * ([physicallyHeld]) is left intact.
+     */
+    private fun flushAllRuntime() {
+        for ((_, entries) in held) {
+            for (entry in entries) {
+                entry.bindings.forEach(emitter::emitRelease)
+            }
+        }
+        held.clear()
+        for ((_, bucket) in pending) {
+            bucket.values.forEach { it.cancel() }
+        }
+        pending.clear()
+        for ((_, window) in doubleTapWindows) {
+            window.timerJob?.cancel()
+        }
+        doubleTapWindows.clear()
+        longPressDeferrals.clear()
+        for ((_, st) in activatorState) {
+            if (st.toggledOn) {
+                st.toggledBindings.forEach(emitter::emitRelease)
+                st.toggledOn = false
+                st.toggledBindings = emptyList()
+                st.toggledAddress = null
+            }
+            st.repeatJob?.cancel()
+            st.repeatJob = null
+            st.startDelayJob?.cancel()
+            st.startDelayJob = null
+        }
+        activeChords.clear()
+    }
+
+    /** Test seam: which action set is currently active. Returns 0L before first event. */
+    internal fun currentActiveSetId(): Long = activeSetId
 
     /** Test seam: how many addresses are currently in the held set. */
     internal fun heldAddressCount(): Int = held.size

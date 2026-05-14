@@ -44,8 +44,8 @@ class CompiledConfigTest {
         val compiled = cfg.toCompiled()
 
         assertSame(CompiledConfig.EMPTY, compiled)
-        assertEquals(0L, compiled.activeActionSetId)
-        assertTrue(compiled.inputs.isEmpty())
+        assertEquals(0L, compiled.defaultActionSetId)
+        assertTrue(compiled.sets.isEmpty())
     }
 
     @Test
@@ -130,7 +130,7 @@ class CompiledConfigTest {
 
         val compiled = cfg.toCompiled()
 
-        assertEquals(3, compiled.inputs.size)
+        assertEquals(3, compiled.totalInputCount)
         assertEquals(
             BindingOutput.KeyPress("ENTER"),
             compiled.lookup(InputSource.BUTTON_DIAMOND, "button_a")!!.activators[0].bindings.single(),
@@ -220,7 +220,56 @@ class CompiledConfigTest {
     }
 
     @Test
-    fun activeActionSetId_propagatesFromGraph() {
+    fun multipleActionSets_eachCompilesToItsOwnInputs() {
+        // Brick 4.2: every set in the graph gets compiled, keyed by set id.
+        val setA = ActionSetGraph(
+            actionSet = ActionSet(id = 10L, controllerProfileId = 1L, name = "gameplay", title = "Gameplay"),
+            layers = emptyList(),
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND, state = "active",
+                    group = groupWith(
+                        inputs = listOf(
+                            inputWith("button_a", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val setB = ActionSetGraph(
+            actionSet = ActionSet(id = 20L, controllerProfileId = 1L, name = "menu", title = "Menu"),
+            layers = emptyList(),
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND, state = "active",
+                    group = groupWith(
+                        inputs = listOf(
+                            inputWith("button_a", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "SPACE"))))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val cfg = ControllerConfig(
+            controllerProfile = sampleControllerProfile().copy(defaultActionSetId = 20L),
+            actionSets = listOf(setA, setB),
+        )
+
+        val compiled = cfg.toCompiled()
+
+        assertEquals(setOf(10L, 20L), compiled.sets.keys)
+        assertEquals(
+            "defaultActionSetId mirrors the controllerProfile pointer",
+            20L, compiled.defaultActionSetId,
+        )
+        val setALookup = compiled.lookup(setId = 10L, source = InputSource.BUTTON_DIAMOND, inputKey = "button_a")!!
+        val setBLookup = compiled.lookup(setId = 20L, source = InputSource.BUTTON_DIAMOND, inputKey = "button_a")!!
+        assertEquals(BindingOutput.KeyPress("ENTER"), setALookup.activators[0].bindings.single())
+        assertEquals(BindingOutput.KeyPress("SPACE"), setBLookup.activators[0].bindings.single())
+    }
+
+    @Test
+    fun defaultActionSetId_propagatesFromGraph() {
         val cfg = configWith(
             actionSet = ActionSet(id = 42L, controllerProfileId = 1L, name = "default", title = "Default"),
             preset = emptyList(),
@@ -228,8 +277,9 @@ class CompiledConfigTest {
 
         val compiled = cfg.toCompiled()
 
-        assertEquals(42L, compiled.activeActionSetId)
-        assertTrue(compiled.inputs.isEmpty())
+        assertEquals(42L, compiled.defaultActionSetId)
+        assertEquals(1, compiled.sets.size)
+        assertTrue(compiled.sets.getValue(42L).inputs.isEmpty())
     }
 
     // ── Settings parsing (Brick 3.1) ──────────────────────────────────────────
@@ -547,6 +597,18 @@ class CompiledConfigTest {
     )
 
     private fun unboundBinding() = binding(BindingOutputType.UNBOUND, "")
+
+    /**
+     * Convenience: every test in this file compiles a [ControllerConfig] with one
+     * action set, so [CompiledConfig.lookup] always targets that set's id. Cuts the
+     * test-side noise of threading the set id through every assertion.
+     */
+    private fun CompiledConfig.lookup(source: InputSource, inputKey: String): CompiledInput? =
+        sets.values.firstOrNull()?.inputs?.get(InputAddress(source, inputKey))
+
+    /** Total compiled inputs across all sets in the snapshot. */
+    private val CompiledConfig.totalInputCount: Int
+        get() = sets.values.sumOf { it.inputs.size }
 
     private var nextId = 100L
 }

@@ -14,22 +14,41 @@ import org.json.JSONObject
  * The materialized graph is great for editor UIs but terrible for per-event work:
  * resolving a single physical press would have to walk action set → preset entries →
  * binding group → group inputs → activators every time. [CompiledConfig] flattens that
- * walk into a single map keyed by [InputAddress].
+ * walk into a [CompiledActionSet] per action set, each keyed by [InputAddress].
  *
- * Phase 2 honors only the base action set's "active"-state preset entries — action set
- * switching (Phase 4) and layer stacking (Phase 5) will recompile when their state changes.
+ * Brick 4.2 widened this from "only the active set's inputs" to "every set's inputs":
+ * runtime active-set switching (`CHANGE_PRESET`) needs every set immediately resolvable
+ * without recompiling. [defaultActionSetId] is what the evaluator initializes its
+ * runtime `activeSetId` to; the live active set after `CHANGE_PRESET` fires lives in
+ * the evaluator's mutable state, not this snapshot.
+ *
+ * Layer stacking (Phase 5) is still unmodeled here — overlay groups don't appear in
+ * any [CompiledActionSet.inputs] yet.
  */
 data class CompiledConfig(
-    val activeActionSetId: Long,
-    val inputs: Map<InputAddress, CompiledInput>,
+    val defaultActionSetId: Long,
+    val sets: Map<Long, CompiledActionSet>,
 ) {
-    fun lookup(source: InputSource, inputKey: String): CompiledInput? =
-        inputs[InputAddress(source, inputKey)]
+    /**
+     * Resolve an address within a specific action set. Returns null if either the set
+     * isn't in the snapshot or the address has no compiled input under it.
+     */
+    fun lookup(setId: Long, source: InputSource, inputKey: String): CompiledInput? =
+        sets[setId]?.inputs?.get(InputAddress(source, inputKey))
 
     companion object {
-        val EMPTY = CompiledConfig(activeActionSetId = 0L, inputs = emptyMap())
+        val EMPTY = CompiledConfig(defaultActionSetId = 0L, sets = emptyMap())
     }
 }
+
+/**
+ * One action set's compiled lookup table. Each [InputAddress] in [inputs] resolves to
+ * its full activator list, pre-parsed.
+ */
+data class CompiledActionSet(
+    val actionSetId: Long,
+    val inputs: Map<InputAddress, CompiledInput>,
+)
 
 /**
  * Identifies a sub-input within a binding group. The unit of activator evaluation —
@@ -208,30 +227,39 @@ private fun JSONObject.optInputSourceOrNull(key: String): InputSource? {
 
 /**
  * Flatten the materialized [ControllerConfig] graph into a [CompiledConfig] for the
- * runtime evaluator. Honors only "active"-state preset entries on the base action set.
+ * runtime evaluator. Every action set is compiled — runtime set switching reads
+ * directly from [CompiledConfig.sets] with no recompilation cost. Each set honors only
+ * its "active"-state preset entries.
  *
  *  - Layer overrides are ignored (Phase 5).
  *  - Multi-binding activators (cycle_binding) keep all their bindings; the runtime
  *    cycle index is state owned by the evaluator, not the snapshot.
  *  - When the config has no action sets, [CompiledConfig.EMPTY] is returned.
+ *  - [CompiledConfig.defaultActionSetId] mirrors `controllerProfile.defaultActionSetId`
+ *    (falling back to the first set by orderIndex when the pointer is null/stale).
  */
 fun ControllerConfig.toCompiled(): CompiledConfig {
-    val activeSet = activeActionSet ?: return CompiledConfig.EMPTY
-    val inputs = HashMap<InputAddress, CompiledInput>()
-    for (preset in activeSet.preset) {
-        if (preset.state != "active") continue
-        for (inputGraph in preset.group.inputs) {
-            val address = InputAddress(preset.inputSource, inputGraph.input.inputKey)
-            val compiledActivators = inputGraph.activators.map { actGraph ->
-                CompiledActivator(
-                    activatorId = actGraph.activator.id,
-                    type = actGraph.activator.type,
-                    bindings = actGraph.bindings.map { BindingOutput.fromEntity(it.outputType, it.args) },
-                    settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson),
-                )
+    if (actionSets.isEmpty()) return CompiledConfig.EMPTY
+    val compiledSets = HashMap<Long, CompiledActionSet>(actionSets.size)
+    for (setGraph in actionSets) {
+        val inputs = HashMap<InputAddress, CompiledInput>()
+        for (preset in setGraph.preset) {
+            if (preset.state != "active") continue
+            for (inputGraph in preset.group.inputs) {
+                val address = InputAddress(preset.inputSource, inputGraph.input.inputKey)
+                val compiledActivators = inputGraph.activators.map { actGraph ->
+                    CompiledActivator(
+                        activatorId = actGraph.activator.id,
+                        type = actGraph.activator.type,
+                        bindings = actGraph.bindings.map { BindingOutput.fromEntity(it.outputType, it.args) },
+                        settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson),
+                    )
+                }
+                inputs[address] = CompiledInput(inputGraph.input.id, compiledActivators)
             }
-            inputs[address] = CompiledInput(inputGraph.input.id, compiledActivators)
         }
+        compiledSets[setGraph.actionSet.id] = CompiledActionSet(setGraph.actionSet.id, inputs)
     }
-    return CompiledConfig(activeSet.actionSet.id, inputs)
+    val defaultId = activeActionSet?.actionSet?.id ?: actionSets.first().actionSet.id
+    return CompiledConfig(defaultActionSetId = defaultId, sets = compiledSets)
 }

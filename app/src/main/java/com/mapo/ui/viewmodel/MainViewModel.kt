@@ -205,7 +205,7 @@ class MainViewModel @Inject constructor(
                 inputDispatcher.setCompiledConfig(compiled)
                 android.util.Log.d(
                     "MainViewModel",
-                    "Published CompiledConfig: activeSet=${compiled.activeActionSetId} inputs=${compiled.inputs.size}",
+                    "Published CompiledConfig: defaultSet=${compiled.defaultActionSetId} sets=${compiled.sets.size}",
                 )
             }
         }

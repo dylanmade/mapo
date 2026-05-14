@@ -37,30 +37,38 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.mapo.data.defaults.InputOption
 import com.mapo.data.defaults.RemapInputOptions
-import kotlinx.collections.immutable.ImmutableList
 import com.mapo.data.model.RemapTarget
+import com.mapo.data.model.steam.BindingOutput
+import kotlinx.collections.immutable.ImmutableList
 
 /**
- * Full-screen picker for choosing a [RemapTarget]. Reached as a Navigation destination from
- * RemapControlsScreen (per-physical-button mappings) and ConfigureButtonScreen (per-virtual-
- * button trackpad gestures). The internal multi-step flow (category → filtered list) is
- * preserved from the previous AlertDialog version, just hosted in a Scaffold + TopAppBar.
+ * Full-screen picker for choosing a [BindingOutput]. Reached as a Navigation destination
+ * from `InputEditorScreen` (Steam-Input remap world) and `ConfigureButtonScreen` (legacy
+ * trackpad gestures — which convert the picked output back to [RemapTarget] at the boundary).
  *
- * On selection the screen invokes [onSelect] with the chosen target; the caller is
- * responsible for routing it back to the previous destination's savedStateHandle and popping.
+ * Brick 4.5 generalized this from the previous `RemapTarget`-only picker. The Gamepad /
+ * Keyboard / Mouse categories still produce the same legacy outputs (now wrapped as
+ * [BindingOutput.fromRemapTarget]); a new **Controller → Switch Action Set** category
+ * appears only when [availableActionSets] is non-empty, and emits a
+ * `ControllerAction("CHANGE_PRESET", [setId])` binding.
+ *
+ * On selection the screen invokes [onSelect] with the chosen [BindingOutput]; the caller
+ * routes it back to the previous destination's savedStateHandle and pops.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RemapTargetPickerScreen(
     title: String,
     currentEncoded: String,
-    onSelect: (RemapTarget) -> Unit,
+    onSelect: (BindingOutput) -> Unit,
     onBack: () -> Unit,
+    availableActionSets: List<Pair<Long, String>> = emptyList(),
 ) {
-    val current = remember(currentEncoded) { RemapTarget.decode(currentEncoded) }
+    val current = remember(currentEncoded) { BindingOutput.decode(currentEncoded) }
     var pickerState by remember { mutableStateOf<RemapPickerState>(RemapPickerState.CategorySelection) }
     val onCategoryNav: () -> Unit = { pickerState = RemapPickerState.CategorySelection }
     val isCategoryView = pickerState is RemapPickerState.CategorySelection
@@ -88,10 +96,12 @@ fun RemapTargetPickerScreen(
             when (val state = pickerState) {
                 is RemapPickerState.CategorySelection -> CategoryList(
                     current = current,
-                    onUnbound = { onSelect(RemapTarget.Unbound) },
+                    showSwitchActionSet = availableActionSets.isNotEmpty(),
+                    onUnbound = { onSelect(BindingOutput.Unbound) },
                     onPickGamepad = { pickerState = RemapPickerState.GamepadList() },
                     onPickKeyboard = { pickerState = RemapPickerState.KeyboardList() },
                     onPickMouse = { pickerState = RemapPickerState.MouseList() },
+                    onPickSwitchActionSet = { pickerState = RemapPickerState.SwitchActionSetList },
                 )
                 is RemapPickerState.GamepadList -> FilteredInputList(
                     options = RemapInputOptions.gamepadOptions,
@@ -99,7 +109,7 @@ fun RemapTargetPickerScreen(
                     showFilter = true,
                     current = current,
                     onFilterChange = { pickerState = state.copy(filter = it) },
-                    onSelect = onSelect,
+                    onSelect = { target -> onSelect(BindingOutput.fromRemapTarget(target)) },
                 )
                 is RemapPickerState.KeyboardList -> FilteredInputList(
                     options = RemapInputOptions.keyboardOptions,
@@ -107,7 +117,7 @@ fun RemapTargetPickerScreen(
                     showFilter = true,
                     current = current,
                     onFilterChange = { pickerState = state.copy(filter = it) },
-                    onSelect = onSelect,
+                    onSelect = { target -> onSelect(BindingOutput.fromRemapTarget(target)) },
                 )
                 is RemapPickerState.MouseList -> FilteredInputList(
                     options = RemapInputOptions.mouseOptions,
@@ -115,29 +125,57 @@ fun RemapTargetPickerScreen(
                     showFilter = false,
                     current = current,
                     onFilterChange = {},
-                    onSelect = onSelect,
+                    onSelect = { target -> onSelect(BindingOutput.fromRemapTarget(target)) },
+                )
+                is RemapPickerState.SwitchActionSetList -> SwitchActionSetList(
+                    sets = availableActionSets,
+                    current = current,
+                    onSelect = { setId ->
+                        onSelect(BindingOutput.ControllerAction("CHANGE_PRESET", listOf(setId.toString())))
+                    },
                 )
             }
         }
     }
 }
 
+/** True when [current] matches a [BindingOutput] inhabitant of [category]. */
+private fun matchesCategory(current: BindingOutput, category: PickerCategory): Boolean = when (category) {
+    PickerCategory.Unbound          -> current is BindingOutput.Unbound
+    PickerCategory.Gamepad          -> current is BindingOutput.XInputButton
+    PickerCategory.Keyboard         -> current is BindingOutput.KeyPress
+    PickerCategory.Mouse            -> current is BindingOutput.MouseButton || current is BindingOutput.MouseWheel
+    PickerCategory.SwitchActionSet  -> current is BindingOutput.ControllerAction && current.verb == "CHANGE_PRESET"
+}
+
+private enum class PickerCategory { Unbound, Gamepad, Keyboard, Mouse, SwitchActionSet }
+
 @Composable
 private fun CategoryList(
-    current: RemapTarget,
+    current: BindingOutput,
+    showSwitchActionSet: Boolean,
     onUnbound: () -> Unit,
     onPickGamepad: () -> Unit,
     onPickKeyboard: () -> Unit,
     onPickMouse: () -> Unit,
+    onPickSwitchActionSet: () -> Unit,
 ) {
     Column {
-        CategoryRow("Unbound / None", current is RemapTarget.Unbound, showChevron = false, onClick = onUnbound)
+        CategoryRow("Unbound / None", matchesCategory(current, PickerCategory.Unbound), showChevron = false, onClick = onUnbound)
         HorizontalDivider()
-        CategoryRow("Gamepad", current is RemapTarget.Gamepad, onClick = onPickGamepad)
+        CategoryRow("Gamepad", matchesCategory(current, PickerCategory.Gamepad), onClick = onPickGamepad)
         HorizontalDivider()
-        CategoryRow("Keyboard", current is RemapTarget.Keyboard, onClick = onPickKeyboard)
+        CategoryRow("Keyboard", matchesCategory(current, PickerCategory.Keyboard), onClick = onPickKeyboard)
         HorizontalDivider()
-        CategoryRow("Mouse", current is RemapTarget.Mouse, onClick = onPickMouse)
+        CategoryRow("Mouse", matchesCategory(current, PickerCategory.Mouse), onClick = onPickMouse)
+        if (showSwitchActionSet) {
+            HorizontalDivider()
+            CategoryRow(
+                label = "Switch Action Set",
+                selected = matchesCategory(current, PickerCategory.SwitchActionSet),
+                onClick = onPickSwitchActionSet,
+            )
+        }
     }
 }
 
@@ -163,6 +201,7 @@ private fun CategoryRow(
             containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
                              else Color.Transparent,
         ),
+        modifier = Modifier.testTag("category_$label"),
     ) { Text(label) }
 }
 
@@ -172,7 +211,7 @@ private fun FilteredInputList(
     options: ImmutableList<InputOption>,
     filter: String,
     showFilter: Boolean,
-    current: RemapTarget,
+    current: BindingOutput,
     onFilterChange: (String) -> Unit,
     onSelect: (RemapTarget) -> Unit,
 ) {
@@ -195,7 +234,8 @@ private fun FilteredInputList(
             val listState = rememberLazyListState()
             LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
                 itemsIndexed(filtered) { index, option ->
-                    val isSelected = option.target == current
+                    val asOutput = BindingOutput.fromRemapTarget(option.target)
+                    val isSelected = asOutput == current
                     ListItem(
                         onClick = { onSelect(option.target) },
                         leadingContent = if (isSelected) {
@@ -220,6 +260,57 @@ private fun FilteredInputList(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
+        }
+    }
+}
+
+/**
+ * Brick 4.5: list of action sets in the current controller_profile. Selecting one emits a
+ * `CHANGE_PRESET` controller_action. The currently-bound set (if any) shows a check tick.
+ * No filter affordance — the typical user has 2-5 sets.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun SwitchActionSetList(
+    sets: List<Pair<Long, String>>,
+    current: BindingOutput,
+    onSelect: (Long) -> Unit,
+) {
+    val currentSetId = (current as? BindingOutput.ControllerAction)
+        ?.takeIf { it.verb == "CHANGE_PRESET" }
+        ?.args?.firstOrNull()?.toLongOrNull()
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (sets.isEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "No other action sets available",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            return@Column
+        }
+        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            itemsIndexed(sets) { index, (setId, title) ->
+                val isSelected = setId == currentSetId
+                ListItem(
+                    onClick = { onSelect(setId) },
+                    leadingContent = if (isSelected) {
+                        { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
+                    } else null,
+                    colors = ListItemDefaults.colors(
+                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                         else Color.Transparent,
+                    ),
+                    supportingContent = {
+                        Text(
+                            "Switches the active set at runtime",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                ) { Text(title) }
+                if (index < sets.lastIndex) HorizontalDivider()
+            }
         }
     }
 }

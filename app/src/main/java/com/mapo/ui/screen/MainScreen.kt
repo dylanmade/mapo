@@ -101,7 +101,9 @@ import com.mapo.R
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.RemapTarget
+import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.resolveActionSet
+import com.mapo.data.model.steam.toRemapTarget
 import com.mapo.data.model.TrackpadGesture
 import com.mapo.data.model.ButtonRegion
 import com.mapo.data.model.RegionPosition
@@ -575,7 +577,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     groupInputKey = groupInputKey,
                     config = activeControllerConfig,
                     viewingActionSetId = viewingActionSetId,
-                    pickerResult = pickerResult?.let { RemapTarget.decode(it) },
+                    pickerResult = pickerResult?.let { BindingOutput.decode(it) },
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
                     },
@@ -583,7 +585,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         viewModel.setControllerCommand(bindingId, output)
                     },
                     onOpenPicker = { title, current ->
-                        navController.navigate(MapoRoute.remapTargetPicker(title, current.encode()))
+                        navController.navigate(MapoRoute.remapTargetPicker(title, current.encode(), showActionSets = true))
                     },
                     onAddActivator = { groupInputId, type ->
                         viewModel.addControllerActivator(groupInputId, type)
@@ -714,7 +716,13 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         layout = displayLayout,
                         themeFallback = MaterialTheme.colorScheme.surface,
                     ),
-                    pickerResult = pickerResult?.let { RemapTarget.decode(it) },
+                    // Brick 4.5: picker emits BindingOutput-encoded results. Trackpad gestures
+                    // are still RemapTarget-shaped at the data layer, so convert at the boundary.
+                    // The picker doesn't surface Steam-Input categories here (showActionSets=false),
+                    // so the decoded BindingOutput will always be in the RemapTarget-compatible subset.
+                    pickerResult = pickerResult
+                        ?.let { BindingOutput.decode(it) }
+                        ?.toRemapTarget(),
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
                     },
@@ -725,7 +733,13 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         viewModel.updateSelectedButton(updated)
                     },
                     onOpenPicker = { title, current ->
-                        navController.navigate(MapoRoute.remapTargetPicker(title, current.encode()))
+                        navController.navigate(
+                            MapoRoute.remapTargetPicker(
+                                title,
+                                BindingOutput.fromRemapTarget(current).encode(),
+                                showActionSets = false,
+                            )
+                        )
                     },
                     onBack = { navController.popBackStack() },
                 )
@@ -757,21 +771,35 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 arguments = listOf(
                     navArgument(MapoRoute.ARG_TITLE) { type = NavType.StringType },
                     navArgument(MapoRoute.ARG_CURRENT) { type = NavType.StringType },
+                    navArgument(MapoRoute.ARG_SHOW_ACTION_SETS) {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    },
                 ),
             ) { entry ->
                 val title = entry.arguments?.getString(MapoRoute.ARG_TITLE) ?: ""
-                val currentEncoded = entry.arguments?.getString(MapoRoute.ARG_CURRENT) ?: "none"
+                val currentEncoded = entry.arguments?.getString(MapoRoute.ARG_CURRENT)
+                    ?: BindingOutput.Unbound.encode()
+                val showActionSets = entry.arguments?.getBoolean(MapoRoute.ARG_SHOW_ACTION_SETS) == true
+                // Brick 4.5: source the action sets list from the active config for the
+                // Steam-Input call site. ConfigureButton sets showActionSets=false so this
+                // list isn't consulted there even though we'd compute the same value.
+                val availableActionSets: List<Pair<Long, String>> = if (showActionSets) {
+                    activeControllerConfig?.actionSets?.map { it.actionSet.id to it.actionSet.title }
+                        ?: emptyList()
+                } else emptyList()
                 RemapTargetPickerScreen(
                     title = title,
                     currentEncoded = currentEncoded,
-                    onSelect = { target ->
+                    availableActionSets = availableActionSets,
+                    onSelect = { output ->
                         // Write the result to the previous destination's saved state and pop. The
                         // caller observes its own saved-state handle and applies the result to
-                        // whatever it's editing (RemapControlsScreen's editingButton, or
+                        // whatever it's editing (InputEditor's editingBindingId, or
                         // ConfigureButtonScreen's editingGesture).
                         navController.previousBackStackEntry
                             ?.savedStateHandle
-                            ?.set(MapoRoute.PICKER_RESULT_KEY, target.encode())
+                            ?.set(MapoRoute.PICKER_RESULT_KEY, output.encode())
                         navController.popBackStack()
                     },
                     onBack = { navController.popBackStack() },

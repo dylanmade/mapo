@@ -36,6 +36,16 @@ sealed class BindingOutput {
     /** While-held single-source override (Phase 5). Targets a specific binding group. */
     data class ModeShift(val inputSource: InputSource, val bindingGroupId: Long) : BindingOutput()
 
+    /**
+     * Encode into a single string suitable for nav saved-state. Inverse of [decode].
+     * Format: `"<outputType.name>|<args>"`. Empty args still keep the trailing `|`,
+     * so the decode side can split unconditionally.
+     */
+    fun encode(): String {
+        val (type, args) = toEntity()
+        return "${type.name}|$args"
+    }
+
     /** The (outputType, args) shape this BindingOutput persists as. */
     fun toEntity(): Pair<BindingOutputType, String> = when (this) {
         Unbound              -> BindingOutputType.UNBOUND to ""
@@ -49,6 +59,20 @@ sealed class BindingOutput {
     }
 
     companion object {
+        /**
+         * Decode a nav saved-state string produced by [encode]. Unknown discriminators
+         * (including unrecognized future variants) fall back to [Unbound] rather than
+         * throwing — picker round-trips must be defensive against stale state.
+         */
+        fun decode(encoded: String): BindingOutput {
+            val pipe = encoded.indexOf('|')
+            if (pipe < 0) return Unbound
+            val typeName = encoded.substring(0, pipe)
+            val args = encoded.substring(pipe + 1)
+            val type = runCatching { BindingOutputType.valueOf(typeName) }.getOrNull() ?: return Unbound
+            return fromEntity(type, args)
+        }
+
         fun fromEntity(outputType: BindingOutputType, args: String): BindingOutput = when (outputType) {
             BindingOutputType.UNBOUND -> Unbound
             BindingOutputType.KEY_PRESS -> KeyPress(args)
@@ -93,8 +117,28 @@ fun BindingOutput.displayLabel(): String = when (this) {
     is BindingOutput.MouseButton   -> "MS: $button"
     is BindingOutput.MouseWheel    -> "MS: $direction"
     is BindingOutput.GameAction    -> "Action: $setName/$actionName"
-    is BindingOutput.ControllerAction -> "Verb: $verb"
+    is BindingOutput.ControllerAction -> changePresetLabelOrNull()?.let { "Switch to: Set #$it" } ?: "Verb: $verb"
     is BindingOutput.ModeShift     -> "Mode shift: ${inputSource.name}"
+}
+
+/**
+ * Context-aware variant of [displayLabel]: resolves `CHANGE_PRESET` to the target set's
+ * human title (e.g. "Switch to: Menu"). Falls back to the [displayLabel] form when
+ * [config] is null or the referenced set isn't present (stale binding after delete).
+ */
+fun BindingOutput.displayLabel(config: ControllerConfig?): String {
+    if (this is BindingOutput.ControllerAction) {
+        val targetId = changePresetLabelOrNull() ?: return displayLabel()
+        val title = config?.actionSets?.firstOrNull { it.actionSet.id == targetId }?.actionSet?.title
+        return if (title != null) "Switch to: $title" else "Switch to: Set #$targetId"
+    }
+    return displayLabel()
+}
+
+/** Extract the target set id from a CHANGE_PRESET binding, or null if this isn't one. */
+private fun BindingOutput.ControllerAction.changePresetLabelOrNull(): Long? {
+    if (verb != "CHANGE_PRESET") return null
+    return args.firstOrNull()?.toLongOrNull()
 }
 
 /**

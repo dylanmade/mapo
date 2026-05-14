@@ -351,6 +351,31 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("Delete \"Default\"").assertIsNotEnabled()
     }
 
+    @Test
+    fun bindingRow_showsResolvedSetTitle_forChangePresetBinding() {
+        // Brick 4.5: a button bound to CHANGE_PRESET should display "Switch to: <set title>"
+        // — the row-preview side of the context-aware displayLabel(config).
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = twoSetConfig(
+                            setAButtonA = BindingOutput.ControllerAction("CHANGE_PRESET", listOf("2")),
+                            setBButtonA = BindingOutput.Unbound,
+                        ),
+                        viewingActionSetId = 1L,
+                        onSelectActionSet = {},
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Switch to: Menu").assertIsDisplayed()
+    }
+
     /**
      * Builds a two-action-set config. Set 1 is the starting set (first in order)
      * ("Gameplay", button_a → [setAButtonA]); Set 2 is "Menu" with button_a → [setBButtonA].

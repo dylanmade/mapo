@@ -27,10 +27,17 @@ object MapoRoute {
     // recomposition and applies the result to whatever it's editing.
     const val ARG_TITLE = "title"
     const val ARG_CURRENT = "current"
+    /**
+     * Brick 4.5: when true, the picker shows the **Switch Action Set** category populated
+     * from the active controller_profile. InputEditor sets true; legacy trackpad-gesture
+     * config (ConfigureButton) sets false because its outputs run through a different
+     * pipeline that can't honor a runtime set switch.
+     */
+    const val ARG_SHOW_ACTION_SETS = "showActionSets"
     const val PICKER_RESULT_KEY = "remap_target_picker_result"
-    const val REMAP_TARGET_PICKER = "remap_target_picker?$ARG_TITLE={$ARG_TITLE}&$ARG_CURRENT={$ARG_CURRENT}"
-    fun remapTargetPicker(title: String, currentEncoded: String): String =
-        "remap_target_picker?$ARG_TITLE=${Uri.encode(title)}&$ARG_CURRENT=${Uri.encode(currentEncoded)}"
+    const val REMAP_TARGET_PICKER = "remap_target_picker?$ARG_TITLE={$ARG_TITLE}&$ARG_CURRENT={$ARG_CURRENT}&$ARG_SHOW_ACTION_SETS={$ARG_SHOW_ACTION_SETS}"
+    fun remapTargetPicker(title: String, currentEncoded: String, showActionSets: Boolean = false): String =
+        "remap_target_picker?$ARG_TITLE=${Uri.encode(title)}&$ARG_CURRENT=${Uri.encode(currentEncoded)}&$ARG_SHOW_ACTION_SETS=$showActionSets"
 
     // ── Per-activator settings editor (full-screen, instant-commit) ───────────────
     //

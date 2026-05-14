@@ -122,6 +122,7 @@ fun RemapControlsScreen(
             RemapDetailPane(
                 sectionId = sectionId,
                 viewingSet = viewingSet,
+                config = config,
                 firstRowFocusRequester = firstRowFocusRequester,
                 onOpenInputEditor = onOpenInputEditor,
             )
@@ -332,6 +333,7 @@ private fun ActionSetOverflowMenu(
 private fun RemapDetailPane(
     sectionId: String,
     viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    config: ControllerConfig?,
     firstRowFocusRequester: FocusRequester,
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
 ) {
@@ -359,6 +361,7 @@ private fun RemapDetailPane(
                 is RemapPaneItem.BindingRow -> BindingRowItem(
                     item = item,
                     viewingSet = viewingSet,
+                    config = config,
                     modifier = focusModifier,
                     onOpenInputEditor = onOpenInputEditor,
                 )
@@ -418,6 +421,7 @@ private fun DisabledModeDropdown(label: String) {
 private fun BindingRowItem(
     item: RemapPaneItem.BindingRow,
     viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    config: ControllerConfig?,
     modifier: Modifier = Modifier,
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
 ) {
@@ -457,7 +461,7 @@ private fun BindingRowItem(
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(
-                text = output.displayLabel(),
+                text = output.displayLabel(config),
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (output == BindingOutput.Unbound)
                     MaterialTheme.colorScheme.onSurfaceVariant

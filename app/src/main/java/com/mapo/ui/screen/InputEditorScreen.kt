@@ -44,7 +44,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
-import com.mapo.data.model.RemapTarget
 import com.mapo.data.model.steam.ActivatorGraph
 import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.BindingOutput
@@ -52,7 +51,6 @@ import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.InputSource
 import com.mapo.data.model.steam.displayLabel
 import com.mapo.data.model.steam.findGroupInput
-import com.mapo.data.model.steam.toRemapTarget
 
 /**
  * Per-input activator editor. Reached from `RemapControlsScreen` by tapping any input row.
@@ -79,10 +77,10 @@ fun InputEditorScreen(
     groupInputKey: String,
     config: ControllerConfig?,
     viewingActionSetId: Long? = null,
-    pickerResult: RemapTarget?,
+    pickerResult: BindingOutput?,
     onConsumePickerResult: () -> Unit,
     onPickResult: (bindingId: Long, output: BindingOutput) -> Unit,
-    onOpenPicker: (title: String, current: RemapTarget) -> Unit,
+    onOpenPicker: (title: String, current: BindingOutput) -> Unit,
     onAddActivator: (groupInputId: Long, type: ActivatorType) -> Unit,
     onRemoveActivator: (activatorId: Long) -> Unit,
     onSetActivatorType: (activatorId: Long, type: ActivatorType) -> Unit,
@@ -97,10 +95,10 @@ fun InputEditorScreen(
     var editingBindingId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(pickerResult) {
-        val target = pickerResult ?: return@LaunchedEffect
+        val output = pickerResult ?: return@LaunchedEffect
         val bindingId = editingBindingId
         if (bindingId != null) {
-            onPickResult(bindingId, BindingOutput.fromRemapTarget(target))
+            onPickResult(bindingId, output)
         }
         editingBindingId = null
         onConsumePickerResult()
@@ -147,10 +145,11 @@ fun InputEditorScreen(
                 val graph = activators[idx]
                 ActivatorRow(
                     graph = graph,
+                    config = config,
                     onTapCommand = { bindingId, currentOutput ->
                         editingBindingId = bindingId
                         val title = "$inputLabel · ${graph.activator.type.displayLabel()}"
-                        onOpenPicker(title, currentOutput.toRemapTarget())
+                        onOpenPicker(title, currentOutput)
                     },
                     onChangeType = { newType ->
                         onSetActivatorType(graph.activator.id, newType)
@@ -225,6 +224,7 @@ private val UNIMPLEMENTED_ACTIVATORS = setOf(
 @Composable
 private fun ActivatorRow(
     graph: ActivatorGraph,
+    config: ControllerConfig?,
     onTapCommand: (bindingId: Long, current: BindingOutput) -> Unit,
     onChangeType: (ActivatorType) -> Unit,
     onOpenSettings: () -> Unit,
@@ -270,6 +270,7 @@ private fun ActivatorRow(
             val output = BindingOutput.fromEntity(binding.outputType, binding.args)
             CommandRow(
                 output = output,
+                config = config,
                 unimplemented = unimplemented,
                 canRemove = bindings.size > 1,
                 onTap = { onTapCommand(binding.id, output) },
@@ -300,6 +301,7 @@ private fun ActivatorRow(
 @Composable
 private fun CommandRow(
     output: BindingOutput,
+    config: ControllerConfig?,
     unimplemented: Boolean,
     canRemove: Boolean,
     onTap: () -> Unit,
@@ -318,7 +320,7 @@ private fun CommandRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = output.displayLabel(),
+                    text = output.displayLabel(config),
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (output == BindingOutput.Unbound)
                         MaterialTheme.colorScheme.onSurfaceVariant

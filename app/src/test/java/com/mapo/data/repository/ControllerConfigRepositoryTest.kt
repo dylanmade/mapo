@@ -508,15 +508,6 @@ class ControllerConfigRepositoryTest {
     // ── Action set CRUD (Brick 4.1) ─────────────────────────────────────────
 
     @Test
-    fun seedDefaultConfig_setsDefaultActionSetIdToTheSeededSet() = runTest {
-        val cpId = subject.seedDefaultConfig(profileId = 1L)
-        val cp = controllerProfileDao.getById(cpId)!!
-        val seededSet = actionSetDao.getByControllerProfile(cpId).single()
-
-        assertEquals(seededSet.id, cp.defaultActionSetId)
-    }
-
-    @Test
     fun addActionSet_blank_seedsDefaultGroupsAndPresets() = runTest {
         val cpId = subject.seedDefaultConfig(profileId = 1L)
 
@@ -641,60 +632,4 @@ class ControllerConfigRepositoryTest {
         assertTrue(remaining.none { it.id == newSetId })
     }
 
-    @Test
-    fun deleteActionSet_default_reassignsToFirstRemaining() = runTest {
-        val cpId = subject.seedDefaultConfig(profileId = 1L)
-        val defaultSet = actionSetDao.getByControllerProfile(cpId).single()
-        val newSetId = subject.addActionSet(cpId, "menu", "Menu")
-
-        // Promote new set as default, then delete it.
-        subject.setDefaultActionSet(cpId, newSetId)
-        subject.deleteActionSet(newSetId)
-
-        val cp = controllerProfileDao.getById(cpId)!!
-        assertEquals(
-            "Deleting the default set should re-point the default at the first remaining set",
-            defaultSet.id, cp.defaultActionSetId,
-        )
-    }
-
-    @Test
-    fun setDefaultActionSet_updatesControllerProfile() = runTest {
-        val cpId = subject.seedDefaultConfig(profileId = 1L)
-        val newSetId = subject.addActionSet(cpId, "menu", "Menu")
-
-        subject.setDefaultActionSet(cpId, newSetId)
-
-        assertEquals(newSetId, controllerProfileDao.getById(cpId)!!.defaultActionSetId)
-    }
-
-    @Test
-    fun setDefaultActionSet_setFromAnotherProfile_isNoOp() = runTest {
-        val cpAId = subject.seedDefaultConfig(profileId = 1L)
-        val cpBId = subject.seedDefaultConfig(profileId = 2L)
-        val setUnderB = actionSetDao.getByControllerProfile(cpBId).single()
-        val originalDefaultForA = controllerProfileDao.getById(cpAId)!!.defaultActionSetId
-
-        subject.setDefaultActionSet(cpAId, setUnderB.id)
-
-        assertEquals(
-            "Setting a foreign set as default must be rejected",
-            originalDefaultForA, controllerProfileDao.getById(cpAId)!!.defaultActionSetId,
-        )
-    }
-
-    @Test
-    fun copyConfig_remapsDefaultActionSetIdToClonedSet() = runTest {
-        val srcCpId = subject.seedDefaultConfig(profileId = 1L)
-        val srcSetId = actionSetDao.getByControllerProfile(srcCpId).single().id
-
-        subject.copyConfig(sourceProfileId = 1L, destProfileId = 2L)
-
-        val destCp = controllerProfileDao.getByProfile(2L).single()
-        val destSet = actionSetDao.getByControllerProfile(destCp.id).single()
-        assertTrue(
-            "Cloned controller_profile's defaultActionSetId must point at the cloned set, not the source",
-            destCp.defaultActionSetId == destSet.id && destCp.defaultActionSetId != srcSetId,
-        )
-    }
 }

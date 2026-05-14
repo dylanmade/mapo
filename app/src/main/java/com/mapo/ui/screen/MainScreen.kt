@@ -518,6 +518,28 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     config = activeControllerConfig,
                     viewingActionSetId = viewingActionSetId,
                     onSelectActionSet = viewModel::setViewingActionSet,
+                    onAddActionSet = { title, inheritFromSetId ->
+                        viewModel.addControllerActionSet(
+                            name = com.mapo.ui.screen.deriveActionSetName(title),
+                            title = title,
+                            inheritFromSetId = inheritFromSetId,
+                        )
+                    },
+                    onRenameActionSet = { setId, newTitle ->
+                        viewModel.renameControllerActionSet(
+                            actionSetId = setId,
+                            name = com.mapo.ui.screen.deriveActionSetName(newTitle),
+                            title = newTitle,
+                        )
+                    },
+                    onDuplicateActionSet = { sourceSetId, newTitle ->
+                        viewModel.duplicateControllerActionSet(
+                            sourceSetId = sourceSetId,
+                            name = com.mapo.ui.screen.deriveActionSetName(newTitle),
+                            title = newTitle,
+                        )
+                    },
+                    onDeleteActionSet = viewModel::deleteControllerActionSet,
                     onBack = { navController.popBackStack() },
                     onOpenInputEditor = { inputSource, groupInputKey, label ->
                         navController.navigate(

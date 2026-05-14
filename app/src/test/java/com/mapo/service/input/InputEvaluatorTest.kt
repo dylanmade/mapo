@@ -789,7 +789,7 @@ class InputEvaluatorTest {
     @Test
     fun activeSet_lazyInitializes_toDefault_onFirstPress() {
         compiledConfig.value = configWithTwoSets(
-            defaultSetId = 1L,
+            startingSetId = 1L,
             setA = 1L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER)),
             setB = 2L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
         )
@@ -805,7 +805,7 @@ class InputEvaluatorTest {
     fun changePreset_swapsActiveSet_andSubsequentPressesEmitFromNewSet() {
         // Set 1: BUTTON_A → CHANGE_PRESET(2). Set 2: BUTTON_A → ESCAPE.
         compiledConfig.value = configWithTwoSets(
-            defaultSetId = 1L,
+            startingSetId = 1L,
             setA = 1L to listOf(
                 BUTTON_A to listOf(
                     CompiledActivator(
@@ -833,7 +833,7 @@ class InputEvaluatorTest {
     @Test
     fun changePreset_invalidTarget_isNoOp() {
         compiledConfig.value = configWithTwoSets(
-            defaultSetId = 1L,
+            startingSetId = 1L,
             setA = 1L to listOf(
                 BUTTON_A to listOf(
                     CompiledActivator(
@@ -859,7 +859,7 @@ class InputEvaluatorTest {
         // The swap should release ENTER even though BUTTON_A is still physically held.
         val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
         compiledConfig.value = configWithTwoSets(
-            defaultSetId = 1L,
+            startingSetId = 1L,
             setA = 1L to listOf(
                 BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER),
                 BUTTON_B to listOf(
@@ -887,7 +887,7 @@ class InputEvaluatorTest {
         // Start in set 1; CHANGE_PRESET to set 2; then config swaps to a new config
         // that only has set 3. Next press should resolve via set 3 (the new default).
         compiledConfig.value = configWithTwoSets(
-            defaultSetId = 1L,
+            startingSetId = 1L,
             setA = 1L to listOf(
                 BUTTON_A to listOf(
                     CompiledActivator(
@@ -922,7 +922,7 @@ class InputEvaluatorTest {
         val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
         val toggleActivator = activatorWith(ActivatorType.FULL_PRESS, ENTER, toggle = true)
         compiledConfig.value = configWithTwoSets(
-            defaultSetId = 1L,
+            startingSetId = 1L,
             setA = 1L to listOf(
                 BUTTON_A to listOf(toggleActivator),
                 BUTTON_B to listOf(
@@ -1013,7 +1013,7 @@ class InputEvaluatorTest {
     /**
      * Build a [CompiledConfig] with a single action set at [setId], holding the
      * supplied address→activators mapping. [setId] becomes the snapshot's
-     * `defaultActionSetId`, so evaluator lookups land on these inputs by default.
+     * `startingActionSetId`, so evaluator lookups land on these inputs by default.
      */
     private fun configWithSet(
         setId: Long,
@@ -1023,17 +1023,17 @@ class InputEvaluatorTest {
             addr to CompiledInput(groupInputId = 0L, activators = activators)
         }
         return CompiledConfig(
-            defaultActionSetId = setId,
+            startingActionSetId = setId,
             sets = mapOf(setId to CompiledActionSet(setId, inputs)),
         )
     }
 
     /**
-     * Build a [CompiledConfig] with two action sets, both populated. [defaultSetId]
-     * picks which becomes the snapshot's default. Used by Brick 4.2 set-switching tests.
+     * Build a [CompiledConfig] with two action sets, both populated. [startingSetId]
+     * picks which becomes the snapshot's starting set. Used by Brick 4.2 set-switching tests.
      */
     private fun configWithTwoSets(
-        defaultSetId: Long,
+        startingSetId: Long,
         setA: Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>,
         setB: Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>,
     ): CompiledConfig {
@@ -1045,7 +1045,7 @@ class InputEvaluatorTest {
                 },
             )
         return CompiledConfig(
-            defaultActionSetId = defaultSetId,
+            startingActionSetId = startingSetId,
             sets = mapOf(
                 setA.first to build(setA.first, setA.second),
                 setB.first to build(setB.first, setB.second),

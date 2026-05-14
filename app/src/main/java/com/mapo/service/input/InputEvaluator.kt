@@ -112,11 +112,11 @@ class InputEvaluator @Inject constructor(
 
     /**
      * Currently-active action set id (Brick 4.2). 0L means "uninitialized — lazy-resolve
-     * from `compiledConfig.defaultActionSetId` on first event." A `CHANGE_PRESET`
+     * from `compiledConfig.startingActionSetId` on first event." A `CHANGE_PRESET`
      * controller_action verb mutates this; [flushAllRuntime] runs first so no held
      * binding or pending timer from the old set bleeds into the new one. When a config
      * swap removes the active set, [resolveActiveSet] silently falls back to the new
-     * config's default.
+     * config's starting set.
      */
     private var activeSetId: Long = 0L
 
@@ -133,19 +133,19 @@ class InputEvaluator @Inject constructor(
 
     /**
      * Resolve the currently-active [CompiledActionSet]. Lazy-initializes [activeSetId]
-     * from the snapshot's default on the first call after a fresh config. If the active
-     * set was removed (e.g. user deleted it via the editor), falls back to the new
-     * default without releasing anything — held entries are already snapshotted bindings
-     * and release normally on UP.
+     * from the snapshot's starting set on the first call after a fresh config. If the
+     * active set was removed (e.g. user deleted it via the editor), falls back to the
+     * new starting set without releasing anything — held entries are already snapshotted
+     * bindings and release normally on UP.
      */
     private fun resolveActiveSet(): CompiledActionSet? {
         val cfg = dispatcher.compiledConfig.value
         if (cfg.sets.isEmpty()) return null
         if (activeSetId == 0L || activeSetId !in cfg.sets) {
             if (activeSetId != 0L) {
-                Log.d(TAG, "active set $activeSetId missing from current config; falling back to default ${cfg.defaultActionSetId}")
+                Log.d(TAG, "active set $activeSetId missing from current config; falling back to starting set ${cfg.startingActionSetId}")
             }
-            activeSetId = cfg.defaultActionSetId
+            activeSetId = cfg.startingActionSetId
         }
         return cfg.sets[activeSetId]
     }

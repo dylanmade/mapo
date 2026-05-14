@@ -171,9 +171,9 @@ class MainViewModel @Inject constructor(
     /**
      * Brick 4.3: which action set the editor is currently *viewing*. Independent of the
      * runtime active set (which lives in the evaluator and only changes via `CHANGE_PRESET`
-     * bindings). Null means "follow the controller_profile's default set" — so the editor
-     * always lands somewhere sensible without the VM having to chase the default whenever
-     * the config changes.
+     * bindings). Null means "follow the controller_profile's starting set (first by order)"
+     * — so the editor always lands somewhere sensible without the VM having to chase the
+     * config's first set whenever the config changes.
      *
      * Maintenance: reset to null when the active profile changes (different controller's
      * sets are unaddressable from here) or when the currently-viewed set disappears from
@@ -220,7 +220,7 @@ class MainViewModel @Inject constructor(
                 inputDispatcher.setCompiledConfig(compiled)
                 android.util.Log.d(
                     "MainViewModel",
-                    "Published CompiledConfig: defaultSet=${compiled.defaultActionSetId} sets=${compiled.sets.size}",
+                    "Published CompiledConfig: startingSet=${compiled.startingActionSetId} sets=${compiled.sets.size}",
                 )
                 // Stale-id cleanup: if the user deleted or migrated away from the set
                 // they were viewing, drop back to the controller_profile default.
@@ -371,11 +371,56 @@ class MainViewModel @Inject constructor(
     /**
      * Brick 4.3: editor-side viewing selection. Pass a set id to view that set in the
      * `RemapControlsScreen` overview / row previews, or null to fall back to the
-     * controller_profile's default set. This is *not* the runtime active set —
+     * controller_profile's starting set. This is *not* the runtime active set —
      * `CHANGE_PRESET` bindings drive that, independently.
      */
     fun setViewingActionSet(actionSetId: Long?) {
         _viewingActionSetId.value = actionSetId
+    }
+
+    /**
+     * Brick 4.4: add a new [com.mapo.data.model.steam.ActionSet] under the active
+     * controller_profile. When [inheritFromSetId] is non-null the new set is a deep-clone
+     * of that source; null seeds a default-shaped set. After creation the editor's
+     * viewing pointer flips to the new set so the user lands in what they just made.
+     */
+    fun addControllerActionSet(name: String, title: String, inheritFromSetId: Long? = null) {
+        val cpId = activeControllerConfig.value?.controllerProfile?.id ?: return
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            val newId = controllerConfigRepository.addActionSet(cpId, name, title, inheritFromSetId)
+            _viewingActionSetId.value = newId
+        }
+    }
+
+    /** Rename action set [actionSetId]. No-op for unknown ids or when no profile is active. */
+    fun renameControllerActionSet(actionSetId: Long, name: String, title: String) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.renameActionSet(actionSetId, name, title) }
+    }
+
+    /**
+     * Deep-clone action set [sourceSetId] with new [name] / [title]. The editor's viewing
+     * pointer flips to the duplicate, so the user can immediately tweak the copy without
+     * hunting for it.
+     */
+    fun duplicateControllerActionSet(sourceSetId: Long, name: String, title: String) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            val newId = controllerConfigRepository.duplicateActionSet(sourceSetId, name, title)
+            _viewingActionSetId.value = newId
+        }
+    }
+
+    /**
+     * Delete action set [actionSetId]. The repo refuses to delete the last set on a
+     * controller_profile, so the UI must keep its Delete affordance disabled when only
+     * one set remains. Viewing-pointer cleanup runs through the existing
+     * `activeControllerConfig` collector when the deletion lands.
+     */
+    fun deleteControllerActionSet(actionSetId: Long) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.deleteActionSet(actionSetId) }
     }
 
     /**

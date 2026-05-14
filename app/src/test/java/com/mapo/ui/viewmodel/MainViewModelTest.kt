@@ -521,6 +521,94 @@ class MainViewModelTest {
         )
     }
 
+    // ── Action set management (Brick 4.4) ─────────────────────────────────────
+
+    @Test
+    fun addControllerActionSet_noActiveProfile_isNoOp() = runTest(testDispatcher) {
+        activeProfile.value = null
+
+        subject.addControllerActionSet(name = "menu", title = "Menu", inheritFromSetId = null)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { controllerConfigRepo.addActionSet(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun addControllerActionSet_noActiveConfig_isNoOp() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+        // observeActiveConfig still emits null, so activeControllerConfig.value stays null.
+        subject.addControllerActionSet(name = "menu", title = "Menu", inheritFromSetId = null)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { controllerConfigRepo.addActionSet(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun addControllerActionSet_delegatesToRepo_andFlipsViewingPointerToNewSet() = runTest(testDispatcher) {
+        val configFlow = MutableStateFlow<ControllerConfig?>(miniConfig(setIds = listOf(1L)))
+        every { controllerConfigRepo.observeActiveConfig(any()) } returns configFlow
+        coEvery { controllerConfigRepo.addActionSet(any(), any(), any(), any()) } returns 42L
+        subject = rebuildSubject()
+        activeProfile.value = Profile(id = 1L, name = "P")
+        advanceUntilIdle()
+
+        subject.addControllerActionSet(name = "menu", title = "Menu", inheritFromSetId = null)
+        advanceUntilIdle()
+
+        coVerify { controllerConfigRepo.addActionSet(1L, "menu", "Menu", null) }
+        assertEquals(42L, subject.viewingActionSetId.value)
+    }
+
+    @Test
+    fun renameControllerActionSet_delegatesToRepo() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+        subject.renameControllerActionSet(actionSetId = 7L, name = "menu", title = "Menu")
+        advanceUntilIdle()
+        coVerify { controllerConfigRepo.renameActionSet(7L, "menu", "Menu") }
+    }
+
+    @Test
+    fun renameControllerActionSet_noActiveProfile_isNoOp() = runTest(testDispatcher) {
+        activeProfile.value = null
+        subject.renameControllerActionSet(actionSetId = 7L, name = "menu", title = "Menu")
+        advanceUntilIdle()
+        coVerify(exactly = 0) { controllerConfigRepo.renameActionSet(any(), any(), any()) }
+    }
+
+    @Test
+    fun duplicateControllerActionSet_flipsViewingPointerToCopy() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+        coEvery { controllerConfigRepo.duplicateActionSet(any(), any(), any()) } returns 99L
+
+        subject.duplicateControllerActionSet(sourceSetId = 5L, name = "copy", title = "Copy")
+        advanceUntilIdle()
+
+        coVerify { controllerConfigRepo.duplicateActionSet(5L, "copy", "Copy") }
+        assertEquals(99L, subject.viewingActionSetId.value)
+    }
+
+    @Test
+    fun deleteControllerActionSet_delegatesToRepo() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+        subject.deleteControllerActionSet(actionSetId = 5L)
+        advanceUntilIdle()
+        coVerify { controllerConfigRepo.deleteActionSet(5L) }
+    }
+
+    /** Helper for tests that need to rebuild the subject after tweaking mock behavior. */
+    private fun rebuildSubject(): MainViewModel = MainViewModel(
+        layoutRepository = layoutRepo,
+        profileRepository = profileRepo,
+        controllerConfigRepository = controllerConfigRepo,
+        appProfileBindingRepository = bindingRepo,
+        autoSwitchSettings = settings,
+        autoSwitcher = autoSwitcher,
+        foregroundAppFilter = filter,
+        keyboardTemplateRepository = templateRepo,
+        inputDispatcher = inputDispatcher,
+        ioDispatcher = testDispatcher,
+    )
+
     @Test
     fun setControllerBinding_noActiveProfile_isNoOp() = runTest(testDispatcher) {
         activeProfile.value = null

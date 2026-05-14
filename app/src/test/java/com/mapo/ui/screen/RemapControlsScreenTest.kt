@@ -6,9 +6,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -275,8 +278,81 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
     }
 
+    // ── Action set management bar (Brick 4.4) ─────────────────────────────────
+
+    @Test
+    fun addSetButton_opensAddSetDialog() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = twoSetConfig(
+                            setAButtonA = BindingOutput.Unbound,
+                            setBButtonA = BindingOutput.Unbound,
+                        ),
+                        viewingActionSetId = 1L,
+                        onSelectActionSet = {},
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Add action set").performClick()
+        composeRule.onNodeWithText("Add Action Set", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun overflowMenu_showsManagementItems_forViewingSet() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = twoSetConfig(
+                            setAButtonA = BindingOutput.Unbound,
+                            setBButtonA = BindingOutput.Unbound,
+                        ),
+                        viewingActionSetId = 2L,  // viewing "Menu"
+                        onSelectActionSet = {},
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Action set actions").performClick()
+        // Items titled with the viewing set's name; merged-tree lookups so the
+        // disabled state lives on the same node as the text.
+        composeRule.onNodeWithText("Rename \"Menu\"").assertIsEnabled()
+        composeRule.onNodeWithText("Duplicate \"Menu\"").assertIsEnabled()
+        composeRule.onNodeWithText("Delete \"Menu\"").assertIsEnabled()
+    }
+
+    @Test
+    fun overflowMenu_deleteDisabled_whenOnlyOneSet() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = sampleConfig(),  // single-set
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Action set actions").performClick()
+        composeRule.onNodeWithText("Delete \"Default\"").assertIsNotEnabled()
+    }
+
     /**
-     * Builds a two-action-set config. Set 1 is the controller_profile default
+     * Builds a two-action-set config. Set 1 is the starting set (first in order)
      * ("Gameplay", button_a → [setAButtonA]); Set 2 is "Menu" with button_a → [setBButtonA].
      */
     private fun twoSetConfig(
@@ -313,7 +389,6 @@ class RemapControlsScreenTest {
             controllerProfile = ControllerProfile(
                 id = 1L, profileId = 1L,
                 controllerType = ControllerType.GENERIC_ANDROID, name = "Default",
-                defaultActionSetId = 1L,
             ),
             actionSets = listOf(setA, setB),
         )

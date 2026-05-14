@@ -34,11 +34,4 @@ data class ControllerProfile(
     val controllerType: ControllerType,
     val name: String,
     val legacySet: Boolean = true,
-    /**
-     * Which [ActionSet] becomes active when this controller_profile is loaded
-     * at runtime. Persisted, *not* a FK — the repository maintains integrity
-     * (clears or reassigns when the referenced set is deleted) to avoid a cyclic
-     * FK with [ActionSet]. A null value means "fall back to first set by orderIndex".
-     */
-    val defaultActionSetId: Long? = null,
 )

@@ -18,7 +18,7 @@ import org.json.JSONObject
  *
  * Brick 4.2 widened this from "only the active set's inputs" to "every set's inputs":
  * runtime active-set switching (`CHANGE_PRESET`) needs every set immediately resolvable
- * without recompiling. [defaultActionSetId] is what the evaluator initializes its
+ * without recompiling. [startingActionSetId] is what the evaluator initializes its
  * runtime `activeSetId` to; the live active set after `CHANGE_PRESET` fires lives in
  * the evaluator's mutable state, not this snapshot.
  *
@@ -26,7 +26,7 @@ import org.json.JSONObject
  * any [CompiledActionSet.inputs] yet.
  */
 data class CompiledConfig(
-    val defaultActionSetId: Long,
+    val startingActionSetId: Long,
     val sets: Map<Long, CompiledActionSet>,
 ) {
     /**
@@ -37,7 +37,7 @@ data class CompiledConfig(
         sets[setId]?.inputs?.get(InputAddress(source, inputKey))
 
     companion object {
-        val EMPTY = CompiledConfig(defaultActionSetId = 0L, sets = emptyMap())
+        val EMPTY = CompiledConfig(startingActionSetId = 0L, sets = emptyMap())
     }
 }
 
@@ -235,8 +235,8 @@ private fun JSONObject.optInputSourceOrNull(key: String): InputSource? {
  *  - Multi-binding activators (cycle_binding) keep all their bindings; the runtime
  *    cycle index is state owned by the evaluator, not the snapshot.
  *  - When the config has no action sets, [CompiledConfig.EMPTY] is returned.
- *  - [CompiledConfig.defaultActionSetId] mirrors `controllerProfile.defaultActionSetId`
- *    (falling back to the first set by orderIndex when the pointer is null/stale).
+ *  - [CompiledConfig.startingActionSetId] is the first set by orderIndex (Steam's
+ *    starting-set convention). Runtime set-switching is the evaluator's job.
  */
 fun ControllerConfig.toCompiled(): CompiledConfig {
     if (actionSets.isEmpty()) return CompiledConfig.EMPTY
@@ -260,6 +260,6 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
         }
         compiledSets[setGraph.actionSet.id] = CompiledActionSet(setGraph.actionSet.id, inputs)
     }
-    val defaultId = activeActionSet?.actionSet?.id ?: actionSets.first().actionSet.id
-    return CompiledConfig(defaultActionSetId = defaultId, sets = compiledSets)
+    val startingId = actionSets.first().actionSet.id
+    return CompiledConfig(startingActionSetId = startingId, sets = compiledSets)
 }

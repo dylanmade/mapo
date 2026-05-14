@@ -13,17 +13,13 @@ data class ControllerConfig(
     val actionSets: List<ActionSetGraph>,
 ) {
     /**
-     * The controller_profile's persisted default set, or the first by orderIndex if
-     * the default pointer is null or stale. "Active" here means *default-active at
-     * load time*; runtime set-switching (Brick 4.2) is layered on top of this in the
-     * evaluator, not in the materialized graph.
+     * The starting set when the controller_profile is loaded at runtime: the first
+     * [ActionSetGraph] by ordering. Steam has no exposed "default" concept; switching
+     * is purely runtime via `CHANGE_PRESET` bindings (Brick 4.2), which the evaluator
+     * tracks separately from this materialized graph.
      */
     val activeActionSet: ActionSetGraph?
-        get() {
-            val explicit = controllerProfile.defaultActionSetId
-                ?.let { id -> actionSets.firstOrNull { it.actionSet.id == id } }
-            return explicit ?: actionSets.firstOrNull()
-        }
+        get() = actionSets.firstOrNull()
 }
 
 data class ActionSetGraph(

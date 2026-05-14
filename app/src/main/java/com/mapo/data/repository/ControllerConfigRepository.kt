@@ -109,10 +109,6 @@ class ControllerConfigRepository @Inject constructor(
         )
         seedDefaultSetContents(actionSetId)
 
-        controllerProfileDao.getById(controllerProfileId)?.let { cp ->
-            controllerProfileDao.update(cp.copy(defaultActionSetId = actionSetId))
-        }
-
         configDirtyTick.value = configDirtyTick.value + 1
         return controllerProfileId
     }
@@ -313,8 +309,8 @@ class ControllerConfigRepository @Inject constructor(
 
     /**
      * Delete [actionSetId]. Guards against deleting the last remaining set under a
-     * controller_profile (returns false). When the deleted set was the controller_profile's
-     * default, the default is reassigned to the first remaining set by orderIndex.
+     * controller_profile (returns false). The starting set is implicitly the first
+     * set by orderIndex on whatever remains, so no reassignment is needed.
      * Returns true on successful deletion.
      */
     suspend fun deleteActionSet(actionSetId: Long): Boolean {
@@ -322,29 +318,9 @@ class ControllerConfigRepository @Inject constructor(
         val siblings = actionSetDao.getByControllerProfile(existing.controllerProfileId)
         if (siblings.size <= 1) return false
 
-        val cp = controllerProfileDao.getById(existing.controllerProfileId)
         actionSetDao.deleteById(actionSetId)
-
-        if (cp != null && cp.defaultActionSetId == actionSetId) {
-            val remaining = actionSetDao.getByControllerProfile(existing.controllerProfileId)
-            controllerProfileDao.update(cp.copy(defaultActionSetId = remaining.firstOrNull()?.id))
-        }
         configDirtyTick.value = configDirtyTick.value + 1
         return true
-    }
-
-    /**
-     * Mark [actionSetId] as the controller_profile's default (the set that becomes
-     * active when the profile is loaded at runtime). No-op if the set doesn't belong
-     * to [controllerProfileId].
-     */
-    suspend fun setDefaultActionSet(controllerProfileId: Long, actionSetId: Long) {
-        val cp = controllerProfileDao.getById(controllerProfileId) ?: return
-        if (cp.defaultActionSetId == actionSetId) return
-        val set = actionSetDao.getById(actionSetId) ?: return
-        if (set.controllerProfileId != controllerProfileId) return
-        controllerProfileDao.update(cp.copy(defaultActionSetId = actionSetId))
-        configDirtyTick.value = configDirtyTick.value + 1
     }
 
     /**
@@ -489,16 +465,6 @@ class ControllerConfigRepository @Inject constructor(
                         bindingGroupId = groupIdMap.getValue(sourcePreset.bindingGroupId),
                     )
                 )
-            }
-
-            // Re-point the cloned controller_profile's defaultActionSetId at the
-            // cloned set (it currently still references the source set's id from
-            // the initial `.copy(id = 0, profileId = destProfileId)` above).
-            val remappedDefault = sourceCp.defaultActionSetId?.let(setIdMap::get)
-            if (remappedDefault != sourceCp.defaultActionSetId) {
-                controllerProfileDao.getById(newCpId)?.let { newCp ->
-                    controllerProfileDao.update(newCp.copy(defaultActionSetId = remappedDefault))
-                }
             }
         }
 

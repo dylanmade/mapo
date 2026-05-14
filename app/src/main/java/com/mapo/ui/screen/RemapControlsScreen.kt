@@ -17,13 +17,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -31,9 +36,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,8 +66,16 @@ fun RemapControlsScreen(
     modifier: Modifier = Modifier,
     viewingActionSetId: Long? = null,
     onSelectActionSet: (Long) -> Unit = {},
+    onAddActionSet: (title: String, inheritFromSetId: Long?) -> Unit = { _, _ -> },
+    onRenameActionSet: (actionSetId: Long, newTitle: String) -> Unit = { _, _ -> },
+    onDuplicateActionSet: (sourceSetId: Long, newTitle: String) -> Unit = { _, _ -> },
+    onDeleteActionSet: (actionSetId: Long) -> Unit = {},
 ) {
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
+
+    // Brick 4.4: which management dialog is currently open. Plain `remember` —
+    // dialogs are short-lived; rotation-survival isn't worth a custom Saver.
+    var dialog by remember { mutableStateOf<ActionSetDialogState>(ActionSetDialogState.None) }
 
     // Resolve which set is currently being viewed in the editor. The viewing pointer is
     // user-driven (tab tap); when null, fall back to the controller_profile default so the
@@ -88,6 +103,10 @@ fun RemapControlsScreen(
                     config = config,
                     viewingSetId = viewingSet?.actionSet?.id,
                     onSelectActionSet = onSelectActionSet,
+                    onRequestAddSet = { dialog = ActionSetDialogState.Add },
+                    onRequestRenameSet = { dialog = ActionSetDialogState.Rename },
+                    onRequestDuplicateSet = { dialog = ActionSetDialogState.Duplicate },
+                    onRequestDeleteSet = { dialog = ActionSetDialogState.Delete },
                 )
             }
         },
@@ -108,6 +127,61 @@ fun RemapControlsScreen(
             )
         }
     }
+
+    // Brick 4.4: management dialogs. Rendered outside the Scaffold so they overlay
+    // everything (M3 AlertDialog uses a Dialog window, but we still hoist the state
+    // here so it survives Scaffold recompositions).
+    val viewingActionSet = viewingSet?.actionSet
+    when (dialog) {
+        ActionSetDialogState.None -> Unit
+        ActionSetDialogState.Add -> AddSetDialog(
+            existingSets = config?.actionSets.orEmpty(),
+            onConfirm = { title, inheritFromSetId ->
+                onAddActionSet(title, inheritFromSetId)
+                dialog = ActionSetDialogState.None
+            },
+            onDismiss = { dialog = ActionSetDialogState.None },
+        )
+        ActionSetDialogState.Rename -> viewingActionSet?.let { target ->
+            RenameSetDialog(
+                target = target,
+                onConfirm = { newTitle ->
+                    onRenameActionSet(target.id, newTitle)
+                    dialog = ActionSetDialogState.None
+                },
+                onDismiss = { dialog = ActionSetDialogState.None },
+            )
+        } ?: run { dialog = ActionSetDialogState.None }
+        ActionSetDialogState.Duplicate -> viewingActionSet?.let { source ->
+            DuplicateSetDialog(
+                source = source,
+                onConfirm = { newTitle ->
+                    onDuplicateActionSet(source.id, newTitle)
+                    dialog = ActionSetDialogState.None
+                },
+                onDismiss = { dialog = ActionSetDialogState.None },
+            )
+        } ?: run { dialog = ActionSetDialogState.None }
+        ActionSetDialogState.Delete -> viewingActionSet?.let { target ->
+            DeleteSetConfirmDialog(
+                target = target,
+                onConfirm = {
+                    onDeleteActionSet(target.id)
+                    dialog = ActionSetDialogState.None
+                },
+                onDismiss = { dialog = ActionSetDialogState.None },
+            )
+        } ?: run { dialog = ActionSetDialogState.None }
+    }
+}
+
+/** Which management dialog is currently open. Hoisted in [RemapControlsScreen]. */
+private sealed class ActionSetDialogState {
+    object None : ActionSetDialogState()
+    object Add : ActionSetDialogState()
+    object Rename : ActionSetDialogState()
+    object Duplicate : ActionSetDialogState()
+    object Delete : ActionSetDialogState()
 }
 
 /**
@@ -123,27 +197,60 @@ private fun ActionSetAndLayersBar(
     config: ControllerConfig?,
     viewingSetId: Long?,
     onSelectActionSet: (Long) -> Unit,
+    onRequestAddSet: () -> Unit,
+    onRequestRenameSet: () -> Unit,
+    onRequestDuplicateSet: () -> Unit,
+    onRequestDeleteSet: () -> Unit,
 ) {
     val sets = config?.actionSets.orEmpty()
     val viewingIndex = sets.indexOfFirst { it.actionSet.id == viewingSetId }.coerceAtLeast(0)
+    val viewingSet = sets.firstOrNull { it.actionSet.id == viewingSetId }
+    val canDelete = sets.size > 1
 
     // M3 role: surfaceContainer — same plane as the rail below.
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Column {
             if (sets.isNotEmpty()) {
-                PrimaryTabRow(selectedTabIndex = viewingIndex) {
-                    sets.forEach { setGraph ->
-                        Tab(
-                            selected = setGraph.actionSet.id == viewingSetId,
-                            onClick = { onSelectActionSet(setGraph.actionSet.id) },
-                            text = {
-                                Text(
-                                    text = setGraph.actionSet.title,
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            },
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    PrimaryTabRow(
+                        selectedTabIndex = viewingIndex,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        sets.forEach { setGraph ->
+                            Tab(
+                                selected = setGraph.actionSet.id == viewingSetId,
+                                onClick = { onSelectActionSet(setGraph.actionSet.id) },
+                                text = {
+                                    Text(
+                                        text = setGraph.actionSet.title,
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onRequestAddSet,
+                        modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
+                    ) {
+                        Icon(
+                            Icons.Filled.Add,
+                            contentDescription = "Add action set",
+                            modifier = Modifier.size(IconButtonDefaults.smallIconSize),
                         )
                     }
+                    Spacer(Modifier.width(4.dp))
+                    ActionSetOverflowMenu(
+                        viewingSetTitle = viewingSet?.actionSet?.title,
+                        canDelete = canDelete,
+                        onRename = onRequestRenameSet,
+                        onDuplicate = onRequestDuplicateSet,
+                        onDelete = onRequestDeleteSet,
+                    )
+                    Spacer(Modifier.width(8.dp))
                 }
             }
             Row(
@@ -166,6 +273,58 @@ private fun ActionSetAndLayersBar(
                 )
             }
         }
+    }
+}
+
+/**
+ * Trailing overflow menu on the action-set tab row (Brick 4.4). Operates on the
+ * **currently-viewing** set. Item titles include the set name to make the target
+ * unambiguous ("Delete 'Menu'"); "Delete" is disabled when only one set remains
+ * (the repo refuses to delete the last set anyway, but disabling the affordance is
+ * the M3-conventional way to communicate that).
+ *
+ * Long-press on individual tabs was the design proposed in the parity plan but
+ * conflicts with `Tab`'s built-in selectable wrapper and is poorly discoverable on
+ * M3; an explicit overflow is more discoverable and avoids gesture conflicts.
+ *
+ * Brick 4.4.1: no "Set as default" — Steam has no exposed default concept; the
+ * starting set is just the first set by orderIndex (creation order).
+ */
+@Composable
+private fun ActionSetOverflowMenu(
+    viewingSetTitle: String?,
+    canDelete: Boolean,
+    onRename: () -> Unit,
+    onDuplicate: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val titleSuffix = viewingSetTitle?.let { " \"$it\"" }.orEmpty()
+    IconButton(
+        onClick = { expanded = true },
+        modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
+        enabled = viewingSetTitle != null,
+    ) {
+        Icon(
+            Icons.Filled.MoreVert,
+            contentDescription = "Action set actions",
+            modifier = Modifier.size(IconButtonDefaults.smallIconSize),
+        )
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenuItem(
+            text = { Text("Rename$titleSuffix") },
+            onClick = { expanded = false; onRename() },
+        )
+        DropdownMenuItem(
+            text = { Text("Duplicate$titleSuffix") },
+            onClick = { expanded = false; onDuplicate() },
+        )
+        DropdownMenuItem(
+            text = { Text("Delete$titleSuffix") },
+            enabled = canDelete,
+            onClick = { expanded = false; onDelete() },
+        )
     }
 }
 

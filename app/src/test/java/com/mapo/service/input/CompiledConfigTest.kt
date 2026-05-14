@@ -44,7 +44,7 @@ class CompiledConfigTest {
         val compiled = cfg.toCompiled()
 
         assertSame(CompiledConfig.EMPTY, compiled)
-        assertEquals(0L, compiled.defaultActionSetId)
+        assertEquals(0L, compiled.startingActionSetId)
         assertTrue(compiled.sets.isEmpty())
     }
 
@@ -251,7 +251,7 @@ class CompiledConfigTest {
             ),
         )
         val cfg = ControllerConfig(
-            controllerProfile = sampleControllerProfile().copy(defaultActionSetId = 20L),
+            controllerProfile = sampleControllerProfile(),
             actionSets = listOf(setA, setB),
         )
 
@@ -259,8 +259,8 @@ class CompiledConfigTest {
 
         assertEquals(setOf(10L, 20L), compiled.sets.keys)
         assertEquals(
-            "defaultActionSetId mirrors the controllerProfile pointer",
-            20L, compiled.defaultActionSetId,
+            "starting set is the first action set in the graph",
+            10L, compiled.startingActionSetId,
         )
         val setALookup = compiled.lookup(setId = 10L, source = InputSource.BUTTON_DIAMOND, inputKey = "button_a")!!
         val setBLookup = compiled.lookup(setId = 20L, source = InputSource.BUTTON_DIAMOND, inputKey = "button_a")!!
@@ -269,7 +269,7 @@ class CompiledConfigTest {
     }
 
     @Test
-    fun defaultActionSetId_propagatesFromGraph() {
+    fun startingActionSetId_isFirstActionSetInGraph() {
         val cfg = configWith(
             actionSet = ActionSet(id = 42L, controllerProfileId = 1L, name = "default", title = "Default"),
             preset = emptyList(),
@@ -277,7 +277,7 @@ class CompiledConfigTest {
 
         val compiled = cfg.toCompiled()
 
-        assertEquals(42L, compiled.defaultActionSetId)
+        assertEquals(42L, compiled.startingActionSetId)
         assertEquals(1, compiled.sets.size)
         assertTrue(compiled.sets.getValue(42L).inputs.isEmpty())
     }

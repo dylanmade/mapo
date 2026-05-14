@@ -654,6 +654,13 @@ In any activator's binding list: **Steam → Mode Shift**, target = (input sourc
 - Bind RB → Add Layer (while held) = "Scope". Layer "Scope" overrides A = MOUSE_LEFT. Hold RB → A emits left-click; release RB → A emits ENTER again.
 - Switching action sets clears the layer stack (verified by activating two stacked layers, switching sets, switching back — stack is empty).
 
+### Brick 5.2 deviations + decisions
+
+- **What it covers**: `ControllerConfigRepository.addLayer / renameLayer / duplicateLayer / deleteLayer`. New layers are seeded empty (no overlay binding_groups) — the per-layer preset-binding schema still doesn't exist, and overlays only get authored in 5.5. `duplicateLayer` already has full deep-clone wiring (binding_groups → group_inputs → activators → bindings) so 5.5's overlay-authoring writes don't have to retrofit it.
+- **No "last layer must remain" guard** (unlike `deleteActionSet`). An action set with zero layers is a valid state per Steam — layers are optional overlays, not mandatory siblings.
+- **Plain orderIndex semantics** for now: `addLayer` appends to the end of the list; no reorder UX. The pill row in 5.4 will read these in order; reordering can land later if needed.
+- **Tests added (7)**: `addLayer_appendsEmptyLayerWithOrderIndexZero`, `addLayer_secondLayerGetsIncrementedOrderIndex`, `renameLayer_updatesNameAndTitle`, `renameLayer_unknownId_isNoOp`, `deleteLayer_unknownId_returnsFalse`, `deleteLayer_existing_succeeds`, `duplicateLayer_emptySource_clonesLayerRowOnly`, `duplicateLayer_clonesGroupsInputsActivatorsBindings_withFreshIds` (seeds an overlay group by hand to exercise the cloning path forward-compat), `duplicateLayer_editsToCloneDoNotAffectSource`.
+
 ### Brick 5.1 deviations + decisions
 
 - **What it covers**: runtime layer stack + the three new controller verbs + `CompiledConfig.CompiledActionSet.layers`. Verified end-to-end via 11 new `InputEvaluatorTest` cases (overlay overrides base; last-in-wins; sticky add/remove; hold while-held; CHANGE_PRESET clearing; idempotent add when already active; safe handling of unknown ids; force-release cleanup; tap-context hold rejection). Plus a `CompiledConfigTest` case that compiles a set with two layer rows and asserts the snapshot's `layers` map carries them.

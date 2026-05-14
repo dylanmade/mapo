@@ -2,6 +2,11 @@ package com.mapo.data.repository
 
 import com.mapo.data.db.steam.FakeActionLayerDao
 import com.mapo.data.db.steam.FakeActionSetDao
+import com.mapo.data.model.steam.ActionLayer
+import com.mapo.data.model.steam.Activator
+import com.mapo.data.model.steam.Binding
+import com.mapo.data.model.steam.BindingGroup
+import com.mapo.data.model.steam.GroupInput
 import com.mapo.data.db.steam.FakeActivatorDao
 import com.mapo.data.db.steam.FakeBindingDao
 import com.mapo.data.db.steam.FakeBindingGroupDao
@@ -630,6 +635,199 @@ class ControllerConfigRepositoryTest {
         val remaining = actionSetDao.getByControllerProfile(cpId)
         assertEquals(1, remaining.size)
         assertTrue(remaining.none { it.id == newSetId })
+    }
+
+    // ── Layer CRUD (Brick 5.2) ───────────────────────────────────────────────
+
+    @Test
+    fun addLayer_appendsEmptyLayerWithOrderIndexZero() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+
+        val layerId = subject.addLayer(setId, name = "scope", title = "Scope")
+
+        val rows = actionLayerDao.getByActionSets(listOf(setId))
+        assertEquals(1, rows.size)
+        val layer = rows.single()
+        assertEquals(layerId, layer.id)
+        assertEquals("scope", layer.name)
+        assertEquals("Scope", layer.title)
+        assertEquals(0, layer.orderIndex)
+        // No overlay binding_groups land at create time.
+        val groups = bindingGroupDao.getByActionLayers(listOf(layerId))
+        assertTrue("New layer must start empty (no overlay groups)", groups.isEmpty())
+    }
+
+    @Test
+    fun addLayer_secondLayerGetsIncrementedOrderIndex() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+
+        subject.addLayer(setId, "scope", "Scope")
+        val secondId = subject.addLayer(setId, "vehicle", "Vehicle")
+
+        val rows = actionLayerDao.getByActionSets(listOf(setId))
+        assertEquals(2, rows.size)
+        val second = rows.first { it.id == secondId }
+        assertEquals(1, second.orderIndex)
+    }
+
+    @Test
+    fun renameLayer_updatesNameAndTitle() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+
+        subject.renameLayer(layerId, name = "aim_down_sights", title = "Aim Down Sights")
+
+        val updated = actionLayerDao.getById(layerId)!!
+        assertEquals("aim_down_sights", updated.name)
+        assertEquals("Aim Down Sights", updated.title)
+    }
+
+    @Test
+    fun renameLayer_unknownId_isNoOp() = runTest {
+        subject.renameLayer(layerId = 999L, name = "x", title = "X")
+        assertEquals(0, actionLayerDao.rows.value.size)
+    }
+
+    @Test
+    fun deleteLayer_unknownId_returnsFalse() = runTest {
+        val result = subject.deleteLayer(999L)
+        assertFalse(result)
+    }
+
+    @Test
+    fun deleteLayer_existing_succeeds() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+
+        val result = subject.deleteLayer(layerId)
+
+        assertTrue(result)
+        assertTrue(actionLayerDao.getByActionSets(listOf(setId)).isEmpty())
+    }
+
+    @Test
+    fun duplicateLayer_emptySource_clonesLayerRowOnly() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val sourceId = subject.addLayer(setId, "scope", "Scope")
+
+        val cloneId = subject.duplicateLayer(sourceId, name = "scope_copy", title = "Scope Copy")
+
+        assertTrue("Cloned layer must have a fresh id", cloneId != sourceId)
+        val rows = actionLayerDao.getByActionSets(listOf(setId))
+        assertEquals(2, rows.size)
+        val clone = rows.first { it.id == cloneId }
+        assertEquals(setId, clone.parentActionSetId)
+        assertEquals("scope_copy", clone.name)
+        assertEquals(1, clone.orderIndex)
+    }
+
+    @Test
+    fun duplicateLayer_clonesGroupsInputsActivatorsBindings_withFreshIds() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val sourceId = subject.addLayer(setId, "scope", "Scope")
+        // Seed an overlay binding_group under the source layer by hand — the 5.5 UI
+        // doesn't exist yet, but the cloning path needs to be exercised so it doesn't
+        // bit-rot before that brick lands.
+        val groupId = bindingGroupDao.insert(
+            BindingGroup(
+                actionSetId = null,
+                actionLayerId = sourceId,
+                name = "face_buttons_overlay",
+                mode = BindingMode.BUTTON_PAD,
+                settingsJson = "{}",
+            )
+        )
+        val inputId = groupInputDao.insert(
+            GroupInput(bindingGroupId = groupId, inputKey = "button_a", orderIndex = 0)
+        )
+        val activatorId = activatorDao.insert(
+            Activator(
+                groupInputId = inputId,
+                type = ActivatorType.FULL_PRESS,
+                settingsJson = "{}",
+                orderIndex = 0,
+            )
+        )
+        bindingDao.insert(
+            Binding(
+                activatorId = activatorId,
+                outputType = BindingOutputType.KEY_PRESS,
+                args = "ENTER",
+                orderIndex = 0,
+            )
+        )
+
+        val cloneId = subject.duplicateLayer(sourceId, name = "scope_copy", title = "Scope Copy")
+
+        // Source still has exactly its original group / input / activator / binding.
+        val sourceGroups = bindingGroupDao.getByActionLayers(listOf(sourceId))
+        assertEquals(1, sourceGroups.size)
+        // Cloned layer has its own group with a new id.
+        val cloneGroups = bindingGroupDao.getByActionLayers(listOf(cloneId))
+        assertEquals(1, cloneGroups.size)
+        assertTrue(
+            "Cloned group must have a fresh id",
+            cloneGroups.single().id != sourceGroups.single().id,
+        )
+        // Inputs / activators / bindings all cloned and fresh-id'd.
+        val cloneInputs = groupInputDao.getByGroups(cloneGroups.map { it.id })
+        assertEquals(1, cloneInputs.size)
+        assertTrue("Cloned input must have a fresh id", cloneInputs.single().id != inputId)
+        val cloneActivators = activatorDao.getByGroupInputs(cloneInputs.map { it.id })
+        assertEquals(1, cloneActivators.size)
+        assertTrue(
+            "Cloned activator must have a fresh id",
+            cloneActivators.single().id != activatorId,
+        )
+        val cloneBindings = bindingDao.getByActivators(cloneActivators.map { it.id })
+        assertEquals(1, cloneBindings.size)
+        assertEquals("ENTER", cloneBindings.single().args)
+    }
+
+    @Test
+    fun duplicateLayer_editsToCloneDoNotAffectSource() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val sourceId = subject.addLayer(setId, "scope", "Scope")
+        val groupId = bindingGroupDao.insert(
+            BindingGroup(
+                actionSetId = null,
+                actionLayerId = sourceId,
+                name = "g",
+                mode = BindingMode.BUTTON_PAD,
+                settingsJson = "{}",
+            )
+        )
+        val inputId = groupInputDao.insert(
+            GroupInput(bindingGroupId = groupId, inputKey = "button_a", orderIndex = 0)
+        )
+        val sourceActivatorId = activatorDao.insert(
+            Activator(groupInputId = inputId, type = ActivatorType.FULL_PRESS, settingsJson = "{}", orderIndex = 0)
+        )
+        bindingDao.insert(
+            Binding(activatorId = sourceActivatorId, outputType = BindingOutputType.KEY_PRESS, args = "ENTER", orderIndex = 0)
+        )
+
+        val cloneId = subject.duplicateLayer(sourceId, name = "copy", title = "Copy")
+        val cloneActivatorId = activatorDao.getByGroupInputs(
+            groupInputDao.getByGroups(
+                bindingGroupDao.getByActionLayers(listOf(cloneId)).map { it.id }
+            ).map { it.id }
+        ).single().id
+        // Edit the clone's binding via setBinding (replace).
+        subject.setBinding(cloneActivatorId, BindingOutput.KeyPress("SPACE"))
+
+        // Source's binding is untouched.
+        val sourceBinding = bindingDao.getByActivators(listOf(sourceActivatorId)).single()
+        assertEquals("ENTER", sourceBinding.args)
+        val cloneBinding = bindingDao.getByActivators(listOf(cloneActivatorId)).single()
+        assertEquals("SPACE", cloneBinding.args)
     }
 
 }

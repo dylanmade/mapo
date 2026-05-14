@@ -78,29 +78,40 @@ data class ActivatorGraph(
 }
 
 /**
- * Resolve `(input source, sub-input, activator type)` on the active action set to a
- * specific [ActivatorGraph]. Returns null if any step doesn't exist (e.g. the seed
- * didn't create that group, or the activator type isn't attached).
+ * Resolve `(input source, sub-input, activator type)` on the action set selected by
+ * [setId] (falling back to [activeActionSet] when [setId] is null or stale) to a
+ * specific [ActivatorGraph]. Returns null if any step doesn't exist.
  */
 fun ControllerConfig.findActivator(
     inputSource: InputSource,
     inputKey: String,
     activatorType: ActivatorType = ActivatorType.FULL_PRESS,
-): ActivatorGraph? = activeActionSet
+    setId: Long? = null,
+): ActivatorGraph? = resolveActionSet(setId)
     ?.presetFor(inputSource)
     ?.group
     ?.inputByKey(inputKey)
     ?.firstActivatorOfType(activatorType)
 
 /**
- * Resolve `(input source, sub-input)` to its [GroupInputGraph], carrying every activator
- * configured on that input. Used by the per-input editor (Brick 3.4+) where the user
- * sees the full activator list, not just one type.
+ * Resolve `(input source, sub-input)` on the action set selected by [setId] (falling
+ * back to [activeActionSet] when [setId] is null or stale) to its [GroupInputGraph].
+ * Carries every activator configured on that input — used by the per-input editor where
+ * the user sees the full activator list, not just one type.
  */
 fun ControllerConfig.findGroupInput(
     inputSource: InputSource,
     inputKey: String,
-): GroupInputGraph? = activeActionSet
+    setId: Long? = null,
+): GroupInputGraph? = resolveActionSet(setId)
     ?.presetFor(inputSource)
     ?.group
     ?.inputByKey(inputKey)
+
+/**
+ * Resolve [setId] to its [ActionSetGraph], falling back to [ControllerConfig.activeActionSet]
+ * when the id is null or no set in the graph carries it. Centralized so every editor screen
+ * picks the same set when wired with the same viewing pointer.
+ */
+fun ControllerConfig.resolveActionSet(setId: Long?): ActionSetGraph? =
+    setId?.let { id -> actionSets.firstOrNull { it.actionSet.id == id } } ?: activeActionSet

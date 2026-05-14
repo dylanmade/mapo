@@ -191,6 +191,134 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
     }
 
+    // ── Action set tabs (Brick 4.3) ───────────────────────────────────────────
+
+    @Test
+    fun rendersTabsForEverySet_andTappingNonViewedTab_invokesCallback() {
+        var selectedSetId: Long? = null
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = twoSetConfig(
+                            setAButtonA = BindingOutput.KeyPress("ENTER"),
+                            setBButtonA = BindingOutput.KeyPress("SPACE"),
+                        ),
+                        viewingActionSetId = 1L,
+                        onSelectActionSet = { selectedSetId = it },
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        // Both tabs render.
+        composeRule.onNodeWithText("Gameplay", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("Menu", useUnmergedTree = true).assertExists()
+
+        composeRule.onNodeWithText("Menu", useUnmergedTree = true).performClick()
+
+        assert(selectedSetId == 2L) {
+            "Expected onSelectActionSet(2L), got $selectedSetId"
+        }
+    }
+
+    @Test
+    fun bindingRowReflectsViewingSet_notDefaultSet() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = twoSetConfig(
+                            setAButtonA = BindingOutput.KeyPress("ENTER"),
+                            setBButtonA = BindingOutput.KeyPress("SPACE"),
+                        ),
+                        // Default per twoSetConfig is set 1 (ENTER); viewing 2 (SPACE).
+                        viewingActionSetId = 2L,
+                        onSelectActionSet = {},
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("KB: SPACE", useUnmergedTree = true).assertExists()
+        // The default set's binding is NOT shown — the editor follows the viewing pointer.
+        composeRule.onAllNodesWithText("KB: ENTER", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test
+    fun nullViewingActionSetId_fallsBackToDefaultSet() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = twoSetConfig(
+                            setAButtonA = BindingOutput.KeyPress("ENTER"),
+                            setBButtonA = BindingOutput.KeyPress("SPACE"),
+                        ),
+                        viewingActionSetId = null,
+                        onSelectActionSet = {},
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        // Default set (set 1) wins → ENTER, not SPACE.
+        composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
+    }
+
+    /**
+     * Builds a two-action-set config. Set 1 is the controller_profile default
+     * ("Gameplay", button_a → [setAButtonA]); Set 2 is "Menu" with button_a → [setBButtonA].
+     */
+    private fun twoSetConfig(
+        setAButtonA: BindingOutput,
+        setBButtonA: BindingOutput,
+    ): ControllerConfig {
+        fun buildFaceGroup(actionSetId: Long, bindingGroupId: Long, baseId: Long, output: BindingOutput): BindingGroupGraph {
+            val activator = Activator(
+                id = baseId, groupInputId = baseId + 1, type = ActivatorType.FULL_PRESS, orderIndex = 0,
+            )
+            val binding = output.toEntity().let { (t, args) ->
+                Binding(id = baseId + 100, activatorId = activator.id, outputType = t, args = args, orderIndex = 0)
+            }
+            val buttonAInput = GroupInputGraph(
+                input = GroupInput(id = baseId + 1, bindingGroupId = bindingGroupId, inputKey = "button_a", orderIndex = 0),
+                activators = listOf(ActivatorGraph(activator, listOf(binding))),
+            )
+            return BindingGroupGraph(
+                group = BindingGroup(id = bindingGroupId, actionSetId = actionSetId, name = "face_buttons", mode = BindingMode.BUTTON_PAD),
+                inputs = listOf(buttonAInput),
+            )
+        }
+        val setA = ActionSetGraph(
+            actionSet = ActionSet(id = 1L, controllerProfileId = 1L, name = "gameplay", title = "Gameplay"),
+            layers = emptyList(),
+            preset = listOf(PresetEntry(InputSource.BUTTON_DIAMOND, "active", buildFaceGroup(1L, 1L, 100L, setAButtonA))),
+        )
+        val setB = ActionSetGraph(
+            actionSet = ActionSet(id = 2L, controllerProfileId = 1L, name = "menu", title = "Menu"),
+            layers = emptyList(),
+            preset = listOf(PresetEntry(InputSource.BUTTON_DIAMOND, "active", buildFaceGroup(2L, 2L, 200L, setBButtonA))),
+        )
+        return ControllerConfig(
+            controllerProfile = ControllerProfile(
+                id = 1L, profileId = 1L,
+                controllerType = ControllerType.GENERIC_ANDROID, name = "Default",
+                defaultActionSetId = 1L,
+            ),
+            actionSets = listOf(setA, setB),
+        )
+    }
+
     /** Builds a minimal ControllerConfig matching the seed shape, with optional override for BUTTON_A. */
     private fun sampleConfig(
         boundButtonA: BindingOutput = BindingOutput.Unbound,

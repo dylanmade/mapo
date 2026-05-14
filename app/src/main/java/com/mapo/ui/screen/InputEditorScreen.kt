@@ -78,6 +78,7 @@ fun InputEditorScreen(
     inputSource: InputSource,
     groupInputKey: String,
     config: ControllerConfig?,
+    viewingActionSetId: Long? = null,
     pickerResult: RemapTarget?,
     onConsumePickerResult: () -> Unit,
     onPickResult: (bindingId: Long, output: BindingOutput) -> Unit,
@@ -105,7 +106,7 @@ fun InputEditorScreen(
         onConsumePickerResult()
     }
 
-    val groupInput = config?.findGroupInput(inputSource, groupInputKey)
+    val groupInput = config?.findGroupInput(inputSource, groupInputKey, setId = viewingActionSetId)
     val activators = groupInput?.activators.orEmpty().sortedWith(activatorRenderOrder)
 
     Scaffold(

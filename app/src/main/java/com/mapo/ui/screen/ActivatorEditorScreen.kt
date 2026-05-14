@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.displayName
+import com.mapo.data.model.steam.resolveActionSet
 import com.mapo.service.input.CompiledActivatorSettings
 import kotlin.math.roundToLong
 
@@ -56,12 +57,15 @@ fun ActivatorEditorScreen(
     activatorId: Long,
     title: String,
     config: ControllerConfig?,
+    viewingActionSetId: Long? = null,
     onSettingsChange: (Long, CompiledActivatorSettings) -> Unit,
     onPickChordPartner: (Long) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val activatorContext = remember(config, activatorId) { findActivatorContext(config, activatorId) }
+    val activatorContext = remember(config, activatorId, viewingActionSetId) {
+        findActivatorContext(config, activatorId, viewingActionSetId)
+    }
 
     // Stale route (activator deleted from elsewhere mid-edit) — pop without crashing.
     if (config != null && activatorContext == null) {
@@ -216,14 +220,17 @@ fun ActivatorEditorScreen(
 
 /**
  * Resolve [activatorId] against [config] to return its type + parsed settings. Walks the
- * active action set's preset entries / binding groups / inputs in O(N) of the active-set
- * graph; called once per recomposition with `remember` keying so it's cheap.
+ * action set selected by [viewingActionSetId] (falling back to the controller_profile
+ * default) in O(N) of that set's graph; called once per recomposition with `remember`
+ * keying so it's cheap. An activator id from a different set won't resolve here — the
+ * caller is expected to keep the viewing pointer aligned with how the editor was opened.
  */
 private fun findActivatorContext(
     config: ControllerConfig?,
     activatorId: Long,
+    viewingActionSetId: Long? = null,
 ): Pair<ActivatorType, CompiledActivatorSettings>? {
-    val activeSet = config?.activeActionSet ?: return null
+    val activeSet = config?.resolveActionSet(viewingActionSetId) ?: return null
     for (preset in activeSet.preset) {
         for (input in preset.group.inputs) {
             for (graph in input.activators) {

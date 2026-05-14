@@ -57,8 +57,20 @@ fun RemapControlsScreen(
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    viewingActionSetId: Long? = null,
+    onSelectActionSet: (Long) -> Unit = {},
 ) {
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
+
+    // Resolve which set is currently being viewed in the editor. The viewing pointer is
+    // user-driven (tab tap); when null, fall back to the controller_profile default so the
+    // screen always renders *something* sensible. Independent of the runtime active set —
+    // that swaps via CHANGE_PRESET in the evaluator (Brick 4.2).
+    val viewingSet = config?.let { cfg ->
+        viewingActionSetId
+            ?.let { id -> cfg.actionSets.firstOrNull { it.actionSet.id == id } }
+            ?: cfg.activeActionSet
+    }
 
     Scaffold(
         modifier = modifier,
@@ -72,7 +84,11 @@ fun RemapControlsScreen(
                         }
                     },
                 )
-                ActionSetAndLayersBar(config)
+                ActionSetAndLayersBar(
+                    config = config,
+                    viewingSetId = viewingSet?.actionSet?.id,
+                    onSelectActionSet = onSelectActionSet,
+                )
             }
         },
     ) { innerPadding ->
@@ -86,7 +102,7 @@ fun RemapControlsScreen(
         ) { sectionId, firstRowFocusRequester ->
             RemapDetailPane(
                 sectionId = sectionId,
-                config = config,
+                viewingSet = viewingSet,
                 firstRowFocusRequester = firstRowFocusRequester,
                 onOpenInputEditor = onOpenInputEditor,
             )
@@ -95,28 +111,31 @@ fun RemapControlsScreen(
 }
 
 /**
- * Inert top bar: action-set tabs + layer chips. Brick 1.3 ships these as visible-but-disabled
- * affordances so the eventual Phase 4 (action sets) and Phase 5 (layers) plumbing has a place
- * to land without UI churn. The tab row reflects whatever's in the active config.
+ * Top bar: action-set tabs + (inert) layer chips. As of Brick 4.3 the tabs are live —
+ * tapping a tab swaps the editor's viewing set (M3 PrimaryTabRow `selectedTabIndex`
+ * follows `viewingSetId`). The runtime-active set is *not* what these tabs control —
+ * that's evaluator-side, swapped by `CHANGE_PRESET` bindings (Brick 4.2). Layer chips
+ * stay inert until Phase 5.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ActionSetAndLayersBar(config: ControllerConfig?) {
+private fun ActionSetAndLayersBar(
+    config: ControllerConfig?,
+    viewingSetId: Long?,
+    onSelectActionSet: (Long) -> Unit,
+) {
     val sets = config?.actionSets.orEmpty()
-    val activeId = config?.activeActionSet?.actionSet?.id
-    val activeIndex = sets.indexOfFirst { it.actionSet.id == activeId }.coerceAtLeast(0)
+    val viewingIndex = sets.indexOfFirst { it.actionSet.id == viewingSetId }.coerceAtLeast(0)
 
     // M3 role: surfaceContainer — same plane as the rail below.
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Column {
             if (sets.isNotEmpty()) {
-                PrimaryTabRow(selectedTabIndex = activeIndex) {
+                PrimaryTabRow(selectedTabIndex = viewingIndex) {
                     sets.forEach { setGraph ->
                         Tab(
-                            selected = setGraph.actionSet.id == activeId,
-                            // Action-set switching is Phase 4 — disabled for now.
-                            enabled = false,
-                            onClick = { /* no-op until Phase 4 */ },
+                            selected = setGraph.actionSet.id == viewingSetId,
+                            onClick = { onSelectActionSet(setGraph.actionSet.id) },
                             text = {
                                 Text(
                                     text = setGraph.actionSet.title,
@@ -153,7 +172,7 @@ private fun ActionSetAndLayersBar(config: ControllerConfig?) {
 @Composable
 private fun RemapDetailPane(
     sectionId: String,
-    config: ControllerConfig?,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
     firstRowFocusRequester: FocusRequester,
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
 ) {
@@ -180,7 +199,7 @@ private fun RemapDetailPane(
                 is RemapPaneItem.Subheader -> SubheaderRow(item)
                 is RemapPaneItem.BindingRow -> BindingRowItem(
                     item = item,
-                    config = config,
+                    viewingSet = viewingSet,
                     modifier = focusModifier,
                     onOpenInputEditor = onOpenInputEditor,
                 )
@@ -239,16 +258,14 @@ private fun DisabledModeDropdown(label: String) {
 @Composable
 private fun BindingRowItem(
     item: RemapPaneItem.BindingRow,
-    config: ControllerConfig?,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
     modifier: Modifier = Modifier,
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
 ) {
     // The row preview shows the FULL_PRESS binding; the per-input editor (Brick 3.4) is
     // where the full activator list lives. When multiple activators are configured we
     // append "+N more" so the user can tell at a glance the row holds more than they see.
-    val groupInput = config?.let { cfg ->
-        cfg.activeActionSet?.presetFor(item.inputSource)?.group?.inputByKey(item.groupInputKey)
-    }
+    val groupInput = viewingSet?.presetFor(item.inputSource)?.group?.inputByKey(item.groupInputKey)
     val activators = groupInput?.activators.orEmpty()
     val primary = activators.firstOrNull { it.activator.type == item.activatorType }
         ?: activators.firstOrNull()

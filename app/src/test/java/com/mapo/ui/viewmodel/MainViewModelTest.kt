@@ -435,6 +435,92 @@ class MainViewModelTest {
         verify(exactly = 1) { filter.appLabel("com.example") }
     }
 
+    // ── Viewing action set (Brick 4.3) ────────────────────────────────────────
+
+    @Test
+    fun setViewingActionSet_flowsThroughStateFlow() = runTest(testDispatcher) {
+        assertNull(subject.viewingActionSetId.value)
+
+        subject.setViewingActionSet(42L)
+        assertEquals(42L, subject.viewingActionSetId.value)
+
+        subject.setViewingActionSet(null)
+        assertNull(subject.viewingActionSetId.value)
+    }
+
+    @Test
+    fun viewingActionSetId_resetsToNull_whenActiveProfileChanges() = runTest(testDispatcher) {
+        subject.setViewingActionSet(42L)
+        assertEquals(42L, subject.viewingActionSetId.value)
+
+        activeProfile.value = Profile(id = 7L, name = "Other")
+        advanceUntilIdle()
+
+        assertNull(
+            "Switching the active profile should drop the editor's viewing pointer — the new controller has its own sets",
+            subject.viewingActionSetId.value,
+        )
+    }
+
+    @Test
+    fun viewingActionSetId_resetsToNull_whenViewedSetDisappearsFromConfig() = runTest(testDispatcher) {
+        val activeConfigFlow = MutableStateFlow<ControllerConfig?>(null)
+        every { controllerConfigRepo.observeActiveConfig(any()) } returns activeConfigFlow
+        // Rebuild subject so it picks up the new mock behavior.
+        subject = MainViewModel(
+            layoutRepository = layoutRepo,
+            profileRepository = profileRepo,
+            controllerConfigRepository = controllerConfigRepo,
+            appProfileBindingRepository = bindingRepo,
+            autoSwitchSettings = settings,
+            autoSwitcher = autoSwitcher,
+            foregroundAppFilter = filter,
+            keyboardTemplateRepository = templateRepo,
+            inputDispatcher = inputDispatcher,
+            ioDispatcher = testDispatcher,
+        )
+        activeProfile.value = Profile(id = 1L, name = "P")
+        // Emit a config that has set ids 1L and 2L.
+        activeConfigFlow.value = miniConfig(setIds = listOf(1L, 2L))
+        advanceUntilIdle()
+
+        subject.setViewingActionSet(2L)
+        assertEquals(2L, subject.viewingActionSetId.value)
+
+        // Now emit a new config without set 2L (e.g., user deleted it).
+        activeConfigFlow.value = miniConfig(setIds = listOf(1L))
+        advanceUntilIdle()
+
+        assertNull(
+            "Stale viewing pointer should reset to null when the set disappears from config",
+            subject.viewingActionSetId.value,
+        )
+    }
+
+    /**
+     * Minimal ControllerConfig with the given [setIds] — used by Brick 4.3 cleanup tests.
+     * Empty preset / no inputs, since these tests don't exercise the binding graph.
+     */
+    private fun miniConfig(setIds: List<Long>): ControllerConfig {
+        val sets = setIds.map { id ->
+            com.mapo.data.model.steam.ActionSetGraph(
+                actionSet = com.mapo.data.model.steam.ActionSet(
+                    id = id, controllerProfileId = 1L, name = "s$id", title = "S$id",
+                ),
+                layers = emptyList(),
+                preset = emptyList(),
+            )
+        }
+        return ControllerConfig(
+            controllerProfile = com.mapo.data.model.steam.ControllerProfile(
+                id = 1L, profileId = 1L,
+                controllerType = com.mapo.data.model.steam.ControllerType.GENERIC_ANDROID,
+                name = "Default",
+            ),
+            actionSets = sets,
+        )
+    }
+
     @Test
     fun setControllerBinding_noActiveProfile_isNoOp() = runTest(testDispatcher) {
         activeProfile.value = null

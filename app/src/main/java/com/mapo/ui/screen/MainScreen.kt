@@ -101,6 +101,7 @@ import com.mapo.R
 import com.mapo.data.model.GridButton
 import com.mapo.data.model.GridLayout
 import com.mapo.data.model.RemapTarget
+import com.mapo.data.model.steam.resolveActionSet
 import com.mapo.data.model.TrackpadGesture
 import com.mapo.data.model.ButtonRegion
 import com.mapo.data.model.RegionPosition
@@ -211,6 +212,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     }
 
     val activeControllerConfig by viewModel.activeControllerConfig.collectAsStateWithLifecycle()
+    val viewingActionSetId by viewModel.viewingActionSetId.collectAsStateWithLifecycle()
     val remapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -514,6 +516,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             composable(MapoRoute.REMAP_CONTROLS) {
                 RemapControlsScreen(
                     config = activeControllerConfig,
+                    viewingActionSetId = viewingActionSetId,
+                    onSelectActionSet = viewModel::setViewingActionSet,
                     onBack = { navController.popBackStack() },
                     onOpenInputEditor = { inputSource, groupInputKey, label ->
                         navController.navigate(
@@ -548,6 +552,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     inputSource = inputSource,
                     groupInputKey = groupInputKey,
                     config = activeControllerConfig,
+                    viewingActionSetId = viewingActionSetId,
                     pickerResult = pickerResult?.let { RemapTarget.decode(it) },
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
@@ -604,8 +609,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     val source = runCatching {
                         com.mapo.data.model.steam.InputSource.valueOf(parts[0])
                     }.getOrNull() ?: return@LaunchedEffect
-                    // Resolve current settings off the active config so we don't clobber other knobs.
-                    val current = activeControllerConfig?.activeActionSet?.preset
+                    // Resolve current settings off the viewed set so we don't clobber other knobs.
+                    val current = activeControllerConfig
+                        ?.resolveActionSet(viewingActionSetId)
+                        ?.preset
                         ?.flatMap { p -> p.group.inputs.flatMap { it.activators } }
                         ?.firstOrNull { it.activator.id == activatorId }
                         ?.let { com.mapo.service.input.CompiledActivatorSettings.parse(it.activator.settingsJson) }
@@ -620,6 +627,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     activatorId = activatorId,
                     title = label.ifEmpty { "Activator" },
                     config = activeControllerConfig,
+                    viewingActionSetId = viewingActionSetId,
                     onSettingsChange = { id, settings ->
                         viewModel.setControllerActivatorSettings(id, settings)
                     },

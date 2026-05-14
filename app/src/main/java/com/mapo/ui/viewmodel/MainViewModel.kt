@@ -168,6 +168,21 @@ class MainViewModel @Inject constructor(
             .flatMapLatest { controllerConfigRepository.observeActiveConfig(it.id) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /**
+     * Brick 4.3: which action set the editor is currently *viewing*. Independent of the
+     * runtime active set (which lives in the evaluator and only changes via `CHANGE_PRESET`
+     * bindings). Null means "follow the controller_profile's default set" — so the editor
+     * always lands somewhere sensible without the VM having to chase the default whenever
+     * the config changes.
+     *
+     * Maintenance: reset to null when the active profile changes (different controller's
+     * sets are unaddressable from here) or when the currently-viewed set disappears from
+     * the config (e.g., user deleted it — Brick 4.4 territory). The cleanup collector is
+     * cheap because the only state read is `actionSets.map { it.id }`.
+     */
+    private val _viewingActionSetId = MutableStateFlow<Long?>(null)
+    val viewingActionSetId: StateFlow<Long?> = _viewingActionSetId.asStateFlow()
+
     val templates: StateFlow<ImmutableList<TemplateRef>> = keyboardTemplateRepository.allTemplates
         .map { it.toImmutableList() }
         .stateIn(
@@ -207,7 +222,17 @@ class MainViewModel @Inject constructor(
                     "MainViewModel",
                     "Published CompiledConfig: defaultSet=${compiled.defaultActionSetId} sets=${compiled.sets.size}",
                 )
+                // Stale-id cleanup: if the user deleted or migrated away from the set
+                // they were viewing, drop back to the controller_profile default.
+                val currentViewing = _viewingActionSetId.value
+                if (currentViewing != null && config?.actionSets?.any { it.actionSet.id == currentViewing } != true) {
+                    _viewingActionSetId.value = null
+                }
             }
+        }
+        viewModelScope.launch {
+            // Profile change → forget the previous controller's set selection.
+            activeProfile.collect { _viewingActionSetId.value = null }
         }
         viewModelScope.launch {
             combine(appProfileBindings, ignoredPackages) { bindings, ignored ->
@@ -341,6 +366,16 @@ class MainViewModel @Inject constructor(
     fun removeControllerCommand(bindingId: Long) {
         if (activeProfile.value == null) return
         viewModelScope.launch { controllerConfigRepository.removeCommand(bindingId) }
+    }
+
+    /**
+     * Brick 4.3: editor-side viewing selection. Pass a set id to view that set in the
+     * `RemapControlsScreen` overview / row previews, or null to fall back to the
+     * controller_profile's default set. This is *not* the runtime active set —
+     * `CHANGE_PRESET` bindings drive that, independently.
+     */
+    fun setViewingActionSet(actionSetId: Long?) {
+        _viewingActionSetId.value = actionSetId
     }
 
     /**

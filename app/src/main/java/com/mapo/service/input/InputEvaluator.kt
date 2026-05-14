@@ -26,6 +26,8 @@ import javax.inject.Singleton
  *  - **Brick 3.2** — `DOUBLE_PRESS` window state machine + Regular/Double coexistence.
  *  - **Brick 3.3** — Universal settings (toggle, hold-to-repeat / turbo, fire start/end
  *    delays, cycle bindings, interruptable) and `CHORDED_PRESS`.
+ *  - **Brick 5.1** — Action-set layer stack with `add_layer` / `remove_layer` /
+ *    `hold_layer` verbs. Top-of-stack wins on lookup; `CHANGE_PRESET` clears the stack.
  *
  * State held here:
  *  - [held] — per-address held entries released on UP. Each entry captures the bindings,
@@ -111,6 +113,25 @@ class InputEvaluator @Inject constructor(
     private val activeChords = mutableListOf<ChordLink>()
 
     /**
+     * Active action set layer stack (Brick 5.1). Front-to-back order: index 0 is the
+     * earliest activation, last index is the most recent (top-of-stack, highest priority
+     * on conflicts). Steam-faithful:
+     *  - `add_layer X` when X already present is a no-op (no reorder).
+     *  - Explicit `remove_layer X; add_layer X` is how the user moves a layer to the top.
+     *  - `CHANGE_PRESET` clears the stack (per the docs: "Switching action sets clears
+     *    ALL layers of the old set").
+     */
+    private val activeLayers = ArrayDeque<Long>()
+
+    /**
+     * Per-address `hold_layer` link (Brick 5.1). When a binding emits `hold_layer N`
+     * during a held press, we record (address → layerId) here so the matching UP can
+     * deactivate that specific layer. Independent of [held] because the layer side has
+     * no key-output to release through the emitter — only a stack mutation.
+     */
+    private val heldLayerByAddress = HashMap<InputAddress, Long>()
+
+    /**
      * Currently-active action set id (Brick 4.2). 0L means "uninitialized — lazy-resolve
      * from `compiledConfig.startingActionSetId` on first event." A `CHANGE_PRESET`
      * controller_action verb mutates this; [flushAllRuntime] runs first so no held
@@ -150,8 +171,21 @@ class InputEvaluator @Inject constructor(
         return cfg.sets[activeSetId]
     }
 
-    private fun lookupActive(address: InputAddress): CompiledInput? =
-        resolveActiveSet()?.inputs?.get(address)
+    /**
+     * Lookup with layer-stack overlay (Brick 5.1). Walks [activeLayers] top-down (last
+     * entry = highest priority); first overlay that holds the address wins. Falls back
+     * to the base set's inputs when no layer in the stack overrides the address.
+     */
+    private fun lookupActive(address: InputAddress): CompiledInput? {
+        val set = resolveActiveSet() ?: return null
+        if (activeLayers.isNotEmpty()) {
+            for (i in activeLayers.indices.reversed()) {
+                val overlay = set.layers[activeLayers[i]]?.inputs?.get(address)
+                if (overlay != null) return overlay
+            }
+        }
+        return set.inputs[address]
+    }
 
     /**
      * Handle a digital press/release at [address]. Returns true if the event was consumed
@@ -300,6 +334,11 @@ class InputEvaluator @Inject constructor(
         // [address] is itself a chord, the normal release path below handles the bindings;
         // we just clean up the activeChords tracking.
         releaseChordsDependingOn(address)
+
+        // 5.1: `hold_layer` linked to this address releases here. Done before the
+        // RELEASE_PRESS activator path so RELEASE_PRESS bindings already see the
+        // underlying-set bindings restored (matches Steam: the layer goes away with the UP).
+        releaseHeldLayer(address)
 
         // If a DOUBLE_PRESS window is still active for this address, this UP belongs to the
         // first tap. Note the physical state — the window timer uses it later to decide
@@ -461,7 +500,7 @@ class InputEvaluator @Inject constructor(
     ): Boolean {
         val holdable = mutableListOf<BindingOutput>()
         for (binding in bindings) {
-            if (tryHandleControllerAction(binding)) continue
+            if (tryHandleControllerAction(binding, address)) continue
             if (emitter.emitPress(binding)) holdable += binding
         }
 
@@ -502,7 +541,9 @@ class InputEvaluator @Inject constructor(
             while (isActive) {
                 delay(rate)
                 for (binding in bindings) {
-                    if (tryHandleControllerAction(binding)) continue
+                    // Repeat path: no owning address. `hold_layer` skips with a warning;
+                    // `add_layer` / `remove_layer` repeat harmlessly (already-active is a no-op).
+                    if (tryHandleControllerAction(binding, address = null)) continue
                     val holdable = emitter.emitPress(binding)
                     if (holdable) emitter.emitRelease(binding)
                 }
@@ -524,7 +565,9 @@ class InputEvaluator @Inject constructor(
         val st = stateFor(activator.activatorId)
         val bindings = pickBindings(activator, st)
         for (binding in bindings) {
-            if (tryHandleControllerAction(binding)) continue
+            // Tap path: no held semantics. `hold_layer` skips (logged) because it would
+            // never get a release; sticky `add_layer` / `remove_layer` are fine.
+            if (tryHandleControllerAction(binding, address = null)) continue
             val holdable = emitter.emitPress(binding)
             if (holdable) emitter.emitRelease(binding)
         }
@@ -546,6 +589,9 @@ class InputEvaluator @Inject constructor(
         doubleTapWindows.remove(address)?.timerJob?.cancel()
         longPressDeferrals.remove(address)
         releaseChordsDependingOn(address)
+        // 5.1: drop any layer held by this address so a stale duplicate DOWN doesn't
+        // strand the overlay active forever.
+        releaseHeldLayer(address)
         held.remove(address)?.forEach { entry ->
             entry.bindings.forEach(emitter::emitRelease)
         }
@@ -582,11 +628,17 @@ class InputEvaluator @Inject constructor(
     /**
      * Intercept evaluator-managed controller verbs *before* they're handed to
      * [OutputEmitter]. Returns true when the binding was consumed by the evaluator,
-     * in which case the caller should skip the normal emit path. Today this is just
-     * `CHANGE_PRESET` (Brick 4.2); Phase 5 will add layer verbs (`add_layer`,
-     * `remove_layer`, `hold_layer`, mode-shift).
+     * in which case the caller should skip the normal emit path.
+     *
+     * [address] is the physical input that emitted this binding, if known. Required by
+     * `hold_layer` (which needs to know whose UP releases the layer). Null is supplied
+     * by call sites that don't have a single owning address — turbo repeat and tap
+     * paths — and `hold_layer` no-ops with a warning in that case.
+     *
+     * Brick 4.2 introduced `CHANGE_PRESET`; Brick 5.1 adds `add_layer`, `remove_layer`,
+     * and `hold_layer`. `mode_shift` lands in Phase 6 with mode authoring.
      */
-    private fun tryHandleControllerAction(output: BindingOutput): Boolean {
+    private fun tryHandleControllerAction(output: BindingOutput, address: InputAddress?): Boolean {
         if (output !is BindingOutput.ControllerAction) return false
         return when (output.verb) {
             "CHANGE_PRESET" -> {
@@ -598,8 +650,90 @@ class InputEvaluator @Inject constructor(
                 }
                 true
             }
+            "add_layer" -> {
+                val layerId = output.args.firstOrNull()?.toLongOrNull()
+                if (layerId == null) Log.w(TAG, "add_layer missing layer id: ${output.args}")
+                else addLayer(layerId)
+                true
+            }
+            "remove_layer" -> {
+                val layerId = output.args.firstOrNull()?.toLongOrNull()
+                if (layerId == null) Log.w(TAG, "remove_layer missing layer id: ${output.args}")
+                else removeLayer(layerId)
+                true
+            }
+            "hold_layer" -> {
+                val layerId = output.args.firstOrNull()?.toLongOrNull()
+                when {
+                    layerId == null -> Log.w(TAG, "hold_layer missing layer id: ${output.args}")
+                    address == null -> Log.w(TAG, "hold_layer($layerId) from a tap/repeat context has no UP to release on — ignoring (use FULL_PRESS for while-held layers)")
+                    else -> holdLayer(address, layerId)
+                }
+                true
+            }
             else -> false
         }
+    }
+
+    /**
+     * Push [layerId] onto the active layer stack. Per Steam: "Activating an already-active
+     * layer = no-op." (To move a layer to the top, `remove_layer` + `add_layer` explicitly.)
+     * Guards against unknown ids — if the layer isn't on the active set, log + skip.
+     */
+    private fun addLayer(layerId: Long) {
+        val set = resolveActiveSet()
+        if (set == null) {
+            Log.w(TAG, "add_layer($layerId): no active set; ignoring")
+            return
+        }
+        if (layerId !in set.layers) {
+            Log.w(TAG, "add_layer($layerId): set ${set.actionSetId} has no such layer; ignoring")
+            return
+        }
+        if (layerId in activeLayers) {
+            Log.d(TAG, "add_layer($layerId): already active — no-op")
+            return
+        }
+        activeLayers.addLast(layerId)
+        Log.d(TAG, "add_layer($layerId): pushed; stack depth=${activeLayers.size}")
+    }
+
+    /**
+     * Remove [layerId] from anywhere in the stack. Lower-priority layers and the base
+     * set remain — the gap closes naturally. No-op when the layer isn't active.
+     */
+    private fun removeLayer(layerId: Long) {
+        if (activeLayers.remove(layerId)) {
+            Log.d(TAG, "remove_layer($layerId): popped; stack depth=${activeLayers.size}")
+        } else {
+            Log.d(TAG, "remove_layer($layerId): not active — no-op")
+        }
+    }
+
+    /**
+     * `hold_layer`: while-held single-verb form. Activates the layer and binds its release
+     * to the next UP on [address]. If [address] already holds another layer (duplicate DOWN
+     * without an intervening UP), the prior layer is released first.
+     */
+    private fun holdLayer(address: InputAddress, layerId: Long) {
+        heldLayerByAddress[address]?.let { existing ->
+            Log.d(TAG, "hold_layer($layerId) on $address replacing prior held layer $existing")
+            removeLayer(existing)
+        }
+        addLayer(layerId)
+        heldLayerByAddress[address] = layerId
+        Log.d(TAG, "hold_layer($layerId): linked to $address; release on UP")
+    }
+
+    /**
+     * Release whatever layer (if any) is held by [address] (Brick 5.1). Called from the
+     * normal release path and the forced-release path so a duplicate DOWN or set-switch
+     * doesn't leak a held layer.
+     */
+    private fun releaseHeldLayer(address: InputAddress) {
+        val layerId = heldLayerByAddress.remove(address) ?: return
+        Log.d(TAG, "hold_layer release on $address: removing layer $layerId")
+        removeLayer(layerId)
     }
 
     /**
@@ -625,9 +759,10 @@ class InputEvaluator @Inject constructor(
     /**
      * Release everything currently in flight: held bindings (with their releases sent),
      * pending timers, in-flight double-tap windows, long-press deferrals, toggle latches,
-     * hold-to-repeat jobs, fire-start-delay jobs, active chords. Called on set-switch
-     * (Brick 4.2) and reusable by Phase 5's layer-clearing path. Physical state
-     * ([physicallyHeld]) is left intact.
+     * hold-to-repeat jobs, fire-start-delay jobs, active chords, and the layer stack
+     * (Brick 5.1: "Switching action sets clears ALL layers of the old set" per Steam).
+     * Called on set-switch (Brick 4.2 / 5.1). Physical state ([physicallyHeld]) is
+     * left intact.
      */
     private fun flushAllRuntime() {
         for ((_, entries) in held) {
@@ -658,6 +793,11 @@ class InputEvaluator @Inject constructor(
             st.startDelayJob = null
         }
         activeChords.clear()
+        if (activeLayers.isNotEmpty()) {
+            Log.d(TAG, "flushAllRuntime: clearing ${activeLayers.size} active layer(s) $activeLayers")
+            activeLayers.clear()
+        }
+        heldLayerByAddress.clear()
     }
 
     /** Test seam: which action set is currently active. Returns 0L before first event. */
@@ -682,6 +822,15 @@ class InputEvaluator @Inject constructor(
 
     /** Test seam: number of active CHORDED_PRESS activations. */
     internal fun activeChordCount(): Int = activeChords.size
+
+    /** Test seam: how many layers are currently active in the stack. */
+    internal fun activeLayerCount(): Int = activeLayers.size
+
+    /** Test seam: active layer ids, bottom-of-stack first. Top-of-stack is the last entry. */
+    internal fun activeLayerIds(): List<Long> = activeLayers.toList()
+
+    /** Test seam: is the given layer currently in the active stack? */
+    internal fun isLayerActive(layerId: Long): Boolean = layerId in activeLayers
 
     companion object {
         private const val TAG = "InputEvaluator"

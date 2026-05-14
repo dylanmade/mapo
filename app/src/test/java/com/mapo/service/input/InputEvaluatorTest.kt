@@ -949,6 +949,422 @@ class InputEvaluatorTest {
         )
     }
 
+    // ── Action set layers (Brick 5.1) ────────────────────────────────────────
+
+    private fun addLayerVerb(layerId: Long): BindingOutput.ControllerAction =
+        BindingOutput.ControllerAction(verb = "add_layer", args = listOf(layerId.toString()))
+
+    private fun removeLayerVerb(layerId: Long): BindingOutput.ControllerAction =
+        BindingOutput.ControllerAction(verb = "remove_layer", args = listOf(layerId.toString()))
+
+    private fun holdLayerVerb(layerId: Long): BindingOutput.ControllerAction =
+        BindingOutput.ControllerAction(verb = "hold_layer", args = listOf(layerId.toString()))
+
+    /**
+     * Build a single-set config that also carries layer overlays. Each entry in [layers]
+     * is `(layerId, list of (address, activators))` — only the overridden addresses appear.
+     */
+    private fun configWithLayers(
+        setId: Long,
+        base: List<Pair<InputAddress, List<CompiledActivator>>>,
+        layers: List<Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>>,
+    ): CompiledConfig {
+        val baseInputs = base.associate { (addr, activators) ->
+            addr to CompiledInput(groupInputId = 0L, activators = activators)
+        }
+        val compiledLayers = layers.associate { (layerId, entries) ->
+            layerId to CompiledLayer(
+                layerId = layerId,
+                inputs = entries.associate { (addr, activators) ->
+                    addr to CompiledInput(groupInputId = 0L, activators = activators)
+                },
+            )
+        }
+        return CompiledConfig(
+            startingActionSetId = setId,
+            sets = mapOf(setId to CompiledActionSet(setId, baseInputs, compiledLayers)),
+        )
+    }
+
+    @Test
+    fun addLayer_overlayOverridesBaseAddress_onSubsequentPress() {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        // Base: A → ENTER. Layer L10 overlays A → ESCAPE.
+        // B → add_layer(10).
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER),
+                BUTTON_B to listOf(
+                    CompiledActivator(
+                        activatorId = 50L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(addLayerVerb(10L)),
+                    )
+                ),
+            ),
+            layers = listOf(
+                10L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+            ),
+        )
+
+        // Pre-layer: A emits ENTER.
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }
+
+        // Activate the layer via B, then re-press A.
+        subject.handleDigital(BUTTON_B, isDown = true)
+        subject.handleDigital(BUTTON_B, isDown = false)
+        assertTrue(subject.isLayerActive(10L))
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+        // ENTER didn't fire a second time.
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+    }
+
+    @Test
+    fun addLayer_alreadyActive_isNoOp_doesNotReorderStack() {
+        // Press B twice → second add_layer is no-op (stack stays [10]).
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_A to listOf(
+                    CompiledActivator(
+                        activatorId = 50L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(addLayerVerb(10L)),
+                    )
+                ),
+            ),
+            layers = listOf(10L to emptyList()),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+
+        assertEquals(listOf(10L), subject.activeLayerIds())
+    }
+
+    @Test
+    fun removeLayer_dropsFromStack_baseRebinds() {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        val BUTTON_X = InputAddress(InputSource.BUTTON_DIAMOND, "button_x")
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER),
+                BUTTON_B to listOf(
+                    CompiledActivator(
+                        activatorId = 50L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(addLayerVerb(10L)),
+                    )
+                ),
+                BUTTON_X to listOf(
+                    CompiledActivator(
+                        activatorId = 51L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(removeLayerVerb(10L)),
+                    )
+                ),
+            ),
+            layers = listOf(
+                10L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+            ),
+        )
+
+        // Add layer, press A → ESCAPE. Remove layer, press A → ENTER again.
+        subject.handleDigital(BUTTON_B, isDown = true); subject.handleDigital(BUTTON_B, isDown = false)
+        subject.handleDigital(BUTTON_A, isDown = true); subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+
+        subject.handleDigital(BUTTON_X, isDown = true); subject.handleDigital(BUTTON_X, isDown = false)
+        assertEquals(0, subject.activeLayerCount())
+
+        subject.handleDigital(BUTTON_A, isDown = true); subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+    }
+
+    @Test
+    fun removeLayer_unknownId_isNoOp() {
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_A to listOf(
+                    CompiledActivator(
+                        activatorId = 50L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(removeLayerVerb(999L)),
+                    )
+                ),
+            ),
+            layers = emptyList(),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        assertEquals(0, subject.activeLayerCount())
+        // Nothing crashed; nothing emitted (binding was a controller verb).
+        verify(exactly = 0) { emitter.emitPress(any()) }
+    }
+
+    @Test
+    fun addLayer_unknownId_isNoOpAndDoesNotPushOntoStack() {
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_A to listOf(
+                    CompiledActivator(
+                        activatorId = 50L,
+                        type = ActivatorType.FULL_PRESS,
+                        bindings = listOf(addLayerVerb(999L)),  // not in layers map
+                    )
+                ),
+            ),
+            layers = listOf(10L to emptyList()),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        assertEquals(emptyList<Long>(), subject.activeLayerIds())
+    }
+
+    @Test
+    fun layerStack_lastInWins_onConflict() {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        val BUTTON_X = InputAddress(InputSource.BUTTON_DIAMOND, "button_x")
+        // Base A → ENTER. Layer 10 overlays A → ESCAPE. Layer 20 also overlays A → SPACE.
+        // B activates layer 10, X activates layer 20 (added later → top of stack).
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER),
+                BUTTON_B to listOf(
+                    CompiledActivator(50L, ActivatorType.FULL_PRESS, bindings = listOf(addLayerVerb(10L))),
+                ),
+                BUTTON_X to listOf(
+                    CompiledActivator(51L, ActivatorType.FULL_PRESS, bindings = listOf(addLayerVerb(20L))),
+                ),
+            ),
+            layers = listOf(
+                10L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+                20L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, SPACE)),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true); subject.handleDigital(BUTTON_B, isDown = false)
+        subject.handleDigital(BUTTON_X, isDown = true); subject.handleDigital(BUTTON_X, isDown = false)
+        assertEquals(listOf(10L, 20L), subject.activeLayerIds())  // 20 on top
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(SPACE) }
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }
+        verify(exactly = 0) { emitter.emitPress(ENTER) }
+    }
+
+    @Test
+    fun layerStack_removeTopLayer_underlyingLayerResolves() {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        val BUTTON_X = InputAddress(InputSource.BUTTON_DIAMOND, "button_x")
+        val BUTTON_Y = InputAddress(InputSource.BUTTON_DIAMOND, "button_y")
+        // Base A → ENTER. Layer 10 → ESCAPE. Layer 20 → SPACE.
+        // B adds 10, X adds 20, Y removes 20. After Y, A should resolve to layer 10 (ESCAPE).
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER),
+                BUTTON_B to listOf(
+                    CompiledActivator(50L, ActivatorType.FULL_PRESS, bindings = listOf(addLayerVerb(10L))),
+                ),
+                BUTTON_X to listOf(
+                    CompiledActivator(51L, ActivatorType.FULL_PRESS, bindings = listOf(addLayerVerb(20L))),
+                ),
+                BUTTON_Y to listOf(
+                    CompiledActivator(52L, ActivatorType.FULL_PRESS, bindings = listOf(removeLayerVerb(20L))),
+                ),
+            ),
+            layers = listOf(
+                10L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+                20L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, SPACE)),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true); subject.handleDigital(BUTTON_B, isDown = false)
+        subject.handleDigital(BUTTON_X, isDown = true); subject.handleDigital(BUTTON_X, isDown = false)
+        subject.handleDigital(BUTTON_Y, isDown = true); subject.handleDigital(BUTTON_Y, isDown = false)
+
+        assertEquals(listOf(10L), subject.activeLayerIds())
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+    }
+
+    @Test
+    fun holdLayer_activatesOnPress_releasesOnUp() {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        // B holds layer 10. Layer 10 overlays A → ESCAPE.
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER),
+                BUTTON_B to listOf(
+                    CompiledActivator(50L, ActivatorType.FULL_PRESS, bindings = listOf(holdLayerVerb(10L))),
+                ),
+            ),
+            layers = listOf(
+                10L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+            ),
+        )
+
+        // Hold B. Layer active. A presses while held → ESCAPE.
+        subject.handleDigital(BUTTON_B, isDown = true)
+        assertTrue(subject.isLayerActive(10L))
+        subject.handleDigital(BUTTON_A, isDown = true); subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+
+        // Release B → layer deactivates. A presses → ENTER.
+        subject.handleDigital(BUTTON_B, isDown = false)
+        assertFalse(subject.isLayerActive(10L))
+        subject.handleDigital(BUTTON_A, isDown = true); subject.handleDigital(BUTTON_A, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+    }
+
+    @Test
+    fun holdLayer_fromTapContext_isWarnedAndIgnored() {
+        // START_PRESS fires hold_layer via the tap path — no UP semantics, so it should
+        // be skipped (the warning is logcat-side; we just assert no stack mutation).
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_A to listOf(
+                    CompiledActivator(50L, ActivatorType.START_PRESS, bindings = listOf(holdLayerVerb(10L))),
+                ),
+            ),
+            layers = listOf(10L to emptyList()),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        assertEquals(0, subject.activeLayerCount())
+    }
+
+    @Test
+    fun changePreset_clearsActiveLayerStack() {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWithLayersAndTwoSets(
+            startingSetId = 1L,
+            baseSetA = 1L to listOf(
+                BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER),
+                BUTTON_B to listOf(
+                    CompiledActivator(50L, ActivatorType.FULL_PRESS, bindings = listOf(addLayerVerb(10L))),
+                ),
+            ),
+            layersForA = listOf(
+                10L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+            ),
+            setB = 2L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, SPACE)),
+        )
+
+        // Activate layer 10 in set 1.
+        subject.handleDigital(BUTTON_B, isDown = true); subject.handleDigital(BUTTON_B, isDown = false)
+        assertTrue(subject.isLayerActive(10L))
+
+        // CHANGE_PRESET directly via the helper API by issuing it from a binding. To keep
+        // the test compact, we just call the verb path through B's binding after rewriting
+        // the config — simpler: drop a CHANGE_PRESET binding on a third button.
+        val BUTTON_X = InputAddress(InputSource.BUTTON_DIAMOND, "button_x")
+        compiledConfig.value = configWithLayersAndTwoSets(
+            startingSetId = 1L,
+            baseSetA = 1L to listOf(
+                BUTTON_A to activator(ActivatorType.FULL_PRESS, ENTER),
+                BUTTON_X to listOf(
+                    CompiledActivator(99L, ActivatorType.FULL_PRESS, bindings = listOf(changePresetTo(2L))),
+                ),
+            ),
+            layersForA = listOf(
+                10L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+            ),
+            setB = 2L to listOf(BUTTON_A to activator(ActivatorType.FULL_PRESS, SPACE)),
+        )
+
+        subject.handleDigital(BUTTON_X, isDown = true); subject.handleDigital(BUTTON_X, isDown = false)
+        assertEquals(2L, subject.currentActiveSetId())
+        assertEquals("CHANGE_PRESET must clear the layer stack", 0, subject.activeLayerCount())
+
+        // New set's binding for A resolves cleanly.
+        subject.handleDigital(BUTTON_A, isDown = true)
+        verify(exactly = 1) { emitter.emitPress(SPACE) }
+    }
+
+    @Test
+    fun holdLayer_releasedByForceRelease_onDuplicateDown() {
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWithLayers(
+            setId = 1L,
+            base = listOf(
+                BUTTON_B to listOf(
+                    CompiledActivator(50L, ActivatorType.FULL_PRESS, bindings = listOf(holdLayerVerb(10L))),
+                ),
+            ),
+            layers = listOf(10L to emptyList()),
+        )
+
+        // Press B (layer active). Duplicate DOWN without UP — force-release path kicks in
+        // and drops the held layer to prevent stranding.
+        subject.handleDigital(BUTTON_B, isDown = true)
+        assertTrue(subject.isLayerActive(10L))
+        subject.handleDigital(BUTTON_B, isDown = true)
+        // The force-release runs *before* the new press re-adds, so the new press still
+        // ends up holding the layer afresh. What we're verifying is that we didn't leak
+        // two stack entries for the same layer.
+        assertEquals(listOf(10L), subject.activeLayerIds())
+
+        // Releasing now drops it.
+        subject.handleDigital(BUTTON_B, isDown = false)
+        assertEquals(0, subject.activeLayerCount())
+    }
+
+    /**
+     * Layer-aware extension of [configWithTwoSets]. Set A carries an overlay; Set B is
+     * plain. Used by CHANGE_PRESET-clears-stack tests.
+     */
+    private fun configWithLayersAndTwoSets(
+        startingSetId: Long,
+        baseSetA: Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>,
+        layersForA: List<Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>>,
+        setB: Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>,
+    ): CompiledConfig {
+        fun buildSet(
+            setId: Long,
+            base: List<Pair<InputAddress, List<CompiledActivator>>>,
+            layers: List<Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>>,
+        ): CompiledActionSet {
+            val baseInputs = base.associate { (addr, activators) ->
+                addr to CompiledInput(groupInputId = 0L, activators = activators)
+            }
+            val compiledLayers = layers.associate { (layerId, entries) ->
+                layerId to CompiledLayer(
+                    layerId = layerId,
+                    inputs = entries.associate { (addr, activators) ->
+                        addr to CompiledInput(groupInputId = 0L, activators = activators)
+                    },
+                )
+            }
+            return CompiledActionSet(setId, baseInputs, compiledLayers)
+        }
+        return CompiledConfig(
+            startingActionSetId = startingSetId,
+            sets = mapOf(
+                baseSetA.first to buildSet(baseSetA.first, baseSetA.second, layersForA),
+                setB.first to buildSet(setB.first, setB.second, emptyList()),
+            ),
+        )
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun activator(

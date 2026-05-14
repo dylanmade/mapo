@@ -584,7 +584,18 @@ A new binding output category in the picker: **Steam → Switch Action Set**, ta
 
 ---
 
-## Phase 5 — Action layers + mode-shift
+## Phase 5 — Action layers (mode-shift deferred → Phase 6)
+
+> **Scope change vs. original plan:** mode-shift was originally bundled with layers but is conceptually closer to *modes* (the per-source authoring problem) than to layers (the stacking-overlay problem). It moves into Phase 6 alongside mode authoring, where the source ↔ target compatibility matrix can be checked when wiring the picker. Phase 5 is now layers-only.
+
+### Brick breakdown
+
+- **5.1 — Runtime: layer stack in InputEvaluator + CompiledConfig overlays**. New verbs `add_layer` / `remove_layer` / `hold_layer` in `tryHandleControllerAction`; `CompiledConfig` carries per-layer overlay groups; last-in-wins resolution; `CHANGE_PRESET` clears stack.
+- **5.2 — Repo CRUD: addLayer / renameLayer / duplicateLayer / deleteLayer** (empty seed for new layers). When duplicating, every overlay's groups/inputs/activators/bindings get fresh ids per `feedback_duplicates_own_their_data`.
+- **5.3 — VM: viewingLayerId pointer** with stale-id and profile-change cleanup, plus an `availableLayers` flow for picker categories.
+- **5.4 — UI: Layers pill row beside Action Set tabs**, with `[+]` and per-pill overflow menu (Rename / Duplicate / Delete).
+- **5.5 — UI: Overlay editing mode** with ghost text for parent-set bindings and a "Show all / Only overrides" toggle. This is where the per-layer preset-binding schema needs to land (so an overlay can actually associate a group with an input source).
+- **5.6 — Picker: Layer activation categories** (Add Layer sticky, Add Layer while-held, Hold Layer, Remove Layer).
 
 ### Action layers
 
@@ -641,8 +652,16 @@ In any activator's binding list: **Steam → Mode Shift**, target = (input sourc
 ### Verify
 
 - Bind RB → Add Layer (while held) = "Scope". Layer "Scope" overrides A = MOUSE_LEFT. Hold RB → A emits left-click; release RB → A emits ENTER again.
-- Bind A → Mode Shift right trackpad → Scroll Wheel. Hold A; drag right trackpad → emits scroll up/down. Release A; right trackpad reverts to its primary mode.
 - Switching action sets clears the layer stack (verified by activating two stacked layers, switching sets, switching back — stack is empty).
+
+### Brick 5.1 deviations + decisions
+
+- **What it covers**: runtime layer stack + the three new controller verbs + `CompiledConfig.CompiledActionSet.layers`. Verified end-to-end via 11 new `InputEvaluatorTest` cases (overlay overrides base; last-in-wins; sticky add/remove; hold while-held; CHANGE_PRESET clearing; idempotent add when already active; safe handling of unknown ids; force-release cleanup; tap-context hold rejection). Plus a `CompiledConfigTest` case that compiles a set with two layer rows and asserts the snapshot's `layers` map carries them.
+- **The `hold_layer` address question** turned out to need plumbing: `tryHandleControllerAction(output)` now takes a nullable `InputAddress`. `doEmitPress` passes the address; turbo repeat and `emitTap` pass null. `hold_layer` rejects null with a log line ("use FULL_PRESS for while-held layers") — there's no UP for it to fire on in a tap context.
+- **`add_layer` semantics chosen**: Steam-faithful — re-adding an already-active layer is a no-op, *not* a reorder. To move a layer to the top, callers must `remove_layer` then `add_layer`. Captured in the addLayer doc; tested in `addLayer_alreadyActive_isNoOp_doesNotReorderStack`.
+- **Persistence gap (intentional)**: `CompiledLayer.inputs` is materialized as empty for now because there's no per-layer preset-binding schema yet. The layer stack runtime is testable today by synthesizing `CompiledConfig` directly in tests; the schema/CRUD piece arrives in 5.2 / 5.5. `ControllerConfig.toCompiled()` still walks `setGraph.layers` and emits one `CompiledLayer` per layer row — only the `inputs` map starts empty.
+- **flushAllRuntime extended** (Brick 4.2 set-switch path) to clear both `activeLayers` and `heldLayerByAddress`, with a log line listing the cleared layers.
+- **Tests added**: `InputEvaluatorTest` — `addLayer_overlayOverridesBaseAddress_onSubsequentPress`, `addLayer_alreadyActive_isNoOp_doesNotReorderStack`, `removeLayer_dropsFromStack_baseRebinds`, `removeLayer_unknownId_isNoOp`, `addLayer_unknownId_isNoOpAndDoesNotPushOntoStack`, `layerStack_lastInWins_onConflict`, `layerStack_removeTopLayer_underlyingLayerResolves`, `holdLayer_activatesOnPress_releasesOnUp`, `holdLayer_fromTapContext_isWarnedAndIgnored`, `changePreset_clearsActiveLayerStack`, `holdLayer_releasedByForceRelease_onDuplicateDown`. `CompiledConfigTest` — `actionLayers_areMaterializedIntoCompiledActionSetLayersMap`.
 
 ---
 

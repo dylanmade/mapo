@@ -1,5 +1,7 @@
 package com.mapo.service.input
 
+import com.mapo.data.model.steam.ActionLayer
+import com.mapo.data.model.steam.ActionLayerGraph
 import com.mapo.data.model.steam.ActionSet
 import com.mapo.data.model.steam.ActionSetGraph
 import com.mapo.data.model.steam.Activator
@@ -266,6 +268,39 @@ class CompiledConfigTest {
         val setBLookup = compiled.lookup(setId = 20L, source = InputSource.BUTTON_DIAMOND, inputKey = "button_a")!!
         assertEquals(BindingOutput.KeyPress("ENTER"), setALookup.activators[0].bindings.single())
         assertEquals(BindingOutput.KeyPress("SPACE"), setBLookup.activators[0].bindings.single())
+    }
+
+    @Test
+    fun actionLayers_areMaterializedIntoCompiledActionSetLayersMap() {
+        // Brick 5.1: layer rows reach the compiled snapshot so the evaluator can stack
+        // them at runtime. Per-input overlays don't get populated yet — the per-layer
+        // preset-binding schema doesn't exist — so we only assert the shape.
+        val setWithLayers = ActionSetGraph(
+            actionSet = ActionSet(id = 7L, controllerProfileId = 1L, name = "default", title = "Default"),
+            layers = listOf(
+                ActionLayerGraph(
+                    layer = ActionLayer(id = 100L, parentActionSetId = 7L, name = "scope", title = "Scope"),
+                    bindingGroups = emptyList(),
+                ),
+                ActionLayerGraph(
+                    layer = ActionLayer(id = 101L, parentActionSetId = 7L, name = "vehicle", title = "Vehicle"),
+                    bindingGroups = emptyList(),
+                ),
+            ),
+            preset = emptyList(),
+        )
+        val cfg = ControllerConfig(
+            controllerProfile = sampleControllerProfile(),
+            actionSets = listOf(setWithLayers),
+        )
+
+        val compiled = cfg.toCompiled()
+        val compiledSet = compiled.sets.getValue(7L)
+        assertEquals(setOf(100L, 101L), compiledSet.layers.keys)
+        assertTrue(
+            "Layer overlays start empty — per-layer preset-binding schema is post-5.1",
+            compiledSet.layers.values.all { it.inputs.isEmpty() },
+        )
     }
 
     @Test

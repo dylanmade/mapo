@@ -22,8 +22,12 @@ import org.json.JSONObject
  * runtime `activeSetId` to; the live active set after `CHANGE_PRESET` fires lives in
  * the evaluator's mutable state, not this snapshot.
  *
- * Layer stacking (Phase 5) is still unmodeled here — overlay groups don't appear in
- * any [CompiledActionSet.inputs] yet.
+ * Brick 5.1 adds [CompiledActionSet.layers] so the evaluator can stack overlay groups
+ * (last-in-wins) on top of the base set's inputs. The runtime layer-stack state still
+ * lives in the evaluator — this snapshot only carries the *available* layers and their
+ * overlays per set. The compiler currently produces layer rows with empty `inputs`
+ * maps (no per-layer preset-binding schema yet — wired in a later brick); the runtime
+ * machinery is testable end-to-end via tests that synthesize overlays directly.
  */
 data class CompiledConfig(
     val startingActionSetId: Long,
@@ -31,7 +35,9 @@ data class CompiledConfig(
 ) {
     /**
      * Resolve an address within a specific action set. Returns null if either the set
-     * isn't in the snapshot or the address has no compiled input under it.
+     * isn't in the snapshot or the address has no compiled input under it. Does NOT
+     * consult layer overlays — that's a runtime concern (the evaluator's layer stack
+     * decides which overlay wins).
      */
     fun lookup(setId: Long, source: InputSource, inputKey: String): CompiledInput? =
         sets[setId]?.inputs?.get(InputAddress(source, inputKey))
@@ -43,10 +49,24 @@ data class CompiledConfig(
 
 /**
  * One action set's compiled lookup table. Each [InputAddress] in [inputs] resolves to
- * its full activator list, pre-parsed.
+ * its full activator list, pre-parsed. [layers] holds every layer available on this
+ * set, keyed by layer id; the evaluator picks which (if any) are currently active.
  */
 data class CompiledActionSet(
     val actionSetId: Long,
+    val inputs: Map<InputAddress, CompiledInput>,
+    val layers: Map<Long, CompiledLayer> = emptyMap(),
+)
+
+/**
+ * One stacking overlay on a [CompiledActionSet]. [inputs] holds only the addresses
+ * the layer overrides — addresses absent from this map fall through to the base set
+ * (or to a lower-priority layer in the active stack). Layer stacking semantics live
+ * in the evaluator: later-activated layers win conflicts; re-activating an already-
+ * active layer is a no-op (Steam docs).
+ */
+data class CompiledLayer(
+    val layerId: Long,
     val inputs: Map<InputAddress, CompiledInput>,
 )
 
@@ -231,12 +251,15 @@ private fun JSONObject.optInputSourceOrNull(key: String): InputSource? {
  * directly from [CompiledConfig.sets] with no recompilation cost. Each set honors only
  * its "active"-state preset entries.
  *
- *  - Layer overrides are ignored (Phase 5).
  *  - Multi-binding activators (cycle_binding) keep all their bindings; the runtime
  *    cycle index is state owned by the evaluator, not the snapshot.
  *  - When the config has no action sets, [CompiledConfig.EMPTY] is returned.
  *  - [CompiledConfig.startingActionSetId] is the first set by orderIndex (Steam's
  *    starting-set convention). Runtime set-switching is the evaluator's job.
+ *  - Layer rows (Brick 5.1) are materialized with empty `inputs` maps — the per-layer
+ *    preset-binding schema doesn't yet exist, so the compiler has no input-source ↔
+ *    binding-group association to populate from. Layer-stack runtime is testable now
+ *    via synthesized `CompiledLayer` overlays; real persistence catches up later.
  */
 fun ControllerConfig.toCompiled(): CompiledConfig {
     if (actionSets.isEmpty()) return CompiledConfig.EMPTY
@@ -258,7 +281,14 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                 inputs[address] = CompiledInput(inputGraph.input.id, compiledActivators)
             }
         }
-        compiledSets[setGraph.actionSet.id] = CompiledActionSet(setGraph.actionSet.id, inputs)
+        val compiledLayers = if (setGraph.layers.isEmpty()) emptyMap() else
+            setGraph.layers.associate { layerGraph ->
+                layerGraph.layer.id to CompiledLayer(
+                    layerId = layerGraph.layer.id,
+                    inputs = emptyMap(),
+                )
+            }
+        compiledSets[setGraph.actionSet.id] = CompiledActionSet(setGraph.actionSet.id, inputs, compiledLayers)
     }
     val startingId = actionSets.first().actionSet.id
     return CompiledConfig(startingActionSetId = startingId, sets = compiledSets)

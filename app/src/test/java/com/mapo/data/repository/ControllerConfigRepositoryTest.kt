@@ -13,6 +13,7 @@ import com.mapo.data.db.steam.FakeBindingGroupDao
 import com.mapo.data.db.steam.FakeControllerProfileDao
 import com.mapo.data.db.steam.FakeGameActionDao
 import com.mapo.data.db.steam.FakeGroupInputDao
+import com.mapo.data.db.steam.FakeLayerPresetBindingDao
 import com.mapo.data.db.steam.FakePresetBindingDao
 import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.BindingMode
@@ -20,6 +21,7 @@ import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.BindingOutputType
 import com.mapo.data.model.steam.ControllerType
 import com.mapo.data.model.steam.InputSource
+import com.mapo.data.model.steam.LayerPresetBinding
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.test.runTest
@@ -42,6 +44,7 @@ class ControllerConfigRepositoryTest {
     private lateinit var activatorDao: FakeActivatorDao
     private lateinit var bindingDao: FakeBindingDao
     private lateinit var presetBindingDao: FakePresetBindingDao
+    private lateinit var layerPresetBindingDao: FakeLayerPresetBindingDao
     private lateinit var subject: ControllerConfigRepository
 
     @Before
@@ -55,6 +58,7 @@ class ControllerConfigRepositoryTest {
         activatorDao = FakeActivatorDao()
         bindingDao = FakeBindingDao()
         presetBindingDao = FakePresetBindingDao()
+        layerPresetBindingDao = FakeLayerPresetBindingDao()
         subject = ControllerConfigRepository(
             controllerProfileDao,
             actionSetDao,
@@ -65,6 +69,7 @@ class ControllerConfigRepositoryTest {
             activatorDao,
             bindingDao,
             presetBindingDao,
+            layerPresetBindingDao,
         )
     }
 
@@ -828,6 +833,99 @@ class ControllerConfigRepositoryTest {
         assertEquals("ENTER", sourceBinding.args)
         val cloneBinding = bindingDao.getByActivators(listOf(cloneActivatorId)).single()
         assertEquals("SPACE", cloneBinding.args)
+    }
+
+    // ── Brick 5.5.a: layer preset bindings ──────────────────────────────────
+
+    @Test
+    fun observeActiveConfig_hydratesActionLayerGraphPreset_fromLayerPresetBindingDao() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+        // Seed an overlay binding_group + the layer_preset_binding pointing at it.
+        // No 5.5.b "materializeLayerOverride" helper yet, so we hand-roll the rows.
+        val overlayGroupId = bindingGroupDao.insert(
+            BindingGroup(
+                actionSetId = null,
+                actionLayerId = layerId,
+                name = "face_buttons_overlay",
+                mode = BindingMode.BUTTON_PAD,
+                settingsJson = "{}",
+            )
+        )
+        groupInputDao.insert(
+            GroupInput(bindingGroupId = overlayGroupId, inputKey = "button_a", orderIndex = 0)
+        )
+        layerPresetBindingDao.insert(
+            LayerPresetBinding(
+                actionLayerId = layerId,
+                inputSource = InputSource.BUTTON_DIAMOND,
+                state = "active",
+                bindingGroupId = overlayGroupId,
+            )
+        )
+
+        val config = subject.observeActiveConfig(profileId = 1L).first()
+        val layerGraph = config!!.actionSets.single().layers.single()
+        assertEquals(layerId, layerGraph.layer.id)
+        assertEquals(1, layerGraph.preset.size)
+        val entry = layerGraph.preset.single()
+        assertEquals(InputSource.BUTTON_DIAMOND, entry.inputSource)
+        assertEquals("active", entry.state)
+        assertEquals(overlayGroupId, entry.group.group.id)
+        assertEquals("button_a", entry.group.inputs.single().input.inputKey)
+    }
+
+    @Test
+    fun duplicateLayer_clonesLayerPresetBindingRows_pointingAtClonedGroups() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val sourceLayerId = subject.addLayer(setId, "scope", "Scope")
+        val overlayGroupId = bindingGroupDao.insert(
+            BindingGroup(
+                actionSetId = null,
+                actionLayerId = sourceLayerId,
+                name = "face_overlay",
+                mode = BindingMode.BUTTON_PAD,
+                settingsJson = "{}",
+            )
+        )
+        groupInputDao.insert(GroupInput(bindingGroupId = overlayGroupId, inputKey = "button_a", orderIndex = 0))
+        layerPresetBindingDao.insert(
+            LayerPresetBinding(
+                actionLayerId = sourceLayerId,
+                inputSource = InputSource.BUTTON_DIAMOND,
+                state = "active",
+                bindingGroupId = overlayGroupId,
+            )
+        )
+
+        val cloneId = subject.duplicateLayer(sourceLayerId, name = "scope_copy", title = "Scope Copy")
+
+        val sourceRows = layerPresetBindingDao.getByActionLayers(listOf(sourceLayerId))
+        val cloneRows = layerPresetBindingDao.getByActionLayers(listOf(cloneId))
+        assertEquals(1, sourceRows.size)
+        assertEquals(1, cloneRows.size)
+        // Source row still points at the original overlay group.
+        assertEquals(overlayGroupId, sourceRows.single().bindingGroupId)
+        // Cloned row points at a FRESH group (not the original) — per
+        // feedback_duplicates_own_their_data.
+        assertTrue(
+            "Cloned layer_preset_binding must reference the cloned binding_group, not the source",
+            cloneRows.single().bindingGroupId != overlayGroupId,
+        )
+        assertEquals(InputSource.BUTTON_DIAMOND, cloneRows.single().inputSource)
+    }
+
+    @Test
+    fun observeActiveConfig_layerWithNoPreset_yieldsEmptyPresetList() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        subject.addLayer(setId, "scope", "Scope")
+
+        val config = subject.observeActiveConfig(profileId = 1L).first()
+        val layerGraph = config!!.actionSets.single().layers.single()
+        assertTrue("Default-state layer has no preset entries", layerGraph.preset.isEmpty())
     }
 
 }

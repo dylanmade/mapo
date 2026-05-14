@@ -35,7 +35,12 @@ data class ActionSetGraph(
 data class ActionLayerGraph(
     val layer: ActionLayer,
     val bindingGroups: List<BindingGroupGraph>,
-)
+    val preset: List<PresetEntry> = emptyList(),
+) {
+    /** Lookup helper parallel to [ActionSetGraph.presetFor]. */
+    fun presetFor(inputSource: InputSource, state: String = "active"): PresetEntry? =
+        preset.firstOrNull { it.inputSource == inputSource && it.state == state }
+}
 
 data class PresetEntry(
     val inputSource: InputSource,

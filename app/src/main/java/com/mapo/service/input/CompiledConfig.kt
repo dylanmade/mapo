@@ -256,17 +256,18 @@ private fun JSONObject.optInputSourceOrNull(key: String): InputSource? {
  *  - When the config has no action sets, [CompiledConfig.EMPTY] is returned.
  *  - [CompiledConfig.startingActionSetId] is the first set by orderIndex (Steam's
  *    starting-set convention). Runtime set-switching is the evaluator's job.
- *  - Layer rows (Brick 5.1) are materialized with empty `inputs` maps — the per-layer
- *    preset-binding schema doesn't yet exist, so the compiler has no input-source ↔
- *    binding-group association to populate from. Layer-stack runtime is testable now
- *    via synthesized `CompiledLayer` overlays; real persistence catches up later.
+ *  - Layer rows (Brick 5.1) materialize with their own `inputs` map. Brick 5.5.a
+ *    adds the per-layer preset-binding schema (`ActionLayerGraph.preset`), so each
+ *    layer's overrides are now folded into [CompiledLayer.inputs] exactly the same
+ *    shape as a set's `inputs` — just keyed under the layer instead of the set. The
+ *    runtime evaluator (Brick 5.1) already walks the active layer stack top-down.
  */
 fun ControllerConfig.toCompiled(): CompiledConfig {
     if (actionSets.isEmpty()) return CompiledConfig.EMPTY
-    val compiledSets = HashMap<Long, CompiledActionSet>(actionSets.size)
-    for (setGraph in actionSets) {
+
+    fun compileInputs(presetEntries: List<com.mapo.data.model.steam.PresetEntry>): Map<InputAddress, CompiledInput> {
         val inputs = HashMap<InputAddress, CompiledInput>()
-        for (preset in setGraph.preset) {
+        for (preset in presetEntries) {
             if (preset.state != "active") continue
             for (inputGraph in preset.group.inputs) {
                 val address = InputAddress(preset.inputSource, inputGraph.input.inputKey)
@@ -281,11 +282,17 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                 inputs[address] = CompiledInput(inputGraph.input.id, compiledActivators)
             }
         }
+        return inputs
+    }
+
+    val compiledSets = HashMap<Long, CompiledActionSet>(actionSets.size)
+    for (setGraph in actionSets) {
+        val inputs = compileInputs(setGraph.preset)
         val compiledLayers = if (setGraph.layers.isEmpty()) emptyMap() else
             setGraph.layers.associate { layerGraph ->
                 layerGraph.layer.id to CompiledLayer(
                     layerId = layerGraph.layer.id,
-                    inputs = emptyMap(),
+                    inputs = compileInputs(layerGraph.preset),
                 )
             }
         compiledSets[setGraph.actionSet.id] = CompiledActionSet(setGraph.actionSet.id, inputs, compiledLayers)

@@ -67,6 +67,7 @@ class ControllerConfigRepository @Inject constructor(
     private val activatorDao: ActivatorDao,
     private val bindingDao: BindingDao,
     private val presetBindingDao: PresetBindingDao,
+    private val layerPresetBindingDao: com.mapo.data.db.steam.LayerPresetBindingDao,
 ) {
 
     private val configDirtyTick = MutableStateFlow(0L)
@@ -425,6 +426,20 @@ class ControllerConfigRepository @Inject constructor(
             }
         }
 
+        // 5.5.a: clone layer preset entries so the duplicate's overrides point at the
+        // cloned binding_groups. Without this, the copy would have orphan layer rows
+        // and no actual override mapping.
+        for (sourcePreset in layerPresetBindingDao.getByActionLayers(listOf(sourceLayerId))) {
+            val mappedGroupId = groupIdMap[sourcePreset.bindingGroupId] ?: continue
+            layerPresetBindingDao.insert(
+                sourcePreset.copy(
+                    id = 0,
+                    actionLayerId = newLayerId,
+                    bindingGroupId = mappedGroupId,
+                )
+            )
+        }
+
         configDirtyTick.value = configDirtyTick.value + 1
         return newLayerId
     }
@@ -724,6 +739,9 @@ class ControllerConfigRepository @Inject constructor(
         val presetsByActionSet = presetBindingDao.getByActionSets(setIds).groupBy { it.actionSetId }
 
         val layerIds = layersByActionSet.values.flatten().map { it.id }
+        val layerPresetsByLayer = if (layerIds.isNotEmpty()) {
+            layerPresetBindingDao.getByActionLayers(layerIds).groupBy { it.actionLayerId }
+        } else emptyMap()
         val groupsByActionSet = bindingGroupDao.getByActionSets(setIds).groupBy { it.actionSetId!! }
         val groupsByActionLayer = if (layerIds.isNotEmpty()) {
             bindingGroupDao.getByActionLayers(layerIds).groupBy { it.actionLayerId!! }
@@ -759,7 +777,11 @@ class ControllerConfigRepository @Inject constructor(
         val actionSetGraphs = sets.map { actionSet ->
             val layerGraphs = (layersByActionSet[actionSet.id] ?: emptyList()).map { layer ->
                 val groupsForLayer = (groupsByActionLayer[layer.id] ?: emptyList()).map(::buildGroup)
-                ActionLayerGraph(layer, groupsForLayer)
+                val layerPresetEntries = (layerPresetsByLayer[layer.id] ?: emptyList()).mapNotNull { lpb ->
+                    val group = groupsById[lpb.bindingGroupId] ?: return@mapNotNull null
+                    PresetEntry(lpb.inputSource, lpb.state, buildGroup(group))
+                }
+                ActionLayerGraph(layer, groupsForLayer, layerPresetEntries)
             }
             val presetEntries = (presetsByActionSet[actionSet.id] ?: emptyList()).mapNotNull { pb ->
                 val group = groupsById[pb.bindingGroupId] ?: return@mapNotNull null

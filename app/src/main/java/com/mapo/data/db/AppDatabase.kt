@@ -14,6 +14,7 @@ import com.mapo.data.db.steam.BindingGroupDao
 import com.mapo.data.db.steam.ControllerProfileDao
 import com.mapo.data.db.steam.GameActionDao
 import com.mapo.data.db.steam.GroupInputDao
+import com.mapo.data.db.steam.LayerPresetBindingDao
 import com.mapo.data.db.steam.PresetBindingDao
 import com.mapo.data.db.steam.SteamTypeConverters
 import com.mapo.data.model.AppProfileBinding
@@ -28,6 +29,7 @@ import com.mapo.data.model.steam.BindingGroup
 import com.mapo.data.model.steam.ControllerProfile
 import com.mapo.data.model.steam.GameAction
 import com.mapo.data.model.steam.GroupInput
+import com.mapo.data.model.steam.LayerPresetBinding
 import com.mapo.data.model.steam.PresetBinding
 
 @Database(
@@ -45,8 +47,9 @@ import com.mapo.data.model.steam.PresetBinding
         Activator::class,
         Binding::class,
         PresetBinding::class,
+        LayerPresetBinding::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 @TypeConverters(SteamTypeConverters::class)
@@ -66,6 +69,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun activatorDao(): ActivatorDao
     abstract fun bindingDao(): BindingDao
     abstract fun presetBindingDao(): PresetBindingDao
+    abstract fun layerPresetBindingDao(): LayerPresetBindingDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

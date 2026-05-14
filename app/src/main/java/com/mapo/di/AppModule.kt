@@ -14,6 +14,7 @@ import com.mapo.data.db.steam.BindingGroupDao
 import com.mapo.data.db.steam.ControllerProfileDao
 import com.mapo.data.db.steam.GameActionDao
 import com.mapo.data.db.steam.GroupInputDao
+import com.mapo.data.db.steam.LayerPresetBindingDao
 import com.mapo.data.db.steam.PresetBindingDao
 import dagger.Module
 import dagger.Provides
@@ -73,4 +74,7 @@ object AppModule {
 
     @Provides @Singleton
     fun providePresetBindingDao(db: AppDatabase): PresetBindingDao = db.presetBindingDao()
+
+    @Provides @Singleton
+    fun provideLayerPresetBindingDao(db: AppDatabase): LayerPresetBindingDao = db.layerPresetBindingDao()
 }

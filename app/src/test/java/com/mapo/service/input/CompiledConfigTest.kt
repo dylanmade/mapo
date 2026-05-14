@@ -273,8 +273,8 @@ class CompiledConfigTest {
     @Test
     fun actionLayers_areMaterializedIntoCompiledActionSetLayersMap() {
         // Brick 5.1: layer rows reach the compiled snapshot so the evaluator can stack
-        // them at runtime. Per-input overlays don't get populated yet — the per-layer
-        // preset-binding schema doesn't exist — so we only assert the shape.
+        // them at runtime. This baseline case has no layer presets — so layer inputs
+        // start empty (5.5.a only populates them when preset entries exist).
         val setWithLayers = ActionSetGraph(
             actionSet = ActionSet(id = 7L, controllerProfileId = 1L, name = "default", title = "Default"),
             layers = listOf(
@@ -298,8 +298,117 @@ class CompiledConfigTest {
         val compiledSet = compiled.sets.getValue(7L)
         assertEquals(setOf(100L, 101L), compiledSet.layers.keys)
         assertTrue(
-            "Layer overlays start empty — per-layer preset-binding schema is post-5.1",
+            "Layer overlays are empty when the layer has no preset entries",
             compiledSet.layers.values.all { it.inputs.isEmpty() },
+        )
+    }
+
+    @Test
+    fun actionLayer_presetEntries_areFoldedIntoCompiledLayerInputs() {
+        // Brick 5.5.a: each layer's preset entries are compiled into CompiledLayer.inputs
+        // exactly like a set's preset folds into CompiledActionSet.inputs. This is what
+        // makes the runtime layer-stack walk (Brick 5.1) actually produce overrides.
+        val setWithOverlay = ActionSetGraph(
+            actionSet = ActionSet(id = 9L, controllerProfileId = 1L, name = "default", title = "Default"),
+            layers = listOf(
+                ActionLayerGraph(
+                    layer = ActionLayer(id = 200L, parentActionSetId = 9L, name = "scope", title = "Scope"),
+                    bindingGroups = emptyList(),
+                    preset = listOf(
+                        presetEntry(
+                            inputSource = InputSource.BUTTON_DIAMOND,
+                            state = "active",
+                            group = groupWith(
+                                inputs = listOf(
+                                    inputWith(
+                                        "button_a",
+                                        listOf(activatorWith(
+                                            bindings = listOf(binding(BindingOutputType.MOUSE_BUTTON, "MOUSE_LEFT")),
+                                        )),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND,
+                    state = "active",
+                    group = groupWith(
+                        inputs = listOf(
+                            inputWith(
+                                "button_a",
+                                listOf(activatorWith(
+                                    bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER")),
+                                )),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val cfg = ControllerConfig(
+            controllerProfile = sampleControllerProfile(),
+            actionSets = listOf(setWithOverlay),
+        )
+
+        val compiled = cfg.toCompiled()
+        val compiledSet = compiled.sets.getValue(9L)
+        val baseAddress = InputAddress(InputSource.BUTTON_DIAMOND, "button_a")
+
+        // Base set still binds ENTER for button_a.
+        assertEquals(
+            BindingOutput.KeyPress("ENTER"),
+            compiledSet.inputs.getValue(baseAddress).activators[0].bindings.single(),
+        )
+        // The Scope layer overrides button_a → MOUSE_LEFT.
+        val layerInput = compiledSet.layers.getValue(200L).inputs.getValue(baseAddress)
+        assertEquals(
+            BindingOutput.MouseButton("MOUSE_LEFT"),
+            layerInput.activators[0].bindings.single(),
+        )
+    }
+
+    @Test
+    fun actionLayer_inactiveStatePresetEntries_areSkipped() {
+        // Mirror of the base-set behavior: only state=="active" preset entries compile.
+        val setWithLayer = ActionSetGraph(
+            actionSet = ActionSet(id = 12L, controllerProfileId = 1L, name = "default", title = "Default"),
+            layers = listOf(
+                ActionLayerGraph(
+                    layer = ActionLayer(id = 300L, parentActionSetId = 12L, name = "scope", title = "Scope"),
+                    bindingGroups = emptyList(),
+                    preset = listOf(
+                        presetEntry(
+                            inputSource = InputSource.BUTTON_DIAMOND,
+                            state = "inactive",
+                            group = groupWith(
+                                inputs = listOf(
+                                    inputWith(
+                                        "button_a",
+                                        listOf(activatorWith(
+                                            bindings = listOf(binding(BindingOutputType.KEY_PRESS, "X")),
+                                        )),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            preset = emptyList(),
+        )
+        val cfg = ControllerConfig(
+            controllerProfile = sampleControllerProfile(),
+            actionSets = listOf(setWithLayer),
+        )
+
+        val compiled = cfg.toCompiled()
+        assertTrue(
+            "Inactive layer preset entries don't compile into the active overlay map",
+            compiled.sets.getValue(12L).layers.getValue(300L).inputs.isEmpty(),
         )
     }
 

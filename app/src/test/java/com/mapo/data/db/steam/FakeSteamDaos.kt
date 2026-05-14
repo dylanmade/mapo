@@ -8,6 +8,8 @@ import com.mapo.data.model.steam.BindingGroup
 import com.mapo.data.model.steam.ControllerProfile
 import com.mapo.data.model.steam.GameAction
 import com.mapo.data.model.steam.GroupInput
+import com.mapo.data.model.steam.InputSource
+import com.mapo.data.model.steam.LayerPresetBinding
 import com.mapo.data.model.steam.PresetBinding
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -229,5 +231,41 @@ class FakePresetBindingDao : PresetBindingDao {
 
     override suspend fun deleteById(id: Long) {
         rows.value = rows.value.filterNot { it.id == id }
+    }
+}
+
+class FakeLayerPresetBindingDao : LayerPresetBindingDao {
+    val rows = MutableStateFlow<List<LayerPresetBinding>>(emptyList())
+    private var nextId = 1L
+
+    override suspend fun getByActionLayers(actionLayerIds: List<Long>): List<LayerPresetBinding> =
+        rows.value.filter { it.actionLayerId in actionLayerIds }
+
+    override suspend fun getById(id: Long): LayerPresetBinding? = rows.value.firstOrNull { it.id == id }
+
+    override suspend fun insert(layerPresetBinding: LayerPresetBinding): Long {
+        val id = nextId++
+        rows.value = rows.value + layerPresetBinding.copy(id = id)
+        return id
+    }
+
+    override suspend fun update(layerPresetBinding: LayerPresetBinding) {
+        rows.value = rows.value.map { if (it.id == layerPresetBinding.id) layerPresetBinding else it }
+    }
+
+    override suspend fun deleteById(id: Long) {
+        rows.value = rows.value.filterNot { it.id == id }
+    }
+
+    override suspend fun deleteByLayerAndSource(
+        actionLayerId: Long,
+        inputSource: InputSource,
+        state: String,
+    ) {
+        rows.value = rows.value.filterNot {
+            it.actionLayerId == actionLayerId &&
+                it.inputSource == inputSource &&
+                it.state == state
+        }
     }
 }

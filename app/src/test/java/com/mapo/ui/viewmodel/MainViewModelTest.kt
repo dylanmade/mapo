@@ -500,14 +500,26 @@ class MainViewModelTest {
     /**
      * Minimal ControllerConfig with the given [setIds] — used by Brick 4.3 cleanup tests.
      * Empty preset / no inputs, since these tests don't exercise the binding graph.
+     * [layersBySet] (5.3) attaches layer ids per set when supplied.
      */
-    private fun miniConfig(setIds: List<Long>): ControllerConfig {
+    private fun miniConfig(
+        setIds: List<Long>,
+        layersBySet: Map<Long, List<Long>> = emptyMap(),
+    ): ControllerConfig {
         val sets = setIds.map { id ->
             com.mapo.data.model.steam.ActionSetGraph(
                 actionSet = com.mapo.data.model.steam.ActionSet(
                     id = id, controllerProfileId = 1L, name = "s$id", title = "S$id",
                 ),
-                layers = emptyList(),
+                layers = (layersBySet[id] ?: emptyList()).map { lid ->
+                    com.mapo.data.model.steam.ActionLayerGraph(
+                        layer = com.mapo.data.model.steam.ActionLayer(
+                            id = lid, parentActionSetId = id,
+                            name = "l$lid", title = "L$lid",
+                        ),
+                        bindingGroups = emptyList(),
+                    )
+                },
                 preset = emptyList(),
             )
         }
@@ -593,6 +605,185 @@ class MainViewModelTest {
         subject.deleteControllerActionSet(actionSetId = 5L)
         advanceUntilIdle()
         coVerify { controllerConfigRepo.deleteActionSet(5L) }
+    }
+
+    // ── Action layers — viewing pointer (Brick 5.3) ──────────────────────────
+
+    @Test
+    fun setViewingLayer_flowsThroughStateFlow() = runTest(testDispatcher) {
+        assertNull(subject.viewingLayerId.value)
+
+        subject.setViewingLayer(7L)
+        assertEquals(7L, subject.viewingLayerId.value)
+
+        subject.setViewingLayer(null)
+        assertNull(subject.viewingLayerId.value)
+    }
+
+    @Test
+    fun viewingLayerId_resetsToNull_whenActiveProfileChanges() = runTest(testDispatcher) {
+        subject.setViewingLayer(7L)
+        assertEquals(7L, subject.viewingLayerId.value)
+
+        activeProfile.value = Profile(id = 9L, name = "Other")
+        advanceUntilIdle()
+
+        assertNull(
+            "Switching the active profile should drop the editor's layer focus",
+            subject.viewingLayerId.value,
+        )
+    }
+
+    @Test
+    fun viewingLayerId_resetsToNull_whenViewingActionSetChanges() = runTest(testDispatcher) {
+        subject.setViewingLayer(7L)
+        assertEquals(7L, subject.viewingLayerId.value)
+
+        subject.setViewingActionSet(2L)
+        advanceUntilIdle()
+
+        assertNull(
+            "Layers are per-set: switching set must clear the layer focus",
+            subject.viewingLayerId.value,
+        )
+    }
+
+    @Test
+    fun viewingLayerId_resetsToNull_whenLayerDisappearsFromConfig() = runTest(testDispatcher) {
+        val activeConfigFlow = MutableStateFlow<ControllerConfig?>(null)
+        every { controllerConfigRepo.observeActiveConfig(any()) } returns activeConfigFlow
+        subject = rebuildSubject()
+        activeProfile.value = Profile(id = 1L, name = "P")
+        activeConfigFlow.value = miniConfig(setIds = listOf(1L), layersBySet = mapOf(1L to listOf(10L, 11L)))
+        advanceUntilIdle()
+
+        subject.setViewingLayer(11L)
+        advanceUntilIdle()
+        assertEquals(11L, subject.viewingLayerId.value)
+
+        // User deletes layer 11; new config drops it.
+        activeConfigFlow.value = miniConfig(setIds = listOf(1L), layersBySet = mapOf(1L to listOf(10L)))
+        advanceUntilIdle()
+
+        assertNull(
+            "Stale layer pointer should reset when the layer disappears from config",
+            subject.viewingLayerId.value,
+        )
+    }
+
+    @Test
+    fun viewingLayerId_isNotClearedWhenAnotherSetsLayerChanges() = runTest(testDispatcher) {
+        // Viewing set 1 with layer 10. Adding/removing a layer on set 2 must not
+        // affect set 1's layer pointer.
+        val activeConfigFlow = MutableStateFlow<ControllerConfig?>(null)
+        every { controllerConfigRepo.observeActiveConfig(any()) } returns activeConfigFlow
+        subject = rebuildSubject()
+        activeProfile.value = Profile(id = 1L, name = "P")
+        activeConfigFlow.value = miniConfig(
+            setIds = listOf(1L, 2L),
+            layersBySet = mapOf(1L to listOf(10L), 2L to listOf(20L)),
+        )
+        advanceUntilIdle()
+
+        subject.setViewingActionSet(1L)
+        advanceUntilIdle()
+        subject.setViewingLayer(10L)
+        advanceUntilIdle()
+
+        // Set 2 loses its layer; we're still on set 1.
+        activeConfigFlow.value = miniConfig(
+            setIds = listOf(1L, 2L),
+            layersBySet = mapOf(1L to listOf(10L), 2L to emptyList()),
+        )
+        advanceUntilIdle()
+
+        assertEquals(
+            "Set 1's layer pointer must not be affected by edits to set 2's layers",
+            10L, subject.viewingLayerId.value,
+        )
+    }
+
+    @Test
+    fun availableLayers_reflectsViewingSet() = runTest(testDispatcher) {
+        val activeConfigFlow = MutableStateFlow<ControllerConfig?>(null)
+        every { controllerConfigRepo.observeActiveConfig(any()) } returns activeConfigFlow
+        subject = rebuildSubject()
+        activeProfile.value = Profile(id = 1L, name = "P")
+        activeConfigFlow.value = miniConfig(
+            setIds = listOf(1L, 2L),
+            layersBySet = mapOf(1L to listOf(10L, 11L), 2L to listOf(20L)),
+        )
+        advanceUntilIdle()
+
+        // Default viewing = starting set (id = 1).
+        assertEquals(
+            listOf(10L to "L10", 11L to "L11"),
+            subject.availableLayers.value,
+        )
+
+        subject.setViewingActionSet(2L)
+        advanceUntilIdle()
+        assertEquals(listOf(20L to "L20"), subject.availableLayers.value)
+    }
+
+    // ── Action layer CRUD wrappers (Brick 5.3) ───────────────────────────────
+
+    @Test
+    fun addControllerActionLayer_noActiveProfile_isNoOp() = runTest(testDispatcher) {
+        activeProfile.value = null
+
+        subject.addControllerActionLayer(actionSetId = 1L, name = "scope", title = "Scope")
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { controllerConfigRepo.addLayer(any(), any(), any()) }
+    }
+
+    @Test
+    fun addControllerActionLayer_delegatesToRepo_andFlipsViewingLayerToNew() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+        coEvery { controllerConfigRepo.addLayer(any(), any(), any()) } returns 77L
+
+        subject.addControllerActionLayer(actionSetId = 5L, name = "scope", title = "Scope")
+        advanceUntilIdle()
+
+        coVerify { controllerConfigRepo.addLayer(5L, "scope", "Scope") }
+        assertEquals(77L, subject.viewingLayerId.value)
+    }
+
+    @Test
+    fun renameControllerActionLayer_delegatesToRepo() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+        subject.renameControllerActionLayer(layerId = 7L, name = "ads", title = "ADS")
+        advanceUntilIdle()
+        coVerify { controllerConfigRepo.renameLayer(7L, "ads", "ADS") }
+    }
+
+    @Test
+    fun renameControllerActionLayer_noActiveProfile_isNoOp() = runTest(testDispatcher) {
+        activeProfile.value = null
+        subject.renameControllerActionLayer(layerId = 7L, name = "ads", title = "ADS")
+        advanceUntilIdle()
+        coVerify(exactly = 0) { controllerConfigRepo.renameLayer(any(), any(), any()) }
+    }
+
+    @Test
+    fun duplicateControllerActionLayer_flipsViewingLayerToCopy() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+        coEvery { controllerConfigRepo.duplicateLayer(any(), any(), any()) } returns 88L
+
+        subject.duplicateControllerActionLayer(sourceLayerId = 5L, name = "copy", title = "Copy")
+        advanceUntilIdle()
+
+        coVerify { controllerConfigRepo.duplicateLayer(5L, "copy", "Copy") }
+        assertEquals(88L, subject.viewingLayerId.value)
+    }
+
+    @Test
+    fun deleteControllerActionLayer_delegatesToRepo() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+        subject.deleteControllerActionLayer(layerId = 5L)
+        advanceUntilIdle()
+        coVerify { controllerConfigRepo.deleteLayer(5L) }
     }
 
     /** Helper for tests that need to rebuild the subject after tweaking mock behavior. */

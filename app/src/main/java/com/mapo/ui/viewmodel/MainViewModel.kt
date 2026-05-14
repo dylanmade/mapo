@@ -29,6 +29,7 @@ import com.mapo.data.model.toSnapshot
 import com.mapo.data.model.wouldOverlap
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
+import com.mapo.data.model.steam.resolveActionSet
 import com.mapo.data.repository.AppProfileBindingRepository
 import com.mapo.data.repository.ControllerConfigRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
@@ -183,6 +184,35 @@ class MainViewModel @Inject constructor(
     private val _viewingActionSetId = MutableStateFlow<Long?>(null)
     val viewingActionSetId: StateFlow<Long?> = _viewingActionSetId.asStateFlow()
 
+    /**
+     * Brick 5.3: which [com.mapo.data.model.steam.ActionLayer] within the currently-viewed
+     * action set the editor is focused on. Null = base set (no layer overlay focus); a
+     * non-null id targets a specific layer for overlay editing (5.5) and is the source of
+     * truth for the layer pill row's selected state (5.4).
+     *
+     * Layers are *per-set*: each [ActionSet] has its own layer namespace. Maintenance:
+     *  - Reset to null when the active profile changes (different controller's layers).
+     *  - Reset to null when the viewing action set changes (sibling sets' ids are unrelated).
+     *  - Reset to null when the layer disappears from the viewing set (user deleted it).
+     *
+     * Unlike `viewingActionSetId` (which has a starting-set fallback), null here is a
+     * meaningful editor state — "I'm editing the base set's bindings, not any overlay."
+     */
+    private val _viewingLayerId = MutableStateFlow<Long?>(null)
+    val viewingLayerId: StateFlow<Long?> = _viewingLayerId.asStateFlow()
+
+    /**
+     * Brick 5.3: layers available on the currently-viewed action set as
+     * `(layerId, title)` pairs in order. Drives both the layer pill row (5.4) and the
+     * layer-activation picker categories (5.6). Empty when no controller config is loaded
+     * yet or the viewing set has no layers.
+     */
+    val availableLayers: StateFlow<List<Pair<Long, String>>> =
+        combine(activeControllerConfig, _viewingActionSetId) { config, viewingId ->
+            val set = config?.resolveActionSet(viewingId) ?: return@combine emptyList()
+            set.layers.map { it.layer.id to it.layer.title }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     val templates: StateFlow<ImmutableList<TemplateRef>> = keyboardTemplateRepository.allTemplates
         .map { it.toImmutableList() }
         .stateIn(
@@ -228,11 +258,29 @@ class MainViewModel @Inject constructor(
                 if (currentViewing != null && config?.actionSets?.any { it.actionSet.id == currentViewing } != true) {
                     _viewingActionSetId.value = null
                 }
+                // 5.3: same stale-id check for the viewing layer pointer. We compare
+                // against the resolved viewing set (which may be the starting-set
+                // fallback when _viewingActionSetId is null), since that's the
+                // namespace the layer id is scoped to.
+                val currentLayer = _viewingLayerId.value
+                if (currentLayer != null) {
+                    val resolvedSet = config?.resolveActionSet(_viewingActionSetId.value)
+                    val stillPresent = resolvedSet?.layers?.any { it.layer.id == currentLayer } == true
+                    if (!stillPresent) _viewingLayerId.value = null
+                }
             }
         }
         viewModelScope.launch {
-            // Profile change → forget the previous controller's set selection.
-            activeProfile.collect { _viewingActionSetId.value = null }
+            // Profile change → forget the previous controller's set + layer selection.
+            activeProfile.collect {
+                _viewingActionSetId.value = null
+                _viewingLayerId.value = null
+            }
+        }
+        viewModelScope.launch {
+            // 5.3: layers are per-set. When the user switches which set is being viewed,
+            // any focused-layer selection from the prior set is meaningless and is reset.
+            _viewingActionSetId.collect { _viewingLayerId.value = null }
         }
         viewModelScope.launch {
             combine(appProfileBindings, ignoredPackages) { bindings, ignored ->
@@ -421,6 +469,59 @@ class MainViewModel @Inject constructor(
     fun deleteControllerActionSet(actionSetId: Long) {
         if (activeProfile.value == null) return
         viewModelScope.launch { controllerConfigRepository.deleteActionSet(actionSetId) }
+    }
+
+    // ── Action layers (Brick 5.3) ────────────────────────────────────────────
+
+    /**
+     * Brick 5.3: focus a specific [com.mapo.data.model.steam.ActionLayer] for overlay
+     * editing (5.5) and pill-row selection (5.4). Pass null to drop focus and return
+     * to base-set editing. The id is interpreted within the currently-viewed set's
+     * layer namespace; switching `viewingActionSetId` clears this automatically.
+     */
+    fun setViewingLayer(layerId: Long?) {
+        _viewingLayerId.value = layerId
+    }
+
+    /**
+     * Append a new empty [com.mapo.data.model.steam.ActionLayer] to [actionSetId] and
+     * focus it (so the user lands on the layer they just created, mirroring how
+     * `addControllerActionSet` flips the set pointer to the new set).
+     */
+    fun addControllerActionLayer(actionSetId: Long, name: String, title: String) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            val newId = controllerConfigRepository.addLayer(actionSetId, name, title)
+            _viewingLayerId.value = newId
+        }
+    }
+
+    /** Rename layer [layerId]. No-op for unknown ids or when no profile is active. */
+    fun renameControllerActionLayer(layerId: Long, name: String, title: String) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.renameLayer(layerId, name, title) }
+    }
+
+    /**
+     * Deep-clone layer [sourceLayerId] with new [name] / [title]. Focuses the duplicate
+     * so the user can immediately tweak the copy.
+     */
+    fun duplicateControllerActionLayer(sourceLayerId: Long, name: String, title: String) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            val newId = controllerConfigRepository.duplicateLayer(sourceLayerId, name, title)
+            _viewingLayerId.value = newId
+        }
+    }
+
+    /**
+     * Delete layer [layerId]. The viewing-pointer cleanup runs through the existing
+     * `activeControllerConfig` collector when the deletion lands — no need to clear
+     * here.
+     */
+    fun deleteControllerActionLayer(layerId: Long) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.deleteLayer(layerId) }
     }
 
     /**

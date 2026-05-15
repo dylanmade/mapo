@@ -28,6 +28,7 @@ import com.mapo.data.model.steam.ControllerType
 import com.mapo.data.model.steam.GroupInput
 import com.mapo.data.model.steam.GroupInputGraph
 import com.mapo.data.model.steam.InputSource
+import com.mapo.data.model.steam.LayerPresetBinding
 import com.mapo.data.model.steam.PresetBinding
 import com.mapo.data.model.steam.PresetEntry
 import kotlinx.coroutines.flow.Flow
@@ -455,6 +456,144 @@ class ControllerConfigRepository @Inject constructor(
         actionLayerDao.deleteById(layerId)
         configDirtyTick.value = configDirtyTick.value + 1
         return true
+    }
+
+    // ── Brick 5.5.b: layer override materialization ──────────────────────────
+
+    /**
+     * Find-or-create the override chain for `(layerId, inputSource, groupInputKey)`.
+     *
+     * When the user taps a "ghost" row in overlay-editing mode, the row has no
+     * persisted override yet — only the parent set's binding inherits through. This
+     * call materializes the scaffolding: an overlay [BindingGroup] on the layer (one
+     * per input source, shared across that source's sub-inputs to mirror the base
+     * preset grain), a [GroupInput] for the requested key, a default `FULL_PRESS`
+     * activator, and a single unbound [Binding]. Subsequent `setBinding` calls write
+     * the real output.
+     *
+     * **Inherits from base**: the new overlay group copies the base set's group's
+     * `mode` and `settingsJson` for the same input source — so e.g. an overlay on a
+     * trackpad starts with the same deadzone settings the base has. The user can
+     * diverge later (Phase 6).
+     *
+     * Idempotent on the sub-input level: calling twice with identical args returns
+     * the same group_input id. Returns the [GroupInput.id] of the materialized row —
+     * callers can immediately use it for further wiring (e.g., opening the picker).
+     */
+    suspend fun materializeLayerOverride(
+        layerId: Long,
+        inputSource: InputSource,
+        groupInputKey: String,
+    ): Long {
+        val layer = actionLayerDao.getById(layerId)
+            ?: error("Unknown layer $layerId")
+
+        // 1. Find or create the overlay binding_group for this input source on the layer.
+        val existingPreset = layerPresetBindingDao.getByActionLayers(listOf(layerId))
+            .firstOrNull { it.inputSource == inputSource && it.state == "active" }
+
+        val overlayGroupId: Long = if (existingPreset != null) {
+            existingPreset.bindingGroupId
+        } else {
+            // Inherit mode + settings from the base set's group for the same input source.
+            // Falls back to BUTTON_PAD + "{}" if the base has no preset entry — shouldn't
+            // normally happen for seeded sources, but defensive.
+            val basePresetRow = presetBindingDao.getByActionSets(listOf(layer.parentActionSetId))
+                .firstOrNull { it.inputSource == inputSource && it.state == "active" }
+            val baseGroup = basePresetRow?.let { bindingGroupDao.getById(it.bindingGroupId) }
+            val newGroupId = bindingGroupDao.insert(
+                BindingGroup(
+                    actionSetId = null,
+                    actionLayerId = layerId,
+                    name = baseGroup?.name ?: inputSource.name.lowercase(),
+                    mode = baseGroup?.mode ?: BindingMode.BUTTON_PAD,
+                    settingsJson = baseGroup?.settingsJson ?: "{}",
+                )
+            )
+            layerPresetBindingDao.insert(
+                LayerPresetBinding(
+                    actionLayerId = layerId,
+                    inputSource = inputSource,
+                    state = "active",
+                    bindingGroupId = newGroupId,
+                )
+            )
+            newGroupId
+        }
+
+        // 2. Idempotency on the sub-input — return the existing row if already materialized.
+        groupInputDao.getByGroups(listOf(overlayGroupId))
+            .firstOrNull { it.inputKey == groupInputKey }
+            ?.let { return it.id }
+
+        // 3. Fresh group_input + default activator + unbound binding.
+        val nextOrder = groupInputDao.getByGroups(listOf(overlayGroupId))
+            .maxOfOrNull { it.orderIndex }?.plus(1) ?: 0
+        val newInputId = groupInputDao.insert(
+            GroupInput(
+                bindingGroupId = overlayGroupId,
+                inputKey = groupInputKey,
+                orderIndex = nextOrder,
+            )
+        )
+        val activatorId = activatorDao.insert(
+            Activator(
+                groupInputId = newInputId,
+                type = ActivatorType.FULL_PRESS,
+                settingsJson = "{}",
+                orderIndex = 0,
+            )
+        )
+        bindingDao.insert(
+            Binding(
+                activatorId = activatorId,
+                outputType = BindingOutputType.UNBOUND,
+                args = "",
+                orderIndex = 0,
+            )
+        )
+
+        configDirtyTick.value = configDirtyTick.value + 1
+        return newInputId
+    }
+
+    /**
+     * Reverse of [materializeLayerOverride]. Drops the [GroupInput] chain on the
+     * layer for `(inputSource, groupInputKey)`, returning the row to inheritance
+     * from the parent set. If the overlay [BindingGroup] is left with no remaining
+     * inputs, the group itself is also deleted — FK cascade on `layer_preset_binding`
+     * drops the orphan preset row. Sibling sub-inputs (e.g., other buttons on the
+     * same diamond) are left untouched.
+     *
+     * No-op when no override exists at `(layerId, inputSource, groupInputKey)`.
+     */
+    suspend fun clearLayerOverride(
+        layerId: Long,
+        inputSource: InputSource,
+        groupInputKey: String,
+    ) {
+        val presetRow = layerPresetBindingDao.getByActionLayers(listOf(layerId))
+            .firstOrNull { it.inputSource == inputSource && it.state == "active" }
+            ?: return
+
+        val target = groupInputDao.getByGroups(listOf(presetRow.bindingGroupId))
+            .firstOrNull { it.inputKey == groupInputKey }
+            ?: return
+
+        groupInputDao.deleteById(target.id)
+
+        // If we just deleted the last sub-input on this overlay group, drop the group
+        // and its preset pointer — the layer no longer has any reason to hold an
+        // overlay for this source. Explicit cleanup (rather than relying on FK
+        // cascade) so the path stays portable to test fakes and the intent is
+        // obvious at the call site.
+        val remaining = groupInputDao.getByGroups(listOf(presetRow.bindingGroupId))
+        if (remaining.isEmpty()) {
+            layerPresetBindingDao.deleteById(presetRow.id)
+            bindingGroupDao.deleteById(presetRow.bindingGroupId)
+        }
+
+        configDirtyTick.value = configDirtyTick.value + 1
     }
 
     /**

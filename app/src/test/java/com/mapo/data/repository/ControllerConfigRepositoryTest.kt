@@ -928,4 +928,185 @@ class ControllerConfigRepositoryTest {
         assertTrue("Default-state layer has no preset entries", layerGraph.preset.isEmpty())
     }
 
+    // ── Brick 5.5.b: layer override CRUD ─────────────────────────────────────
+
+    @Test
+    fun materializeLayerOverride_freshLayer_createsGroupInputActivatorAndBindingChain() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+
+        val newInputId = subject.materializeLayerOverride(
+            layerId = layerId,
+            inputSource = InputSource.BUTTON_DIAMOND,
+            groupInputKey = "button_a",
+        )
+
+        // Overlay binding_group exists on the layer.
+        val overlayGroups = bindingGroupDao.getByActionLayers(listOf(layerId))
+        assertEquals(1, overlayGroups.size)
+        // GroupInput materialized under it for button_a.
+        val groupInputs = groupInputDao.getByGroups(listOf(overlayGroups.single().id))
+        assertEquals(1, groupInputs.size)
+        assertEquals("button_a", groupInputs.single().inputKey)
+        assertEquals(newInputId, groupInputs.single().id)
+        // Default FULL_PRESS activator with one unbound binding.
+        val activators = activatorDao.getByGroupInputs(listOf(newInputId))
+        assertEquals(1, activators.size)
+        assertEquals(ActivatorType.FULL_PRESS, activators.single().type)
+        val bindings = bindingDao.getByActivators(listOf(activators.single().id))
+        assertEquals(1, bindings.size)
+        assertEquals(BindingOutputType.UNBOUND, bindings.single().outputType)
+        // layer_preset_binding row points overlay group at the input source.
+        val presets = layerPresetBindingDao.getByActionLayers(listOf(layerId))
+        assertEquals(1, presets.size)
+        assertEquals(InputSource.BUTTON_DIAMOND, presets.single().inputSource)
+        assertEquals(overlayGroups.single().id, presets.single().bindingGroupId)
+    }
+
+    @Test
+    fun materializeLayerOverride_secondSubInputOnSameSource_reusesOverlayGroup() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+
+        subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+        subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_b")
+
+        // Still one overlay group for BUTTON_DIAMOND on this layer.
+        val overlayGroups = bindingGroupDao.getByActionLayers(listOf(layerId))
+        assertEquals(1, overlayGroups.size)
+        // Both button_a and button_b under it.
+        val keys = groupInputDao.getByGroups(overlayGroups.map { it.id }).map { it.inputKey }.sorted()
+        assertEquals(listOf("button_a", "button_b"), keys)
+        // Still one preset row (the group is shared).
+        assertEquals(1, layerPresetBindingDao.getByActionLayers(listOf(layerId)).size)
+    }
+
+    @Test
+    fun materializeLayerOverride_calledTwiceForSameSubInput_isIdempotent() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+
+        val first = subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+        val second = subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+
+        assertEquals("Same call must yield the same GroupInput id (no duplicate row)", first, second)
+        // Only one group_input for button_a.
+        val overlayGroup = bindingGroupDao.getByActionLayers(listOf(layerId)).single()
+        assertEquals(
+            1,
+            groupInputDao.getByGroups(listOf(overlayGroup.id)).count { it.inputKey == "button_a" },
+        )
+        // Only one activator + binding pair.
+        val activators = activatorDao.getByGroupInputs(listOf(first))
+        assertEquals(1, activators.size)
+        assertEquals(1, bindingDao.getByActivators(listOf(activators.single().id)).size)
+    }
+
+    @Test
+    fun materializeLayerOverride_inheritsBaseGroupModeAndSettings() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        // Mutate the base BUTTON_DIAMOND group's settings so we can verify inheritance.
+        val basePresetRow = presetBindingDao.getByActionSets(listOf(setId))
+            .single { it.inputSource == InputSource.BUTTON_DIAMOND && it.state == "active" }
+        val baseGroup = bindingGroupDao.getById(basePresetRow.bindingGroupId)!!
+        bindingGroupDao.update(baseGroup.copy(settingsJson = """{"deadzone":0.42}"""))
+
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+        subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+
+        val overlayGroup = bindingGroupDao.getByActionLayers(listOf(layerId)).single()
+        assertEquals(
+            "Overlay group must inherit base group's mode",
+            baseGroup.mode, overlayGroup.mode,
+        )
+        assertEquals(
+            "Overlay group must inherit base group's settingsJson",
+            """{"deadzone":0.42}""", overlayGroup.settingsJson,
+        )
+    }
+
+    @Test
+    fun clearLayerOverride_existingOverride_deletesGroupInput() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+        val materializedId =
+            subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+
+        subject.clearLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+
+        assertNull(groupInputDao.getById(materializedId))
+    }
+
+    @Test
+    fun clearLayerOverride_lastSubInput_alsoDropsOverlayGroupAndPresetRow() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+        subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+
+        subject.clearLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+
+        assertTrue(
+            "Overlay binding_group must be gone once its last sub-input is cleared",
+            bindingGroupDao.getByActionLayers(listOf(layerId)).isEmpty(),
+        )
+        assertTrue(
+            "layer_preset_binding row must also be gone",
+            layerPresetBindingDao.getByActionLayers(listOf(layerId)).isEmpty(),
+        )
+    }
+
+    @Test
+    fun clearLayerOverride_keepsSiblingSubInputsIntact() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+        subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+        subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_b")
+
+        subject.clearLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+
+        // button_b's chain is untouched. Overlay group still present.
+        val overlayGroups = bindingGroupDao.getByActionLayers(listOf(layerId))
+        assertEquals(1, overlayGroups.size)
+        val keys = groupInputDao.getByGroups(overlayGroups.map { it.id }).map { it.inputKey }
+        assertEquals(listOf("button_b"), keys)
+        // Preset row still present (group still has a sub-input).
+        assertEquals(1, layerPresetBindingDao.getByActionLayers(listOf(layerId)).size)
+    }
+
+    @Test
+    fun clearLayerOverride_unknownOverride_isNoOp() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+        // No materialize call — nothing exists for this layer.
+
+        subject.clearLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+        // No throw, no side effects: still no overlay group + no preset row.
+        assertTrue(bindingGroupDao.getByActionLayers(listOf(layerId)).isEmpty())
+        assertTrue(layerPresetBindingDao.getByActionLayers(listOf(layerId)).isEmpty())
+    }
+
+    @Test
+    fun clearLayerOverride_unknownSubInputOnExistingOverlayGroup_isNoOp() = runTest {
+        val cpId = subject.seedDefaultConfig(profileId = 1L)
+        val setId = actionSetDao.getByControllerProfile(cpId).single().id
+        val layerId = subject.addLayer(setId, "scope", "Scope")
+        subject.materializeLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_a")
+
+        // Sub-input not in the overlay group.
+        subject.clearLayerOverride(layerId, InputSource.BUTTON_DIAMOND, "button_x")
+
+        // button_a override untouched; group + preset still present.
+        val overlayGroup = bindingGroupDao.getByActionLayers(listOf(layerId)).single()
+        val keys = groupInputDao.getByGroups(listOf(overlayGroup.id)).map { it.inputKey }
+        assertEquals(listOf("button_a"), keys)
+    }
+
 }

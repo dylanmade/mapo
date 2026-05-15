@@ -525,6 +525,46 @@ class MainViewModel @Inject constructor(
     }
 
     /**
+     * Brick 5.5.b: materialize a layer-side override scaffold for
+     * `(layerId, inputSource, groupInputKey)`. Suspending — the repo persists the
+     * chain before returning; the next `activeControllerConfig` emission carries the
+     * new GroupInput. Returns the materialized [com.mapo.data.model.steam.GroupInput]
+     * id so callers (e.g., the per-input editor) can immediately route picker results
+     * to the new override.
+     *
+     * No-op (returns null) when no profile is active.
+     */
+    suspend fun materializeLayerOverride(
+        layerId: Long,
+        inputSource: com.mapo.data.model.steam.InputSource,
+        groupInputKey: String,
+    ): Long? {
+        if (activeProfile.value == null) return null
+        return controllerConfigRepository.materializeLayerOverride(
+            layerId = layerId,
+            inputSource = inputSource,
+            groupInputKey = groupInputKey,
+        )
+    }
+
+    /**
+     * Brick 5.5.b: drop the layer override at `(layerId, inputSource, groupInputKey)`,
+     * returning that row to inheritance from the parent set. If the layer's overlay
+     * group is left with no remaining inputs, the repo also removes the overlay
+     * group + preset pointer.
+     */
+    fun clearLayerOverride(
+        layerId: Long,
+        inputSource: com.mapo.data.model.steam.InputSource,
+        groupInputKey: String,
+    ) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            controllerConfigRepository.clearLayerOverride(layerId, inputSource, groupInputKey)
+        }
+    }
+
+    /**
      * Append a new activator of [type] to the input identified by [groupInputId].
      * Used by the per-input editor screen's `[+ Add Activator]` action.
      */

@@ -786,6 +786,87 @@ class MainViewModelTest {
         coVerify { controllerConfigRepo.deleteLayer(5L) }
     }
 
+    // ── Brick 5.5.b: layer override CRUD wrappers ────────────────────────────
+
+    @Test
+    fun materializeLayerOverride_noActiveProfile_returnsNull_andDoesNotCallRepo() = runTest(testDispatcher) {
+        activeProfile.value = null
+
+        val result = subject.materializeLayerOverride(
+            layerId = 1L,
+            inputSource = com.mapo.data.model.steam.InputSource.BUTTON_DIAMOND,
+            groupInputKey = "button_a",
+        )
+
+        assertEquals(null, result)
+        coVerify(exactly = 0) {
+            controllerConfigRepo.materializeLayerOverride(any(), any(), any())
+        }
+    }
+
+    @Test
+    fun materializeLayerOverride_delegatesToRepo_andReturnsId() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+        coEvery {
+            controllerConfigRepo.materializeLayerOverride(
+                layerId = 10L,
+                inputSource = com.mapo.data.model.steam.InputSource.BUTTON_DIAMOND,
+                groupInputKey = "button_a",
+            )
+        } returns 555L
+
+        val result = subject.materializeLayerOverride(
+            layerId = 10L,
+            inputSource = com.mapo.data.model.steam.InputSource.BUTTON_DIAMOND,
+            groupInputKey = "button_a",
+        )
+
+        assertEquals(555L, result)
+        coVerify {
+            controllerConfigRepo.materializeLayerOverride(
+                layerId = 10L,
+                inputSource = com.mapo.data.model.steam.InputSource.BUTTON_DIAMOND,
+                groupInputKey = "button_a",
+            )
+        }
+    }
+
+    @Test
+    fun clearLayerOverride_noActiveProfile_isNoOp() = runTest(testDispatcher) {
+        activeProfile.value = null
+
+        subject.clearLayerOverride(
+            layerId = 1L,
+            inputSource = com.mapo.data.model.steam.InputSource.BUTTON_DIAMOND,
+            groupInputKey = "button_a",
+        )
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) {
+            controllerConfigRepo.clearLayerOverride(any(), any(), any())
+        }
+    }
+
+    @Test
+    fun clearLayerOverride_delegatesToRepo() = runTest(testDispatcher) {
+        activeProfile.value = Profile(id = 1L, name = "P")
+
+        subject.clearLayerOverride(
+            layerId = 10L,
+            inputSource = com.mapo.data.model.steam.InputSource.BUTTON_DIAMOND,
+            groupInputKey = "button_a",
+        )
+        advanceUntilIdle()
+
+        coVerify {
+            controllerConfigRepo.clearLayerOverride(
+                10L,
+                com.mapo.data.model.steam.InputSource.BUTTON_DIAMOND,
+                "button_a",
+            )
+        }
+    }
+
     /** Helper for tests that need to rebuild the subject after tweaking mock behavior. */
     private fun rebuildSubject(): MainViewModel = MainViewModel(
         layoutRepository = layoutRepo,

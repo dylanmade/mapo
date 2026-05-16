@@ -67,6 +67,7 @@ fun RemapTargetPickerScreen(
     onSelect: (BindingOutput) -> Unit,
     onBack: () -> Unit,
     availableActionSets: List<Pair<Long, String>> = emptyList(),
+    availableLayers: List<Pair<Long, String>> = emptyList(),
 ) {
     val current = remember(currentEncoded) { BindingOutput.decode(currentEncoded) }
     var pickerState by remember { mutableStateOf<RemapPickerState>(RemapPickerState.CategorySelection) }
@@ -97,11 +98,13 @@ fun RemapTargetPickerScreen(
                 is RemapPickerState.CategorySelection -> CategoryList(
                     current = current,
                     showSwitchActionSet = availableActionSets.isNotEmpty(),
+                    showLayer = availableLayers.isNotEmpty(),
                     onUnbound = { onSelect(BindingOutput.Unbound) },
                     onPickGamepad = { pickerState = RemapPickerState.GamepadList() },
                     onPickKeyboard = { pickerState = RemapPickerState.KeyboardList() },
                     onPickMouse = { pickerState = RemapPickerState.MouseList() },
                     onPickSwitchActionSet = { pickerState = RemapPickerState.SwitchActionSetList },
+                    onPickLayer = { pickerState = RemapPickerState.LayerVerbList },
                 )
                 is RemapPickerState.GamepadList -> FilteredInputList(
                     options = RemapInputOptions.gamepadOptions,
@@ -134,6 +137,23 @@ fun RemapTargetPickerScreen(
                         onSelect(BindingOutput.ControllerAction("CHANGE_PRESET", listOf(setId.toString())))
                     },
                 )
+                is RemapPickerState.LayerVerbList -> LayerVerbList(
+                    current = current,
+                    onSelect = { verb -> pickerState = RemapPickerState.LayerSelectionList(verb) },
+                )
+                is RemapPickerState.LayerSelectionList -> LayerSelectionList(
+                    verb = state.verb,
+                    layers = availableLayers,
+                    current = current,
+                    onSelect = { layerId ->
+                        onSelect(
+                            BindingOutput.ControllerAction(
+                                verb = state.verb,
+                                args = listOf(layerId.toString()),
+                            )
+                        )
+                    },
+                )
             }
         }
     }
@@ -146,19 +166,25 @@ private fun matchesCategory(current: BindingOutput, category: PickerCategory): B
     PickerCategory.Keyboard         -> current is BindingOutput.KeyPress
     PickerCategory.Mouse            -> current is BindingOutput.MouseButton || current is BindingOutput.MouseWheel
     PickerCategory.SwitchActionSet  -> current is BindingOutput.ControllerAction && current.verb == "CHANGE_PRESET"
+    PickerCategory.Layer            -> current is BindingOutput.ControllerAction && current.verb in LAYER_VERBS
 }
 
-private enum class PickerCategory { Unbound, Gamepad, Keyboard, Mouse, SwitchActionSet }
+private enum class PickerCategory { Unbound, Gamepad, Keyboard, Mouse, SwitchActionSet, Layer }
+
+/** Brick 5.6: layer-activation verbs the picker exposes. */
+private val LAYER_VERBS = setOf("add_layer", "hold_layer", "remove_layer")
 
 @Composable
 private fun CategoryList(
     current: BindingOutput,
     showSwitchActionSet: Boolean,
+    showLayer: Boolean,
     onUnbound: () -> Unit,
     onPickGamepad: () -> Unit,
     onPickKeyboard: () -> Unit,
     onPickMouse: () -> Unit,
     onPickSwitchActionSet: () -> Unit,
+    onPickLayer: () -> Unit,
 ) {
     Column {
         CategoryRow("Unbound / None", matchesCategory(current, PickerCategory.Unbound), showChevron = false, onClick = onUnbound)
@@ -174,6 +200,14 @@ private fun CategoryList(
                 label = "Switch Action Set",
                 selected = matchesCategory(current, PickerCategory.SwitchActionSet),
                 onClick = onPickSwitchActionSet,
+            )
+        }
+        if (showLayer) {
+            HorizontalDivider()
+            CategoryRow(
+                label = "Layer",
+                selected = matchesCategory(current, PickerCategory.Layer),
+                onClick = onPickLayer,
             )
         }
     }
@@ -310,6 +344,106 @@ private fun SwitchActionSetList(
                     },
                 ) { Text(title) }
                 if (index < sets.lastIndex) HorizontalDivider()
+            }
+        }
+    }
+}
+
+/**
+ * Brick 5.6: pick a layer-activation verb. Three options:
+ *  - **Add Layer** (sticky) — `add_layer`. Activates the layer; remains active until
+ *    a `Remove Layer` binding deactivates it or the action set changes.
+ *  - **Hold Layer** (while held) — `hold_layer`. Single-binding while-held variant —
+ *    activates on press, releases on the matching up event.
+ *  - **Remove Layer** — `remove_layer`. Deactivates a layer (paired with sticky Add).
+ *
+ * The "explicit pair" Steam form (FULL_PRESS add_layer + RELEASE_PRESS remove_layer)
+ * is intentionally not exposed here — `Hold Layer` covers the same use case as a
+ * single verb with less wiring for the user. The pair form can be authored manually
+ * by adding a Release activator if needed; full UI support can land later.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun LayerVerbList(
+    current: BindingOutput,
+    onSelect: (verb: String) -> Unit,
+) {
+    val currentVerb = (current as? BindingOutput.ControllerAction)
+        ?.takeIf { it.verb in LAYER_VERBS }
+        ?.verb
+    val verbs = listOf(
+        VerbOption("add_layer", "Add Layer (sticky)", "Activates the layer until another binding deactivates it."),
+        VerbOption("hold_layer", "Hold Layer (while held)", "Activates while this input is held; releases on up."),
+        VerbOption("remove_layer", "Remove Layer", "Deactivates a layer that's currently active."),
+    )
+    Column(modifier = Modifier.fillMaxSize()) {
+        verbs.forEachIndexed { idx, verb ->
+            val isSelected = verb.verbId == currentVerb
+            ListItem(
+                onClick = { onSelect(verb.verbId) },
+                leadingContent = if (isSelected) {
+                    { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
+                } else null,
+                trailingContent = {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+                },
+                colors = ListItemDefaults.colors(
+                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                     else Color.Transparent,
+                ),
+                supportingContent = {
+                    Text(verb.subtext, style = MaterialTheme.typography.bodySmall)
+                },
+                modifier = Modifier.testTag("layer_verb_${verb.verbId}"),
+            ) { Text(verb.label) }
+            if (idx < verbs.lastIndex) HorizontalDivider()
+        }
+    }
+}
+
+private data class VerbOption(val verbId: String, val label: String, val subtext: String)
+
+/**
+ * Brick 5.6: list of layers in the editing context's action set. Selecting one emits
+ * a `ControllerAction(verb, [layerId])` binding. The currently-bound layer (if any)
+ * shows a check tick.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun LayerSelectionList(
+    verb: String,
+    layers: List<Pair<Long, String>>,
+    current: BindingOutput,
+    onSelect: (Long) -> Unit,
+) {
+    val currentLayerId = (current as? BindingOutput.ControllerAction)
+        ?.takeIf { it.verb == verb }
+        ?.args?.firstOrNull()?.toLongOrNull()
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (layers.isEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "No layers in this action set yet",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            return@Column
+        }
+        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            itemsIndexed(layers) { index, (layerId, title) ->
+                val isSelected = layerId == currentLayerId
+                ListItem(
+                    onClick = { onSelect(layerId) },
+                    leadingContent = if (isSelected) {
+                        { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
+                    } else null,
+                    colors = ListItemDefaults.colors(
+                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                         else Color.Transparent,
+                    ),
+                ) { Text(title) }
+                if (index < layers.lastIndex) HorizontalDivider()
             }
         }
     }

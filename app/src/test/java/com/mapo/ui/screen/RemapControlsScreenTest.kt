@@ -595,6 +595,204 @@ class RemapControlsScreenTest {
         composeRule.onAllNodesWithText("ScopeA").assertCountEquals(0)
     }
 
+    // ── Overlay editing mode (Brick 5.5.c) ────────────────────────────────────
+
+    @Test
+    fun overlayMode_ghostRow_showsBaseBindingWhenLayerHasNoOverride() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = configWithLayerOverride(
+                            baseButtonA = BindingOutput.KeyPress("ENTER"),
+                            layerId = 10L,
+                            layerTitle = "Scope",
+                            layerOverrideButtonA = null,  // ghost row
+                        ),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = 10L,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        // The base set's binding text shows through as ghost (Robolectric can't probe
+        // alpha cleanly; we verify the text is *present* and there's no override icon).
+        composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
+        composeRule.onAllNodesWithText("Override actions").assertCountEquals(0)
+    }
+
+    @Test
+    fun overlayMode_overriddenRow_showsLayerBindingAndOverflowMenu() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = configWithLayerOverride(
+                            baseButtonA = BindingOutput.KeyPress("ENTER"),
+                            layerId = 10L,
+                            layerTitle = "Scope",
+                            layerOverrideButtonA = BindingOutput.MouseButton("MOUSE_LEFT"),
+                        ),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = 10L,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        // Override visible; base hidden for that row.
+        composeRule.onNodeWithText("MS: MOUSE_LEFT", useUnmergedTree = true).assertExists()
+        composeRule.onAllNodesWithText("KB: ENTER", useUnmergedTree = true).assertCountEquals(0)
+        // Trailing menu present.
+        composeRule.onNodeWithContentDescription("Override actions").assertIsDisplayed()
+    }
+
+    @Test
+    fun overlayMode_clearOverride_invokesCallback_withLayerSourceAndKey() {
+        var args: Triple<Long, com.mapo.data.model.steam.InputSource, String>? = null
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = configWithLayerOverride(
+                            baseButtonA = BindingOutput.KeyPress("ENTER"),
+                            layerId = 42L,
+                            layerTitle = "Scope",
+                            layerOverrideButtonA = BindingOutput.MouseButton("MOUSE_LEFT"),
+                        ),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = 42L,
+                        onClearLayerOverride = { layerId, src, key -> args = Triple(layerId, src, key) },
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Override actions").performClick()
+        composeRule.onNodeWithText("Clear override").performClick()
+
+        assert(args == Triple(42L, com.mapo.data.model.steam.InputSource.BUTTON_DIAMOND, "button_a")) {
+            "Expected callback (42, BUTTON_DIAMOND, button_a); got $args"
+        }
+    }
+
+    @Test
+    fun overridesFilterToggle_hiddenInBaseMode() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = sampleConfig(),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = null,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+        composeRule.onAllNodesWithText("Only overrides").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Show all").assertCountEquals(0)
+    }
+
+    @Test
+    fun overridesFilterToggle_visibleInOverlayMode_andOverriddenRowSurvivesFilter() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = configWithLayerOverride(
+                            baseButtonA = BindingOutput.KeyPress("ENTER"),
+                            layerId = 10L,
+                            layerTitle = "Scope",
+                            layerOverrideButtonA = BindingOutput.MouseButton("MOUSE_LEFT"),
+                        ),
+                        viewingActionSetId = 1L,
+                        viewingLayerId = 10L,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        // Toggle visible.
+        composeRule.onNodeWithText("Show all").assertIsDisplayed()
+        composeRule.onNodeWithText("Only overrides").assertIsDisplayed()
+
+        composeRule.onNodeWithText("Only overrides").performClick()
+        composeRule.waitForIdle()
+
+        // The overridden row is still in the tree — the filter let it through.
+        // We don't assert that the non-overridden rows are *gone* here because
+        // Robolectric's LazyColumn doesn't always materialize below-the-fold rows
+        // anyway (per feedback_robolectric_compose_pitfalls). The filter's
+        // correctness is exhaustively tested at the pure-function level via
+        // FilterToOverridesTest.
+        composeRule.onNodeWithText("MS: MOUSE_LEFT", useUnmergedTree = true).assertExists()
+    }
+
+    /**
+     * Helper for overlay-mode tests. Builds a single-set config with one layer that
+     * optionally carries a `button_a` override (when [layerOverrideButtonA] is non-null).
+     * Mirrors `sampleConfig`'s base shape (four face buttons on BUTTON_DIAMOND).
+     */
+    private fun configWithLayerOverride(
+        baseButtonA: BindingOutput,
+        layerId: Long,
+        layerTitle: String,
+        layerOverrideButtonA: BindingOutput?,
+    ): ControllerConfig {
+        val base = sampleConfig(boundButtonA = baseButtonA)
+        val baseSet = base.actionSets.first()
+
+        val layerPresetEntries = if (layerOverrideButtonA != null) {
+            val overlayActivator = Activator(
+                id = 5000L, groupInputId = 6000L, type = ActivatorType.FULL_PRESS, orderIndex = 0,
+            )
+            val overlayBinding = layerOverrideButtonA.toEntity().let { (t, args) ->
+                Binding(id = 7000L, activatorId = overlayActivator.id, outputType = t, args = args, orderIndex = 0)
+            }
+            val overlayInput = GroupInputGraph(
+                input = GroupInput(id = 6000L, bindingGroupId = 4000L, inputKey = "button_a", orderIndex = 0),
+                activators = listOf(ActivatorGraph(overlayActivator, listOf(overlayBinding))),
+            )
+            val overlayGroup = BindingGroupGraph(
+                group = BindingGroup(
+                    id = 4000L, actionSetId = null, actionLayerId = layerId,
+                    name = "face_overlay", mode = BindingMode.BUTTON_PAD,
+                ),
+                inputs = listOf(overlayInput),
+            )
+            listOf(PresetEntry(InputSource.BUTTON_DIAMOND, "active", overlayGroup))
+        } else emptyList()
+
+        val layer = ActionLayerGraph(
+            layer = ActionLayer(
+                id = layerId,
+                parentActionSetId = baseSet.actionSet.id,
+                name = layerTitle.lowercase(),
+                title = layerTitle,
+            ),
+            bindingGroups = emptyList(),
+            preset = layerPresetEntries,
+        )
+
+        return base.copy(actionSets = listOf(baseSet.copy(layers = listOf(layer))))
+    }
+
     /** Single-set config with [layers] attached (id+title pairs, in order). */
     private fun singleSetConfigWithLayers(
         layers: List<Pair<Long, String>>,

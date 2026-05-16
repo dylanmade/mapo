@@ -567,11 +567,33 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         )
                     },
                     onDeleteLayer = viewModel::deleteControllerActionLayer,
+                    onClearLayerOverride = { layerId, inputSource, groupInputKey ->
+                        viewModel.clearLayerOverride(layerId, inputSource, groupInputKey)
+                    },
                     onBack = { navController.popBackStack() },
                     onOpenInputEditor = { inputSource, groupInputKey, label ->
-                        navController.navigate(
-                            MapoRoute.inputEditor(inputSource.name, groupInputKey, label)
-                        )
+                        // Brick 5.5.c: in overlay mode, eagerly materialize the layer
+                        // override before navigating so the editor opens against a
+                        // real GroupInput on the layer (not the base set's row). The
+                        // VM call is suspend; scoped to keep the navigation atomic
+                        // with the persist. In base mode, navigate directly.
+                        val currentLayerId = viewingLayerId
+                        if (currentLayerId != null) {
+                            scope.launch {
+                                viewModel.materializeLayerOverride(
+                                    layerId = currentLayerId,
+                                    inputSource = inputSource,
+                                    groupInputKey = groupInputKey,
+                                )
+                                navController.navigate(
+                                    MapoRoute.inputEditor(inputSource.name, groupInputKey, label)
+                                )
+                            }
+                        } else {
+                            navController.navigate(
+                                MapoRoute.inputEditor(inputSource.name, groupInputKey, label)
+                            )
+                        }
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -602,6 +624,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     groupInputKey = groupInputKey,
                     config = activeControllerConfig,
                     viewingActionSetId = viewingActionSetId,
+                    viewingLayerId = viewingLayerId,
                     pickerResult = pickerResult?.let { BindingOutput.decode(it) },
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
@@ -610,7 +633,14 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         viewModel.setControllerCommand(bindingId, output)
                     },
                     onOpenPicker = { title, current ->
-                        navController.navigate(MapoRoute.remapTargetPicker(title, current.encode(), showActionSets = true))
+                        navController.navigate(
+                            MapoRoute.remapTargetPicker(
+                                title = title,
+                                currentEncoded = current.encode(),
+                                showActionSets = true,
+                                showLayers = true,
+                            )
+                        )
                     },
                     onAddActivator = { groupInputId, type ->
                         viewModel.addControllerActivator(groupInputId, type)
@@ -800,12 +830,17 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         type = NavType.BoolType
                         defaultValue = false
                     },
+                    navArgument(MapoRoute.ARG_SHOW_LAYERS) {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    },
                 ),
             ) { entry ->
                 val title = entry.arguments?.getString(MapoRoute.ARG_TITLE) ?: ""
                 val currentEncoded = entry.arguments?.getString(MapoRoute.ARG_CURRENT)
                     ?: BindingOutput.Unbound.encode()
                 val showActionSets = entry.arguments?.getBoolean(MapoRoute.ARG_SHOW_ACTION_SETS) == true
+                val showLayers = entry.arguments?.getBoolean(MapoRoute.ARG_SHOW_LAYERS) == true
                 // Brick 4.5: source the action sets list from the active config for the
                 // Steam-Input call site. ConfigureButton sets showActionSets=false so this
                 // list isn't consulted there even though we'd compute the same value.
@@ -813,10 +848,21 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     activeControllerConfig?.actionSets?.map { it.actionSet.id to it.actionSet.title }
                         ?: emptyList()
                 } else emptyList()
+                // Brick 5.6: layers list is scoped to the viewing action set — layers in
+                // one set don't appear in another's namespace (Steam-faithful).
+                val availableLayers: List<Pair<Long, String>> = if (showLayers) {
+                    val viewingSet = activeControllerConfig?.let { cfg ->
+                        viewingActionSetId?.let { id ->
+                            cfg.actionSets.firstOrNull { it.actionSet.id == id }
+                        } ?: cfg.activeActionSet
+                    }
+                    viewingSet?.layers?.map { it.layer.id to it.layer.title } ?: emptyList()
+                } else emptyList()
                 RemapTargetPickerScreen(
                     title = title,
                     currentEncoded = currentEncoded,
                     availableActionSets = availableActionSets,
+                    availableLayers = availableLayers,
                     onSelect = { output ->
                         // Write the result to the previous destination's saved state and pop. The
                         // caller observes its own saved-state handle and applies the result to

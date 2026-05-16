@@ -104,10 +104,21 @@ fun ControllerConfig.findGroupInput(
     inputSource: InputSource,
     inputKey: String,
     setId: Long? = null,
-): GroupInputGraph? = resolveActionSet(setId)
-    ?.presetFor(inputSource)
-    ?.group
-    ?.inputByKey(inputKey)
+    layerId: Long? = null,
+): GroupInputGraph? {
+    val set = resolveActionSet(setId) ?: return null
+    // Brick 5.5.c: when [layerId] is non-null and resolves to a layer in this set,
+    // the editor is in overlay mode — read from the layer's preset (which only carries
+    // input sources the user has overridden). Fall back to the base set's preset only
+    // when the layer has nothing for this source — but in that scenario the screen
+    // shouldn't be open against a layer that has no override (5.5.c materializes
+    // eagerly on tap). The fall-through preserves correctness for stale-pointer cases.
+    if (layerId != null) {
+        val layer = set.layers.firstOrNull { it.layer.id == layerId }
+        layer?.presetFor(inputSource)?.group?.inputByKey(inputKey)?.let { return it }
+    }
+    return set.presetFor(inputSource)?.group?.inputByKey(inputKey)
+}
 
 /**
  * Resolve [setId] to its [ActionSetGraph], falling back to [ControllerConfig.activeActionSet]

@@ -140,9 +140,67 @@ class BindingOutputTest {
     }
 
     @Test
-    fun controllerAction_nonChangePreset_keepsVerbLabel() {
-        // Future verbs (add_layer, remove_layer) shouldn't display as "Switch to: ...".
-        val output = BindingOutput.ControllerAction("add_layer", listOf("3"))
-        assertEquals("Verb: add_layer", output.displayLabel())
+    fun controllerAction_unknownVerb_keepsVerbLabel() {
+        // Unknown verbs (e.g. a future "mode_shift_combo" we haven't wired) still fall
+        // back to the literal verb form so debug info isn't lost.
+        val output = BindingOutput.ControllerAction("mode_shift_combo", listOf("3"))
+        assertEquals("Verb: mode_shift_combo", output.displayLabel())
     }
+
+    // ── Brick 5.6: layer verbs ───────────────────────────────────────────────
+
+    @Test
+    fun addLayerDisplayLabel_resolvesLayerTitleFromConfig() {
+        val output = BindingOutput.ControllerAction("add_layer", listOf("100"))
+        val config = configWithLayers(layers = listOf(100L to "Scope", 101L to "Vehicle"))
+        assertEquals("Add Layer: Scope", output.displayLabel(config))
+    }
+
+    @Test
+    fun holdLayerDisplayLabel_resolvesLayerTitleFromConfig() {
+        val output = BindingOutput.ControllerAction("hold_layer", listOf("101"))
+        val config = configWithLayers(layers = listOf(100L to "Scope", 101L to "Vehicle"))
+        assertEquals("Hold Layer: Vehicle", output.displayLabel(config))
+    }
+
+    @Test
+    fun removeLayerDisplayLabel_resolvesLayerTitleFromConfig() {
+        val output = BindingOutput.ControllerAction("remove_layer", listOf("100"))
+        val config = configWithLayers(layers = listOf(100L to "Scope"))
+        assertEquals("Remove Layer: Scope", output.displayLabel(config))
+    }
+
+    @Test
+    fun layerVerbDisplayLabel_fallsBackToLayerIdWhenNotInConfig() {
+        val output = BindingOutput.ControllerAction("add_layer", listOf("999"))
+        val config = configWithLayers(layers = emptyList())
+        assertEquals("Add Layer: Layer #999", output.displayLabel(config))
+        assertEquals("Add Layer: Layer #999", output.displayLabel(null))
+    }
+
+    @Test
+    fun layerVerbDisplayLabel_noConfig_usesNumericFallback() {
+        val output = BindingOutput.ControllerAction("hold_layer", listOf("42"))
+        // No config → can't resolve title; the no-arg displayLabel also shows numeric.
+        assertEquals("Hold Layer: Layer #42", output.displayLabel())
+    }
+
+    private fun configWithLayers(layers: List<Pair<Long, String>>) = ControllerConfig(
+        controllerProfile = ControllerProfile(
+            id = 1L, profileId = 1L,
+            controllerType = ControllerType.GENERIC_ANDROID, name = "Default",
+        ),
+        actionSets = listOf(
+            ActionSetGraph(
+                actionSet = ActionSet(id = 10L, controllerProfileId = 1L, name = "default", title = "Default"),
+                layers = layers.map { (id, title) ->
+                    ActionLayerGraph(
+                        layer = ActionLayer(id = id, parentActionSetId = 10L, name = title.lowercase(), title = title),
+                        bindingGroups = emptyList(),
+                    )
+                },
+                preset = emptyList(),
+            ),
+        ),
+    )
 }

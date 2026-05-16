@@ -77,6 +77,7 @@ fun RemapControlsScreen(
     onRenameLayer: (layerId: Long, newTitle: String) -> Unit = { _, _ -> },
     onDuplicateLayer: (sourceLayerId: Long, newTitle: String) -> Unit = { _, _ -> },
     onDeleteLayer: (layerId: Long) -> Unit = {},
+    onClearLayerOverride: (layerId: Long, inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit = { _, _, _ -> },
 ) {
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
 
@@ -94,6 +95,18 @@ fun RemapControlsScreen(
             ?.let { id -> cfg.actionSets.firstOrNull { it.actionSet.id == id } }
             ?: cfg.activeActionSet
     }
+    // Brick 5.5.c: resolve the focused layer (when present). The detail pane reads from
+    // this in overlay mode — ghost rows fall back to the parent set's binding.
+    val viewingLayer = viewingSet?.layers?.firstOrNull { it.layer.id == viewingLayerId }
+
+    // Brick 5.5.c: "Show all / Only overrides" toggle state. Visible only in overlay
+    // mode. `rememberSaveable` survives recomposition but intentionally not nav — the
+    // user reopening Remap Controls starts from "Show all" each time.
+    var onlyOverrides by rememberSaveable { mutableStateOf(false) }
+    // Drop "only overrides" automatically when the user leaves overlay mode — toggling
+    // it on, then deselecting the layer, would otherwise leave a stale filter applied
+    // when the next overlay session starts.
+    if (viewingLayer == null && onlyOverrides) onlyOverrides = false
 
     Scaffold(
         modifier = modifier,
@@ -137,9 +150,16 @@ fun RemapControlsScreen(
             RemapDetailPane(
                 sectionId = sectionId,
                 viewingSet = viewingSet,
+                viewingLayer = viewingLayer,
+                onlyOverrides = onlyOverrides,
+                onSetOnlyOverrides = { onlyOverrides = it },
                 config = config,
                 firstRowFocusRequester = firstRowFocusRequester,
                 onOpenInputEditor = onOpenInputEditor,
+                onClearOverride = { inputSource, groupInputKey ->
+                    val layerId = viewingLayer?.layer?.id ?: return@RemapDetailPane
+                    onClearLayerOverride(layerId, inputSource, groupInputKey)
+                },
             )
         }
     }
@@ -195,7 +215,7 @@ fun RemapControlsScreen(
     // within the currently-viewing set — the overflow button is disabled when no
     // layer is focused (handled in LayersPillRow), so a non-null viewing layer is
     // a precondition for Rename/Duplicate/Delete here.
-    val viewingLayer = viewingSet?.layers?.firstOrNull { it.layer.id == viewingLayerId }?.layer
+    val viewingLayerEntity = viewingLayer?.layer
     when (layerDialog) {
         LayerDialogState.None -> Unit
         LayerDialogState.Add -> viewingActionSet?.let { parentSet ->
@@ -207,7 +227,7 @@ fun RemapControlsScreen(
                 onDismiss = { layerDialog = LayerDialogState.None },
             )
         } ?: run { layerDialog = LayerDialogState.None }
-        LayerDialogState.Rename -> viewingLayer?.let { target ->
+        LayerDialogState.Rename -> viewingLayerEntity?.let { target ->
             RenameLayerDialog(
                 target = target,
                 onConfirm = { newTitle ->
@@ -217,7 +237,7 @@ fun RemapControlsScreen(
                 onDismiss = { layerDialog = LayerDialogState.None },
             )
         } ?: run { layerDialog = LayerDialogState.None }
-        LayerDialogState.Duplicate -> viewingLayer?.let { source ->
+        LayerDialogState.Duplicate -> viewingLayerEntity?.let { source ->
             DuplicateLayerDialog(
                 source = source,
                 onConfirm = { newTitle ->
@@ -227,7 +247,7 @@ fun RemapControlsScreen(
                 onDismiss = { layerDialog = LayerDialogState.None },
             )
         } ?: run { layerDialog = LayerDialogState.None }
-        LayerDialogState.Delete -> viewingLayer?.let { target ->
+        LayerDialogState.Delete -> viewingLayerEntity?.let { target ->
             DeleteLayerConfirmDialog(
                 target = target,
                 onConfirm = {
@@ -546,42 +566,135 @@ private fun ActionSetOverflowMenu(
 private fun RemapDetailPane(
     sectionId: String,
     viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
+    onlyOverrides: Boolean,
+    onSetOnlyOverrides: (Boolean) -> Unit,
     config: ControllerConfig?,
     firstRowFocusRequester: FocusRequester,
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
+    onClearOverride: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit,
 ) {
-    val items = RemapSections.contentBySection[sectionId]
+    val rawItems = RemapSections.contentBySection[sectionId]
 
-    if (items == null) {
+    if (rawItems == null) {
         // Gyro and any future un-implemented sections route here.
         DetailPlaceholder(RemapSections.GYRO_PLACEHOLDER)
         return
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 12.dp),
-    ) {
-        // First focusable row gets the cross-pane focus requester so D-pad Right from the
-        // rail lands on the first interactable element of this section.
-        val firstBindingRowKey = items.firstOrNull { it is RemapPaneItem.BindingRow }?.key
-        items(items = items, key = { it.key }) { item ->
-            val focusModifier = if (item.key == firstBindingRowKey) {
-                Modifier.focusRequester(firstRowFocusRequester)
-            } else Modifier
-            when (item) {
-                is RemapPaneItem.Subheader -> SubheaderRow(item)
-                is RemapPaneItem.BindingRow -> BindingRowItem(
-                    item = item,
-                    viewingSet = viewingSet,
-                    config = config,
-                    modifier = focusModifier,
-                    onOpenInputEditor = onOpenInputEditor,
-                )
-                is RemapPaneItem.DisabledRow -> DisabledRowItem(item)
+    // Brick 5.5.c: when "Only overrides" is on, drop binding rows without an override
+    // — and any subheader whose children all dropped. Disabled rows always hide in
+    // overrides-only (they can't be overridden anyway).
+    val items = remember(rawItems, onlyOverrides, viewingLayer) {
+        if (!onlyOverrides || viewingLayer == null) rawItems
+        else filterToOverrides(rawItems, viewingLayer)
+    }
+    val isOverlayMode = viewingLayer != null
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (isOverlayMode) {
+            OverridesFilterToggle(
+                onlyOverrides = onlyOverrides,
+                onChange = onSetOnlyOverrides,
+            )
+        }
+        if (isOverlayMode && onlyOverrides && items.none { it is RemapPaneItem.BindingRow }) {
+            // Common edge case: user selected a fresh layer + filtered to overrides.
+            // Without an empty-state hint the pane would just be blank.
+            DetailPlaceholder("No overrides in this section yet.")
+            return@Column
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 12.dp),
+        ) {
+            // First focusable row gets the cross-pane focus requester so D-pad Right
+            // from the rail lands on the first interactable element of this section.
+            val firstBindingRowKey = items.firstOrNull { it is RemapPaneItem.BindingRow }?.key
+            items(items = items, key = { it.key }) { item ->
+                val focusModifier = if (item.key == firstBindingRowKey) {
+                    Modifier.focusRequester(firstRowFocusRequester)
+                } else Modifier
+                when (item) {
+                    is RemapPaneItem.Subheader -> SubheaderRow(item)
+                    is RemapPaneItem.BindingRow -> BindingRowItem(
+                        item = item,
+                        viewingSet = viewingSet,
+                        viewingLayer = viewingLayer,
+                        config = config,
+                        modifier = focusModifier,
+                        onOpenInputEditor = onOpenInputEditor,
+                        onClearOverride = onClearOverride,
+                    )
+                    is RemapPaneItem.DisabledRow -> DisabledRowItem(item)
+                }
             }
         }
     }
+}
+
+/**
+ * Brick 5.5.c: filter a section's items down to rows that have an override on
+ * [layer], dropping any subheader whose entire group of binding rows is filtered out.
+ * Disabled rows are hidden — they can't be overridden anyway, so leaving them in
+ * "Only overrides" would be misleading.
+ *
+ * Implementation: single linear pass over [items]. A subheader is queued until at
+ * least one of its child binding rows survives, then emitted once before the
+ * survivor. If the next subheader arrives before any survivors emit, the queued one
+ * is discarded.
+ */
+internal fun filterToOverrides(
+    items: List<RemapPaneItem>,
+    layer: com.mapo.data.model.steam.ActionLayerGraph,
+): List<RemapPaneItem> {
+    val result = mutableListOf<RemapPaneItem>()
+    var pendingSubheader: RemapPaneItem.Subheader? = null
+    for (item in items) {
+        when (item) {
+            is RemapPaneItem.Subheader -> pendingSubheader = item
+            is RemapPaneItem.BindingRow -> {
+                val hasOverride = layer.presetFor(item.inputSource)
+                    ?.group?.inputByKey(item.groupInputKey) != null
+                if (hasOverride) {
+                    pendingSubheader?.let { result += it }
+                    pendingSubheader = null
+                    result += item
+                }
+            }
+            is RemapPaneItem.DisabledRow -> Unit  // hidden in overrides-only
+        }
+    }
+    return result
+}
+
+@Composable
+private fun OverridesFilterToggle(
+    onlyOverrides: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    // M3 segmented buttons would be the conventional choice but they're heavy in the
+    // tab-row real estate; a pair of FilterChips reads cleaner here and matches the
+    // pill aesthetic of the layer row above.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.FilterChip(
+            selected = !onlyOverrides,
+            onClick = { onChange(false) },
+            label = { Text("Show all", style = MaterialTheme.typography.labelLarge) },
+        )
+        androidx.compose.material3.FilterChip(
+            selected = onlyOverrides,
+            onClick = { onChange(true) },
+            label = { Text("Only overrides", style = MaterialTheme.typography.labelLarge) },
+        )
+    }
+    HorizontalDivider()
 }
 
 @Composable
@@ -634,20 +747,35 @@ private fun DisabledModeDropdown(label: String) {
 private fun BindingRowItem(
     item: RemapPaneItem.BindingRow,
     viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
     config: ControllerConfig?,
     modifier: Modifier = Modifier,
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
+    onClearOverride: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit,
 ) {
-    // The row preview shows the FULL_PRESS binding; the per-input editor (Brick 3.4) is
-    // where the full activator list lives. When multiple activators are configured we
-    // append "+N more" so the user can tell at a glance the row holds more than they see.
-    val groupInput = viewingSet?.presetFor(item.inputSource)?.group?.inputByKey(item.groupInputKey)
-    val activators = groupInput?.activators.orEmpty()
+    // Brick 5.5.c: overlay mode resolution.
+    //  - Layer's groupInput (if any) wins → "override" visual (primary color, trailing
+    //    [⋮] menu offering Clear Override).
+    //  - Else fall through to the base set's groupInput → in overlay mode this renders
+    //    as ghost text (alpha 0.5); in base mode it renders normally.
+    val layerGroupInput =
+        viewingLayer?.presetFor(item.inputSource)?.group?.inputByKey(item.groupInputKey)
+    val baseGroupInput =
+        viewingSet?.presetFor(item.inputSource)?.group?.inputByKey(item.groupInputKey)
+    val effectiveGroupInput = layerGroupInput ?: baseGroupInput
+    val hasOverride = layerGroupInput != null
+    val isGhost = viewingLayer != null && !hasOverride
+
+    val activators = effectiveGroupInput?.activators.orEmpty()
     val primary = activators.firstOrNull { it.activator.type == item.activatorType }
         ?: activators.firstOrNull()
     val output = primary?.primaryOutput ?: BindingOutput.Unbound
     val extraCount = (activators.size - 1).coerceAtLeast(0)
-    val ready = groupInput != null
+    // In overlay mode the row is always tappable (a tap on a ghost row materializes the
+    // override). In base mode we still gate on `baseGroupInput != null` so we don't try
+    // to edit a non-existent row.
+    val ready = viewingLayer != null || baseGroupInput != null
+    val contentAlpha = if (isGhost) 0.5f else 1f
 
     Row(
         modifier = modifier
@@ -659,7 +787,11 @@ private fun BindingRowItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .alpha(contentAlpha),
+        ) {
             Text(
                 text = item.label,
                 style = MaterialTheme.typography.bodyLarge,
@@ -672,7 +804,10 @@ private fun BindingRowItem(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Column(horizontalAlignment = Alignment.End) {
+        Column(
+            horizontalAlignment = Alignment.End,
+            modifier = Modifier.alpha(contentAlpha),
+        ) {
             Text(
                 text = output.displayLabel(config),
                 style = MaterialTheme.typography.bodyMedium,
@@ -688,8 +823,44 @@ private fun BindingRowItem(
                 )
             }
         }
+        if (hasOverride) {
+            BindingRowOverflowMenu(
+                onClearOverride = {
+                    onClearOverride(item.inputSource, item.groupInputKey)
+                },
+            )
+        }
     }
     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+}
+
+/**
+ * Brick 5.5.c: trailing [⋮] menu for binding rows in overlay mode that have an
+ * override. Currently exposes a single "Clear override" action; future per-row
+ * actions can land here. Hidden on ghost rows (no override to clear) and in base
+ * mode entirely.
+ */
+@Composable
+private fun BindingRowOverflowMenu(
+    onClearOverride: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    IconButton(
+        onClick = { expanded = true },
+        modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
+    ) {
+        Icon(
+            Icons.Filled.MoreVert,
+            contentDescription = "Override actions",
+            modifier = Modifier.size(IconButtonDefaults.smallIconSize),
+        )
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenuItem(
+            text = { Text("Clear override") },
+            onClick = { expanded = false; onClearOverride() },
+        )
+    }
 }
 
 @Composable

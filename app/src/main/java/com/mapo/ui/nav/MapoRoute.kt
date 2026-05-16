@@ -34,10 +34,25 @@ object MapoRoute {
      * pipeline that can't honor a runtime set switch.
      */
     const val ARG_SHOW_ACTION_SETS = "showActionSets"
+    /**
+     * Brick 5.6: when true, the picker also shows the **Layer** category — populated
+     * from the active controller_profile's viewing-set layers. Same call-site rule as
+     * showActionSets (InputEditor true; ConfigureButton false).
+     */
+    const val ARG_SHOW_LAYERS = "showLayers"
     const val PICKER_RESULT_KEY = "remap_target_picker_result"
-    const val REMAP_TARGET_PICKER = "remap_target_picker?$ARG_TITLE={$ARG_TITLE}&$ARG_CURRENT={$ARG_CURRENT}&$ARG_SHOW_ACTION_SETS={$ARG_SHOW_ACTION_SETS}"
-    fun remapTargetPicker(title: String, currentEncoded: String, showActionSets: Boolean = false): String =
-        "remap_target_picker?$ARG_TITLE=${Uri.encode(title)}&$ARG_CURRENT=${Uri.encode(currentEncoded)}&$ARG_SHOW_ACTION_SETS=$showActionSets"
+    const val REMAP_TARGET_PICKER =
+        "remap_target_picker?$ARG_TITLE={$ARG_TITLE}&$ARG_CURRENT={$ARG_CURRENT}&$ARG_SHOW_ACTION_SETS={$ARG_SHOW_ACTION_SETS}&$ARG_SHOW_LAYERS={$ARG_SHOW_LAYERS}"
+    fun remapTargetPicker(
+        title: String,
+        currentEncoded: String,
+        showActionSets: Boolean = false,
+        showLayers: Boolean = false,
+    ): String =
+        "remap_target_picker?$ARG_TITLE=${Uri.encode(title)}" +
+            "&$ARG_CURRENT=${Uri.encode(currentEncoded)}" +
+            "&$ARG_SHOW_ACTION_SETS=$showActionSets" +
+            "&$ARG_SHOW_LAYERS=$showLayers"
 
     // ── Per-activator settings editor (full-screen, instant-commit) ───────────────
     //

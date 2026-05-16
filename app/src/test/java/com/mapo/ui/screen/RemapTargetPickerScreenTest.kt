@@ -122,4 +122,144 @@ class RemapTargetPickerScreenTest {
         // simplest way to assert the selected-state visually.
         composeRule.onNodeWithText("Menu").assertIsDisplayed()
     }
+
+    // ── Brick 5.6: Layer category + verb/layer two-step picker ───────────────
+
+    @Test
+    fun layerCategory_hiddenWhenAvailableLayersEmpty() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1000.dp, 1400.dp)) {
+                    RemapTargetPickerScreen(
+                        title = "Pick",
+                        currentEncoded = BindingOutput.Unbound.encode(),
+                        onSelect = {},
+                        onBack = {},
+                        availableLayers = emptyList(),
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithText("Layer").assertDoesNotExist()
+    }
+
+    @Test
+    fun layerCategory_visibleWhenLayersProvided() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1000.dp, 1400.dp)) {
+                    RemapTargetPickerScreen(
+                        title = "Pick",
+                        currentEncoded = BindingOutput.Unbound.encode(),
+                        onSelect = {},
+                        onBack = {},
+                        availableLayers = listOf(10L to "Scope"),
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithText("Layer").assertIsDisplayed()
+    }
+
+    @Test
+    fun layerCategory_routesToVerbList_withThreeOptions() {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1000.dp, 1400.dp)) {
+                    RemapTargetPickerScreen(
+                        title = "Pick",
+                        currentEncoded = BindingOutput.Unbound.encode(),
+                        onSelect = {},
+                        onBack = {},
+                        availableLayers = listOf(10L to "Scope"),
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithText("Layer").performClick()
+        composeRule.onNodeWithText("Add Layer (sticky)").assertIsDisplayed()
+        composeRule.onNodeWithText("Hold Layer (while held)").assertIsDisplayed()
+        composeRule.onNodeWithText("Remove Layer").assertIsDisplayed()
+    }
+
+    @Test
+    fun pickingHoldLayer_then_pickingALayer_emitsHoldLayerBindingOutput() {
+        var picked: BindingOutput? = null
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1000.dp, 1400.dp)) {
+                    RemapTargetPickerScreen(
+                        title = "Pick",
+                        currentEncoded = BindingOutput.Unbound.encode(),
+                        onSelect = { picked = it },
+                        onBack = {},
+                        availableLayers = listOf(10L to "Scope", 11L to "Vehicle"),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Layer").performClick()
+        composeRule.onNodeWithText("Hold Layer (while held)").performClick()
+        composeRule.onNodeWithText("Vehicle").performClick()
+
+        val action = picked as? BindingOutput.ControllerAction
+        assert(action != null && action.verb == "hold_layer" && action.args == listOf("11")) {
+            "Expected ControllerAction(hold_layer, [11]); got $picked"
+        }
+    }
+
+    @Test
+    fun pickingAddLayer_emitsAddLayerBindingOutput() {
+        var picked: BindingOutput? = null
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1000.dp, 1400.dp)) {
+                    RemapTargetPickerScreen(
+                        title = "Pick",
+                        currentEncoded = BindingOutput.Unbound.encode(),
+                        onSelect = { picked = it },
+                        onBack = {},
+                        availableLayers = listOf(10L to "Scope"),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Layer").performClick()
+        composeRule.onNodeWithText("Add Layer (sticky)").performClick()
+        composeRule.onNodeWithText("Scope").performClick()
+
+        val action = picked as? BindingOutput.ControllerAction
+        assert(action != null && action.verb == "add_layer" && action.args == listOf("10")) {
+            "Expected ControllerAction(add_layer, [10]); got $picked"
+        }
+    }
+
+    @Test
+    fun pickingRemoveLayer_emitsRemoveLayerBindingOutput() {
+        var picked: BindingOutput? = null
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1000.dp, 1400.dp)) {
+                    RemapTargetPickerScreen(
+                        title = "Pick",
+                        currentEncoded = BindingOutput.Unbound.encode(),
+                        onSelect = { picked = it },
+                        onBack = {},
+                        availableLayers = listOf(10L to "Scope"),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Layer").performClick()
+        composeRule.onNodeWithText("Remove Layer").performClick()
+        composeRule.onNodeWithText("Scope").performClick()
+
+        val action = picked as? BindingOutput.ControllerAction
+        assert(action != null && action.verb == "remove_layer" && action.args == listOf("10")) {
+            "Expected ControllerAction(remove_layer, [10]); got $picked"
+        }
+    }
 }

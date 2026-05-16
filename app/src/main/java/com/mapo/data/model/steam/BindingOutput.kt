@@ -117,20 +117,39 @@ fun BindingOutput.displayLabel(): String = when (this) {
     is BindingOutput.MouseButton   -> "MS: $button"
     is BindingOutput.MouseWheel    -> "MS: $direction"
     is BindingOutput.GameAction    -> "Action: $setName/$actionName"
-    is BindingOutput.ControllerAction -> changePresetLabelOrNull()?.let { "Switch to: Set #$it" } ?: "Verb: $verb"
+    is BindingOutput.ControllerAction -> when {
+        changePresetLabelOrNull() != null ->
+            "Switch to: Set #${changePresetLabelOrNull()}"
+        verb in LAYER_VERBS ->
+            "${verb.layerVerbDisplayPrefix()}: Layer #${layerArgIdOrNull() ?: "?"}"
+        else -> "Verb: $verb"
+    }
     is BindingOutput.ModeShift     -> "Mode shift: ${inputSource.name}"
 }
 
 /**
  * Context-aware variant of [displayLabel]: resolves `CHANGE_PRESET` to the target set's
- * human title (e.g. "Switch to: Menu"). Falls back to the [displayLabel] form when
- * [config] is null or the referenced set isn't present (stale binding after delete).
+ * human title (e.g. "Switch to: Menu") and the layer verbs (`add_layer` / `remove_layer`
+ * / `hold_layer`) to their layer's title (e.g. "Hold Layer: Scope"). Falls back to the
+ * [displayLabel] form when [config] is null or the referenced set/layer is missing
+ * (stale binding after delete).
  */
 fun BindingOutput.displayLabel(config: ControllerConfig?): String {
     if (this is BindingOutput.ControllerAction) {
-        val targetId = changePresetLabelOrNull() ?: return displayLabel()
-        val title = config?.actionSets?.firstOrNull { it.actionSet.id == targetId }?.actionSet?.title
-        return if (title != null) "Switch to: $title" else "Switch to: Set #$targetId"
+        changePresetLabelOrNull()?.let { targetId ->
+            val title = config?.actionSets?.firstOrNull { it.actionSet.id == targetId }?.actionSet?.title
+            return if (title != null) "Switch to: $title" else "Switch to: Set #$targetId"
+        }
+        if (verb in LAYER_VERBS) {
+            val layerId = layerArgIdOrNull()
+            val prefix = verb.layerVerbDisplayPrefix()
+            if (layerId == null) return displayLabel()
+            val title = config?.actionSets
+                ?.flatMap { it.layers }
+                ?.firstOrNull { it.layer.id == layerId }
+                ?.layer?.title
+            return if (title != null) "$prefix: $title" else "$prefix: Layer #$layerId"
+        }
     }
     return displayLabel()
 }
@@ -139,6 +158,19 @@ fun BindingOutput.displayLabel(config: ControllerConfig?): String {
 private fun BindingOutput.ControllerAction.changePresetLabelOrNull(): Long? {
     if (verb != "CHANGE_PRESET") return null
     return args.firstOrNull()?.toLongOrNull()
+}
+
+/** Layer-activation verbs. Args[0] is the layer id (Long-encoded as string). */
+private val LAYER_VERBS = setOf("add_layer", "remove_layer", "hold_layer")
+
+private fun BindingOutput.ControllerAction.layerArgIdOrNull(): Long? =
+    args.firstOrNull()?.toLongOrNull()
+
+private fun String.layerVerbDisplayPrefix(): String = when (this) {
+    "add_layer"    -> "Add Layer"
+    "remove_layer" -> "Remove Layer"
+    "hold_layer"   -> "Hold Layer"
+    else           -> "Verb: $this"
 }
 
 /**

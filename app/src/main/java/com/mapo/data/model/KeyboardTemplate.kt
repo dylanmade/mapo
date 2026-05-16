@@ -53,6 +53,11 @@ data class KeyboardTemplate(
     val defaultButtonShadowColorArgb: Int? = null,
     val defaultButtonShadowIsAuto: Boolean = true,
 
+    val defaultButtonAnimationEnabled: Boolean = true,
+    val defaultButtonAnimationColorArgb: Int? = null,
+    val defaultButtonAnimationIsAuto: Boolean = true,
+    val defaultButtonAnimationMotionEnabled: Boolean = true,
+
     val defaultButtonRegionsJson: String = "{}",
 )
 
@@ -92,6 +97,10 @@ fun KeyboardTemplate.toUserTemplateRef(): TemplateRef.User = TemplateRef.User(
     defaultButtonShadowEnabled = defaultButtonShadowEnabled,
     defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
     defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonAnimationEnabled = defaultButtonAnimationEnabled,
+    defaultButtonAnimationColorArgb = defaultButtonAnimationColorArgb,
+    defaultButtonAnimationIsAuto = defaultButtonAnimationIsAuto,
+    defaultButtonAnimationMotionEnabled = defaultButtonAnimationMotionEnabled,
     defaultButtonRegions = gson.fromJson(defaultButtonRegionsJson, regionsType) ?: emptyMap(),
 )
 
@@ -127,6 +136,10 @@ fun TemplateRef.User.toEntity(): KeyboardTemplate = KeyboardTemplate(
     defaultButtonShadowEnabled = defaultButtonShadowEnabled,
     defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
     defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonAnimationEnabled = defaultButtonAnimationEnabled,
+    defaultButtonAnimationColorArgb = defaultButtonAnimationColorArgb,
+    defaultButtonAnimationIsAuto = defaultButtonAnimationIsAuto,
+    defaultButtonAnimationMotionEnabled = defaultButtonAnimationMotionEnabled,
     defaultButtonRegionsJson = gson.toJson(defaultButtonRegions),
 )
 
@@ -162,5 +175,9 @@ fun GridLayout.toNewTemplateEntity(templateName: String): KeyboardTemplate = Key
     defaultButtonShadowEnabled = defaultButtonShadowEnabled,
     defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
     defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonAnimationEnabled = defaultButtonAnimationEnabled,
+    defaultButtonAnimationColorArgb = defaultButtonAnimationColorArgb,
+    defaultButtonAnimationIsAuto = defaultButtonAnimationIsAuto,
+    defaultButtonAnimationMotionEnabled = defaultButtonAnimationMotionEnabled,
     defaultButtonRegionsJson = gson.toJson(defaultButtonRegions),
 )

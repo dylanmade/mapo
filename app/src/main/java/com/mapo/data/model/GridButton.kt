@@ -75,6 +75,16 @@ data class GridButton(
     val shadowColorArgb: Int? = null,
     val shadowIsAuto: Boolean = true,
 
+    // Animation: a fifth slot that paints a press-state overlay on top of fill+outline
+    // (but not bevel) while the button is held. *Enabled / *ColorArgb / *IsAuto follow
+    // the same conventions as the four color slots above. [animationMotionEnabled] is
+    // exclusive to this slot: when true (and bevel is also enabled), pressing the button
+    // collapses the bevel band to ~20% of its idle height for a "pressed down" illusion.
+    val animationEnabled: Boolean = true,
+    val animationColorArgb: Int? = null,
+    val animationIsAuto: Boolean = true,
+    val animationMotionEnabled: Boolean = true,
+
     // Keyed by RegionPosition.name so Gson serializes cleanly without an enum-key adapter.
     val regions: Map<String, ButtonRegion> = emptyMap(),
 )

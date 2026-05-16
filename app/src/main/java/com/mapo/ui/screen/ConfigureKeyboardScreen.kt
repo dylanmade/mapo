@@ -455,6 +455,19 @@ private fun ButtonsTab(
                 onUpdate(layout.withDefaultButtonFrom(slot.reset(template)))
             },
         )
+        // Match the Animation slot's Motion sub-row from ConfigureButtonScreen so the
+        // Buttons-tab defaults expose the same control surface.
+        if (slot == ColorSlot.Animation && template.animationEnabled) {
+            MotionCheckboxRow(
+                checked = template.animationMotionEnabled,
+                bevelEnabled = template.bevelEnabled,
+                onToggle = {
+                    onUpdate(layout.withDefaultButtonFrom(
+                        template.copy(animationMotionEnabled = !template.animationMotionEnabled)
+                    ))
+                },
+            )
+        }
     }
 
     Spacer(Modifier.height(4.dp))

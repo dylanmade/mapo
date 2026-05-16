@@ -44,6 +44,11 @@ data class LayoutSnapshot(
     val defaultButtonShadowColorArgb: Int? = null,
     val defaultButtonShadowIsAuto: Boolean = true,
 
+    val defaultButtonAnimationEnabled: Boolean = true,
+    val defaultButtonAnimationColorArgb: Int? = null,
+    val defaultButtonAnimationIsAuto: Boolean = true,
+    val defaultButtonAnimationMotionEnabled: Boolean = true,
+
     val defaultButtonRegions: Map<String, ButtonRegion> = emptyMap(),
 )
 
@@ -80,6 +85,10 @@ fun GridLayout.toSnapshot(): LayoutSnapshot = LayoutSnapshot(
     defaultButtonShadowEnabled = defaultButtonShadowEnabled,
     defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
     defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonAnimationEnabled = defaultButtonAnimationEnabled,
+    defaultButtonAnimationColorArgb = defaultButtonAnimationColorArgb,
+    defaultButtonAnimationIsAuto = defaultButtonAnimationIsAuto,
+    defaultButtonAnimationMotionEnabled = defaultButtonAnimationMotionEnabled,
     defaultButtonRegions = defaultButtonRegions,
 )
 
@@ -115,6 +124,10 @@ fun LayoutSnapshot.toGridLayout(id: Long = 0L): GridLayout = GridLayout(
     defaultButtonShadowEnabled = defaultButtonShadowEnabled,
     defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
     defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonAnimationEnabled = defaultButtonAnimationEnabled,
+    defaultButtonAnimationColorArgb = defaultButtonAnimationColorArgb,
+    defaultButtonAnimationIsAuto = defaultButtonAnimationIsAuto,
+    defaultButtonAnimationMotionEnabled = defaultButtonAnimationMotionEnabled,
     defaultButtonRegions = defaultButtonRegions,
 )
 

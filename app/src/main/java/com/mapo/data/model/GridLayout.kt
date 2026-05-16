@@ -60,6 +60,11 @@ data class GridLayout(
     val defaultButtonShadowColorArgb: Int? = null,
     val defaultButtonShadowIsAuto: Boolean = true,
 
+    val defaultButtonAnimationEnabled: Boolean = true,
+    val defaultButtonAnimationColorArgb: Int? = null,
+    val defaultButtonAnimationIsAuto: Boolean = true,
+    val defaultButtonAnimationMotionEnabled: Boolean = true,
+
     val defaultButtonRegions: Map<String, ButtonRegion> = emptyMap(),
 )
 
@@ -88,6 +93,10 @@ fun GridLayout.defaultButtonTemplate(): GridButton = GridButton(
     shadowEnabled = defaultButtonShadowEnabled,
     shadowColorArgb = defaultButtonShadowColorArgb,
     shadowIsAuto = defaultButtonShadowIsAuto,
+    animationEnabled = defaultButtonAnimationEnabled,
+    animationColorArgb = defaultButtonAnimationColorArgb,
+    animationIsAuto = defaultButtonAnimationIsAuto,
+    animationMotionEnabled = defaultButtonAnimationMotionEnabled,
     regions = defaultButtonRegions,
 )
 
@@ -107,6 +116,10 @@ fun GridLayout.withDefaultButtonFrom(template: GridButton): GridLayout = copy(
     defaultButtonShadowEnabled = template.shadowEnabled,
     defaultButtonShadowColorArgb = template.shadowColorArgb,
     defaultButtonShadowIsAuto = template.shadowIsAuto,
+    defaultButtonAnimationEnabled = template.animationEnabled,
+    defaultButtonAnimationColorArgb = template.animationColorArgb,
+    defaultButtonAnimationIsAuto = template.animationIsAuto,
+    defaultButtonAnimationMotionEnabled = template.animationMotionEnabled,
     defaultButtonRegions = template.regions,
 )
 
@@ -131,6 +144,10 @@ fun GridLayout.seedNewButton(base: GridButton): GridButton = base.copy(
     shadowEnabled = defaultButtonShadowEnabled,
     shadowColorArgb = defaultButtonShadowColorArgb,
     shadowIsAuto = defaultButtonShadowIsAuto,
+    animationEnabled = defaultButtonAnimationEnabled,
+    animationColorArgb = defaultButtonAnimationColorArgb,
+    animationIsAuto = defaultButtonAnimationIsAuto,
+    animationMotionEnabled = defaultButtonAnimationMotionEnabled,
     regions = defaultButtonRegions,
 )
 

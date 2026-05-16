@@ -51,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -341,6 +342,17 @@ private fun AppearanceTab(
             onChange = onDraftChange,
             onEditColor = onEditSlot,
         )
+        // The Animation slot owns a "Motion" sub-checkbox that doesn't fit the
+        // generic four-row [ColorSlotGroup] shape. Render it directly here, but
+        // only when the Animation master is enabled (matches ColorSlotGroup's
+        // own behavior of hiding sub-rows on disabled).
+        if (slot == ColorSlot.Animation && draft.animationEnabled) {
+            MotionCheckboxRow(
+                checked = draft.animationMotionEnabled,
+                bevelEnabled = draft.bevelEnabled,
+                onToggle = { onDraftChange(draft.copy(animationMotionEnabled = !draft.animationMotionEnabled)) },
+            )
+        }
     }
 
     Spacer(Modifier.height(4.dp))
@@ -416,6 +428,37 @@ private fun GestureRow(label: String, target: RemapTarget, onClick: () -> Unit) 
             )
         }
     }
+}
+
+/**
+ * Sub-row under the "Press animation" slot. Mirrors the indentation + trailing-checkbox
+ * shape of [ColorSlotGroup]'s "Auto" row so the Animation slot reads as one visual group.
+ * Tied to bevel: the row is rendered greyed-out and non-clickable while bevel is disabled,
+ * since the motion effect collapses the bevel band — without a bevel there is nothing to
+ * collapse. The stored value persists across bevel toggles.
+ */
+@Composable
+internal fun MotionCheckboxRow(
+    checked: Boolean,
+    bevelEnabled: Boolean,
+    onToggle: () -> Unit,
+) {
+    val rowAlpha = if (bevelEnabled) 1f else 0.38f
+    ListItem(
+        headlineContent = { Text("Motion") },
+        supportingContent = { Text("Briefly collapse the bevel on press for a \"pressed down\" feel") },
+        trailingContent = {
+            Checkbox(
+                checked = checked,
+                enabled = bevelEnabled,
+                onCheckedChange = null,
+            )
+        },
+        modifier = Modifier
+            .padding(start = 24.dp)
+            .then(if (bevelEnabled) Modifier.clickable { onToggle() } else Modifier)
+            .alpha(rowAlpha),
+    )
 }
 
 /**
@@ -757,65 +800,85 @@ internal enum class ColorSlot(
         title = "Button shadow",
         description = "Soft drop shadow beneath the button",
         defaultEnabled = true,
+    ),
+    Animation(
+        title = "Press animation",
+        description = "Color overlay shown while the button is pressed",
+        defaultEnabled = true,
     );
 
     fun enabled(b: GridButton): Boolean = when (this) {
-        Fill    -> b.fillEnabled
-        Outline -> b.outlineEnabled
-        Bevel   -> b.bevelEnabled
-        Shadow  -> b.shadowEnabled
+        Fill      -> b.fillEnabled
+        Outline   -> b.outlineEnabled
+        Bevel     -> b.bevelEnabled
+        Shadow    -> b.shadowEnabled
+        Animation -> b.animationEnabled
     }
 
     fun isAuto(b: GridButton): Boolean = when (this) {
-        Fill    -> b.fillIsAuto
-        Outline -> b.outlineIsAuto
-        Bevel   -> b.bevelIsAuto
-        Shadow  -> b.shadowIsAuto
+        Fill      -> b.fillIsAuto
+        Outline   -> b.outlineIsAuto
+        Bevel     -> b.bevelIsAuto
+        Shadow    -> b.shadowIsAuto
+        Animation -> b.animationIsAuto
     }
 
     fun setEnabled(b: GridButton, v: Boolean): GridButton = when (this) {
-        Fill    -> b.copy(fillEnabled = v)
-        Outline -> b.copy(outlineEnabled = v)
-        Bevel   -> b.copy(bevelEnabled = v)
-        Shadow  -> b.copy(shadowEnabled = v)
+        Fill      -> b.copy(fillEnabled = v)
+        Outline   -> b.copy(outlineEnabled = v)
+        Bevel     -> b.copy(bevelEnabled = v)
+        Shadow    -> b.copy(shadowEnabled = v)
+        Animation -> b.copy(animationEnabled = v)
     }
 
     fun setAuto(b: GridButton, v: Boolean): GridButton = when (this) {
-        Fill    -> b.copy(fillIsAuto = v)
-        Outline -> b.copy(outlineIsAuto = v)
-        Bevel   -> b.copy(bevelIsAuto = v)
-        Shadow  -> b.copy(shadowIsAuto = v)
+        Fill      -> b.copy(fillIsAuto = v)
+        Outline   -> b.copy(outlineIsAuto = v)
+        Bevel     -> b.copy(bevelIsAuto = v)
+        Shadow    -> b.copy(shadowIsAuto = v)
+        Animation -> b.copy(animationIsAuto = v)
     }
 
     fun setManualColor(b: GridButton, c: Color): GridButton {
         val argb = c.toArgb()
         return when (this) {
-            Fill    -> b.copy(fillColorArgb = argb, fillIsAuto = false)
-            Outline -> b.copy(outlineColorArgb = argb, outlineIsAuto = false)
-            Bevel   -> b.copy(bevelColorArgb = argb, bevelIsAuto = false)
-            Shadow  -> b.copy(shadowColorArgb = argb, shadowIsAuto = false)
+            Fill      -> b.copy(fillColorArgb = argb, fillIsAuto = false)
+            Outline   -> b.copy(outlineColorArgb = argb, outlineIsAuto = false)
+            Bevel     -> b.copy(bevelColorArgb = argb, bevelIsAuto = false)
+            Shadow    -> b.copy(shadowColorArgb = argb, shadowIsAuto = false)
+            Animation -> b.copy(animationColorArgb = argb, animationIsAuto = false)
         }
     }
 
     fun clearColor(b: GridButton): GridButton = when (this) {
-        Fill    -> b.copy(fillColorArgb = null)
-        Outline -> b.copy(outlineColorArgb = null)
-        Bevel   -> b.copy(bevelColorArgb = null)
-        Shadow  -> b.copy(shadowColorArgb = null)
+        Fill      -> b.copy(fillColorArgb = null)
+        Outline   -> b.copy(outlineColorArgb = null)
+        Bevel     -> b.copy(bevelColorArgb = null)
+        Shadow    -> b.copy(shadowColorArgb = null)
+        Animation -> b.copy(animationColorArgb = null)
     }
 
     fun reset(b: GridButton): GridButton = when (this) {
-        Fill    -> b.copy(fillEnabled = defaultEnabled, fillIsAuto = true, fillColorArgb = null)
-        Outline -> b.copy(outlineEnabled = defaultEnabled, outlineIsAuto = true, outlineColorArgb = null)
-        Bevel   -> b.copy(bevelEnabled = defaultEnabled, bevelIsAuto = true, bevelColorArgb = null)
-        Shadow  -> b.copy(shadowEnabled = defaultEnabled, shadowIsAuto = true, shadowColorArgb = null)
+        Fill      -> b.copy(fillEnabled = defaultEnabled, fillIsAuto = true, fillColorArgb = null)
+        Outline   -> b.copy(outlineEnabled = defaultEnabled, outlineIsAuto = true, outlineColorArgb = null)
+        Bevel     -> b.copy(bevelEnabled = defaultEnabled, bevelIsAuto = true, bevelColorArgb = null)
+        Shadow    -> b.copy(shadowEnabled = defaultEnabled, shadowIsAuto = true, shadowColorArgb = null)
+        // Animation also resets its exclusive sub-control (motion) back to the GridButton
+        // constructor default so "Reset to default" fully restores the slot.
+        Animation -> b.copy(
+            animationEnabled = defaultEnabled,
+            animationIsAuto = true,
+            animationColorArgb = null,
+            animationMotionEnabled = true,
+        )
     }
 
     fun resolvedColor(resolved: ResolvedButtonColors): Color = when (this) {
-        Fill    -> resolved.fill
-        Outline -> resolved.outline
-        Bevel   -> resolved.bevel
-        Shadow  -> resolved.shadow
+        Fill      -> resolved.fill
+        Outline   -> resolved.outline
+        Bevel     -> resolved.bevel
+        Shadow    -> resolved.shadow
+        Animation -> resolved.animation
     }
 }
 

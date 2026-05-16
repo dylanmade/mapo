@@ -56,6 +56,9 @@ data class ResolvedButtonColors(
     val bevel: Color,
     val shadowEnabled: Boolean,
     val shadow: Color,
+    val animationEnabled: Boolean,
+    val animation: Color,
+    val animationMotionEnabled: Boolean,
 )
 
 /**
@@ -66,6 +69,8 @@ data class ResolvedButtonColors(
  *  - Auto outline ← fill (or theme if fill disabled), contrast-shifted
  *  - Auto bevel  ← fill (or theme if fill disabled), darkened
  *  - Auto shadow ← fill (or theme if fill disabled), shadowified
+ *  - Auto animation ← fill (or theme if fill disabled), darkened + mostly transparent
+ *    (paints a press-state overlay on top of fill+outline; never covers the bevel band)
  */
 fun resolveAutoColors(button: GridButton, keyboardTheme: Color): ResolvedButtonColors {
     val fill = if (button.fillIsAuto || button.fillColorArgb == null) {
@@ -98,11 +103,23 @@ fun resolveAutoColors(button: GridButton, keyboardTheme: Color): ResolvedButtonC
         Color(button.shadowColorArgb)
     }
 
+    // Press-state overlay. Auto = "mostly transparent and slightly darker version of
+    // the fill" — slight darken + 0.35 alpha gives the impression of finger pressure
+    // without obscuring the underlying label/icon. Manual values are honored as-is so
+    // the user can pick any color (including a translucent highlight).
+    val animation = if (button.animationIsAuto || button.animationColorArgb == null) {
+        parent.darkened(amount = 0.10f).copy(alpha = 0.35f)
+    } else {
+        Color(button.animationColorArgb)
+    }
+
     return ResolvedButtonColors(
         fillEnabled = button.fillEnabled, fill = fill,
         outlineEnabled = button.outlineEnabled, outline = outline,
         bevelEnabled = button.bevelEnabled, bevel = bevel,
         shadowEnabled = button.shadowEnabled, shadow = shadow,
+        animationEnabled = button.animationEnabled, animation = animation,
+        animationMotionEnabled = button.animationMotionEnabled,
     )
 }
 

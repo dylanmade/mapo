@@ -121,7 +121,10 @@ class CompiledConfigTest {
                 ),
                 presetEntry(
                     inputSource = InputSource.DPAD, state = "active",
+                    // mode=DPAD falls through to StubMode (unimplemented) so dpad_north
+                    // isn't dropped by Brick 6.1's mode validation.
                     group = groupWith(
+                        mode = BindingMode.DPAD,
                         inputs = listOf(
                             inputWith("dpad_north", listOf(activatorWith(bindings = listOf(unboundBinding())))),
                         ),
@@ -677,6 +680,91 @@ class CompiledConfigTest {
         assertEquals(BindingOutput.KeyPress("SPACE"), bindings[2])
     }
 
+    // ── Mode validation (Brick 6.1) ──────────────────────────────────────────
+
+    @Test
+    fun buttonPadMode_dropsSubInputsThatArentFaceButtons() {
+        // BUTTON_PAD has a strict sub-input vocabulary: button_a/b/x/y only. A misseeded
+        // dpad_north under a BUTTON_PAD group should be dropped at compile time so the
+        // runtime never sees a phantom address.
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.BUTTON_DIAMOND, state = "active",
+                    group = groupWith(
+                        mode = BindingMode.BUTTON_PAD,
+                        inputs = listOf(
+                            inputWith("button_a", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
+                            inputWith("dpad_north", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "X"))))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+
+        // button_a survives; dpad_north is dropped.
+        assertEquals(1, compiled.totalInputCount)
+        assertEquals(
+            BindingOutput.KeyPress("ENTER"),
+            compiled.lookup(InputSource.BUTTON_DIAMOND, "button_a")!!.activators[0].bindings.single(),
+        )
+        assertEquals(null, compiled.lookup(InputSource.BUTTON_DIAMOND, "dpad_north"))
+    }
+
+    @Test
+    fun singleButtonMode_acceptsOnlyClick() {
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.LEFT_BUMPER, state = "active",
+                    group = groupWith(
+                        mode = BindingMode.SINGLE_BUTTON,
+                        inputs = listOf(
+                            inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
+                            inputWith("edge", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "X"))))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+
+        assertEquals(1, compiled.totalInputCount)
+        assertNotNull(compiled.lookup(InputSource.LEFT_BUMPER, "click"))
+        assertEquals(null, compiled.lookup(InputSource.LEFT_BUMPER, "edge"))
+    }
+
+    @Test
+    fun unimplementedMode_isPermissiveViaStubMode() {
+        // Until 6.2+ implements DPAD/TRIGGER/etc. runtimes, those modes fall through to
+        // StubMode and shouldn't drop ANY sub-input. This is what keeps existing seeded
+        // data working through the 6.1 cutover.
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.DPAD, state = "active",
+                    group = groupWith(
+                        mode = BindingMode.DPAD,
+                        inputs = listOf(
+                            inputWith("dpad_north", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "UP"))))),
+                            // Even a typo'd key passes through under a stub mode.
+                            inputWith("totally_made_up", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "Z"))))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+
+        assertEquals(2, compiled.totalInputCount)
+        assertNotNull(compiled.lookup(InputSource.DPAD, "dpad_north"))
+        assertNotNull(compiled.lookup(InputSource.DPAD, "totally_made_up"))
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun sampleControllerProfile() = ControllerProfile(
@@ -699,8 +787,18 @@ class CompiledConfigTest {
         group: BindingGroupGraph,
     ) = PresetEntry(inputSource, state, group)
 
-    private fun groupWith(inputs: List<GroupInputGraph>) = BindingGroupGraph(
-        group = BindingGroup(id = 1L, actionSetId = 1L, name = "g", mode = BindingMode.BUTTON_PAD),
+    /**
+     * Default mode is [BindingMode.BUTTON_PAD] because the bulk of tests in this file
+     * bind face buttons; tests that bind other sub-input vocabularies (dpad_north, etc.)
+     * pass a matching [mode] so Brick 6.1's compile-path mode validation doesn't drop
+     * them. Passing an unimplemented mode (e.g. [BindingMode.DPAD]) is also fine — those
+     * fall through to StubMode and accept any sub-input key.
+     */
+    private fun groupWith(
+        inputs: List<GroupInputGraph>,
+        mode: BindingMode = BindingMode.BUTTON_PAD,
+    ) = BindingGroupGraph(
+        group = BindingGroup(id = 1L, actionSetId = 1L, name = "g", mode = mode),
         inputs = inputs,
     )
 

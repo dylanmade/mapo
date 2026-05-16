@@ -88,6 +88,10 @@ object GridButtonDefaults {
                 shadowEnabled = template.shadowEnabled,
                 shadowColorArgb = template.shadowColorArgb,
                 shadowIsAuto = template.shadowIsAuto,
+                animationEnabled = template.animationEnabled,
+                animationColorArgb = template.animationColorArgb,
+                animationIsAuto = template.animationIsAuto,
+                animationMotionEnabled = template.animationMotionEnabled,
                 regions = regions,
             )
         }

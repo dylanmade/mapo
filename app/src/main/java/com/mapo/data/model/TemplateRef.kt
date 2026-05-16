@@ -43,6 +43,11 @@ sealed class TemplateRef {
     abstract val defaultButtonShadowColorArgb: Int?
     abstract val defaultButtonShadowIsAuto: Boolean
 
+    abstract val defaultButtonAnimationEnabled: Boolean
+    abstract val defaultButtonAnimationColorArgb: Int?
+    abstract val defaultButtonAnimationIsAuto: Boolean
+    abstract val defaultButtonAnimationMotionEnabled: Boolean
+
     abstract val defaultButtonRegions: Map<String, ButtonRegion>
 
     data class BuiltIn(
@@ -77,6 +82,10 @@ sealed class TemplateRef {
         override val defaultButtonShadowEnabled: Boolean = true,
         override val defaultButtonShadowColorArgb: Int? = null,
         override val defaultButtonShadowIsAuto: Boolean = true,
+        override val defaultButtonAnimationEnabled: Boolean = true,
+        override val defaultButtonAnimationColorArgb: Int? = null,
+        override val defaultButtonAnimationIsAuto: Boolean = true,
+        override val defaultButtonAnimationMotionEnabled: Boolean = true,
         override val defaultButtonRegions: Map<String, ButtonRegion> = emptyMap(),
     ) : TemplateRef()
 
@@ -112,6 +121,10 @@ sealed class TemplateRef {
         override val defaultButtonShadowEnabled: Boolean = true,
         override val defaultButtonShadowColorArgb: Int? = null,
         override val defaultButtonShadowIsAuto: Boolean = true,
+        override val defaultButtonAnimationEnabled: Boolean = true,
+        override val defaultButtonAnimationColorArgb: Int? = null,
+        override val defaultButtonAnimationIsAuto: Boolean = true,
+        override val defaultButtonAnimationMotionEnabled: Boolean = true,
         override val defaultButtonRegions: Map<String, ButtonRegion> = emptyMap(),
     ) : TemplateRef()
 }
@@ -148,6 +161,10 @@ fun TemplateRef.toGridLayout(id: Long = 0L): GridLayout = GridLayout(
     defaultButtonShadowEnabled = defaultButtonShadowEnabled,
     defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
     defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonAnimationEnabled = defaultButtonAnimationEnabled,
+    defaultButtonAnimationColorArgb = defaultButtonAnimationColorArgb,
+    defaultButtonAnimationIsAuto = defaultButtonAnimationIsAuto,
+    defaultButtonAnimationMotionEnabled = defaultButtonAnimationMotionEnabled,
     defaultButtonRegions = defaultButtonRegions,
 )
 
@@ -182,5 +199,9 @@ fun TemplateRef.toSnapshot(): LayoutSnapshot = LayoutSnapshot(
     defaultButtonShadowEnabled = defaultButtonShadowEnabled,
     defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
     defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonAnimationEnabled = defaultButtonAnimationEnabled,
+    defaultButtonAnimationColorArgb = defaultButtonAnimationColorArgb,
+    defaultButtonAnimationIsAuto = defaultButtonAnimationIsAuto,
+    defaultButtonAnimationMotionEnabled = defaultButtonAnimationMotionEnabled,
     defaultButtonRegions = defaultButtonRegions,
 )

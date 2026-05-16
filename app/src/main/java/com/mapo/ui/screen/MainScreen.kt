@@ -9,7 +9,10 @@ import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -126,6 +129,7 @@ import com.mapo.data.model.displayLabel
 import com.mapo.data.model.wouldOverlap
 import com.mapo.data.model.TemplateRef
 import com.mapo.service.InputAccessibilityService
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -1466,6 +1470,12 @@ private fun KeyGrid(
                     // double-tap window, even on buttons without a configured double-tap.
                     val hasDouble = button.onDoubleTapTarget !is RemapTarget.Unbound
                     val hasHold = button.onHoldTarget !is RemapTarget.Unbound
+                    // Surface this button's down-state so KeyButtonShape can paint the
+                    // press-animation overlay and (when motion is on) collapse the bevel.
+                    // The InteractionSource is shared with combinedClickable so we read
+                    // the same press lifecycle that drives ripples/onClick.
+                    val interactionSource = remember { MutableInteractionSource() }
+                    val isPressed by interactionSource.collectIsPressedAsState()
                     KeyButtonShape(
                         button = button,
                         keyboardThemeColor = keyboardTheme,
@@ -1476,6 +1486,8 @@ private fun KeyGrid(
                                 translationY = dragOffset.y
                             },
                         surfaceModifier = Modifier.combinedClickable(
+                            interactionSource = interactionSource,
+                            indication = LocalIndication.current,
                             onClick = {
                                 if (isEditMode) onSelectButton(button.id)
                                 else onButtonTap(button)
@@ -1487,6 +1499,7 @@ private fun KeyGrid(
                                 { onButtonHold(button) }
                             } else null,
                         ),
+                        isPressed = isPressed,
                     ) {
                         ButtonContent(button = button, modifier = Modifier.fillMaxSize())
                     }
@@ -1860,6 +1873,7 @@ private fun KeyButtonShape(
     keyboardThemeColor: Color,
     modifier: Modifier = Modifier,
     surfaceModifier: Modifier = Modifier,
+    isPressed: Boolean = false,
     content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
 ) {
     val resolved = resolveAutoColors(button, keyboardThemeColor)
@@ -1871,6 +1885,14 @@ private fun KeyButtonShape(
     // are cut-off arcs of identical radius — visually the bevel "wraps" the surface's
     // bottom curve.
     val outerShape: Shape = RoundedCornerShape(BUTTON_CORNER)
+
+    // When motion+bevel are both on AND the button is pressed, collapse the bevel band
+    // to 20% of its idle height so the surface visually drops down by 80% of BEVEL_HEIGHT.
+    // animateDpAsState gives a smooth in/out interpolation; the spec only specifies the
+    // pressed magnitude, not the curve, so we lean on the M3 default spring.
+    val motionActive = resolved.animationEnabled && resolved.animationMotionEnabled && resolved.bevelEnabled
+    val targetBevelHeight = if (motionActive && isPressed) BEVEL_HEIGHT * 0.2f else BEVEL_HEIGHT
+    val bevelHeight by animateDpAsState(targetValue = targetBevelHeight, label = "bevelCollapse")
 
     Box(modifier = modifier) {
         // Shape Box: shadow + outer clip + bevel background + click handling. The clip
@@ -1897,15 +1919,26 @@ private fun KeyButtonShape(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(if (resolved.bevelEnabled) Modifier.padding(bottom = BEVEL_HEIGHT) else Modifier)
+                    .then(if (resolved.bevelEnabled) Modifier.padding(bottom = bevelHeight) else Modifier)
                     .clip(outerShape)
                     .then(if (resolved.fillEnabled) Modifier.background(resolved.fill) else Modifier)
                     .then(
                         if (resolved.outlineEnabled) Modifier.border(1.dp, resolved.outline, outerShape)
                         else Modifier
                     ),
-                content = content,
-            )
+            ) {
+                // Press-state overlay. Drawn inside the surface clip so it covers
+                // fill + outline but NOT the bevel band, per spec. Sits beneath the
+                // content callback so labels/icons remain readable through the overlay.
+                if (resolved.animationEnabled && isPressed) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(resolved.animation),
+                    )
+                }
+                content()
+            }
         }
 
         // Selection ring lives outside this composable now (rendered separately in the

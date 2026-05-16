@@ -5,6 +5,8 @@ import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.InputSource
+import com.mapo.service.input.modes.StubMode
+import com.mapo.service.input.modes.handler
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -262,6 +264,8 @@ private fun JSONObject.optInputSourceOrNull(key: String): InputSource? {
  *    shape as a set's `inputs` — just keyed under the layer instead of the set. The
  *    runtime evaluator (Brick 5.1) already walks the active layer stack top-down.
  */
+private const val TAG_COMPILE = "CompiledConfig"
+
 fun ControllerConfig.toCompiled(): CompiledConfig {
     if (actionSets.isEmpty()) return CompiledConfig.EMPTY
 
@@ -269,8 +273,20 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
         val inputs = HashMap<InputAddress, CompiledInput>()
         for (preset in presetEntries) {
             if (preset.state != "active") continue
+            // Brick 6.1: consult the runtime mode handler to validate sub-input keys.
+            // Implemented modes drop unknown keys with a warning so misconfigured data
+            // can't silently emit phantom inputs; StubMode (modes whose runtime hasn't
+            // landed) accepts anything — keeps existing seeded DPAD/TRIGGER/etc. data
+            // working until 6.2+ flips them to real handlers.
+            val sourceMode = preset.group.group.mode.handler()
             for (inputGraph in preset.group.inputs) {
-                val address = InputAddress(preset.inputSource, inputGraph.input.inputKey)
+                val inputKey = inputGraph.input.inputKey
+                if (sourceMode !is StubMode && !sourceMode.accepts(inputKey)) {
+                    Log.w(TAG_COMPILE, "compile: dropping group_input '$inputKey' on " +
+                        "${preset.inputSource} — not valid for mode ${sourceMode.mode}")
+                    continue
+                }
+                val address = InputAddress(preset.inputSource, inputKey)
                 val compiledActivators = inputGraph.activators.map { actGraph ->
                     CompiledActivator(
                         activatorId = actGraph.activator.id,

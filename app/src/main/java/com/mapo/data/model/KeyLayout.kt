@@ -62,6 +62,11 @@ data class KeyLayout(
     val defaultButtonShadowColorArgb: Int? = null,
     val defaultButtonShadowIsAuto: Boolean = true,
 
+    val defaultButtonAnimationEnabled: Boolean = true,
+    val defaultButtonAnimationColorArgb: Int? = null,
+    val defaultButtonAnimationIsAuto: Boolean = true,
+    val defaultButtonAnimationMotionEnabled: Boolean = true,
+
     // Regions are a Map keyed by RegionPosition.name; persisted as JSON like buttonsJson
     // since Room doesn't natively support Map columns.
     val defaultButtonRegionsJson: String = "{}",
@@ -105,6 +110,10 @@ fun KeyLayout.toGridLayout(): GridLayout = GridLayout(
     defaultButtonShadowEnabled = defaultButtonShadowEnabled,
     defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
     defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonAnimationEnabled = defaultButtonAnimationEnabled,
+    defaultButtonAnimationColorArgb = defaultButtonAnimationColorArgb,
+    defaultButtonAnimationIsAuto = defaultButtonAnimationIsAuto,
+    defaultButtonAnimationMotionEnabled = defaultButtonAnimationMotionEnabled,
     defaultButtonRegions = gson.fromJson(defaultButtonRegionsJson, regionsType) ?: emptyMap(),
 )
 
@@ -146,6 +155,10 @@ fun GridLayout.toKeyLayout(
     defaultButtonShadowEnabled = defaultButtonShadowEnabled,
     defaultButtonShadowColorArgb = defaultButtonShadowColorArgb,
     defaultButtonShadowIsAuto = defaultButtonShadowIsAuto,
+    defaultButtonAnimationEnabled = defaultButtonAnimationEnabled,
+    defaultButtonAnimationColorArgb = defaultButtonAnimationColorArgb,
+    defaultButtonAnimationIsAuto = defaultButtonAnimationIsAuto,
+    defaultButtonAnimationMotionEnabled = defaultButtonAnimationMotionEnabled,
     defaultButtonRegionsJson = gson.toJson(defaultButtonRegions),
     originalSnapshotJson = originalSnapshotJson,
 )

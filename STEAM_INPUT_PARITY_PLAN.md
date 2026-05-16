@@ -828,6 +828,22 @@ Each mode swaps both the settings panel and the inputs list. Switching modes pre
 - L2 trigger → Trigger mode, soft-press threshold 0.3. Squeezing trigger lightly → soft-press activator fires; full pull → click activator fires.
 - Left stick mode swapped Joystick Move → Dpad. Push stick up → emits dpad_up.
 
+### Brick 6.1 deviations + decisions
+
+**Scope landed.** `SourceMode` sealed interface + `SingleButtonMode` + `ButtonPadMode` + `StubMode` + `BindingMode.handler()` registry, all under `app/src/main/java/com/mapo/service/input/modes/SourceMode.kt`. Compile path in `CompiledConfig.kt::compileInputs` now consults the handler and drops sub-inputs that an implemented mode rejects (logs a warning at WARN level). No runtime / UI change for the user.
+
+**Interface shape — `evaluate(...)` deferred.** The plan's sketch was three methods: `validInputs`, `evaluate`, `defaultSettings`. Brick 6.1 only ships `validInputs` + `defaultSettingsJson` + an `accepts` helper. The `evaluate(physical, settings, state)` analog-translation hook lives on later subclasses (lands in 6.3 with Trigger — the first mode that actually needs to translate analog state into sub-input events). Digital modes have nothing meaningful to translate, so adding the method now would be a dead-code surface.
+
+**Settings name choice — `defaultSettingsJson()` rather than `defaultSettings()`.** The plan said `defaultSettings(): GroupSettings`. There's no `GroupSettings` sealed class yet in the codebase; group settings are stored as a `settingsJson: String` blob on `BindingGroup`. Returning a string keeps 6.1 a foundation rather than dragging the settings-typing problem in. The typed-wrapper rollout can swap the return type in one place when needed.
+
+**Forward-compat: `StubMode`.** Real foundation work would normally make a contract strict. But the seeded data for `DPAD`, `LEFT_TRIGGER`, `LEFT_JOYSTICK`, etc. all uses mode values whose runtime handlers haven't landed yet. A strict 6.1 cutover would compile-drop most of the bound inputs on every user's device. `StubMode` accepts anything — until 6.2 onwards replaces each fallback with a real handler. Once every enum value has a real handler (target: end of Phase 6), `StubMode` goes away and validation is globally strict.
+
+**Test-helper migration.** `CompiledConfigTest.groupWith(...)` gained an optional `mode` param (default `BUTTON_PAD`). One existing test that bound `dpad_north` under a default-mode group was updated to pass `mode = BindingMode.DPAD` (stub, permissive) so the test continues to assert what it always did. No other tests were affected — the rest of the suite binds `button_*` keys under `BUTTON_PAD`, which is strict-correct.
+
+**Tests added — 11 total.** 8 in `SourceModeTest` (validInputs / accepts / defaults per mode, handler registry shape — including a registry sweep that catches missing entries when a new `BindingMode` enum value is added but never wired). 3 in `CompiledConfigTest::Mode validation` (BUTTON_PAD drops dpad sub-inputs; SINGLE_BUTTON accepts only `click`; unimplemented mode preserves all). Full suite green.
+
+**What this brick does NOT change.** No runtime evaluator behavior. No UI. No new data-model fields. No new tables. No new repository methods. The plan said "proves the plumbing without changing what users see" — that's exactly what's here. If a user is editing their A button right now, the experience is identical to pre-6.1.
+
 ---
 
 ## Phase 7 — VDF import (legacy_set only)

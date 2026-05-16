@@ -1227,6 +1227,10 @@ class MainViewModel @Inject constructor(
             defaultButtonShadowEnabled = template.defaultButtonShadowEnabled,
             defaultButtonShadowColorArgb = template.defaultButtonShadowColorArgb,
             defaultButtonShadowIsAuto = template.defaultButtonShadowIsAuto,
+            defaultButtonAnimationEnabled = template.defaultButtonAnimationEnabled,
+            defaultButtonAnimationColorArgb = template.defaultButtonAnimationColorArgb,
+            defaultButtonAnimationIsAuto = template.defaultButtonAnimationIsAuto,
+            defaultButtonAnimationMotionEnabled = template.defaultButtonAnimationMotionEnabled,
             defaultButtonRegions = template.defaultButtonRegions,
         ).withFreshButtonIds()
         appendNewLayout(draft, profileId)

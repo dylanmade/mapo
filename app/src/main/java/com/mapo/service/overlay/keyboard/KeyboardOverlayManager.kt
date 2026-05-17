@@ -35,12 +35,15 @@ import javax.inject.Singleton
  * is ever attached in this brick (the placeholder POC); the [overlayId] / [displayId]
  * parameters are real seams, not stubs.
  *
- * **Flag matrix.** `TYPE_APPLICATION_OVERLAY` + `FLAG_NOT_TOUCH_MODAL` (touches
- * outside the window pass through to the foreground app). Crucially the window
- * stays focusable / touchable so taps inside reach Compose. Phase 6 already proved
- * `TYPE_ACCESSIBILITY_OVERLAY` (focusable) breaks system focus globally; this
- * window type sidesteps that because it has no role in the accessibility focus
- * chain.
+ * **Flag matrix.** `TYPE_APPLICATION_OVERLAY` + `FLAG_NOT_FOCUSABLE` +
+ * `FLAG_NOT_TOUCH_MODAL`. Touches inside the window still reach Compose (touch
+ * routing is governed by `FLAG_NOT_TOUCHABLE`, which is absent), touches outside
+ * pass through to the foreground app, and **key events route past the overlay**
+ * to whatever window holds keyboard focus underneath — so the foreground game
+ * keeps receiving gamepad input while the keyboard is mounted. Discovered the
+ * hard way during Brick 1 device verification: without `FLAG_NOT_FOCUSABLE` the
+ * overlay absorbed all key events and the user's gamepad started navigating the
+ * overlay's Compose focus tree instead of driving the game.
  *
  * **Foreground service.** Attaching the first overlay starts
  * [KeyboardOverlayService] (Android 12+ kills cached processes within seconds —
@@ -150,7 +153,14 @@ class KeyboardOverlayManager @Inject constructor(
     }
 
     private fun layoutParams(ctx: Context): WindowManager.LayoutParams {
+        // FLAG_NOT_FOCUSABLE — gamepad / key events route past us to the focused
+        //   foreground app. Required: without it the overlay absorbs every key
+        //   press and the user's gamepad navigates the overlay instead of the game.
+        // FLAG_NOT_TOUCH_MODAL — touches outside the window's bounds pass through
+        //   to whatever's underneath. (FLAG_NOT_TOUCHABLE is intentionally absent
+        //   so in-bounds taps still reach Compose's clickable handlers.)
         val flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
         // ~40% of screen height anchored bottom. POC sizing — Brick 3 wires the
         // real keyboard host, which carries its own sizing policy.

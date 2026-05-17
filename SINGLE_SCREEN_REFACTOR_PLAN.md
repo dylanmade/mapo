@@ -26,7 +26,9 @@ Rejected alternatives:
 - Multi-window / split-screen → game-dependent; mangles fullscreen render surfaces.
 - Sub-activity / `Presentation` → second activity steals focus from the game.
 
-The overlay uses `FLAG_NOT_TOUCH_MODAL` (touches outside the keyboard pass through to the game) without `FLAG_NOT_FOCUSABLE` for the keyboard surface itself — taps inside reach Compose, taps outside reach the game. Crucially, this overlay does NOT need to receive gamepad motion events (the Phase 6 blocker), so the focus side effects observed there don't apply here.
+The overlay uses `FLAG_NOT_TOUCH_MODAL` + `FLAG_NOT_FOCUSABLE`. In-bounds taps reach Compose (touch routing is governed by `FLAG_NOT_TOUCHABLE`, which we don't set); out-of-bounds taps fall through to the foreground app; key events (gamepad button presses, back, etc.) route past the overlay to whatever window holds keyboard focus underneath — so the foreground game keeps receiving gamepad input while the keyboard is mounted. Crucially, this overlay does NOT need to receive gamepad motion events (the Phase 6 blocker), so the focus side effects observed there don't apply here.
+
+(Original plan text claimed `FLAG_NOT_FOCUSABLE` should be omitted "so taps reach Compose." That conflated touch routing with key-event focus — Brick 1 device verification proved the overlay absorbed every gamepad press without `FLAG_NOT_FOCUSABLE`, navigating the overlay instead of the game. Adding the flag fixed the regression; taps continue to work because they were never gated on focus.)
 
 **Activation: Quick Settings tile.** User pulls down the notification shade and taps the Mapo tile to toggle the overlay. Modern Android-native pattern, no physical-button commitment, system-wide reachable. Other activation mechanisms deferred.
 
@@ -74,7 +76,7 @@ Sequencing rule: **every brick boundary leaves remap working end-to-end and the 
 
 This file is the deliverable. Contracts above are agreed.
 
-### Brick 1 — Overlay POC + foreground-service skeleton — 🟡 CODE LANDED (device verification pending)
+### Brick 1 — Overlay POC + foreground-service skeleton — ✅ COMPLETED
 
 Goal: answer R1 (touch routing on a large `FLAG_NOT_TOUCH_MODAL` overlay) + R2 (FGS requirements on Android 12+).
 
@@ -103,7 +105,8 @@ Goal: answer R1 (touch routing on a large `FLAG_NOT_TOUCH_MODAL` overlay) + R2 (
 - **Manager mounts the FGS via started-service pattern** (`Context.startForegroundService` + `stopService`), not bound-service. Simpler for Brick 1; Brick 4's QS-tile flow may want bind semantics so the service can also drive the overlay (TileService → service → manager), but that decision is deferred until the tile lands.
 - **`KeyboardOverlayPocContent.kt` is its own file**, not a `private fun` inside the manager. The ViewModel needs to reference it for the debug toggle, and keeping it separate also makes its "Brick 1 placeholder, replaced in Brick 4" status clearer in the file tree.
 - **Drawable added.** Mapo had zero `res/drawable/` files before this brick; the FGS notification requires a small icon, so `ic_keyboard_overlay.xml` was created (vector, 24dp, white fill). The system tints it automatically on the status bar.
-- **POC overlay's flag matrix matches the plan's contract verbatim**: `FLAG_LAYOUT_IN_SCREEN | FLAG_NOT_TOUCH_MODAL` (no `FLAG_NOT_FOCUSABLE`). If on-device testing reveals back-button is being stolen by the overlay, the alternative is to add `FLAG_NOT_FOCUSABLE` and verify Compose taps still land — this is a known R1 follow-up axis.
+- **Overlay flag matrix corrected mid-brick to add `FLAG_NOT_FOCUSABLE`.** The original plan text claimed the keyboard surface should omit `FLAG_NOT_FOCUSABLE` "so Compose taps work." Device verification proved this conflated touch routing with key-event focus — without `FLAG_NOT_FOCUSABLE` the overlay absorbed every gamepad button press and the user's controller navigated the overlay's Compose focus tree instead of driving the foreground game. Adding the flag: gamepad input reaches the game, taps inside the overlay still reach Compose (touch is gated by `FLAG_NOT_TOUCHABLE`, which we don't set), back gesture passes through. Final flag set: `FLAG_LAYOUT_IN_SCREEN | FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL`. Plan's "Decision" section corrected with the lesson inline.
+- **`consumeSystemBack` made lifecycle-scoped (originally a Brick 5 cleanup item, pulled in here).** Device verification surfaced that Mapo's accessibility service was swallowing KEYCODE_BACK system-wide — once `consumeSystemBack` was set true (any time the user landed on the Main route with drawer closed), the global accessibility service consumed back everywhere, including in other apps. Pre-existing Thor-first behavior: the original logic assumed Mapo's activity is always foregrounded on Thor's bottom screen. The fix wraps the `setConsumeSystemBack(keyboardViewActive)` call in `repeatOnLifecycle(Lifecycle.State.STARTED)` so the flag clears automatically when Mapo's activity drops below STARTED (backgrounded) and re-evaluates when it returns. Pulled forward from Brick 5 because it actively breaks back-button behavior in other apps as soon as the user opens Mapo even once.
 
 #### Files actually landed
 
@@ -119,18 +122,21 @@ Goal: answer R1 (touch routing on a large `FLAG_NOT_TOUCH_MODAL` overlay) + R2 (
 
 #### Hand-off to device verification
 
-The compile path is green and the test suite passes. R1 + R2 are device-side questions — please verify on the Thor (and a single-screen phone if convenient):
-1. Open Mapo → drawer → "Toggle POC keyboard overlay." Confirm the 3×4 placeholder grid appears anchored bottom.
-2. Tap inside the grid → look for `KeyboardOverlayPoc: tap on slot N` in logcat.
-3. Tap outside the grid (in the visible area of whatever app is below) → confirm that app receives the tap.
-4. Background Mapo / dismiss from recents while the overlay is up → verify the overlay survives and the FGS notification is visible.
-5. While overlay is up, press a gamepad button → confirm it still reaches the foreground game (the overlay should NOT consume gamepad input).
-6. Tap drawer toggle again → overlay detaches; FGS notification disappears.
-7. On Thor: verify the overlay appears on whichever display has the foreground app (and that switching screens / using Focus Lock doesn't cause regressions).
+Round 1 (2026-05-17) confirmed:
+- ✅ Taps inside the placeholder grid reach Compose (logcat shows `KeyboardOverlayPoc: tap on slot N`).
+- ✅ Taps outside the grid reach the underlying app.
+- ✅ Overlay survives Mapo's dismissal from recents (R2 satisfied — FGS is doing its job).
+- ❌ **Regression found:** gamepad input was absorbed by the overlay window, navigating the overlay's focus tree instead of reaching the foreground game. Root cause: missing `FLAG_NOT_FOCUSABLE`. Fixed by adding the flag (see deviations above).
 
-If the back gesture / back button is being stolen by the overlay (likely if testing with a non-gamepad app), that's the canonical R1 follow-up — flag it and I'll add `FLAG_NOT_FOCUSABLE` + verify taps still work.
+Round 2 (post-fix) — confirmed:
+- ✅ Taps inside the grid still log.
+- ✅ Gamepad input drives the foreground game (not the overlay).
+- ✅ Back-button reaches the foreground app (lifecycle-scoped `consumeSystemBack` fix).
+- ✅ Overlay survives Mapo's dismissal from recents (FGS doing its job).
 
-### Brick 2 — `KeyboardController` extraction (behavior-preserving)
+Thor multi-display routing (overlay auto-attaching to whichever screen has the foreground app) was deferred to Brick 5. R1, R2, and the back-button regression are resolved.
+
+### Brick 2 — `KeyboardController` extraction (behavior-preserving) — ✅ COMPLETED
 
 Goal: answer R3 (ViewModel instancing across activity + overlay) without touching UI.
 
@@ -148,6 +154,23 @@ Goal: answer R3 (ViewModel instancing across activity + overlay) without touchin
 **Verify:** all existing tests pass; manual smoke (key tap injects, remap toggle works).
 
 **Exit criteria:** activity uses the controller through the ViewModel; nothing else does yet.
+
+#### Brick 2 deviations + decisions
+
+- **`MainViewModel`'s `_layouts` / `_selectedIndex` / `_remapEnabled` MutableStateFlows were deleted, not retained as mirrors.** Source of truth is now solely the controller; MainViewModel re-exposes the controller's flows under the same names (`layouts`, `selectedIndex`, `remapEnabled`) so `MainScreen` and the existing test surface see no change. Reads inside the VM go through `keyboardController.<flow>.value`; CRUD writes go through `keyboardController.replaceLayouts(...)` / `replaceLayoutById(...)` / `setSelectedIndex(...)`. Optimistic-update semantics preserved verbatim — the controller's repo-backed collector reconciles after each DB roundtrip exactly as `MainViewModel`'s did pre-brick.
+- **`displayLayout` non-null compat at the VM boundary.** Controller exposes `StateFlow<GridLayout?>` (the actual FC1 seam: opaque + honest about "no layouts loaded yet"). `MainViewModel.displayLayout` keeps the pre-refactor non-null contract via a `map { it ?: DefaultLayouts.all[0] }.stateIn(...)` so MainScreen's existing `.collectAsStateWithLifecycle()` continues to deliver a guaranteed grid. Tomorrow, when KeyboardHost lands and reads the controller directly (Brick 3), it'll handle the nullable surface natively.
+- **Error-message relay.** Controller's run-mode dispatch ("Accessibility service not running") emits to a new `errorMessages: SharedFlow<String>` instead of writing to a VM-owned toast field. `MainViewModel`'s `init { ... }` collects this and forwards to the existing `_toastMessage` flow so MainScreen's toast collector keeps working unchanged.
+- **`MainViewModelTest` uses a real `KeyboardController`, not a mock.** Tests verify behavior through the VM's re-exposed flows (`subject.layouts.value`, `subject.selectedIndex.value`); a relaxed mock would have no real state, so the real controller wires through the same mocked `LayoutRepository` / `ProfileRepository` the VM uses. Same test-fixture pattern (`StandardTestDispatcher`, `MutableStateFlow` mocks for repos) — just one more constructor field.
+- **`@OptIn(ExperimentalCoroutinesApi::class)` is applied to `KeyboardController` for `flatMapLatest` in the repo collector** — same opt-in `MainViewModel` already carried for the same reason.
+- **Singleton scope is `Main.immediate`** so `StateFlow` writes from the main thread don't re-dispatch (matches the pre-refactor behavior of `MutableStateFlow.value =` on the main thread). Repos handle their own IO-thread switches as before.
+
+#### Files actually landed
+
+- `app/src/main/java/com/mapo/service/keyboard/KeyboardController.kt` (new)
+- `app/src/main/java/com/mapo/service/keyboard/KeyboardTab.kt` (new — FC1 seam type)
+- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` (delegation, ~30 sites updated)
+- `app/src/test/java/com/mapo/service/keyboard/KeyboardControllerTest.kt` (new, 20 tests)
+- `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (real-controller wiring in setUp + `rebuildSubject`)
 
 ### Brick 3 — Host-agnostic `KeyboardHost` composable
 
@@ -212,7 +235,7 @@ Thor compatibility:
 Cleanup (now-dead Thor-first code paths):
 - `MainActivity.onCreate`'s unconditional `FLAG_NOT_FOCUSABLE` — remove; defer entirely to per-destination logic.
 - Simplify `ApplyMainScreenWindowBehavior` (`MainScreen.kt:929`). Keep the "user is on Main route on Thor's bottom screen while game runs on top" path but rename / re-comment.
-- `InputDispatcher.consumeSystemBack` — still useful on Thor's secondary-device path; reframe comments.
+- `InputDispatcher.consumeSystemBack` — still useful on Thor's secondary-device path; reframe comments. (Lifecycle-scoping fix was pulled forward into Brick 1 — see Brick 1 deviations.)
 - `MainActivity.kt:31-37` "Secondary display detection" TODO — replace with concrete reference or remove.
 - `InputAccessibilityService.kt` motion-capture comment — sync with `MotionCaptureOverlay`'s class doc (the in-service "confirmed working" comment is stale).
 - `ForegroundAppMonitor.kt` doc — reframe "dual-display devices like the AYN Thor" → single-screen-first.

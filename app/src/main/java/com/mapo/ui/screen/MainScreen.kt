@@ -99,6 +99,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.awaitCancellation
 import androidx.compose.ui.res.stringResource
 import com.mapo.R
 import com.mapo.data.model.GridButton
@@ -242,8 +244,20 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     // has nowhere to deliver and the input dispatcher would ANR. Have the accessibility
     // service consume the back key in that exact state. Matches user intent (back is a
     // no-op on the keyboard view to prevent accidental dismissal during typing/trackpad).
-    LaunchedEffect(keyboardViewActive) {
-        viewModel.setConsumeSystemBack(keyboardViewActive)
+    //
+    // Lifecycle-scoped: the accessibility service is global, so leaving the flag set
+    // would swallow back system-wide once the user switches to another app. Bind to
+    // STARTED so the flag clears on Mapo's onStop and re-evaluates on onStart.
+    val lifecycleOwnerForBack = LocalLifecycleOwner.current
+    LaunchedEffect(keyboardViewActive, lifecycleOwnerForBack) {
+        lifecycleOwnerForBack.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            try {
+                viewModel.setConsumeSystemBack(keyboardViewActive)
+                awaitCancellation()
+            } finally {
+                viewModel.setConsumeSystemBack(false)
+            }
+        }
     }
     // M3's ModalNavigationDrawer doesn't ship an internal BackHandler, so without this
     // the press falls through to the activity default (moveTaskToBack) and the whole

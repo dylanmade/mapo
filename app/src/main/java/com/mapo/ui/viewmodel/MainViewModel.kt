@@ -42,6 +42,7 @@ import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.toCompiled
+import com.mapo.service.keyboard.KeyboardController
 import com.mapo.service.overlay.keyboard.KeyboardOverlayManager
 import com.mapo.service.overlay.keyboard.KeyboardOverlayPocContent
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -92,16 +93,17 @@ class MainViewModel @Inject constructor(
     private val keyboardTemplateRepository: KeyboardTemplateRepository,
     private val inputDispatcher: InputDispatcher,
     private val keyboardOverlayManager: KeyboardOverlayManager,
+    private val keyboardController: KeyboardController,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
-    // Empty until the active profile's layouts emit from the DB. Avoids duplicate LazyRow keys
-    // (every DefaultLayouts entry has id=0 since they're code-only).
-    private val _layouts = MutableStateFlow<ImmutableList<GridLayout>>(persistentListOf())
-    val layouts: StateFlow<ImmutableList<GridLayout>> = _layouts.asStateFlow()
-
-    private val _selectedIndex = MutableStateFlow(0)
-    val selectedIndex: StateFlow<Int> = _selectedIndex.asStateFlow()
+    // Source of truth lives in KeyboardController (Brick 2 of single-screen refactor).
+    // Re-exposed here so the activity surface — MainScreen, tests, drawer wiring —
+    // sees the same `layouts` / `selectedIndex` flows it always has. Writes inside
+    // this VM go through `keyboardController.replaceLayouts` / `replaceLayoutById` /
+    // `setSelectedIndex`; reads use `keyboardController.layouts.value` etc.
+    val layouts: StateFlow<ImmutableList<GridLayout>> = keyboardController.layouts
+    val selectedIndex: StateFlow<Int> = keyboardController.selectedIndex
 
     // Single source of truth for "is some tab being edited?". Replaces the previous
     // (_isEditMode, _editingLayout) pair: there's no buffered draft anymore — every
@@ -138,8 +140,7 @@ class MainViewModel @Inject constructor(
     private val _profiles = MutableStateFlow<ImmutableList<Profile>>(persistentListOf())
     val profiles: StateFlow<ImmutableList<Profile>> = _profiles.asStateFlow()
 
-    private val _remapEnabled = MutableStateFlow(false)
-    val remapEnabled: StateFlow<Boolean> = _remapEnabled.asStateFlow()
+    val remapEnabled: StateFlow<Boolean> = keyboardController.remapEnabled
 
     val autoSwitchEnabled: StateFlow<Boolean> = autoSwitchSettings.autoSwitchEnabled
 
@@ -225,28 +226,23 @@ class MainViewModel @Inject constructor(
             keyboardTemplateRepository.builtIns.toImmutableList()
         )
 
-    val displayLayout: StateFlow<GridLayout> = combine(
-        _selectedIndex, _layouts
-    ) { index, layouts ->
-        layouts.getOrNull(index) ?: layouts.firstOrNull() ?: DefaultLayouts.all[0]
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DefaultLayouts.all[0])
+    // FC1 seam upstream: KeyboardController.displayLayout is `StateFlow<GridLayout?>`
+    // (opaque, nullable — "what's actually rendered, if anything"). The activity
+    // surface here keeps the pre-refactor non-null contract by falling back to
+    // DefaultLayouts.all[0] on null, matching the prior WhileSubscribed/initial-value
+    // behavior at the VM boundary.
+    val displayLayout: StateFlow<GridLayout> = keyboardController.displayLayout
+        .map { it ?: DefaultLayouts.all[0] }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DefaultLayouts.all[0])
 
     init {
         viewModelScope.launch {
             profileRepository.getAllProfiles().collect { _profiles.value = it.toImmutableList() }
         }
+        // Relay run-mode dispatch errors from the controller into this VM's toast stream
+        // so MainScreen's existing `toastMessage` collector keeps surfacing them.
         viewModelScope.launch {
-            activeProfile.filterNotNull().flatMapLatest { profile ->
-                flow {
-                    layoutRepository.seedDefaultsIfEmpty(profile.id)
-                    emitAll(layoutRepository.getLayoutsByProfile(profile.id))
-                }
-            }.collect { roomLayouts ->
-                _layouts.value = roomLayouts.map { it.toGridLayout() }.toImmutableList()
-                if (_selectedIndex.value >= roomLayouts.size) {
-                    _selectedIndex.value = (roomLayouts.size - 1).coerceAtLeast(0)
-                }
-            }
+            keyboardController.errorMessages.collect { _toastMessage.tryEmit(it) }
         }
         viewModelScope.launch {
             activeControllerConfig.collect { config ->
@@ -305,7 +301,7 @@ class MainViewModel @Inject constructor(
 
     fun selectProfile(profile: Profile) {
         profileRepository.setActiveProfile(profile)
-        _selectedIndex.value = 0
+        keyboardController.setSelectedIndex(0)
     }
 
     fun addProfile(name: String) {
@@ -324,16 +320,12 @@ class MainViewModel @Inject constructor(
             profileRepository.deleteProfile(profile)
             if (activeProfile.value?.id == profile.id && defaultProfile != null) {
                 profileRepository.setActiveProfile(defaultProfile)
-                _selectedIndex.value = 0
+                keyboardController.setSelectedIndex(0)
             }
         }
     }
 
-    fun toggleRemap() {
-        val enabled = !_remapEnabled.value
-        _remapEnabled.value = enabled
-        inputDispatcher.setRemapEnabled(enabled)
-    }
+    fun toggleRemap() = keyboardController.toggleRemap()
 
     /**
      * Tell the accessibility service to swallow `KEYCODE_BACK` while the keyboard view
@@ -609,58 +601,26 @@ class MainViewModel @Inject constructor(
     fun selectLayout(index: Int) {
         // Visiting any tab exits edit mode for the previously-edited tab. Per design,
         // only one tab can be in edit mode at a time and tab navigation is always free.
-        _selectedIndex.value = index
-        if (_editingLayoutId.value != null && _layouts.value.getOrNull(index)?.id != _editingLayoutId.value) {
+        keyboardController.setSelectedIndex(index)
+        if (_editingLayoutId.value != null &&
+            keyboardController.layouts.value.getOrNull(index)?.id != _editingLayoutId.value) {
             _editingLayoutId.value = null
             _selectedButtonId.value = null
         }
     }
 
-    // ── Normal mode ───────────────────────────────────────────────────────────
+    // ── Normal mode (delegates to KeyboardController) ─────────────────────────
 
-    fun onButtonTap(button: GridButton) = dispatchButtonTarget(button.onTapTarget)
-    fun onButtonDoubleTap(button: GridButton) = dispatchButtonTarget(button.onDoubleTapTarget)
-    fun onButtonHold(button: GridButton) = dispatchButtonTarget(button.onHoldTarget)
+    fun onButtonTap(button: GridButton) = keyboardController.onButtonTap(button)
+    fun onButtonDoubleTap(button: GridButton) = keyboardController.onButtonDoubleTap(button)
+    fun onButtonHold(button: GridButton) = keyboardController.onButtonHold(button)
 
-    private fun dispatchButtonTarget(target: RemapTarget) {
-        if (target is RemapTarget.Unbound) return
-        if (!inputDispatcher.isReady) {
-            _toastMessage.tryEmit("Accessibility service not running")
-            return
-        }
-        when (target) {
-            is RemapTarget.Unbound -> Unit  // already returned above; here for exhaustiveness
-            is RemapTarget.Keyboard -> inputDispatcher.injectKey(target.code)
-            is RemapTarget.Mouse, is RemapTarget.Gamepad ->
-                inputDispatcher.dispatchTargetAsClick(target)
-        }
-    }
+    fun onTrackpadGesture(button: GridButton, gesture: TrackpadGesture) =
+        keyboardController.onTrackpadGesture(button, gesture)
 
-    fun onTrackpadGesture(button: GridButton, gesture: TrackpadGesture) {
-        val target = button.gestureTarget(gesture)
-        android.util.Log.d("MapoInput", "onTrackpadGesture button=${button.id} gesture=$gesture target=$target")
-        if (!inputDispatcher.isReady) {
-            _toastMessage.tryEmit("Accessibility service not running")
-            return
-        }
-        inputDispatcher.dispatchTargetAsClick(target)
-    }
-
-    fun onDragStart() {
-        if (inputDispatcher.isReady) {
-            inputDispatcher.startMouseDrag()
-        } else {
-            _toastMessage.tryEmit("Accessibility service not running")
-        }
-    }
-
-    fun onMouseMove(dx: Float, dy: Float) {
-        inputDispatcher.injectMouseMove(dx, dy)
-    }
-
-    fun onDragEnd() {
-        inputDispatcher.endMouseDrag()
-    }
+    fun onDragStart() = keyboardController.onDragStart()
+    fun onMouseMove(dx: Float, dy: Float) = keyboardController.onMouseMove(dx, dy)
+    fun onDragEnd() = keyboardController.onDragEnd()
 
     // ── Tab context menu ──────────────────────────────────────────────────────
 
@@ -676,9 +636,9 @@ class MainViewModel @Inject constructor(
     // ── Edit mode lifecycle ───────────────────────────────────────────────────
 
     fun enterEditMode(layoutId: Long) {
-        val targetIdx = _layouts.value.indexOfFirst { it.id == layoutId }
+        val targetIdx = keyboardController.layouts.value.indexOfFirst { it.id == layoutId }
         if (targetIdx < 0) return
-        _selectedIndex.value = targetIdx
+        keyboardController.setSelectedIndex(targetIdx)
         _selectedButtonId.value = null
         _editingLayoutId.value = layoutId
         _tabContextMenuFor.value = null
@@ -718,7 +678,8 @@ class MainViewModel @Inject constructor(
         transform: (GridLayout) -> GridLayout?,
     ) {
         val profileId = activeProfile.value?.id ?: return
-        val current = _layouts.value.find { l -> l.buttons.any { it.id == buttonId } } ?: return
+        val current = keyboardController.layouts.value.find { l -> l.buttons.any { it.id == buttonId } }
+            ?: return
         val updated = transform(current) ?: return
         persistLayoutFields(updated, profileId)
     }
@@ -736,8 +697,9 @@ class MainViewModel @Inject constructor(
      */
     private inline fun mutateDisplayedLayout(transform: (GridLayout) -> GridLayout?) {
         val profileId = activeProfile.value?.id ?: return
-        val layouts = _layouts.value
-        val current = layouts.getOrNull(_selectedIndex.value) ?: layouts.firstOrNull() ?: return
+        val layouts = keyboardController.layouts.value
+        val current = layouts.getOrNull(keyboardController.selectedIndex.value)
+            ?: layouts.firstOrNull() ?: return
         val updated = transform(current) ?: return
         persistLayoutFields(updated, profileId)
     }
@@ -937,19 +899,19 @@ class MainViewModel @Inject constructor(
 
     fun reorderTabs(fromIndex: Int, toIndex: Int) {
         if (fromIndex == toIndex) return
-        val current = _layouts.value
+        val current = keyboardController.layouts.value
         if (fromIndex !in current.indices || toIndex !in current.indices) return
         val mutable = current.toMutableList()
         val moved = mutable.removeAt(fromIndex)
         mutable.add(toIndex, moved)
         val reordered = mutable.toImmutableList()
-        _layouts.value = reordered
+        keyboardController.replaceLayouts(reordered)
 
         // Keep selection on the moved tab if it was selected; otherwise re-resolve by id.
-        val previouslySelectedId = current.getOrNull(_selectedIndex.value)?.id
+        val previouslySelectedId = current.getOrNull(keyboardController.selectedIndex.value)?.id
         if (previouslySelectedId != null) {
             val newIdx = reordered.indexOfFirst { it.id == previouslySelectedId }
-            if (newIdx >= 0) _selectedIndex.value = newIdx
+            if (newIdx >= 0) keyboardController.setSelectedIndex(newIdx)
         }
 
         val profileId = activeProfile.value?.id ?: return
@@ -975,7 +937,7 @@ class MainViewModel @Inject constructor(
      */
     fun tryResizeLayout(layoutId: Long, columns: Int, rows: Int): List<String>? {
         val profileId = activeProfile.value?.id ?: return null
-        val layout = _layouts.value.find { it.id == layoutId } ?: return null
+        val layout = keyboardController.layouts.value.find { it.id == layoutId } ?: return null
         val offending = layout.buttonsExceeding(columns, rows)
         if (offending.isNotEmpty()) {
             return offending.map { it.label.ifBlank { "(unnamed)" } }
@@ -998,7 +960,7 @@ class MainViewModel @Inject constructor(
      */
     fun applyResizeWithAutoFit(layoutId: Long, columns: Int, rows: Int) {
         val profileId = activeProfile.value?.id ?: return
-        val layout = _layouts.value.find { it.id == layoutId } ?: return
+        val layout = keyboardController.layouts.value.find { it.id == layoutId } ?: return
         val resized = autoFitButtons(layout.buttons, columns, rows)
         val dropped = layout.buttons.size - resized.size
         val (clamped, defaultsShrunk) = clampDefaultButtonSize(
@@ -1057,7 +1019,7 @@ class MainViewModel @Inject constructor(
 
     fun resetKeyboard(layoutId: Long) {
         val profileId = activeProfile.value?.id ?: return
-        val current = _layouts.value.find { it.id == layoutId } ?: return
+        val current = keyboardController.layouts.value.find { it.id == layoutId } ?: return
         val previousName = current.name
         viewModelScope.launch {
             val row = layoutRepository.getById(layoutId) ?: return@launch
@@ -1067,11 +1029,7 @@ class MainViewModel @Inject constructor(
             }
             val reverted = snapshot.toGridLayout(layoutId)
             // Optimistic update.
-            val current = _layouts.value
-            val idx = current.indexOfFirst { it.id == layoutId }
-            if (idx >= 0) {
-                _layouts.value = current.toPersistentList().set(idx, reverted)
-            }
+            keyboardController.replaceLayoutById(reverted)
             layoutRepository.saveLayout(
                 reverted.toKeyLayout(
                     profileId = profileId,
@@ -1085,10 +1043,11 @@ class MainViewModel @Inject constructor(
 
     fun duplicateKeyboard(layoutId: Long) {
         val profileId = activeProfile.value?.id ?: return
-        val sourceIdx = _layouts.value.indexOfFirst { it.id == layoutId }
+        val layoutsNow = keyboardController.layouts.value
+        val sourceIdx = layoutsNow.indexOfFirst { it.id == layoutId }
         if (sourceIdx < 0) return
-        val source = _layouts.value[sourceIdx]
-        val newName = nextCopyName(source.name, _layouts.value.map { it.name }.toSet())
+        val source = layoutsNow[sourceIdx]
+        val newName = nextCopyName(source.name, layoutsNow.map { it.name }.toSet())
         // Fresh UUIDs so the copy's buttons don't collide with the source's — both the
         // live draft and the reset-to-original snapshot must reference the new ids.
         val draftLayout = source.copy(name = newName).withFreshButtonIds()
@@ -1115,7 +1074,7 @@ class MainViewModel @Inject constructor(
             // Resolve the newly inserted row's id and select it.
             val refreshed = layoutRepository.getLayoutsByProfileOnce(profileId)
             val newIdx = refreshed.indexOfFirst { it.position == newPosition && it.name == newName }
-            if (newIdx >= 0) _selectedIndex.value = newIdx
+            if (newIdx >= 0) keyboardController.setSelectedIndex(newIdx)
             emitToast("\"$newName\" copied")
         }
     }
@@ -1130,16 +1089,16 @@ class MainViewModel @Inject constructor(
 
     fun removeKeyboard(layoutId: Long) {
         val profile = activeProfile.value ?: return
-        val current = _layouts.value
+        val current = keyboardController.layouts.value
         val idx = current.indexOfFirst { it.id == layoutId }
         if (idx < 0) return
         val name = current[idx].name
 
         // Optimistic UI.
         val newList = current.toPersistentList().removeAt(idx)
-        _layouts.value = newList
-        if (_selectedIndex.value >= newList.size) {
-            _selectedIndex.value = (newList.size - 1).coerceAtLeast(0)
+        keyboardController.replaceLayouts(newList)
+        if (keyboardController.selectedIndex.value >= newList.size) {
+            keyboardController.setSelectedIndex((newList.size - 1).coerceAtLeast(0))
         }
 
         viewModelScope.launch {
@@ -1155,7 +1114,7 @@ class MainViewModel @Inject constructor(
     }
 
     fun saveAsNewTemplate(layoutId: Long, templateName: String) {
-        val layout = _layouts.value.find { it.id == layoutId } ?: return
+        val layout = keyboardController.layouts.value.find { it.id == layoutId } ?: return
         val keyboardName = layout.name
         viewModelScope.launch {
             val existing = keyboardTemplateRepository.findByName(templateName)
@@ -1175,7 +1134,7 @@ class MainViewModel @Inject constructor(
     }
 
     fun updateExistingTemplate(layoutId: Long, ref: TemplateRef.User) {
-        val layout = _layouts.value.find { it.id == layoutId } ?: return
+        val layout = keyboardController.layouts.value.find { it.id == layoutId } ?: return
         val keyboardName = layout.name
         viewModelScope.launch {
             keyboardTemplateRepository.updateExisting(ref.id, layout)
@@ -1185,14 +1144,14 @@ class MainViewModel @Inject constructor(
 
     fun addBlankKeyboard() {
         val profileId = activeProfile.value?.id ?: return
-        val name = nextNumberedName("New Keyboard", _layouts.value.map { it.name }.toSet())
+        val name = nextNumberedName("New Keyboard", keyboardController.layouts.value.map { it.name }.toSet())
         val draft = GridLayout(name = name, columns = 6, rows = 4, buttons = emptyList())
         appendNewLayout(draft, profileId)
     }
 
     fun addKeyboardFromTemplate(template: TemplateRef) {
         val profileId = activeProfile.value?.id ?: return
-        val existing = _layouts.value.map { it.name }.toSet()
+        val existing = keyboardController.layouts.value.map { it.name }.toSet()
         val name = if (template.name in existing)
             nextNumberedName(template.name, existing)
         else template.name
@@ -1245,7 +1204,7 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             val sourceRow = layoutRepository.getById(sourceLayoutId) ?: return@launch
             val sourceGrid = sourceRow.toGridLayout()
-            val existing = _layouts.value.map { it.name }.toSet()
+            val existing = keyboardController.layouts.value.map { it.name }.toSet()
             val name = if (sourceGrid.name in existing)
                 nextNumberedName(sourceGrid.name, existing)
             else sourceGrid.name
@@ -1278,7 +1237,7 @@ class MainViewModel @Inject constructor(
         layoutRepository.saveLayout(newRow)
         val refreshed = layoutRepository.getLayoutsByProfileOnce(profileId)
         val newIdx = refreshed.indexOfFirst { it.position == newPosition && it.name == draft.name }
-        if (newIdx >= 0) _selectedIndex.value = newIdx
+        if (newIdx >= 0) keyboardController.setSelectedIndex(newIdx)
         // Committing to add a new keyboard ends the edit context. Cancel/dismiss paths
         // never reach this funnel, so they correctly leave edit mode untouched.
         exitEditMode()
@@ -1291,11 +1250,8 @@ class MainViewModel @Inject constructor(
 
     private fun persistLayoutFields(updated: GridLayout, profileId: Long) {
         // Optimistic in-memory update.
-        val current = _layouts.value
-        val idx = current.indexOfFirst { it.id == updated.id }
-        if (idx >= 0) {
-            _layouts.value = current.toPersistentList().set(idx, updated)
-        }
+        keyboardController.replaceLayoutById(updated)
+        val idx = keyboardController.layouts.value.indexOfFirst { it.id == updated.id }
         viewModelScope.launch {
             val existing = layoutRepository.getById(updated.id)
             layoutRepository.saveLayout(

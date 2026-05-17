@@ -20,6 +20,7 @@ import com.mapo.data.settings.AutoSwitchSettings
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.InputDispatcher
+import com.mapo.service.keyboard.KeyboardController
 import com.mapo.service.overlay.keyboard.KeyboardOverlayManager
 import app.cash.turbine.test
 import io.mockk.coEvery
@@ -61,6 +62,7 @@ class MainViewModelTest {
     private lateinit var templateRepo: KeyboardTemplateRepository
     private lateinit var inputDispatcher: InputDispatcher
     private lateinit var keyboardOverlayManager: KeyboardOverlayManager
+    private lateinit var keyboardController: KeyboardController
 
     private val activeProfile = MutableStateFlow<Profile?>(null)
     private val allProfiles = MutableStateFlow<List<Profile>>(emptyList())
@@ -90,6 +92,15 @@ class MainViewModelTest {
         templateRepo = mockk(relaxed = true)
         inputDispatcher = mockk(relaxed = true)
         keyboardOverlayManager = mockk(relaxed = true)
+        // Real KeyboardController with mocked deps — the controller's StateFlows /
+        // mutators are the source of truth for `layouts`, `selectedIndex`,
+        // `remapEnabled`, etc., so tests need a working instance, not a relaxed mock.
+        keyboardController = KeyboardController(
+            inputDispatcher = inputDispatcher,
+            layoutRepository = layoutRepo,
+            profileRepository = profileRepo,
+            ioDispatcher = testDispatcher,
+        )
 
         every { profileRepo.activeProfile } returns activeProfile
         every { profileRepo.getAllProfiles() } returns allProfiles
@@ -114,6 +125,7 @@ class MainViewModelTest {
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
             keyboardOverlayManager = keyboardOverlayManager,
+            keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
         )
     }
@@ -482,6 +494,7 @@ class MainViewModelTest {
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
             keyboardOverlayManager = keyboardOverlayManager,
+            keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
         )
         activeProfile.value = Profile(id = 1L, name = "P")
@@ -884,6 +897,7 @@ class MainViewModelTest {
         keyboardTemplateRepository = templateRepo,
         inputDispatcher = inputDispatcher,
         keyboardOverlayManager = keyboardOverlayManager,
+        keyboardController = keyboardController,
         ioDispatcher = testDispatcher,
     )
 

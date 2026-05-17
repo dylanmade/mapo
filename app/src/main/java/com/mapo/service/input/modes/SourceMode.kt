@@ -103,6 +103,34 @@ object DpadMode : SourceMode {
 }
 
 /**
+ * Analog-trigger source (LEFT_TRIGGER, RIGHT_TRIGGER). One sub-input: `click`.
+ * Physical key path: hardware threshold on the trigger pull surfaces as
+ * `KEYCODE_BUTTON_L2` / `KEYCODE_BUTTON_R2`, which the accessibility service routes
+ * to `InputAddress(LEFT_TRIGGER, "click")` / `(RIGHT_TRIGGER, "click")` today.
+ *
+ * **Settings shape (data-model only until motion capture returns).**
+ *  - `click_threshold` — analog pull magnitude (0..1) at which the click sub-input
+ *    fires. Steam-default 0.95. Inert in 6.4 because we have no analog source feeding
+ *    it; the digital hardware threshold (whatever the device decides) is what we get.
+ *  - Future settings (response curve, soft-press threshold, output range remap) will
+ *    join this JSON when analog input is plugged back in.
+ *
+ * **Soft_Press activator status.** Steam Input pairs Trigger mode with the
+ * `Soft_Press` activator type — fires when the analog pull crosses a soft threshold
+ * before the click threshold. The activator type exists in our enum
+ * ([ActivatorType.SOFT_PRESS][com.mapo.data.model.steam.ActivatorType.SOFT_PRESS])
+ * but the evaluator currently skips it (digital triggers don't surface the
+ * "below-click" pull state). Becomes active when the motion-capture refactor lands.
+ */
+object TriggerMode : SourceMode {
+    override val mode: BindingMode = BindingMode.TRIGGER
+    override fun validInputs(): Set<String> = INPUTS
+    /** Steam-default click threshold at 95% pull; runtime-inert in 6.4 (digital only). */
+    override fun defaultSettingsJson(): String = """{"click_threshold":0.95}"""
+    private val INPUTS = setOf("click")
+}
+
+/**
  * Placeholder handler for a [BindingMode] whose runtime hasn't landed yet. Reports an
  * empty [validInputs] but [accepts] always returns true so the compile path doesn't drop
  * existing seeded data while we phase the rest of the modes in (6.2 onward). Disappears
@@ -122,11 +150,11 @@ fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.SINGLE_BUTTON -> SingleButtonMode
     BindingMode.BUTTON_PAD -> ButtonPadMode
     BindingMode.DPAD -> DpadMode
+    BindingMode.TRIGGER -> TriggerMode
     BindingMode.JOYSTICK_MOVE,
     BindingMode.JOYSTICK_CAMERA,
     BindingMode.MOUSE_JOYSTICK,
     BindingMode.ABSOLUTE_MOUSE,
-    BindingMode.TRIGGER,
     BindingMode.SCROLL_WHEEL,
     BindingMode.TWO_D_SCROLL,
     BindingMode.REFERENCE,

@@ -101,6 +101,44 @@ class SourceModeTest {
         assertSame(DpadMode, BindingMode.DPAD.handler())
     }
 
+    // ── Brick 6.4: Trigger mode ──────────────────────────────────────────────
+
+    @Test
+    fun trigger_validInputs_isJustClick() {
+        // Analog triggers have one sub-input — `click`. The actual pull-threshold
+        // analog gating lives in settings, not in additional sub-inputs.
+        assertEquals(setOf("click"), TriggerMode.validInputs())
+    }
+
+    @Test
+    fun trigger_acceptsClick_rejectsOthers() {
+        assertTrue(TriggerMode.accepts("click"))
+        assertFalse(TriggerMode.accepts("edge"))
+        assertFalse(TriggerMode.accepts("button_a"))
+        assertFalse(TriggerMode.accepts("dpad_north"))
+    }
+
+    @Test
+    fun trigger_defaultSettingsJson_includesClickThreshold() {
+        // Steam-default click threshold (0.95 of pull). Inert in 6.4 because we have
+        // no analog source feeding the comparison; laid down so the eventual motion-
+        // capture refactor doesn't need a settings-shape migration.
+        val json = TriggerMode.defaultSettingsJson()
+        assertTrue(
+            "Expected click_threshold key in defaults; got: $json",
+            json.contains("click_threshold"),
+        )
+        assertTrue(
+            "Expected 0.95 default value; got: $json",
+            json.contains("0.95"),
+        )
+    }
+
+    @Test
+    fun handlerRegistry_returnsTriggerModeForTrigger() {
+        assertSame(TriggerMode, BindingMode.TRIGGER.handler())
+    }
+
     @Test
     fun stubMode_acceptsAnyInputKey() {
         // Forward-compat: modes whose runtime hasn't landed (DPAD, TRIGGER, etc.)
@@ -127,6 +165,7 @@ class SourceModeTest {
             BindingMode.SINGLE_BUTTON,
             BindingMode.BUTTON_PAD,
             BindingMode.DPAD,
+            BindingMode.TRIGGER,
         )
         for (mode in BindingMode.values()) {
             if (mode in implemented) continue

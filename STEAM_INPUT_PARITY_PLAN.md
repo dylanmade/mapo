@@ -845,6 +845,25 @@ After Brick 6.2's motion-capture path was found viable but tabled (system focus 
 
 Phase 7 (VDF import) is the next phase gate once 6.3–6.5 land.
 
+### Brick 6.4 deviations + decisions
+
+**Scope landed.** `TriggerMode` `SourceMode` handler. `validInputs = {click}`. `defaultSettingsJson = {"click_threshold":0.95}` — Steam-default click threshold. Registry: `BindingMode.TRIGGER.handler()` now returns `TriggerMode` (was `StubMode(TRIGGER)`).
+
+**No runtime behavior change for the user.** Existing path is unchanged: hardware-threshold trigger pulls fire `KEYCODE_BUTTON_L2` / `KEYCODE_BUTTON_R2` through `onKeyEvent`, the accessibility service routes them to `InputAddress(LEFT_TRIGGER, "click")` / `(RIGHT_TRIGGER, "click")`, the evaluator dispatches whatever `FULL_PRESS` activator is bound. The brick adds compile-time validation (TRIGGER strictly accepts only `click`) and the settings JSON shape — both data-model only.
+
+**Soft_Press activator status.** Steam's `Soft_Press` activator fires when the analog trigger pull crosses a soft threshold *before* the click threshold. The enum value (`ActivatorType.SOFT_PRESS`) exists; the evaluator's per-press switch routes it to the no-op fall-through (`"skipping ${activator.type} activator (later brick)"`). It stays inert until the motion-capture refactor lands — without an analog pull stream, there's no "below-click" signal to threshold against.
+
+**`click_threshold` setting is inert too** — its job is to compare an analog pull magnitude against a configurable cutoff, but we get only the hardware's binary L2/R2 events today. Stored for the schema, runs nothing.
+
+**Tests.** 4 new in `SourceModeTest` (TriggerMode validInputs / accepts / defaultSettings / registry identity). 1 new in `CompiledConfigTest` (`triggerMode_acceptsOnlyClick` — strict validation drops a misseeded `button_a`). Registry-sweep test updated to know TRIGGER is no longer in the stub bucket. Full suite green.
+
+**What this brick does NOT do.**
+- No analog pull processing (the actual reason Trigger mode exists in Steam Input). Tabled with motion capture.
+- No UI surface yet (lands in 6.5).
+- No Soft_Press wiring. Activator type stays inert.
+
+---
+
 ### Brick 6.3 deviations + decisions
 
 **Scope landed.** `DpadMode` `SourceMode` handler in `app/src/main/java/com/mapo/service/input/modes/SourceMode.kt`. `validInputs = {dpad_north, dpad_south, dpad_east, dpad_west, click}`. `defaultSettingsJson` returns `{"dpad_layout":"4_way"}` — Steam-default layout, runtime-inert until analog source feeds the gating.

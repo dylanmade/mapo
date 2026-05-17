@@ -768,6 +768,32 @@ class CompiledConfigTest {
     }
 
     @Test
+    fun triggerMode_acceptsOnlyClick() {
+        // Brick 6.4: TRIGGER has a real handler now. Sub-input vocabulary is just `click`
+        // — analog pull magnitude lives in settings, not in additional sub-inputs.
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.LEFT_TRIGGER, state = "active",
+                    group = groupWith(
+                        mode = BindingMode.TRIGGER,
+                        inputs = listOf(
+                            inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
+                            inputWith("button_a", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "Z"))))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+
+        assertEquals(1, compiled.totalInputCount)
+        assertNotNull(compiled.lookup(InputSource.LEFT_TRIGGER, "click"))
+        assertEquals(null, compiled.lookup(InputSource.LEFT_TRIGGER, "button_a"))
+    }
+
+    @Test
     fun unimplementedMode_isPermissiveViaStubMode() {
         // Brick 6.1 introduced StubMode as the permissive fallback for modes whose
         // runtime hasn't landed yet. Brick 6.3 promoted DPAD out of the stub bucket,

@@ -74,7 +74,7 @@ Sequencing rule: **every brick boundary leaves remap working end-to-end and the 
 
 This file is the deliverable. Contracts above are agreed.
 
-### Brick 1 — Overlay POC + foreground-service skeleton
+### Brick 1 — Overlay POC + foreground-service skeleton — 🟡 CODE LANDED (device verification pending)
 
 Goal: answer R1 (touch routing on a large `FLAG_NOT_TOUCH_MODAL` overlay) + R2 (FGS requirements on Android 12+).
 
@@ -96,6 +96,39 @@ Goal: answer R1 (touch routing on a large `FLAG_NOT_TOUCH_MODAL` overlay) + R2 (
 - Tested on single-screen phone AND on Thor (overlay attaches to whichever display the foreground app is on — verify both screens).
 
 **Exit criteria:** R1 / R2 findings documented; blockers surfaced if any.
+
+#### Brick 1 deviations + decisions
+
+- **`POST_NOTIFICATIONS` permission added** alongside the two FGS permissions. Android 13+ requires it for the FGS's persistent notification to render — without it the service still runs but the notification is silently dropped, which means no visible indicator that the keyboard overlay's process priority is being held.
+- **Manager mounts the FGS via started-service pattern** (`Context.startForegroundService` + `stopService`), not bound-service. Simpler for Brick 1; Brick 4's QS-tile flow may want bind semantics so the service can also drive the overlay (TileService → service → manager), but that decision is deferred until the tile lands.
+- **`KeyboardOverlayPocContent.kt` is its own file**, not a `private fun` inside the manager. The ViewModel needs to reference it for the debug toggle, and keeping it separate also makes its "Brick 1 placeholder, replaced in Brick 4" status clearer in the file tree.
+- **Drawable added.** Mapo had zero `res/drawable/` files before this brick; the FGS notification requires a small icon, so `ic_keyboard_overlay.xml` was created (vector, 24dp, white fill). The system tints it automatically on the status bar.
+- **POC overlay's flag matrix matches the plan's contract verbatim**: `FLAG_LAYOUT_IN_SCREEN | FLAG_NOT_TOUCH_MODAL` (no `FLAG_NOT_FOCUSABLE`). If on-device testing reveals back-button is being stolen by the overlay, the alternative is to add `FLAG_NOT_FOCUSABLE` and verify Compose taps still land — this is a known R1 follow-up axis.
+
+#### Files actually landed
+
+- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayManager.kt` (new)
+- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayService.kt` (new)
+- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPocContent.kt` (new — Brick 1 only)
+- `app/src/main/res/drawable/ic_keyboard_overlay.xml` (new)
+- `app/src/main/AndroidManifest.xml` (FGS perms + service declaration + property)
+- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` (injection + `togglePocKeyboardOverlay()`)
+- `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` (debug drawer item — Brick 1 only)
+- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (wire callback — Brick 1 only)
+- `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (mock + constructor updates)
+
+#### Hand-off to device verification
+
+The compile path is green and the test suite passes. R1 + R2 are device-side questions — please verify on the Thor (and a single-screen phone if convenient):
+1. Open Mapo → drawer → "Toggle POC keyboard overlay." Confirm the 3×4 placeholder grid appears anchored bottom.
+2. Tap inside the grid → look for `KeyboardOverlayPoc: tap on slot N` in logcat.
+3. Tap outside the grid (in the visible area of whatever app is below) → confirm that app receives the tap.
+4. Background Mapo / dismiss from recents while the overlay is up → verify the overlay survives and the FGS notification is visible.
+5. While overlay is up, press a gamepad button → confirm it still reaches the foreground game (the overlay should NOT consume gamepad input).
+6. Tap drawer toggle again → overlay detaches; FGS notification disappears.
+7. On Thor: verify the overlay appears on whichever display has the foreground app (and that switching screens / using Focus Lock doesn't cause regressions).
+
+If the back gesture / back button is being stolen by the overlay (likely if testing with a non-gamepad app), that's the canonical R1 follow-up — flag it and I'll add `FLAG_NOT_FOCUSABLE` + verify taps still work.
 
 ### Brick 2 — `KeyboardController` extraction (behavior-preserving)
 

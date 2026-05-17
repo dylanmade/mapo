@@ -20,6 +20,7 @@ import com.mapo.data.settings.AutoSwitchSettings
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.InputDispatcher
+import com.mapo.service.overlay.keyboard.KeyboardOverlayManager
 import app.cash.turbine.test
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -59,6 +60,7 @@ class MainViewModelTest {
     private lateinit var filter: ForegroundAppFilter
     private lateinit var templateRepo: KeyboardTemplateRepository
     private lateinit var inputDispatcher: InputDispatcher
+    private lateinit var keyboardOverlayManager: KeyboardOverlayManager
 
     private val activeProfile = MutableStateFlow<Profile?>(null)
     private val allProfiles = MutableStateFlow<List<Profile>>(emptyList())
@@ -87,6 +89,7 @@ class MainViewModelTest {
         filter = mockk(relaxed = true)
         templateRepo = mockk(relaxed = true)
         inputDispatcher = mockk(relaxed = true)
+        keyboardOverlayManager = mockk(relaxed = true)
 
         every { profileRepo.activeProfile } returns activeProfile
         every { profileRepo.getAllProfiles() } returns allProfiles
@@ -110,6 +113,7 @@ class MainViewModelTest {
             foregroundAppFilter = filter,
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
+            keyboardOverlayManager = keyboardOverlayManager,
             ioDispatcher = testDispatcher,
         )
     }
@@ -477,6 +481,7 @@ class MainViewModelTest {
             foregroundAppFilter = filter,
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
+            keyboardOverlayManager = keyboardOverlayManager,
             ioDispatcher = testDispatcher,
         )
         activeProfile.value = Profile(id = 1L, name = "P")
@@ -878,6 +883,7 @@ class MainViewModelTest {
         foregroundAppFilter = filter,
         keyboardTemplateRepository = templateRepo,
         inputDispatcher = inputDispatcher,
+        keyboardOverlayManager = keyboardOverlayManager,
         ioDispatcher = testDispatcher,
     )
 

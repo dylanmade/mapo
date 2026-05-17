@@ -305,6 +305,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.THEME_STUDIO)
                 },
+                onTogglePocKeyboardOverlay = {
+                    scope.launch { drawerState.close() }
+                    viewModel.togglePocKeyboardOverlay()
+                },
             )
         }
     ) {

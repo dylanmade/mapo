@@ -42,7 +42,10 @@ import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.toCompiled
+import com.mapo.service.overlay.keyboard.KeyboardOverlayManager
+import com.mapo.service.overlay.keyboard.KeyboardOverlayPocContent
 import dagger.hilt.android.lifecycle.HiltViewModel
+import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -88,6 +91,7 @@ class MainViewModel @Inject constructor(
     private val foregroundAppFilter: ForegroundAppFilter,
     private val keyboardTemplateRepository: KeyboardTemplateRepository,
     private val inputDispatcher: InputDispatcher,
+    private val keyboardOverlayManager: KeyboardOverlayManager,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
@@ -1308,5 +1312,20 @@ class MainViewModel @Inject constructor(
 
     private fun emitError(message: String) {
         _toastMessage.tryEmit(message)
+    }
+
+    // ── Brick 1 single-screen-refactor POC: toggle the placeholder keyboard
+    //    overlay window. Drawer entry that calls this is removed in Brick 4
+    //    once the QS tile + real KeyboardHost(Overlay) are wired up.
+    fun togglePocKeyboardOverlay() {
+        if (keyboardOverlayManager.isAttached(KeyboardOverlayManager.POC_OVERLAY_ID)) {
+            keyboardOverlayManager.detach(KeyboardOverlayManager.POC_OVERLAY_ID)
+        } else {
+            keyboardOverlayManager.attach(KeyboardOverlayManager.POC_OVERLAY_ID) {
+                KeyboardOverlayPocContent(
+                    onTap = { slot -> Log.d("KeyboardOverlayPoc", "tap on slot $slot") },
+                )
+            }
+        }
     }
 }

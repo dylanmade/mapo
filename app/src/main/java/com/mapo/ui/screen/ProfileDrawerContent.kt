@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SportsEsports
@@ -31,6 +32,7 @@ fun ProfileDrawerContent(
     onOpenAutoSwitch: () -> Unit,
     onOpenBlocklist: () -> Unit,
     onOpenThemeStudio: () -> Unit,
+    onTogglePocKeyboardOverlay: () -> Unit,
 ) {
     // surfaceContainerHigh — drawer sheet (canonical M3 elevated container per Reply)
     ModalDrawerSheet(
@@ -91,6 +93,17 @@ fun ProfileDrawerContent(
                     selected = false,
                     onClick = onOpenThemeStudio,
                     icon = { Icon(Icons.Default.Palette, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+            // Brick 1 single-screen-refactor POC trigger — removed in Brick 4
+            // when the QS tile + real KeyboardHost(Overlay) replace it.
+            item {
+                NavigationDrawerItem(
+                    label = { Text("Toggle POC keyboard overlay") },
+                    selected = false,
+                    onClick = onTogglePocKeyboardOverlay,
+                    icon = { Icon(Icons.Default.Keyboard, contentDescription = null) },
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
             }

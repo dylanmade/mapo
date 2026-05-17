@@ -828,22 +828,33 @@ Each mode swaps both the settings panel and the inputs list. Switching modes pre
 - L2 trigger → Trigger mode, soft-press threshold 0.3. Squeezing trigger lightly → soft-press activator fires; full pull → click activator fires.
 - Left stick mode swapped Joystick Move → Dpad. Push stick up → emits dpad_up.
 
-### Digital-only Phase 6 scope (decided 2026-05-16)
+### Phase 6 closed in reduced scope (decided 2026-05-16)
 
-After Brick 6.2's motion-capture path was found viable but tabled (system focus side effects need a wider refactor), Phase 6 is reduced to digital modes only. Revised brick list:
+Phase 6 ended without the analog modes or source-mode picker UI. The dependency chain is:
 
-- **6.1** ✓ — SourceMode foundation + Single Button + Button Pad.
-- **6.2** — Motion-capture scaffold landed; motion capture itself tabled pending refactor.
-- **6.3** — Dpad mode (digital). DpadMode SourceMode handler.
-- **6.4** — Trigger mode (digital click only). Soft_Press activator stays inert.
-- **6.5** — `SourceEditorScreen` UI for the landed digital modes. (Analog modes hidden or marked as "requires analog input — coming soon".)
+1. **Analog modes** need continuous gamepad-axis input.
+2. **Motion capture on stock Android** without root: focusable-accessibility-overlay path captures motion events but causes system focus side effects (IME / back gesture / cursor / app switcher break) — tabled pending a wider refactor.
+3. **The wider refactor depends on the single-screen-device architecture work** that's planned but hasn't started — see `project_target_single_screen_pivot.md`.
 
-**Deferred behind the motion-capture refactor** (split off from Phase 6, no longer blocking phase completion):
+So the analog tail of Phase 6 waits for architecture work that waits for its own design pass. Locked into the order: single-screen architecture → motion-capture refactor → Phase 6 analog modes → Phase 6 mode-picker UI.
 
-- Joystick Move, Joystick Camera, Mouse Joystick, Absolute Mouse, Scroll Wheel, 2D Scroll, Soft_Press analog activation, Flickstick, Mouse Region.
-- Reference mode (Steam VDF alias) — folds into Phase 7 (VDF import) where it actually matters.
+**Bricks completed:**
 
-Phase 7 (VDF import) is the next phase gate once 6.3–6.5 land.
+- **6.1** ✓ — `SourceMode` foundation + Single Button + Button Pad (compile-time sub-input validation).
+- **6.2** ✓ — Motion-capture scaffolding landed (`AnalogEvent`, `MotionEventNormalizer`, `InputEvaluator.handleMotion`, `MotionCaptureOverlay`). Motion capture itself **tabled** — see `project_motion_capture_via_focusable_overlay.md`.
+- **6.3** ✓ — Dpad mode (digital). No analog-stick-as-dpad gating.
+- **6.4** ✓ — Trigger mode (digital click only). Soft_Press activator runtime stays inert.
+
+**Bricks NOT done (analog tail, pending refactor):**
+
+- **6.5** — Source mode picker UI. Skipped — most digital-only mode swaps are no-ops, so the picker had no meaningful use case yet. Existing `DisabledModeDropdown` scaffolding kept in place for future activation.
+- Analog modes: Joystick Move, Joystick Camera, Mouse Joystick, Absolute Mouse, Scroll Wheel, 2D Scroll.
+- Soft_Press activator runtime.
+- Flickstick (gyro-dependent).
+- Mouse Region (overlay-rendering-dependent).
+- Reference mode — folded into Phase 7 (VDF import) where it's actually consumed.
+
+**Next phase gate:** Phase 7 (VDF import). VDF parsing can land structurally even though analog modes don't run at runtime — imported configs that reference analog modes store cleanly; they just don't fire.
 
 ### Brick 6.4 deviations + decisions
 

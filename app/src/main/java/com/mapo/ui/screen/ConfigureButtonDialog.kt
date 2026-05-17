@@ -476,6 +476,7 @@ private fun ColorSlotRow(
     ColorSlotGroup(
         title = slot.title,
         description = slot.description,
+        colorLabel = slot.colorLabel,
         enabled = slot.enabled(button),
         isAuto = slot.isAuto(button),
         resolvedColor = slot.resolvedColor(resolved),
@@ -779,31 +780,37 @@ internal fun RegionEditDialog(
 internal enum class ColorSlot(
     val title: String,
     val description: String,
+    val colorLabel: String,
     val defaultEnabled: Boolean,
 ) {
     Fill(
         title = "Button fill",
         description = "Solid color filling the button",
+        colorLabel = "Button fill color",
         defaultEnabled = true,
     ),
     Outline(
         title = "Button outline",
         description = "Stroke around the button edge",
+        colorLabel = "Button outline color",
         defaultEnabled = false,
     ),
     Bevel(
         title = "Button bevel",
         description = "Darkened bottom edge for a 3D appearance",
+        colorLabel = "Button bevel color",
         defaultEnabled = true,
     ),
     Shadow(
         title = "Button shadow",
         description = "Soft drop shadow beneath the button",
+        colorLabel = "Button shadow color",
         defaultEnabled = true,
     ),
     Animation(
         title = "Press animation",
         description = "Color overlay shown while the button is pressed",
+        colorLabel = "Press animation color",
         defaultEnabled = true,
     );
 

@@ -1886,18 +1886,29 @@ private fun KeyButtonShape(
     // bottom curve.
     val outerShape: Shape = RoundedCornerShape(BUTTON_CORNER)
 
-    // When motion+bevel are both on AND the button is pressed, collapse the bevel band
-    // to 20% of its idle height so the surface visually drops down by 80% of BEVEL_HEIGHT.
-    // animateDpAsState gives a smooth in/out interpolation; the spec only specifies the
-    // pressed magnitude, not the curve, so we lean on the M3 default spring.
+    // When motion+bevel are both on AND the button is pressed, translate the surface
+    // (and its content) downward inside the outer clip. The surface keeps its idle
+    // height — only its position shifts — so the label/icon visibly descend with the
+    // surface, and the bottom bevel band shrinks because the surface bottom slides
+    // toward the outer bottom. A thin sliver of bevel reveals above the surface, which
+    // reads as the housing rim around a button pushed into its socket.
+    //
+    // Press depth = 80% of BEVEL_HEIGHT so the remaining bottom band is ~20% (matches
+    // the prior collapse magnitude). Short tween keeps the press feel snappy — a
+    // default spring overshoots the brief window between finger-down and finger-up on
+    // quick taps and reads as laggy.
     val motionActive = resolved.animationEnabled && resolved.animationMotionEnabled && resolved.bevelEnabled
-    val targetBevelHeight = if (motionActive && isPressed) BEVEL_HEIGHT * 0.2f else BEVEL_HEIGHT
-    val bevelHeight by animateDpAsState(targetValue = targetBevelHeight, label = "bevelCollapse")
+    val pressDepth by animateDpAsState(
+        targetValue = if (motionActive && isPressed) BEVEL_HEIGHT * 0.8f else 0.dp,
+        animationSpec = tween(durationMillis = 60),
+        label = "pressDepth",
+    )
 
     Box(modifier = modifier) {
-        // Shape Box: shadow + outer clip + bevel background + click handling. The clip
-        // applies to children (surface + content). Click ripples expand within the
-        // outer rounded shape, so taps on the bevel band also register as button taps.
+        // Mask Box: shadow + outer clip + click handling. NO background here — the
+        // bevel paint lives one level deeper so it can translate down with the rest
+        // of the render during a press while this clip stays fixed (the "area mask"
+        // the press animation slides the button inside of).
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1910,34 +1921,54 @@ private fun KeyButtonShape(
                     ) else Modifier
                 )
                 .clip(outerShape)
-                .then(if (resolved.bevelEnabled) Modifier.background(resolved.bevel) else Modifier)
                 .then(surfaceModifier),
         ) {
-            // Surface: fully rounded so the bottom corners expose bevel "wings" that
-            // wrap the surface. The user-facing outline (when enabled) strokes only the
-            // surface — per spec, it encompasses the surface, not surface+bevel.
+            // Moving stack: bevel band + surface + content as a single unit. Offset
+            // downward by pressDepth while pressed. Anything that slides past the
+            // fixed mask above gets clipped at the bottom (which is what makes the
+            // visible bevel band shrink), and the area uncovered at the top reveals
+            // whatever sits behind the button (the keyboard surface), reading as
+            // the button sinking into its socket. All layers below — fill, outline,
+            // press overlay, content — translate together, so the label/icon stay
+            // anchored to the surface they sit on.
+            //
+            // Self-clip to outerShape AFTER the offset so the stack carries its own
+            // rounded silhouette: without this the bevel would draw as a rectangle
+            // and only round by accident where it overlaps the outer mask. When the
+            // stack slides down, its rectangular top edge would appear below the
+            // mask's curved top corners and render as harsh right angles.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(if (resolved.bevelEnabled) Modifier.padding(bottom = bevelHeight) else Modifier)
+                    .offset(y = pressDepth)
                     .clip(outerShape)
-                    .then(if (resolved.fillEnabled) Modifier.background(resolved.fill) else Modifier)
-                    .then(
-                        if (resolved.outlineEnabled) Modifier.border(1.dp, resolved.outline, outerShape)
-                        else Modifier
-                    ),
+                    .then(if (resolved.bevelEnabled) Modifier.background(resolved.bevel) else Modifier),
             ) {
-                // Press-state overlay. Drawn inside the surface clip so it covers
-                // fill + outline but NOT the bevel band, per spec. Sits beneath the
-                // content callback so labels/icons remain readable through the overlay.
-                if (resolved.animationEnabled && isPressed) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(resolved.animation),
-                    )
+                // Surface: fully rounded so the bottom corners expose bevel "wings"
+                // that wrap the surface. Padding bottom = constant BEVEL_HEIGHT.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (resolved.bevelEnabled) Modifier.padding(bottom = BEVEL_HEIGHT) else Modifier)
+                        .clip(outerShape)
+                        .then(if (resolved.fillEnabled) Modifier.background(resolved.fill) else Modifier)
+                        .then(
+                            if (resolved.outlineEnabled) Modifier.border(1.dp, resolved.outline, outerShape)
+                            else Modifier
+                        ),
+                ) {
+                    // Press-state overlay. Inside the surface clip so it covers
+                    // fill + outline but not the bevel band, per spec. Beneath the
+                    // content callback so labels/icons remain readable.
+                    if (resolved.animationEnabled && isPressed) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(resolved.animation),
+                        )
+                    }
+                    content()
                 }
-                content()
             }
         }
 

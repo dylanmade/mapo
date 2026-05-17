@@ -828,6 +828,80 @@ Each mode swaps both the settings panel and the inputs list. Switching modes pre
 - L2 trigger → Trigger mode, soft-press threshold 0.3. Squeezing trigger lightly → soft-press activator fires; full pull → click activator fires.
 - Left stick mode swapped Joystick Move → Dpad. Push stick up → emits dpad_up.
 
+### Digital-only Phase 6 scope (decided 2026-05-16)
+
+After Brick 6.2's motion-capture path was found viable but tabled (system focus side effects need a wider refactor), Phase 6 is reduced to digital modes only. Revised brick list:
+
+- **6.1** ✓ — SourceMode foundation + Single Button + Button Pad.
+- **6.2** — Motion-capture scaffold landed; motion capture itself tabled pending refactor.
+- **6.3** — Dpad mode (digital). DpadMode SourceMode handler.
+- **6.4** — Trigger mode (digital click only). Soft_Press activator stays inert.
+- **6.5** — `SourceEditorScreen` UI for the landed digital modes. (Analog modes hidden or marked as "requires analog input — coming soon".)
+
+**Deferred behind the motion-capture refactor** (split off from Phase 6, no longer blocking phase completion):
+
+- Joystick Move, Joystick Camera, Mouse Joystick, Absolute Mouse, Scroll Wheel, 2D Scroll, Soft_Press analog activation, Flickstick, Mouse Region.
+- Reference mode (Steam VDF alias) — folds into Phase 7 (VDF import) where it actually matters.
+
+Phase 7 (VDF import) is the next phase gate once 6.3–6.5 land.
+
+### Brick 6.3 deviations + decisions
+
+**Scope landed.** `DpadMode` `SourceMode` handler in `app/src/main/java/com/mapo/service/input/modes/SourceMode.kt`. `validInputs = {dpad_north, dpad_south, dpad_east, dpad_west, click}`. `defaultSettingsJson` returns `{"dpad_layout":"4_way"}` — Steam-default layout, runtime-inert until analog source feeds the gating.
+
+**Registry update.** `BindingMode.DPAD.handler()` now returns `DpadMode` (was `StubMode(DPAD)`). The change makes DPAD strictly validate sub-input keys at compile time — misseeded `button_a` under a DPAD group is dropped with a WARN log instead of silently passing through.
+
+**No runtime behavior change for the user.** The existing accessibility-service path `KEYCODE_DPAD_UP/DOWN/LEFT/RIGHT → InputAddress(DPAD, "dpad_*")` is unchanged. Pressing physical dpad keys produces the same digital sub-input events as before. The settings JSON shape (`dpad_layout`) is data-model only — no analog source is feeding it, so its runtime gating doesn't fire.
+
+**Tests.** 4 new in `SourceModeTest` (DpadMode validInputs / accepts / defaultSettings / registry identity). 1 new in `CompiledConfigTest` (`dpadMode_dropsSubInputsThatArentDpadKeysOrClick` — strict validation). 1 updated: `unimplementedMode_isPermissiveViaStubMode` swapped from DPAD to `JOYSTICK_MOVE` as the still-stub example. Registry-sweep test (`handlerRegistry_returnsStubForUnimplementedModes`) updated to know DPAD is no longer in the stub bucket. Full suite green.
+
+**What this brick does NOT do.**
+- No analog stick-as-dpad gating (8-way, cross-gate, analog_emulation layouts have no runtime effect — analog source is tabled).
+- No UI surface yet (lands in 6.5).
+- `click` sub-input on DPAD is reserved but inert. Digital dpads don't have a physical stick-click; analog-stick-as-dpad will populate it once motion capture returns.
+
+---
+
+### Brick 6.2 deviations + decisions (motion-capture path identified, tabled for refactor)
+
+**Status: scaffold landed; motion-capture path identified but tabled for a wider refactor.** The brick went through three states:
+
+1. **First attempt — non-focusable overlay**: silent, confirmed Android's documented behavior. Overlays with `FLAG_NOT_FOCUSABLE` don't receive motion events.
+2. **AYN Thor "Focus Lock" discovery + single-screen pivot mid-brick**: surfaced that Thor has a firmware setting governing which screen owns physical input (captured as `reference_thor_focus_lock_setting.md`); user redirected Mapo's primary target from Thor dual-screen to single-screen overlay-over-game (captured as `project_target_single_screen_pivot.md`).
+3. **Second attempt — focusable overlay**: the motion-capture path itself **works** — gamepad motion events reach the overlay and the foreground game continues to render. But wider on-device testing surfaced significant system side effects from the focus competition: IME couldn't appear in other apps, back gesture failed in some apps, GameNative's cursor went invisible, launcher's app-switcher swipe-up broke, Mapo's own layer / non-default-set runtime mutations stopped taking effect. **Reverted.** The motion-capture path is valid but ships only when paired with a solution for the side effects — that's a wider refactor than a single brick. Captured as `project_motion_capture_via_focusable_overlay.md`.
+
+**Lesson:** focus is a logical property, not a visual one. A 1×1 transparent non-touchable focusable overlay still wins focus competition globally and breaks anything that keys off "the focused window" — IME placement, system gesture handling, cursor rendering, etc. Solving that is its own problem, distinct from motion-event reachability.
+
+**What still landed (scaffolding kept for future motion-capture approaches):**
+
+- `app/src/main/java/com/mapo/service/input/AnalogEvent.kt` — `AnalogEvent` data class + `MotionEventNormalizer.extract()`. Covers LEFT_JOYSTICK (AXIS_X/Y), RIGHT_JOYSTICK (AXIS_Z/RZ), DPAD (AXIS_HAT_X/Y), LEFT_TRIGGER (max of AXIS_LTRIGGER, AXIS_BRAKE), RIGHT_TRIGGER (max of AXIS_RTRIGGER, AXIS_GAS). Joint-magnitude deadzone for sticks; single-axis for triggers.
+- `app/src/main/java/com/mapo/service/input/MotionCaptureOverlay.kt` — non-focusable `TYPE_ACCESSIBILITY_OVERLAY` (silent in production, doesn't disrupt anything). Kept as the call site for a future viable motion-capture mechanism; class doc lays out what was tried.
+- `InputEvaluator.handleMotion(MotionEvent)` — extract + log stub. No analog mode consumes anything because nothing's flowing.
+- Tests: 7 in `AnalogEventTest` (covers axis extraction + deadzone behavior). Full suite green.
+
+**What's blocked behind a real motion-capture solution:**
+
+All analog modes: Trigger soft-press, Joystick Move/Camera, Mouse Joystick, Absolute Mouse, Scroll Wheel, 2D Scroll, Flickstick. Without continuous axis values, none of these can ship.
+
+**What's still unblocked (digital paths work via existing `onKeyEvent`):**
+
+Single Button, Button Pad, Dpad (digital — via `KEYCODE_DPAD_*`), Trigger (digital click only — via `KEYCODE_BUTTON_L2/R2` hardware threshold), Reference. Phase 6 can ship a meaningful subset without motion capture.
+
+**Avenues not yet tried (recorded for follow-up research):**
+
+- Different overlay window TYPE constants beyond TYPE_ACCESSIBILITY_OVERLAY.
+- ADB pre-grant patterns (`WRITE_SECURE_SETTINGS`, etc.) — some Android remap apps use these without root.
+- Vendor SDKs that may expose controller state without focus competition.
+- IME-based capture (Mapo as a custom IME).
+- Investigation of how Octopus / Mantis / GamePad Mapper actually solve motion capture in production.
+
+**Constraint reminders applicable here:**
+
+- `project_no_root_ever.md` — no path can require root.
+- `project_target_single_screen_pivot.md` — primary target is single-screen Android overlay-over-game, but the motion-capture solution must not break system UI on that target.
+
+---
+
 ### Brick 6.1 deviations + decisions
 
 **Scope landed.** `SourceMode` sealed interface + `SingleButtonMode` + `ButtonPadMode` + `StubMode` + `BindingMode.handler()` registry, all under `app/src/main/java/com/mapo/service/input/modes/SourceMode.kt`. Compile path in `CompiledConfig.kt::compileInputs` now consults the handler and drops sub-inputs that an implemented mode rejects (logs a warning at WARN level). No runtime / UI change for the user.

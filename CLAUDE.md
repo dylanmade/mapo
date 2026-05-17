@@ -1,8 +1,11 @@
 # Mapo - Project Context
 
 ## Overview
-Android input utility app for Android-based gaming devices (primary target: AYN Thor, dual-screen device).
-Designed for the Thor's bottom screen while games/apps run on the top primary screen.
+Android input utility app for Android-based gaming devices. **Primary target: any single-screen
+Android device** — the design intent is virtual keyboards overlaid on the main screen while a
+game runs "underneath" (transparent overlay over the foregrounded game). The AYN Thor's dual-screen
+form factor is now a **secondary** use case: the bottom screen is bonus real estate for virtual
+keyboards, but the core architecture targets the single-screen overlay pattern first.
 Background remapping works even when Mapo is not visible on any screen.
 
 ## Core Features

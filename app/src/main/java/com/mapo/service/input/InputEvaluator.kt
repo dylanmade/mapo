@@ -1,6 +1,7 @@
 package com.mapo.service.input
 
 import android.util.Log
+import android.view.MotionEvent
 import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.di.ApplicationScope
@@ -194,6 +195,27 @@ class InputEvaluator @Inject constructor(
      */
     fun handleDigital(address: InputAddress, isDown: Boolean): Boolean {
         return if (isDown) onPress(address) else onRelease(address)
+    }
+
+    /**
+     * **Brick 6.2 probe stub.** Receive a raw [MotionEvent] from the motion-capture
+     * overlay (or activity positive control) and extract normalized [AnalogEvent]s for
+     * downstream analog modes. Today: no analog modes consume the readings — the only
+     * effect is verbose logging under the same tag the overlay uses. Returns false so
+     * the platform input pipeline keeps routing the event normally.
+     *
+     * Analog mode consumption lands brick-by-brick from 6.3 (Trigger soft-press) onward.
+     * When that work begins, this method routes [AnalogEvent]s into per-source mode
+     * handlers and starts producing real `GroupInput` events into the activator engine.
+     */
+    fun handleMotion(event: MotionEvent): Boolean {
+        val readings = MotionEventNormalizer.extract(event)
+        if (Log.isLoggable(TAG_MOTION, Log.VERBOSE)) {
+            for (r in readings) {
+                Log.v(TAG_MOTION, "axis ${r.source} x=${"%.3f".format(r.x)} y=${"%.3f".format(r.y)}")
+            }
+        }
+        return false
     }
 
     private fun onPress(address: InputAddress): Boolean {
@@ -834,5 +856,7 @@ class InputEvaluator @Inject constructor(
 
     companion object {
         private const val TAG = "InputEvaluator"
+        /** Distinct from [TAG] so motion logs can be filtered independently (`-s InputEvaluator.Motion`). */
+        private const val TAG_MOTION = "InputEvaluator.Motion"
     }
 }

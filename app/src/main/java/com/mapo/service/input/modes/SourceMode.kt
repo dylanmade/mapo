@@ -75,6 +75,34 @@ object ButtonPadMode : SourceMode {
 }
 
 /**
+ * 4-direction directional pad. Sub-inputs: `dpad_north`, `dpad_south`, `dpad_east`,
+ * `dpad_west`, `click`. The four direction keys flow from physical
+ * `KEYCODE_DPAD_UP/DOWN/LEFT/RIGHT` via the accessibility service. `click` is the
+ * stick-click sub-input used when an analog stick is interpreted as a dpad — inert
+ * on digital-only dpads but reserved here for parity with Steam Input.
+ *
+ * **Settings (data-model only until analog input lands).** The `dpad_layout` setting
+ * is part of the shape because analog Dpad mode (Steam parity) uses it to gate the
+ * stick → direction mapping:
+ *  - `4_way` — strict N/S/E/W; diagonals snap to one cardinal.
+ *  - `8_way` — diagonals emit two adjacent direction inputs simultaneously.
+ *  - `cross_gate` — physical-cross template (4-way with deadzone wedges).
+ *  - `analog_emulation` — sticks emulated as a continuous analog dpad.
+ *
+ * With Phase 6 motion-capture tabled, the settings have no runtime effect today —
+ * the digital `KEYCODE_DPAD_*` path produces single-direction sub-input events and
+ * the layout selection doesn't gate anything. The schema is laid down so the
+ * eventual analog refactor doesn't need a settings-shape migration.
+ */
+object DpadMode : SourceMode {
+    override val mode: BindingMode = BindingMode.DPAD
+    override fun validInputs(): Set<String> = INPUTS
+    /** Steam-default 4-way layout; runtime-inert in 6.3 (no analog source yet). */
+    override fun defaultSettingsJson(): String = """{"dpad_layout":"4_way"}"""
+    private val INPUTS = setOf("dpad_north", "dpad_south", "dpad_east", "dpad_west", "click")
+}
+
+/**
  * Placeholder handler for a [BindingMode] whose runtime hasn't landed yet. Reports an
  * empty [validInputs] but [accepts] always returns true so the compile path doesn't drop
  * existing seeded data while we phase the rest of the modes in (6.2 onward). Disappears
@@ -93,7 +121,7 @@ data class StubMode(override val mode: BindingMode) : SourceMode {
 fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.SINGLE_BUTTON -> SingleButtonMode
     BindingMode.BUTTON_PAD -> ButtonPadMode
-    BindingMode.DPAD,
+    BindingMode.DPAD -> DpadMode
     BindingMode.JOYSTICK_MOVE,
     BindingMode.JOYSTICK_CAMERA,
     BindingMode.MOUSE_JOYSTICK,

@@ -20,6 +20,7 @@ import com.mapo.service.input.InputAddress
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.InputEvaluator
 import com.mapo.service.input.InputSink
+import com.mapo.service.input.MotionCaptureOverlay
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -115,6 +116,15 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    /**
+     * Motion-capture overlay (Brick 6.2, confirmed working 2026-05-16). The
+     * `AccessibilityService` has no `onGenericMotionEvent` hook of its own; this
+     * focusable `TYPE_ACCESSIBILITY_OVERLAY` is how analog input reaches the
+     * evaluator. Attached on connect, detached on unbind. See the class comment +
+     * `project_motion_capture_via_focusable_overlay.md`.
+     */
+    private var motionProbe: MotionCaptureOverlay? = null
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         dispatcher.register(this)
@@ -131,9 +141,18 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         cursorX = w / 2f
         cursorY = h / 2f
         Log.i(TAG, "Service connected — display=${w}x${h} safeZone=[$safeL,$safeT,$safeR,$safeB]")
+
+        // Probe attaches once the service is connected so the WindowManager call has
+        // a valid context. Logs traffic (or lack of it) under MotionCaptureOverlay.TAG.
+        motionProbe = MotionCaptureOverlay(
+            service = this,
+            onMotion = { event -> evaluator.handleMotion(event) },
+        ).also { it.attach() }
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        motionProbe?.detach()
+        motionProbe = null
         dispatcher.unregister()
         return super.onUnbind(intent)
     }

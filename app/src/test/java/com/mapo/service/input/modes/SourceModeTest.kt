@@ -49,9 +49,56 @@ class SourceModeTest {
     @Test
     fun defaultSettings_isEmptyJsonForDigitalModes() {
         // Single Button and Button Pad are purely digital — no deadzones / curves /
-        // sensitivities to seed. Analog modes (6.3+) will override this.
+        // sensitivities to seed.
         assertEquals("{}", SingleButtonMode.defaultSettingsJson())
         assertEquals("{}", ButtonPadMode.defaultSettingsJson())
+    }
+
+    // ── Brick 6.3: Dpad mode ─────────────────────────────────────────────────
+
+    @Test
+    fun dpad_validInputs_areFourDirectionsPlusClick() {
+        // Steam Input Dpad mode exposes N/S/E/W direction sub-inputs plus stick-click.
+        // The four direction keys come from physical KEYCODE_DPAD_* via the accessibility
+        // service; click is reserved for analog-stick-as-dpad use (inert until motion
+        // capture lands).
+        assertEquals(
+            setOf("dpad_north", "dpad_south", "dpad_east", "dpad_west", "click"),
+            DpadMode.validInputs(),
+        )
+    }
+
+    @Test
+    fun dpad_acceptsItsKeys_rejectsOthers() {
+        assertTrue(DpadMode.accepts("dpad_north"))
+        assertTrue(DpadMode.accepts("dpad_south"))
+        assertTrue(DpadMode.accepts("dpad_east"))
+        assertTrue(DpadMode.accepts("dpad_west"))
+        assertTrue(DpadMode.accepts("click"))
+        assertFalse(DpadMode.accepts("button_a"))
+        assertFalse(DpadMode.accepts("edge"))
+        assertFalse(DpadMode.accepts(""))
+    }
+
+    @Test
+    fun dpad_defaultSettingsJson_includesFourWayLayout() {
+        // Settings shape laid down now so the eventual analog refactor doesn't have
+        // to migrate the JSON; 4_way is the Steam default and the most common choice.
+        // Runtime-inert in 6.3 (no analog source feeding the gating logic yet).
+        val json = DpadMode.defaultSettingsJson()
+        assertTrue(
+            "Expected dpad_layout key in defaults; got: $json",
+            json.contains("dpad_layout"),
+        )
+        assertTrue(
+            "Expected 4_way default value; got: $json",
+            json.contains("4_way"),
+        )
+    }
+
+    @Test
+    fun handlerRegistry_returnsDpadModeForDpad() {
+        assertSame(DpadMode, BindingMode.DPAD.handler())
     }
 
     @Test
@@ -76,8 +123,13 @@ class SourceModeTest {
 
     @Test
     fun handlerRegistry_returnsStubForUnimplementedModes() {
+        val implemented = setOf(
+            BindingMode.SINGLE_BUTTON,
+            BindingMode.BUTTON_PAD,
+            BindingMode.DPAD,
+        )
         for (mode in BindingMode.values()) {
-            if (mode == BindingMode.SINGLE_BUTTON || mode == BindingMode.BUTTON_PAD) continue
+            if (mode in implemented) continue
             val handler = mode.handler()
             assertTrue(
                 "Expected StubMode for $mode until its runtime lands (got $handler)",

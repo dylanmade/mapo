@@ -5,8 +5,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.RestartAlt
@@ -23,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -30,26 +34,29 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 
 /**
- * One toggleable color slot rendered as a master M3 list item plus three sub-list-items
- * (Color, Auto, Reset) revealed when [enabled] is true. Used by both ConfigureButtonScreen
+ * One toggleable color slot rendered as a master M3 list item plus two sub-list-items
+ * (Color, Reset) revealed when [enabled] is true. Used by both ConfigureButtonScreen
  * and ConfigureKeyboardScreen so the two configure surfaces stay visually identical —
  * adjust this composable and both screens pick up the change.
  *
  * Layout:
  *
- *   [ <title>                                 ●─ ]   master row, tap-to-toggle
- *   [   Color           #FF8888              ▣  ]   sub-row, opens color picker
- *   [   Auto            <autoDescription>   [✓] ]   sub-row, toggles auto-derive
- *   [   Reset to default <resetDescription> ↻  ]   sub-row, resets this slot only
+ *   [ <title>                                         ●─ ]    master row, tap-to-toggle
+ *   [   <colorLabel>       Auto [✓]   ▣           ]           sub-row: tap label/swatch
+ *                                                              opens picker, tap Auto
+ *                                                              cluster toggles auto-derive
+ *   [   Reset to default   <resetDescription>     ↻  ]        sub-row, resets this slot only
  *
  * Disabling the master switch preserves the slot's stored color + auto state so flipping
- * it back on restores the previous configuration. Sub-rows indent via `start = 24.dp` on
- * top of M3 ListItem's internal padding.
+ * it back on restores the previous configuration. The Auto + swatch cluster lives inside
+ * the Color row's trailing area; picking a new color in the picker flips IsAuto off via
+ * the caller's slot-write helper.
  */
 @Composable
 fun ColorSlotGroup(
     title: String,
     description: String,
+    colorLabel: String,
     enabled: Boolean,
     isAuto: Boolean,
     resolvedColor: Color,
@@ -57,7 +64,6 @@ fun ColorSlotGroup(
     onEditColor: () -> Unit,
     onToggleAuto: () -> Unit,
     onReset: () -> Unit,
-    autoDescription: String = "Derive color from the theme and fill",
     resetDescription: String = "Restore the default settings for this slot",
 ) {
     Column {
@@ -77,25 +83,34 @@ fun ColorSlotGroup(
         )
         if (enabled) {
             ListItem(
-                headlineContent = { Text("Color") },
+                headlineContent = { Text(colorLabel) },
                 supportingContent = { Text("#%08X".format(resolvedColor.toArgb())) },
-                trailingContent = { ColorSlotSwatch(argb = resolvedColor.toArgb()) },
-                modifier = Modifier
-                    .padding(start = 24.dp)
-                    .clickable { onEditColor() },
-            )
-            ListItem(
-                headlineContent = { Text("Auto") },
-                supportingContent = { Text(autoDescription) },
                 trailingContent = {
-                    Checkbox(
-                        checked = isAuto,
-                        onCheckedChange = null,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Auto cluster — its own clickable consumes the tap so it
+                        // doesn't bubble to the row-level picker-opener click.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { onToggleAuto() },
+                        ) {
+                            Text(
+                                "Auto",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Checkbox(
+                                checked = isAuto,
+                                onCheckedChange = null,
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        ColorSlotSwatch(argb = resolvedColor.toArgb())
+                    }
                 },
                 modifier = Modifier
                     .padding(start = 24.dp)
-                    .clickable { onToggleAuto() },
+                    .clickable { onEditColor() },
             )
             ListItem(
                 headlineContent = { Text("Reset to default") },

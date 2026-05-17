@@ -738,10 +738,10 @@ class CompiledConfigTest {
     }
 
     @Test
-    fun unimplementedMode_isPermissiveViaStubMode() {
-        // Until 6.2+ implements DPAD/TRIGGER/etc. runtimes, those modes fall through to
-        // StubMode and shouldn't drop ANY sub-input. This is what keeps existing seeded
-        // data working through the 6.1 cutover.
+    fun dpadMode_dropsSubInputsThatArentDpadKeysOrClick() {
+        // Brick 6.3: DPAD has a real handler now (not StubMode). Its sub-input
+        // vocabulary is the four directions + click. button_a under a DPAD group is
+        // schema misseed and gets dropped at compile time.
         val cfg = configWith(
             preset = listOf(
                 presetEntry(
@@ -750,6 +750,37 @@ class CompiledConfigTest {
                         mode = BindingMode.DPAD,
                         inputs = listOf(
                             inputWith("dpad_north", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "UP"))))),
+                            inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
+                            inputWith("button_a", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "Z"))))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+
+        // dpad_north and click survive; button_a is dropped.
+        assertEquals(2, compiled.totalInputCount)
+        assertNotNull(compiled.lookup(InputSource.DPAD, "dpad_north"))
+        assertNotNull(compiled.lookup(InputSource.DPAD, "click"))
+        assertEquals(null, compiled.lookup(InputSource.DPAD, "button_a"))
+    }
+
+    @Test
+    fun unimplementedMode_isPermissiveViaStubMode() {
+        // Brick 6.1 introduced StubMode as the permissive fallback for modes whose
+        // runtime hasn't landed yet. Brick 6.3 promoted DPAD out of the stub bucket,
+        // so this test uses JOYSTICK_MOVE — still stubbed as of writing. Replace with
+        // another still-stub mode if/when JOYSTICK_MOVE gets its real handler.
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.LEFT_JOYSTICK, state = "active",
+                    group = groupWith(
+                        mode = BindingMode.JOYSTICK_MOVE,
+                        inputs = listOf(
+                            inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
                             // Even a typo'd key passes through under a stub mode.
                             inputWith("totally_made_up", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "Z"))))),
                         ),
@@ -761,8 +792,8 @@ class CompiledConfigTest {
         val compiled = cfg.toCompiled()
 
         assertEquals(2, compiled.totalInputCount)
-        assertNotNull(compiled.lookup(InputSource.DPAD, "dpad_north"))
-        assertNotNull(compiled.lookup(InputSource.DPAD, "totally_made_up"))
+        assertNotNull(compiled.lookup(InputSource.LEFT_JOYSTICK, "click"))
+        assertNotNull(compiled.lookup(InputSource.LEFT_JOYSTICK, "totally_made_up"))
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

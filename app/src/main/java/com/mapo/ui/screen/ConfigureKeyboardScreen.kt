@@ -366,6 +366,7 @@ private fun KeyboardTab(
         ColorSlotGroup(
             title = slot.title,
             description = slot.description,
+            colorLabel = slot.colorLabel,
             enabled = slot.enabled(layout),
             isAuto = slot.isAuto(layout),
             resolvedColor = slot.resolvedColor(resolvedLayoutColors),
@@ -441,6 +442,7 @@ private fun ButtonsTab(
         ColorSlotGroup(
             title = slot.title,
             description = slot.description,
+            colorLabel = slot.colorLabel,
             enabled = slot.enabled(template),
             isAuto = slot.isAuto(template),
             resolvedColor = slot.resolvedColor(resolved),
@@ -530,26 +532,31 @@ private data class PendingResize(
 private enum class KeyboardColorSlot(
     val title: String,
     val description: String,
+    val colorLabel: String,
     val defaultEnabled: Boolean,
 ) {
     Fill(
         title = "Keyboard fill",
         description = "Solid color filling the keyboard surface",
+        colorLabel = "Keyboard fill color",
         defaultEnabled = true,
     ),
     Outline(
         title = "Keyboard outline",
         description = "Stroke around the keyboard edge",
+        colorLabel = "Keyboard outline color",
         defaultEnabled = false,
     ),
     Bevel(
         title = "Keyboard bevel",
         description = "Darkened bottom edge for a 3D appearance",
+        colorLabel = "Keyboard bevel color",
         defaultEnabled = false,
     ),
     Shadow(
         title = "Keyboard shadow",
         description = "Soft drop shadow beneath the keyboard",
+        colorLabel = "Keyboard shadow color",
         defaultEnabled = false,
     );
 

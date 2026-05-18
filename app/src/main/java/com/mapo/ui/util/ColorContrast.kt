@@ -193,8 +193,10 @@ fun resolveAutoLayoutColors(layout: GridLayout, themeFallback: Color): ResolvedL
 /**
  * The color that buttons should treat as their parent in the auto-color hierarchy.
  * When the keyboard's fill slot is enabled, this is the resolved fill (auto or manual).
- * When fill is disabled, the keyboard surface is transparent and the bottom-screen
- * surface shows through — so buttons should derive from [themeFallback] instead.
+ * When fill is disabled, the keyboard surface is transparent and whatever sits behind
+ * the keyboard shows through (the activity's Scaffold container in Activity mode, the
+ * foreground app underneath in Overlay mode) — so buttons derive from [themeFallback]
+ * instead.
  */
 fun keyboardButtonParentColor(layout: GridLayout, themeFallback: Color): Color {
     val resolved = resolveAutoLayoutColors(layout, themeFallback)

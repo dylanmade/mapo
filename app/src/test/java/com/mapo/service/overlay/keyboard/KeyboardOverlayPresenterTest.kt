@@ -29,6 +29,7 @@ class KeyboardOverlayPresenterTest {
     private lateinit var context: Context
     private lateinit var manager: KeyboardOverlayManager
     private lateinit var controller: KeyboardController
+    private lateinit var displayRouter: KeyboardDisplayRouter
 
     private lateinit var subject: KeyboardOverlayPresenter
 
@@ -40,6 +41,11 @@ class KeyboardOverlayPresenterTest {
         context = mockk(relaxed = true)
         manager = mockk(relaxed = true)
         controller = mockk(relaxed = true)
+        displayRouter = mockk(relaxed = true)
+        // Default routing: single-display (`Display.DEFAULT_DISPLAY` == 0). Matches the
+        // Brick 5 baseline router behavior; tests that need to assert fan-out can
+        // override `every { displayRouter.routeOverlay(any()) } returns listOf(0, 1)`.
+        every { displayRouter.routeOverlay(any()) } returns listOf(0)
 
         // Track attach/detach state on the mock so isShowing() reflects what tests do.
         every { manager.isAttached(any()) } answers { call ->
@@ -53,7 +59,7 @@ class KeyboardOverlayPresenterTest {
             attachedIds.remove(call.invocation.args[0] as String)
         }
 
-        subject = KeyboardOverlayPresenter(context, manager, controller)
+        subject = KeyboardOverlayPresenter(context, manager, controller, displayRouter)
     }
 
     @Test

@@ -26,20 +26,30 @@ class KeyboardOverlayPresenter @Inject constructor(
     @ApplicationContext private val context: Context,
     private val manager: KeyboardOverlayManager,
     private val controller: KeyboardController,
+    private val displayRouter: KeyboardDisplayRouter,
 ) {
 
     fun isShowing(): Boolean = manager.isAttached(OVERLAY_ID)
 
     fun show() {
         if (manager.isAttached(OVERLAY_ID)) return
-        manager.attach(OVERLAY_ID) {
-            KeyboardHost(
-                state = controller.asKeyboardHostState(),
-                mode = KeyboardHostMode.Overlay(
-                    onOpenMapoActivity = ::launchMapoActivity,
-                    onHideOverlay = ::hide,
-                ),
-            )
+        // FC2 seam: the router today returns exactly one display id (the default
+        // display); tomorrow it returns N (Thor top + bottom screens as a unified
+        // canvas). When FC2 lands, this loop needs per-display overlay ids
+        // (e.g. "$OVERLAY_ID:$displayId") so the manager treats each window as a
+        // separate entry — `isShowing()` should then return true if ANY of the
+        // fan-out windows are attached. For today's N=1 case the canonical id works.
+        val displays = displayRouter.routeOverlay(OVERLAY_ID)
+        for (displayId in displays) {
+            manager.attach(OVERLAY_ID, displayId = displayId) {
+                KeyboardHost(
+                    state = controller.asKeyboardHostState(),
+                    mode = KeyboardHostMode.Overlay(
+                        onOpenMapoActivity = ::launchMapoActivity,
+                        onHideOverlay = ::hide,
+                    ),
+                )
+            }
         }
     }
 

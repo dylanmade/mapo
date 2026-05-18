@@ -19,6 +19,12 @@ Background remapping works even when Mapo is not visible on any screen.
 - On-screen customizable virtual keyboard layouts
 - Default layouts: Keys Main, Keys Alt, Mouse
 - Provides additional easily-accessible input options
+- **Run mode** renders inside a system overlay (`TYPE_APPLICATION_OVERLAY`),
+  activated via a Quick Settings tile or the in-app drawer toggle. The overlay
+  is `FLAG_NOT_FOCUSABLE` so gamepad input flows past it to the foreground game.
+- **Edit / configure mode** lives inside the Mapo activity (`MainActivity` →
+  `KeyboardHost(mode = Activity, ...)`). Same composable as the overlay, with
+  edit affordances enabled.
 
 ## Profile System
 - Both features governed per-profile

@@ -893,19 +893,29 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 }
 
 /**
- * Per-destination window behavior. Replaces the unconditional setup in MainActivity so the
- * back-gesture exclusion + FLAG_NOT_FOCUSABLE only apply on the keyboard view (Main + drawer
- * closed). On secondary destinations (and on Main with the drawer open) both are cleared, so
- * the back gesture / button can navigate normally.
+ * Per-destination window behavior. Sets `FLAG_NOT_FOCUSABLE` + a full-window gesture-
+ * exclusion rect on the Main route (drawer closed); clears both on every other route
+ * and whenever the drawer is open.
  *
- * **Why this exists:**
- * - `FLAG_NOT_FOCUSABLE` keeps unmapped gamepad inputs flowing to the game on the primary
- *   screen — load-bearing for the dual-screen design — but it also blocks the back button
- *   from reaching the activity, causing a 5 s input-dispatch ANR. Clearing it on secondary
- *   screens lets back work without sacrificing the gamepad routing on Main (where it matters).
- * - `systemGestureExclusionRects` covering the full window prevents accidental back-gesture
- *   swipes during virtual-keyboard / trackpad use on the keyboard view. On secondary screens
- *   (settings) there's no virtual-keyboard concern, so we let the gesture work for navigation.
+ * **Primary purpose post–single-screen-refactor: AYN Thor secondary-device support.**
+ * On Thor, a user may run a game on the top screen while keeping Mapo's activity-mode
+ * keyboard view on the bottom — that case still needs unmapped gamepad input to flow
+ * to the game, and that's what `FLAG_NOT_FOCUSABLE` accomplishes. On single-screen
+ * devices (the new primary target) the user reaches the keyboard via the system
+ * overlay (`KeyboardOverlayPresenter` / QS tile), so this activity is mostly a
+ * configuration UI and the flag is effectively a no-op while it's foregrounded.
+ * Kept on both device classes for simplicity.
+ *
+ * **Pieces:**
+ * - `FLAG_NOT_FOCUSABLE` keeps unmapped gamepad inputs flowing past the activity to
+ *   whatever window holds keyboard focus underneath (the game on a Thor top screen).
+ *   It also blocks the back key from reaching the activity, which would cause a 5 s
+ *   input-dispatch ANR — hence the matching `consumeSystemBack` logic in
+ *   `InputDispatcher` / `InputAccessibilityService` to swallow back in the same state.
+ * - `systemGestureExclusionRects` covering the full window prevents accidental
+ *   back-gesture swipes during virtual-keyboard / trackpad use on the keyboard view.
+ *   On secondary screens (settings) there's no virtual-keyboard concern, so we let
+ *   the gesture work for navigation.
  */
 @Composable
 private fun ApplyMainScreenWindowBehavior(

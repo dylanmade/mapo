@@ -13,10 +13,12 @@ import javax.inject.Singleton
  * Written by InputAccessibilityService on TYPE_WINDOW_STATE_CHANGED, read by ProfileAutoSwitcher.
  *
  * Mapo's own package is dropped at write time so [currentPackage] reflects the most recent
- * *other* foreground app — important on dual-display devices like the AYN Thor where Mapo
- * sits on the bottom screen and a game runs on the primary screen. Resuming Mapo would
- * otherwise overwrite [currentPackage] with `com.mapo`, hiding the game's package from
- * a resume-time auto-switch re-evaluation.
+ * *other* foreground app. This matters for the run-mode overlay flow on every device:
+ * users tap the Quick Settings tile to mount the keyboard over a foregrounded game, then
+ * may swap back to Mapo's activity to tweak something — and on dual-display devices (AYN
+ * Thor) where Mapo's activity can sit on the bottom screen alongside a game on the primary
+ * screen. Either way, resuming Mapo would otherwise overwrite [currentPackage] with
+ * `com.mapo`, hiding the game's package from a resume-time auto-switch re-evaluation.
  */
 @Singleton
 class ForegroundAppMonitor @Inject constructor(

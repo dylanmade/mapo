@@ -69,12 +69,19 @@ class InputDispatcher @Inject constructor() {
 
     /**
      * When true, the accessibility service consumes `KEYCODE_BACK` (returns true from
-     * `onKeyEvent`) without dispatching it. Set by MainScreen when the user is on the
-     * keyboard view with the drawer closed: `FLAG_NOT_FOCUSABLE` is on there (so unmapped
-     * gamepad inputs flow to the game on the primary screen), which means the back key
-     * has no focusable target and would otherwise hit the system's 5 s input-dispatch
-     * timeout and ANR. Consuming it here ack's the press without acting on it — matching
-     * the user-facing intent that back does nothing on the keyboard view.
+     * `onKeyEvent`) without dispatching it. Set by MainScreen via the lifecycle-scoped
+     * effect that watches the Main route + drawer-closed state, and cleared whenever
+     * the activity drops below STARTED (so a backgrounded Mapo doesn't swallow back
+     * system-wide).
+     *
+     * **Why it exists:** `FLAG_NOT_FOCUSABLE` is set on the activity window in the same
+     * state — primarily for the AYN Thor secondary-device scenario where the user has a
+     * game running on the top screen and Mapo's activity keyboard view on the bottom.
+     * That flag means the back key has no focusable target on Mapo's window and would
+     * otherwise hit the system's 5 s input-dispatch timeout and ANR. Consuming it here
+     * ack's the press without acting on it — matching the user-facing intent that back
+     * does nothing on the keyboard view (single-screen users would dismiss the overlay
+     * via the QS tile or its bottom-bar "Hide" button instead).
      */
     private val _consumeSystemBack = MutableStateFlow(false)
     val consumeSystemBack: StateFlow<Boolean> = _consumeSystemBack.asStateFlow()

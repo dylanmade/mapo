@@ -309,7 +309,7 @@ Compile + tests green. Brick 4 is the first time the actual run-mode keyboard re
 
 If all of those work, Brick 4 closes. Brick 5 is cleanup: remove Thor-first scaffolding, verify Thor still works as a secondary device.
 
-### Brick 5 — Thor compatibility + cleanup
+### Brick 5 — Thor compatibility + cleanup — 🟡 CODE LANDED (Thor device verification pending)
 
 Goal: validate Thor as a secondary supported device; strip Thor-first scaffolding.
 
@@ -342,6 +342,41 @@ Cleanup (now-dead Thor-first code paths):
 - Full Robolectric suite green.
 
 **Exit criteria:** both device classes verified end-to-end. No Thor-specific code paths exist that aren't documented as "secondary-device support."
+
+#### Brick 5 deviations + decisions
+
+- **Foreground-display-aware routing on Thor was DEFERRED**, per the plan's "punt if non-trivial." `KeyboardDisplayRouter.routeOverlay` returns `listOf(Display.DEFAULT_DISPLAY)` unconditionally today, which on Thor means the overlay always lands on the primary (top) screen. For most Thor users that's the screen the game is on, so the overlay-over-game flow works the same as on a phone. The "overlay follows whichever screen the foreground app is on" feature needs `DisplayManager` + `ForegroundAppMonitor` integration that's its own design pass — landing it now would have stretched Brick 5 well past its scope. The router's contract (returns a `List<Int>`) is what FC2 needs; the implementation is a one-file follow-up.
+- **`MainActivity.onCreate` no longer bootstraps `FLAG_NOT_FOCUSABLE`.** The flag is now driven entirely by `ApplyMainScreenWindowBehavior` from the Compose side. There's a sub-frame gap on cold launch where the activity is briefly focusable before composition runs — harmless because no input is pending at that instant. Also removed the unused `import android.view.WindowManager` and the "Secondary display detection" TODO comment block (replaced with a doc-only reference to the per-destination Compose toggle).
+- **`ApplyMainScreenWindowBehavior` kept; doc reframed.** Body unchanged — still sets/clears `FLAG_NOT_FOCUSABLE` + gesture exclusion on Main route + drawer-closed. Reframed the rationale: primary purpose is now AYN Thor secondary-device support (activity-mode keyboard on bottom while game on top); on single-screen devices it's a near no-op since the user reaches the keyboard via the overlay.
+- **`InputDispatcher.consumeSystemBack` doc reframed**, body unchanged. Same Thor-secondary justification as above; references the lifecycle-scoping fix pulled forward into Brick 1.
+- **`InputAccessibilityService.kt` motion-capture comment synced.** Old comment claimed "confirmed working 2026-05-16" — stale; `MotionCaptureOverlay`'s class doc has had the correct (reverted-to-non-focusable, Phase 6 deferred) state since Phase 6 closed. New comment matches.
+- **`ForegroundAppMonitor` + `ColorContrast` doc reframes** — removed "dual-display devices like the AYN Thor" framing, replaced with single-screen-first context (overlay over game on every device) with Thor as the additional supporting case.
+- **`CLAUDE.md` Virtual Keyboard Layouts section gained an entry** describing the run-mode overlay (TYPE_APPLICATION_OVERLAY + QS tile activation) vs edit-mode-in-activity split, so future conversations have the architectural mental model loaded out of the box.
+
+#### Files actually landed
+
+- `app/src/main/java/com/mapo/MainActivity.kt` (removed unconditional `FLAG_NOT_FOCUSABLE` bootstrap + TODO; doc reframe)
+- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (`ApplyMainScreenWindowBehavior` doc reframe)
+- `app/src/main/java/com/mapo/service/input/InputDispatcher.kt` (`consumeSystemBack` doc reframe)
+- `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` (motion-capture stale comment fixed)
+- `app/src/main/java/com/mapo/service/foreground/ForegroundAppMonitor.kt` (doc reframe)
+- `app/src/main/java/com/mapo/ui/util/ColorContrast.kt` (doc reframe)
+- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardDisplayRouter.kt` (new — FC2 seam, single-display passthrough)
+- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPresenter.kt` (router injected; documented FC2 fan-out as next change point)
+- `app/src/test/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPresenterTest.kt` (router injected + stubbed)
+- `CLAUDE.md` (Virtual Keyboard Layouts section gained run/edit-mode entry)
+
+#### Hand-off to device verification
+
+Single-screen phone (new primary target) should be unaffected by this brick — nothing structural changed for it. Worth a quick sanity check that the overlay still works from the QS tile.
+
+**Thor** is where this brick's claims need confirming:
+1. Open Mapo on Thor's bottom screen. Drawer → "Toggle keyboard overlay." Overlay should appear on the **top** screen (default display) by default.
+2. Verify gamepad input still drives a game running on top while the overlay is up.
+3. Verify back-button behavior in another app while Mapo is backgrounded (lifecycle-scoped `consumeSystemBack` from Brick 1 still works).
+4. Activity-mode keyboard (Mapo's bottom-screen activity view) should still render and respond to taps — that's the secondary-device path `ApplyMainScreenWindowBehavior` is now documented to serve.
+
+If those work, the refactor is closed. The follow-up "overlay follows the foreground app's screen on Thor" item is filed as a future brick separate from this plan.
 
 ---
 

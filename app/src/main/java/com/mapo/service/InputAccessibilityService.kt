@@ -117,11 +117,15 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     /**
-     * Motion-capture overlay (Brick 6.2, confirmed working 2026-05-16). The
-     * `AccessibilityService` has no `onGenericMotionEvent` hook of its own; this
-     * focusable `TYPE_ACCESSIBILITY_OVERLAY` is how analog input reaches the
-     * evaluator. Attached on connect, detached on unbind. See the class comment +
-     * `project_motion_capture_via_focusable_overlay.md`.
+     * Motion-capture overlay scaffold (Brick 6.2 / Phase 6). The `AccessibilityService`
+     * has no `onGenericMotionEvent` hook of its own; a focusable `TYPE_ACCESSIBILITY_OVERLAY`
+     * was the path discovered that captures analog motion events without root. **Currently
+     * inert.** The focusable variant proved viable for motion capture but caused
+     * system-wide focus side effects (IME, back gesture, cursor visibility, app switcher),
+     * so `MotionCaptureOverlay` was reverted to a non-focusable baseline — see the
+     * class doc on that file for the exact flag matrix today and
+     * `project_motion_capture_via_focusable_overlay.md` for the broader context.
+     * Phase 6 analog modes remain blocked behind a future revisit of this path.
      */
     private var motionProbe: MotionCaptureOverlay? = null
 

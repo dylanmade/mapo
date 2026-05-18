@@ -21,6 +21,7 @@ import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.InputEvaluator
 import com.mapo.service.input.InputSink
 import com.mapo.service.input.MotionCaptureOverlay
+import com.mapo.service.input.OverlayFocusKind
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -201,15 +202,7 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     // ── Physical button interception (remap) ──────────────────────────────────
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        // Consume KEYCODE_BACK as a no-op when MainScreen says the keyboard view has
-        // FLAG_NOT_FOCUSABLE set (Main destination + drawer closed). Without this the
-        // back press has no focusable target on the bottom display and the system input
-        // dispatcher ANRs after ~5 s. Returning true here ack's the press; the user
-        // intent on the keyboard view is "back does nothing" anyway.
-        if (event.keyCode == KeyEvent.KEYCODE_BACK && dispatcher.consumeSystemBack.value) {
-            return true
-        }
-        if (dispatcher.overlayFocus.value == com.mapo.service.input.OverlayFocusKind.PROMPT) {
+        if (dispatcher.overlayFocus.value == OverlayFocusKind.PROMPT) {
             // Translate gamepad A/B into ENTER/BACK so DPAD-navigated overlay buttons
             // can be activated. DPAD events pass through unchanged so Compose's focus
             // traversal handles left/right/up/down naturally.

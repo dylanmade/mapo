@@ -5,7 +5,6 @@ import android.graphics.Rect
 import android.os.Build
 import android.util.Log
 import android.view.ViewTreeObserver
-import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -99,8 +98,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.awaitCancellation
 import androidx.compose.ui.res.stringResource
 import com.mapo.R
 import com.mapo.data.model.GridButton
@@ -238,29 +235,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val isMainRoute = currentBackStackEntry?.destination?.route == MapoRoute.MAIN
     val drawerOpen = drawerState.isOpen
     val keyboardViewActive = isMainRoute && !drawerOpen
-    ApplyMainScreenWindowBehavior(
-        notFocusable = keyboardViewActive,
-        suppressBackGesture = keyboardViewActive,
-    )
-    // While the keyboard view is showing the window is not focusable, so KEYCODE_BACK
-    // has nowhere to deliver and the input dispatcher would ANR. Have the accessibility
-    // service consume the back key in that exact state. Matches user intent (back is a
-    // no-op on the keyboard view to prevent accidental dismissal during typing/trackpad).
-    //
-    // Lifecycle-scoped: the accessibility service is global, so leaving the flag set
-    // would swallow back system-wide once the user switches to another app. Bind to
-    // STARTED so the flag clears on Mapo's onStop and re-evaluates on onStart.
-    val lifecycleOwnerForBack = LocalLifecycleOwner.current
-    LaunchedEffect(keyboardViewActive, lifecycleOwnerForBack) {
-        lifecycleOwnerForBack.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            try {
-                viewModel.setConsumeSystemBack(keyboardViewActive)
-                awaitCancellation()
-            } finally {
-                viewModel.setConsumeSystemBack(false)
-            }
-        }
-    }
+    SuppressEdgeBackGesture(active = keyboardViewActive)
     // M3's ModalNavigationDrawer doesn't ship an internal BackHandler, so without this
     // the press falls through to the activity default (moveTaskToBack) and the whole
     // app minimizes. Close the drawer instead, which is what the user expects.
@@ -893,54 +868,36 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
 }
 
 /**
- * Per-destination window behavior. Sets `FLAG_NOT_FOCUSABLE` + a full-window gesture-
- * exclusion rect on the Main route (drawer closed); clears both on every other route
- * and whenever the drawer is open.
+ * Suppresses the system edge-back gesture across the full activity window while
+ * [active] is true (the keyboard view on the Main route, drawer closed). Prevents
+ * accidental back navigation when the user is swiping near the screen edge during
+ * virtual-keyboard / trackpad use. Cleared on every other destination + while the
+ * drawer is open so back-gesture navigation works normally there.
  *
- * **Primary purpose post–single-screen-refactor: AYN Thor secondary-device support.**
- * On Thor, a user may run a game on the top screen while keeping Mapo's activity-mode
- * keyboard view on the bottom — that case still needs unmapped gamepad input to flow
- * to the game, and that's what `FLAG_NOT_FOCUSABLE` accomplishes. On single-screen
- * devices (the new primary target) the user reaches the keyboard via the system
- * overlay (`KeyboardOverlayPresenter` / QS tile), so this activity is mostly a
- * configuration UI and the flag is effectively a no-op while it's foregrounded.
- * Kept on both device classes for simplicity.
- *
- * **Pieces:**
- * - `FLAG_NOT_FOCUSABLE` keeps unmapped gamepad inputs flowing past the activity to
- *   whatever window holds keyboard focus underneath (the game on a Thor top screen).
- *   It also blocks the back key from reaching the activity, which would cause a 5 s
- *   input-dispatch ANR — hence the matching `consumeSystemBack` logic in
- *   `InputDispatcher` / `InputAccessibilityService` to swallow back in the same state.
- * - `systemGestureExclusionRects` covering the full window prevents accidental
- *   back-gesture swipes during virtual-keyboard / trackpad use on the keyboard view.
- *   On secondary screens (settings) there's no virtual-keyboard concern, so we let
- *   the gesture work for navigation.
+ * **Why this used to be `ApplyMainScreenWindowBehavior`.** Pre–single-screen-refactor,
+ * this composable also toggled `FLAG_NOT_FOCUSABLE` on the activity window — the
+ * Thor "game on top screen, Mapo's activity keyboard on bottom" path used it so
+ * unmapped gamepad input would flow past Mapo to the game. After the refactor the
+ * keyboard lives in a system overlay (`KeyboardOverlayPresenter` / QS tile), so the
+ * activity is a configuration UI. The flag stopped earning its keep and started
+ * causing ANRs: with `FLAG_REQUEST_FILTER_KEY_EVENTS` on the accessibility service,
+ * any key event (F12, media keys, back, IME shortcuts) that didn't match the remap
+ * config had no focusable window to land on and 5-second-timeouts into an ANR. The
+ * flag is gone now; Thor users who want the old "game on the other screen" routing
+ * use Thor's Focus Lock OS feature instead. See the single-screen refactor plan for
+ * the full history.
  */
 @Composable
-private fun ApplyMainScreenWindowBehavior(
-    notFocusable: Boolean,
-    suppressBackGesture: Boolean,
-) {
+private fun SuppressEdgeBackGesture(active: Boolean) {
     val view = LocalView.current
-    val window = (view.context as? Activity)?.window ?: return
-
-    LaunchedEffect(notFocusable) {
-        if (notFocusable) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
-        }
-    }
-
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         // The exclusion rect needs to follow the view's current bounds (which can change with
-        // configuration / display swaps), so we both apply on suppress-state changes AND
-        // re-apply on every layout pass while suppression is active.
-        val suppressState = rememberUpdatedState(suppressBackGesture)
+        // configuration / display swaps), so we both apply on state changes AND re-apply on
+        // every layout pass while suppression is active.
+        val activeState = rememberUpdatedState(active)
         DisposableEffect(view) {
             val listener = ViewTreeObserver.OnGlobalLayoutListener {
-                view.systemGestureExclusionRects = if (suppressState.value) {
+                view.systemGestureExclusionRects = if (activeState.value) {
                     listOf(Rect(0, 0, view.width, view.height))
                 } else {
                     emptyList()
@@ -949,8 +906,8 @@ private fun ApplyMainScreenWindowBehavior(
             view.viewTreeObserver.addOnGlobalLayoutListener(listener)
             onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
         }
-        LaunchedEffect(suppressBackGesture) {
-            view.systemGestureExclusionRects = if (suppressBackGesture) {
+        LaunchedEffect(active) {
+            view.systemGestureExclusionRects = if (active) {
                 listOf(Rect(0, 0, view.width, view.height))
             } else {
                 emptyList()

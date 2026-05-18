@@ -328,15 +328,6 @@ class MainViewModel @Inject constructor(
     override fun toggleRemap() = keyboardController.toggleRemap()
 
     /**
-     * Tell the accessibility service to swallow `KEYCODE_BACK` while the keyboard view
-     * (Main destination + drawer closed) is showing — that view has FLAG_NOT_FOCUSABLE set
-     * for gamepad routing, so back has no focusable target and would ANR the input dispatcher.
-     */
-    fun setConsumeSystemBack(consume: Boolean) {
-        inputDispatcher.setConsumeSystemBack(consume)
-    }
-
-    /**
      * Listen-for-press capture mode used by the chord partner picker (Brick 3.3.e). While
      * true, the accessibility service forwards the next physical button DOWN to
      * [capturedInputs] instead of running it through the remap evaluator.

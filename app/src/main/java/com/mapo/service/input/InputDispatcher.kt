@@ -49,9 +49,9 @@ interface InputSink {
  * rest of the app. Replaces the previous static-singleton + static-mutable-field
  * coupling so the VM/overlay can be tested without touching the service class.
  *
- * - **State** (`compiledConfig`, `remapEnabled`, `overlayFocus`, `consumeSystemBack`)
- *   is published by the ViewModel/overlay and read by the service inline (e.g. in
- *   `onKeyEvent`). Read via `.value` for synchronous access on the main thread.
+ * - **State** (`compiledConfig`, `remapEnabled`, `overlayFocus`) is published by the
+ *   ViewModel/overlay and read by the service inline (e.g. in `onKeyEvent`). Read
+ *   via `.value` for synchronous access on the main thread.
  * - **Actions** (key/gesture injection, drag) are forwarded to the registered
  *   [InputSink]; when the service isn't connected the calls are silent no-ops.
  */
@@ -66,25 +66,6 @@ class InputDispatcher @Inject constructor() {
 
     private val _overlayFocus = MutableStateFlow(OverlayFocusKind.NONE)
     val overlayFocus: StateFlow<OverlayFocusKind> = _overlayFocus.asStateFlow()
-
-    /**
-     * When true, the accessibility service consumes `KEYCODE_BACK` (returns true from
-     * `onKeyEvent`) without dispatching it. Set by MainScreen via the lifecycle-scoped
-     * effect that watches the Main route + drawer-closed state, and cleared whenever
-     * the activity drops below STARTED (so a backgrounded Mapo doesn't swallow back
-     * system-wide).
-     *
-     * **Why it exists:** `FLAG_NOT_FOCUSABLE` is set on the activity window in the same
-     * state — primarily for the AYN Thor secondary-device scenario where the user has a
-     * game running on the top screen and Mapo's activity keyboard view on the bottom.
-     * That flag means the back key has no focusable target on Mapo's window and would
-     * otherwise hit the system's 5 s input-dispatch timeout and ANR. Consuming it here
-     * ack's the press without acting on it — matching the user-facing intent that back
-     * does nothing on the keyboard view (single-screen users would dismiss the overlay
-     * via the QS tile or its bottom-bar "Hide" button instead).
-     */
-    private val _consumeSystemBack = MutableStateFlow(false)
-    val consumeSystemBack: StateFlow<Boolean> = _consumeSystemBack.asStateFlow()
 
     /**
      * Listen-for-press capture mode. When true, the accessibility service short-circuits
@@ -118,10 +99,6 @@ class InputDispatcher @Inject constructor() {
 
     fun setOverlayFocus(kind: OverlayFocusKind) {
         _overlayFocus.value = kind
-    }
-
-    fun setConsumeSystemBack(consume: Boolean) {
-        _consumeSystemBack.value = consume
     }
 
     fun setCaptureMode(enabled: Boolean) {

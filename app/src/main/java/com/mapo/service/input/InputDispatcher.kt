@@ -49,7 +49,7 @@ interface InputSink {
  * rest of the app. Replaces the previous static-singleton + static-mutable-field
  * coupling so the VM/overlay can be tested without touching the service class.
  *
- * - **State** (`compiledConfig`, `remapEnabled`, `overlayFocused`, `consumeSystemBack`)
+ * - **State** (`compiledConfig`, `remapEnabled`, `overlayFocus`, `consumeSystemBack`)
  *   is published by the ViewModel/overlay and read by the service inline (e.g. in
  *   `onKeyEvent`). Read via `.value` for synchronous access on the main thread.
  * - **Actions** (key/gesture injection, drag) are forwarded to the registered
@@ -64,8 +64,8 @@ class InputDispatcher @Inject constructor() {
     private val _remapEnabled = MutableStateFlow(false)
     val remapEnabled: StateFlow<Boolean> = _remapEnabled.asStateFlow()
 
-    private val _overlayFocused = MutableStateFlow(false)
-    val overlayFocused: StateFlow<Boolean> = _overlayFocused.asStateFlow()
+    private val _overlayFocus = MutableStateFlow(OverlayFocusKind.NONE)
+    val overlayFocus: StateFlow<OverlayFocusKind> = _overlayFocus.asStateFlow()
 
     /**
      * When true, the accessibility service consumes `KEYCODE_BACK` (returns true from
@@ -109,8 +109,8 @@ class InputDispatcher @Inject constructor() {
         _remapEnabled.value = enabled
     }
 
-    fun setOverlayFocused(focused: Boolean) {
-        _overlayFocused.value = focused
+    fun setOverlayFocus(kind: OverlayFocusKind) {
+        _overlayFocus.value = kind
     }
 
     fun setConsumeSystemBack(consume: Boolean) {

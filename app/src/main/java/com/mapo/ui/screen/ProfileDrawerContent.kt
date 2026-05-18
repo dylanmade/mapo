@@ -32,7 +32,7 @@ fun ProfileDrawerContent(
     onOpenAutoSwitch: () -> Unit,
     onOpenBlocklist: () -> Unit,
     onOpenThemeStudio: () -> Unit,
-    onTogglePocKeyboardOverlay: () -> Unit,
+    onToggleKeyboardOverlay: () -> Unit,
 ) {
     // surfaceContainerHigh — drawer sheet (canonical M3 elevated container per Reply)
     ModalDrawerSheet(
@@ -96,13 +96,14 @@ fun ProfileDrawerContent(
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
             }
-            // Brick 1 single-screen-refactor POC trigger — removed in Brick 4
-            // when the QS tile + real KeyboardHost(Overlay) replace it.
+            // Mirror of the Quick Settings tile. The tile is the primary activation
+            // surface (system-wide reach without opening Mapo); this drawer entry is
+            // a convenience for first-run setup / users who don't know about the tile.
             item {
                 NavigationDrawerItem(
-                    label = { Text("Toggle POC keyboard overlay") },
+                    label = { Text(stringResource(R.string.keyboard_overlay_drawer_label)) },
                     selected = false,
-                    onClick = onTogglePocKeyboardOverlay,
+                    onClick = onToggleKeyboardOverlay,
                     icon = { Icon(Icons.Default.Keyboard, contentDescription = null) },
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )

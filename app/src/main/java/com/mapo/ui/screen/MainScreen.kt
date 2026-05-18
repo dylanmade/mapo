@@ -144,6 +144,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.mapo.ui.MapoGesture
 import com.mapo.ui.nav.MapoRoute
+import com.mapo.ui.screen.keyboard.KeyboardHost
+import com.mapo.ui.screen.keyboard.KeyboardHostMode
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.ui.screen.keyboard.KeyboardTabBar
 import com.mapo.ui.screen.keyboard.TabActionDialog
@@ -319,9 +321,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.THEME_STUDIO)
                 },
-                onTogglePocKeyboardOverlay = {
+                onToggleKeyboardOverlay = {
                     scope.launch { drawerState.close() }
-                    viewModel.togglePocKeyboardOverlay()
+                    viewModel.toggleKeyboardOverlay()
                 },
             )
         }
@@ -395,31 +397,21 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
                     contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
                 ) { _ ->
-                    Column(
-                        // No manual inset padding: MainActivity does NOT call enableEdgeToEdge,
-                        // so the OS sizes the activity window below the status bar where one
-                        // exists (phone, Thor primary screen) and leaves it alone where one
-                        // doesn't (Thor bottom bezel screen). Adding statusBarsPadding here
-                        // would double-reserve and reintroduce the stale-inset shift bug.
-                        //
-                        // The vertical 4.dp here is plain visual padding (not inset-aware), so
-                        // it doesn't conflict with the rule above. It gives the top/bottom bars
-                        // breathing room from the screen edge — without it, the bar controls
-                        // appeared to be clipped by the Thor's bottom bezel screen.
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(vertical = 4.dp)
-                    ) {
-                        KeyboardTopBar(
-                            layouts = layouts,
-                            selectedIndex = selectedIndex,
-                            isEditMode = isEditMode,
-                            tabContextMenuFor = tabContextMenuFor,
-                            onSelectIndex = { viewModel.selectLayout(it) },
-                            onLongPressMenu = { id -> viewModel.openTabMenu(id) },
-                            onReorder = { from, to -> viewModel.reorderTabs(from, to) },
-                            onCloseMenu = { viewModel.closeTabMenu() },
-                            onMenuEditButtons = { id -> viewModel.enterEditMode(id) },
+                    // Single-screen refactor Brick 3: keyboard subtree (TopBar +
+                    // Surface + Grid + BottomBar) now lives behind `KeyboardHost`.
+                    // Edit-mode callbacks + dialog triggers + navigation are routed
+                    // here through `KeyboardHostMode.Activity`. The same composable
+                    // serves the system-overlay window in Overlay mode (Brick 4).
+                    KeyboardHost(
+                        state = viewModel,
+                        mode = KeyboardHostMode.Activity(
+                            isEditMode = viewModel.isEditMode,
+                            selectedButtonId = viewModel.selectedButtonId,
+                            tabContextMenuFor = viewModel.tabContextMenuFor,
+                            onOpenTabMenu = viewModel::openTabMenu,
+                            onCloseTabMenu = viewModel::closeTabMenu,
+                            onReorderTabs = viewModel::reorderTabs,
+                            onMenuEditButtons = viewModel::enterEditMode,
                             onToggleEditMode = {
                                 if (isEditMode) viewModel.exitEditMode()
                                 else viewModel.enterEditMode(displayLayout.id)
@@ -427,7 +419,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             onMenuConfigure = { id ->
                                 navController.navigate(MapoRoute.configureKeyboard(id))
                             },
-                            onMenuDuplicate = { id -> viewModel.duplicateKeyboard(id) },
+                            onMenuDuplicate = viewModel::duplicateKeyboard,
                             onMenuRemove = { id ->
                                 val layout = layouts.find { it.id == id }
                                 val profileName = activeProfile?.name ?: ""
@@ -455,72 +447,43 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                                 viewModel.exitEditMode()
                                 scope.launch { drawerState.open() }
                             },
-                            onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser }
-                        )
-
-                        KeyboardSurface(
-                            layout = displayLayout,
-                            themeFallback = MaterialTheme.colorScheme.surface,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .padding(4.dp),
-                        ) {
-                            KeyGrid(
-                                layout = displayLayout,
-                                isEditMode = isEditMode,
-                                selectedButtonId = selectedButtonId,
-                                onButtonTap = viewModel::onButtonTap,
-                                onButtonDoubleTap = viewModel::onButtonDoubleTap,
-                                onButtonHold = viewModel::onButtonHold,
-                                onSelectButton = viewModel::selectButton,
-                                onMoveButton = viewModel::moveButton,
-                                onResizeButton = { id, c, r, cs, rs ->
-                                    viewModel.resizeButton(id, c, r, cs, rs)
-                                },
-                                onDragStart = viewModel::onDragStart,
-                                onMouseMove = viewModel::onMouseMove,
-                                onDragEnd = viewModel::onDragEnd,
-                                onTrackpadGesture = viewModel::onTrackpadGesture,
-                                onConfigureButton = { id ->
-                                    val btn = displayLayout.buttons.find { it.id == id }
-                                    if (btn != null) {
-                                        // The configure screen is instant-commit; setting selectedButtonId
-                                        // here makes viewModel.updateSelectedButton apply to the right one.
-                                        viewModel.selectButtonOnly(id)
-                                        navController.navigate(MapoRoute.configureButton(id))
-                                    }
-                                },
-                                onDuplicateButton = { id -> viewModel.duplicateButton(id) },
-                                onRemoveButton = { id ->
-                                    val btn = displayLayout.buttons.find { it.id == id }
-                                    if (btn != null) {
-                                        tabActionDialog = TabActionDialog.RemoveButtonConfirm(
-                                            buttonId = id,
-                                            buttonLabel = btn.label
-                                        )
-                                    }
-                                },
-                                onAddAtCell = { col, row ->
-                                    // Instant-commit add: create a default key-button at the cell first,
-                                    // then navigate to its config screen for further editing. Backing out
-                                    // leaves the button in place; the user removes it via long-press if
-                                    // they didn't actually want it.
-                                    viewModel.addButtonAt(col, row, GridButton(col = col, row = row, type = "key"))
-                                    viewModel.selectedButtonId.value?.let { newId ->
-                                        navController.navigate(MapoRoute.configureButton(newId))
-                                    }
-                                },
-                                onLongPressEmptyArea = { viewModel.enterEditMode(displayLayout.id) },
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
-                        BottomBar(
-                            remapEnabled = remapEnabled,
-                            onToggleRemap = { viewModel.toggleRemap() },
-                            onQuit = { (context as? Activity)?.finish() }
-                        )
-                    }
+                            onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser },
+                            onSelectButton = viewModel::selectButton,
+                            onMoveButton = viewModel::moveButton,
+                            onResizeButton = viewModel::resizeButton,
+                            onConfigureButton = { id ->
+                                val btn = displayLayout.buttons.find { it.id == id }
+                                if (btn != null) {
+                                    // The configure screen is instant-commit; setting selectedButtonId
+                                    // here makes viewModel.updateSelectedButton apply to the right one.
+                                    viewModel.selectButtonOnly(id)
+                                    navController.navigate(MapoRoute.configureButton(id))
+                                }
+                            },
+                            onDuplicateButton = viewModel::duplicateButton,
+                            onRemoveButton = { id ->
+                                val btn = displayLayout.buttons.find { it.id == id }
+                                if (btn != null) {
+                                    tabActionDialog = TabActionDialog.RemoveButtonConfirm(
+                                        buttonId = id,
+                                        buttonLabel = btn.label
+                                    )
+                                }
+                            },
+                            onAddAtCell = { col, row ->
+                                // Instant-commit add: create a default key-button at the cell first,
+                                // then navigate to its config screen for further editing. Backing out
+                                // leaves the button in place; the user removes it via long-press if
+                                // they didn't actually want it.
+                                viewModel.addButtonAt(col, row, GridButton(col = col, row = row, type = "key"))
+                                viewModel.selectedButtonId.value?.let { newId ->
+                                    navController.navigate(MapoRoute.configureButton(newId))
+                                }
+                            },
+                            onLongPressEmptyArea = { viewModel.enterEditMode(displayLayout.id) },
+                            onQuit = { (context as? Activity)?.finish() },
+                        ),
+                    )
                 }
             }
             composable(MapoRoute.CHANGE_PROFILE) {
@@ -986,8 +949,13 @@ private fun ApplyMainScreenWindowBehavior(
     }
 }
 
+// Visibility widened to `internal` so `KeyboardHost` (single-screen refactor Brick 3)
+// can call this from a sibling file. The composable still belongs conceptually to
+// MainScreen — moving the implementation out would be a 1000+ line file shuffle
+// for no architectural gain. Same applies to `KeyboardSurface`, `KeyGrid`, and
+// `BottomBar` below.
 @Composable
-private fun KeyboardTopBar(
+internal fun KeyboardTopBar(
     layouts: ImmutableList<GridLayout>,
     selectedIndex: Int,
     isEditMode: Boolean,
@@ -1048,7 +1016,7 @@ private fun KeyboardTopBar(
 }
 
 @Composable
-private fun KeyGrid(
+internal fun KeyGrid(
     layout: GridLayout,
     isEditMode: Boolean,
     selectedButtonId: String?,
@@ -2027,7 +1995,7 @@ private val KEYBOARD_SHADOW_OFFSET_Y = 6.dp
  * `MaterialTheme.colorScheme.surface` to match the bottom-screen background.
  */
 @Composable
-private fun KeyboardSurface(
+internal fun KeyboardSurface(
     layout: GridLayout,
     themeFallback: Color,
     modifier: Modifier = Modifier,
@@ -2153,10 +2121,11 @@ private fun RegionPosition.alignment(): Alignment = when (this) {
 }
 
 @Composable
-private fun BottomBar(
+internal fun BottomBar(
     remapEnabled: Boolean,
     onToggleRemap: () -> Unit,
-    onQuit: () -> Unit
+    onLeftAction: () -> Unit,
+    leftActionLabel: String = "Quit",
 ) {
     Row(
         modifier = Modifier
@@ -2166,11 +2135,11 @@ private fun BottomBar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         TextButton(
-            onClick = onQuit,
+            onClick = onLeftAction,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
             modifier = Modifier.height(40.dp)
         ) {
-            Text("Quit", style = MaterialTheme.typography.labelLarge)
+            Text(leftActionLabel, style = MaterialTheme.typography.labelLarge)
         }
         Spacer(modifier = Modifier.weight(1f))
         Icon(

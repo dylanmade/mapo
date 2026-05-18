@@ -82,7 +82,7 @@ fun OverlayToast(
  * to be attached to the focus tree (otherwise the request silently no-ops and the
  * default first-focusable button gets focus).
  *
- * Gamepad B (mapped to BACK by InputAccessibilityService while overlayFocused) is
+ * Gamepad B (mapped to BACK by InputAccessibilityService while overlayFocus == PROMPT) is
  * intercepted via onPreviewKeyEvent and dismisses as if "No" was tapped.
  *
  * Buttons use stock Material 3 TextButton — Material's normal focused-state

@@ -172,7 +172,7 @@ Goal: answer R3 (ViewModel instancing across activity + overlay) without touchin
 - `app/src/test/java/com/mapo/service/keyboard/KeyboardControllerTest.kt` (new, 20 tests)
 - `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (real-controller wiring in setUp + `rebuildSubject`)
 
-### Brick 3 — Host-agnostic `KeyboardHost` composable
+### Brick 3 — Host-agnostic `KeyboardHost` composable — 🟡 CODE LANDED (device verification pending)
 
 Goal: make the keyboard UI mountable from anywhere.
 
@@ -191,7 +191,35 @@ Goal: make the keyboard UI mountable from anywhere.
 
 **Exit criteria:** `KeyboardHost(Activity, ...)` is the only path the activity uses; compiles with `Overlay` mode plugged into Brick 1's POC slot.
 
-### Brick 4 — Production overlay-mounted keyboard
+#### Brick 3 deviations + decisions
+
+- **Sub-composables stay in `MainScreen.kt` with relaxed visibility (`private` → `internal`).** Original plan envisioned physically moving `KeyboardTopBar`, `KeyGrid`, `KeyboardSurface`, `BottomBar` (plus their ~600 lines of private helpers — `selectionOutline`, `circleDropShadow`, `softDropShadow`, `KeyButtonShape`, `ButtonContent`, `RegionView`, `RegionPosition.alignment`, the dozen shared `dp`/`Color` constants) into a new file. That's a 1000+ line shuffle with no architectural payoff — the seam this brick establishes is the **contract surface** (`KeyboardHost` + `KeyboardHostState` + `KeyboardHostMode`), not a file boundary. Visibility flips let `KeyboardHost.kt` call into the existing composables without moving them. Future cleanup can do the physical move once the dust settles.
+- **`MainViewModel` implements `KeyboardHostState` directly.** Saves writing an adapter — all the interface methods/properties were already on the VM with matching names + signatures. The overlay-side `KeyboardHostState` impl (Brick 4) will be a tiny wrapper over `KeyboardController` instead.
+- **`BottomBar` parameterized.** Old signature was `(remapEnabled, onToggleRemap, onQuit)`. New is `(remapEnabled, onToggleRemap, onLeftAction, leftActionLabel)` so the same composable serves Activity ("Quit") and Overlay ("Hide"). Single-source UI; mode-specific copy lives in the `KeyboardHostMode` branch.
+- **Overlay top-bar visual polish deferred to Brick 4.** Brick 3's Overlay-mode `KeyboardTopBar` reuses the Activity-mode `KeyboardTopBar` with all edit-related callbacks stubbed out (`onLongPressMenu = {}`, etc.) and `isEditMode = false`. That gets us a compilable, functionally-correct Overlay-mode render path now; the "slim top bar — tab selector + 'Open Mapo' button only" variant in the original plan is a Brick 4 polish pass.
+- **`KeyboardHostTest`** is a Robolectric smoke check, not exhaustive interaction verification. The underlying composables already have dedicated tests (`ActivatorEditorScreenTest`, `InputEditorScreenTest`, etc.); the host's job is plumbing, so the test checks plumbing — does each mode render without crash, does the bottom-bar label flip between modes.
+
+#### Files actually landed
+
+- `app/src/main/java/com/mapo/ui/screen/keyboard/KeyboardHost.kt` (new)
+- `app/src/main/java/com/mapo/ui/screen/keyboard/KeyboardHostState.kt` (new)
+- `app/src/main/java/com/mapo/ui/screen/keyboard/KeyboardHostMode.kt` (new — sealed Activity/Overlay variants)
+- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (visibility flips on 4 composables + main-route rewrite to call `KeyboardHost`)
+- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` (`: KeyboardHostState` + `override` keywords)
+- `app/src/test/java/com/mapo/ui/screen/keyboard/KeyboardHostTest.kt` (new — Robolectric smoke checks for both modes)
+
+#### Hand-off to device verification
+
+Compile + tests green. Activity-mode rendering is the higher-risk path (this is what users see daily). Quick sanity checks worth running on device:
+1. Open Mapo → keyboard view renders. Tab bar at top, key grid in the middle, bottom bar with Quit + remap switch at the bottom — same as before this brick.
+2. Tap a key → it injects (same as before).
+3. Long-press a tab → context menu appears, edit/configure/remove/duplicate/save-template options all work.
+4. Enter edit mode → grid shows drag handles + "+" affordances, buttons can be moved/resized.
+5. Drawer open/close, profile change, auto-switch prompt, remap toggle all unchanged.
+
+If everything renders identically, Brick 3 closes. Brick 4 (production overlay keyboard via QS tile + real `KeyboardHost(mode = Overlay, ...)`) is next.
+
+### Brick 4 — Production overlay-mounted keyboard — 🟡 CODE LANDED (device verification pending)
 
 Goal: end-to-end overlay keyboard with QS tile activation.
 
@@ -223,6 +251,63 @@ Goal: end-to-end overlay keyboard with QS tile activation.
 - Same workflow; overlay defaults to bottom screen.
 
 **Exit criteria:** overlay keyboard is the canonical run-mode UX on single-screen. Activity still hosts keyboard for config/edit usage.
+
+#### Brick 4 deviations + decisions
+
+- **New `KeyboardOverlayPresenter` introduced as the single coordination point.** Not in the original brick file list, but the design that emerged: the QS tile, the drawer item, and (future) the FGS notification action all need the same composable wired with the same callbacks (Open Mapo, Hide overlay). Centralizing in a `@Singleton` presenter keeps the callers as one-liners and prevents copy-paste drift. `KeyboardOverlayManager` stays a pure window-attach mechanic underneath.
+- **Adapter `KeyboardController.asKeyboardHostState()` extension.** The overlay can't reach `MainViewModel` (different `ViewModelStoreOwner`), so the controller goes through a thin `KeyboardHostState` adapter to mount `KeyboardHost(mode = Overlay)`. Adapter's `displayLayout` fallback to `DefaultLayouts.all[0]` mirrors what MainViewModel does at the same boundary — keeps activity- and overlay-side behaviorally identical. Controller's `StateFlow<GridLayout?>` (FC1 seam) stays the source of truth; both adapters apply the non-null bridge at the same point.
+- **`OverlayFocusKind` is a 3-value enum, not the originally-planned 4-value (`NONE`, `PROMPT`, `KEYBOARD`, `INPUT_LAYER_RESERVED`).** Input-layer overlays (FC2-as-originally-scoped) was cancelled mid-plan-refinement, so `INPUT_LAYER_RESERVED` is gone. `KEYBOARD` stays in the enum as a value but is **never set today** — the keyboard overlay's `FLAG_NOT_FOCUSABLE` window means the service has nothing to disambiguate. Kept the value so a future "service routes gamepad differently while the keyboard is up" need lands without an enum-shape change.
+- **Auto-switch profile-create prompt embedding inside the keyboard overlay was DEFERRED.** Original plan: "when keyboard overlay is mounted, embed the prompt inside the keyboard overlay's surface as a snackbar layer." That requires adding a snackbar slot to `KeyboardHost` and routing `OverlayCoordinator` decisions through the presenter. Today the prompt continues to render via `OverlayManager` (focusable, stacked above the keyboard overlay). Visual overlap is suboptimal but functionally fine — gamepad navigation still works on the prompt (`OverlayFocusKind.PROMPT` routing). Polish item for a follow-up.
+- **FGS notification "Show / Hide keyboard" action button DEFERRED.** QS tile is the primary trigger; the drawer entry is the secondary; a notification action would be a third path. Skipped to keep Brick 4 focused. The FGS notification currently shows "Tap the Mapo Quick Settings tile to hide" — directs users to the tile.
+- **`KeyboardOverlayPocContent.kt` deleted.** The Brick 1 placeholder is dead code now that the manager mounts the real `KeyboardHost(Overlay)`.
+- **Settings entry not added.** The drawer entry already serves as the alternative-to-tile activation path. Adding a dedicated "Show keyboard overlay" toggle in a separate settings screen is a UX call the user can make later if drawer-discoverability proves insufficient.
+- **Tests target `KeyboardOverlayPresenter`, not `KeyboardOverlayManager`.** The manager's behavior is window-system mechanics (`WindowManager.addView`, FGS start/stop, display-context creation) verified on-device. The presenter's orchestration logic (show / hide / toggle / isShowing semantics, canonical overlay id) is what the test suite usefully pins.
+
+#### Files actually landed
+
+- `app/src/main/java/com/mapo/service/input/OverlayFocusKind.kt` (new — 3-value enum)
+- `app/src/main/java/com/mapo/service/input/InputDispatcher.kt` (Boolean → enum)
+- `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` (reads `overlayFocus == PROMPT`)
+- `app/src/main/java/com/mapo/service/overlay/OverlayManager.kt` (passes `OverlayFocusKind.PROMPT` / `NONE`)
+- `app/src/main/java/com/mapo/service/overlay/OverlayContent.kt` (doc reflow)
+- `app/src/main/java/com/mapo/service/keyboard/KeyboardControllerHostState.kt` (new — adapter)
+- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPresenter.kt` (new — orchestrator)
+- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardTileService.kt` (new — QS tile)
+- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayManager.kt` (POC_OVERLAY_ID const removed)
+- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPocContent.kt` (deleted)
+- `app/src/main/AndroidManifest.xml` (tile service entry)
+- `app/src/main/res/values/strings.xml` (tile + drawer labels)
+- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` (presenter injection; `togglePocKeyboardOverlay` → `toggleKeyboardOverlay`)
+- `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` (label rename + callback param rename)
+- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (callback rename)
+- `app/src/test/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPresenterTest.kt` (new — 6 tests)
+- `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (constructor param rename)
+
+#### Hand-off to device verification
+
+Compile + tests green. Brick 4 is the first time the actual run-mode keyboard renders inside a system overlay — device verification is essential:
+
+**QS tile path:**
+1. Open Mapo at least once so the accessibility service is connected and a profile + layouts are loaded.
+2. Pull down the notification shade → tap "Edit" (or however your device exposes tile customization) → drag the "Mapo keyboard" tile into the active row.
+3. Launch a game / other app.
+4. Pull down the shade → tap the Mapo tile. The real keyboard (your actual layout, not a placeholder grid) should appear over the foreground app.
+5. Tap a key → it should inject to the foreground app, same as activity-mode keyboard.
+6. Tap a key whose mapping is a mouse/scroll → that dispatch path should also fire.
+7. Tap the "Hide" button in the overlay's bottom bar → overlay detaches.
+8. Tap the tile again → overlay re-appears.
+
+**Drawer path (alternative trigger):**
+9. Inside Mapo, open the drawer → tap "Toggle keyboard overlay" → overlay appears (with the activity behind it).
+10. Tap again → hides.
+
+**Cross-checks:**
+- Gamepad input while overlay is up still drives the foreground game (FLAG_NOT_FOCUSABLE on the overlay window — verified in Brick 1 and preserved here).
+- Physical-button remap still works regardless of whether the overlay is showing.
+- Back-button reaches the foreground app while overlay is up (lifecycle-scoped `consumeSystemBack` from Brick 1).
+- Auto-switch prompt for a new app: today this still pops up via `OverlayManager` (separate window). If you trigger one while the keyboard overlay is up, the prompt will visually overlap. This is the deferred "embed prompt inside keyboard overlay" item — not a Brick 4 blocker.
+
+If all of those work, Brick 4 closes. Brick 5 is cleanup: remove Thor-first scaffolding, verify Thor still works as a secondary device.
 
 ### Brick 5 — Thor compatibility + cleanup
 

@@ -18,6 +18,7 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.mapo.service.input.InputDispatcher
+import com.mapo.service.input.OverlayFocusKind
 import com.mapo.ui.theme.MapoTheme
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -116,14 +117,14 @@ class OverlayManager @Inject constructor(
         }
 
         current = AttachedOverlay(composeView, owner, focusable)
-        if (focusable) inputDispatcher.setOverlayFocused(true)
+        if (focusable) inputDispatcher.setOverlayFocus(OverlayFocusKind.PROMPT)
         Log.i(TAG, "overlay attached (focusable=$focusable)")
     }
 
     private fun detach() {
         val attached = current ?: return
         current = null
-        if (attached.focusable) inputDispatcher.setOverlayFocused(false)
+        if (attached.focusable) inputDispatcher.setOverlayFocus(OverlayFocusKind.NONE)
         try {
             windowManager.removeViewImmediate(attached.view)
         } catch (e: Exception) {

@@ -198,8 +198,5 @@ class KeyboardOverlayManager @Inject constructor(
 
     companion object {
         private const val TAG = "KeyboardOverlayMgr"
-
-        /** Overlay id used by the Brick 1 debug entry. Removed in Brick 4. */
-        const val POC_OVERLAY_ID = "poc_keyboard"
     }
 }

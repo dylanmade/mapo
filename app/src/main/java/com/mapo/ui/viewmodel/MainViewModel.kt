@@ -43,8 +43,8 @@ import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.toCompiled
 import com.mapo.service.keyboard.KeyboardController
-import com.mapo.service.overlay.keyboard.KeyboardOverlayManager
-import com.mapo.service.overlay.keyboard.KeyboardOverlayPocContent
+import com.mapo.service.overlay.keyboard.KeyboardOverlayPresenter
+import com.mapo.ui.screen.keyboard.KeyboardHostState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
@@ -92,18 +92,18 @@ class MainViewModel @Inject constructor(
     private val foregroundAppFilter: ForegroundAppFilter,
     private val keyboardTemplateRepository: KeyboardTemplateRepository,
     private val inputDispatcher: InputDispatcher,
-    private val keyboardOverlayManager: KeyboardOverlayManager,
+    private val keyboardOverlayPresenter: KeyboardOverlayPresenter,
     private val keyboardController: KeyboardController,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
-) : ViewModel() {
+) : ViewModel(), KeyboardHostState {
 
     // Source of truth lives in KeyboardController (Brick 2 of single-screen refactor).
     // Re-exposed here so the activity surface — MainScreen, tests, drawer wiring —
     // sees the same `layouts` / `selectedIndex` flows it always has. Writes inside
     // this VM go through `keyboardController.replaceLayouts` / `replaceLayoutById` /
     // `setSelectedIndex`; reads use `keyboardController.layouts.value` etc.
-    val layouts: StateFlow<ImmutableList<GridLayout>> = keyboardController.layouts
-    val selectedIndex: StateFlow<Int> = keyboardController.selectedIndex
+    override val layouts: StateFlow<ImmutableList<GridLayout>> = keyboardController.layouts
+    override val selectedIndex: StateFlow<Int> = keyboardController.selectedIndex
 
     // Single source of truth for "is some tab being edited?". Replaces the previous
     // (_isEditMode, _editingLayout) pair: there's no buffered draft anymore — every
@@ -140,7 +140,7 @@ class MainViewModel @Inject constructor(
     private val _profiles = MutableStateFlow<ImmutableList<Profile>>(persistentListOf())
     val profiles: StateFlow<ImmutableList<Profile>> = _profiles.asStateFlow()
 
-    val remapEnabled: StateFlow<Boolean> = keyboardController.remapEnabled
+    override val remapEnabled: StateFlow<Boolean> = keyboardController.remapEnabled
 
     val autoSwitchEnabled: StateFlow<Boolean> = autoSwitchSettings.autoSwitchEnabled
 
@@ -231,7 +231,7 @@ class MainViewModel @Inject constructor(
     // surface here keeps the pre-refactor non-null contract by falling back to
     // DefaultLayouts.all[0] on null, matching the prior WhileSubscribed/initial-value
     // behavior at the VM boundary.
-    val displayLayout: StateFlow<GridLayout> = keyboardController.displayLayout
+    override val displayLayout: StateFlow<GridLayout> = keyboardController.displayLayout
         .map { it ?: DefaultLayouts.all[0] }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DefaultLayouts.all[0])
 
@@ -325,7 +325,7 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun toggleRemap() = keyboardController.toggleRemap()
+    override fun toggleRemap() = keyboardController.toggleRemap()
 
     /**
      * Tell the accessibility service to swallow `KEYCODE_BACK` while the keyboard view
@@ -598,7 +598,7 @@ class MainViewModel @Inject constructor(
 
     // ── Navigation ────────────────────────────────────────────────────────────
 
-    fun selectLayout(index: Int) {
+    override fun selectLayout(index: Int) {
         // Visiting any tab exits edit mode for the previously-edited tab. Per design,
         // only one tab can be in edit mode at a time and tab navigation is always free.
         keyboardController.setSelectedIndex(index)
@@ -611,16 +611,16 @@ class MainViewModel @Inject constructor(
 
     // ── Normal mode (delegates to KeyboardController) ─────────────────────────
 
-    fun onButtonTap(button: GridButton) = keyboardController.onButtonTap(button)
-    fun onButtonDoubleTap(button: GridButton) = keyboardController.onButtonDoubleTap(button)
-    fun onButtonHold(button: GridButton) = keyboardController.onButtonHold(button)
+    override fun onButtonTap(button: GridButton) = keyboardController.onButtonTap(button)
+    override fun onButtonDoubleTap(button: GridButton) = keyboardController.onButtonDoubleTap(button)
+    override fun onButtonHold(button: GridButton) = keyboardController.onButtonHold(button)
 
-    fun onTrackpadGesture(button: GridButton, gesture: TrackpadGesture) =
+    override fun onTrackpadGesture(button: GridButton, gesture: TrackpadGesture) =
         keyboardController.onTrackpadGesture(button, gesture)
 
-    fun onDragStart() = keyboardController.onDragStart()
-    fun onMouseMove(dx: Float, dy: Float) = keyboardController.onMouseMove(dx, dy)
-    fun onDragEnd() = keyboardController.onDragEnd()
+    override fun onDragStart() = keyboardController.onDragStart()
+    override fun onMouseMove(dx: Float, dy: Float) = keyboardController.onMouseMove(dx, dy)
+    override fun onDragEnd() = keyboardController.onDragEnd()
 
     // ── Tab context menu ──────────────────────────────────────────────────────
 
@@ -1270,18 +1270,13 @@ class MainViewModel @Inject constructor(
         _toastMessage.tryEmit(message)
     }
 
-    // ── Brick 1 single-screen-refactor POC: toggle the placeholder keyboard
-    //    overlay window. Drawer entry that calls this is removed in Brick 4
-    //    once the QS tile + real KeyboardHost(Overlay) are wired up.
-    fun togglePocKeyboardOverlay() {
-        if (keyboardOverlayManager.isAttached(KeyboardOverlayManager.POC_OVERLAY_ID)) {
-            keyboardOverlayManager.detach(KeyboardOverlayManager.POC_OVERLAY_ID)
-        } else {
-            keyboardOverlayManager.attach(KeyboardOverlayManager.POC_OVERLAY_ID) {
-                KeyboardOverlayPocContent(
-                    onTap = { slot -> Log.d("KeyboardOverlayPoc", "tap on slot $slot") },
-                )
-            }
-        }
+    /**
+     * Drawer affordance for toggling the run-mode keyboard overlay (mirrors the QS tile).
+     * Both call the same [KeyboardOverlayPresenter] so there is exactly one
+     * orchestration point for "show / hide the overlay" — easy to add new triggers
+     * later (FGS notification action, physical-button binding, …) without drifting.
+     */
+    fun toggleKeyboardOverlay() {
+        keyboardOverlayPresenter.toggle()
     }
 }

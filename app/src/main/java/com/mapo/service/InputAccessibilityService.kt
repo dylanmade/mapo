@@ -205,7 +205,7 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         if (event.keyCode == KeyEvent.KEYCODE_BACK && dispatcher.consumeSystemBack.value) {
             return true
         }
-        if (dispatcher.overlayFocused.value) {
+        if (dispatcher.overlayFocus.value == com.mapo.service.input.OverlayFocusKind.PROMPT) {
             // Translate gamepad A/B into ENTER/BACK so DPAD-navigated overlay buttons
             // can be activated. DPAD events pass through unchanged so Compose's focus
             // traversal handles left/right/up/down naturally.

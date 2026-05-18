@@ -21,13 +21,34 @@ PKG=com.mapo
 SERVICE="${PKG}/${PKG}.service.InputAccessibilityService"
 ACTIVITY="${PKG}/.MainActivity"
 
-# Forward an optional `-s <serial>` through to every adb invocation.
+# Forward an optional `-s <serial>` through to every adb invocation AND to
+# Gradle. Gradle's `installDebug` picks its target via ANDROID_SERIAL, not adb
+# args, so both need to be set for multi-device setups.
 ADB_TARGET=()
 if [[ "${1:-}" == "-s" && -n "${2:-}" ]]; then
   ADB_TARGET=(-s "$2")
+  export ANDROID_SERIAL="$2"
   shift 2
 fi
 adb_() { adb ${ADB_TARGET[@]+"${ADB_TARGET[@]}"} "$@"; }
+
+# Fail early with a useful device list if multiple devices are attached and the
+# caller didn't pick one — otherwise adb / gradle bail mid-run with "more than
+# one device".
+if [[ ${#ADB_TARGET[@]} -eq 0 ]]; then
+  device_count=$(adb devices | awk 'NR>1 && $2=="device"' | wc -l | tr -d ' ')
+  if [[ "$device_count" -gt 1 ]]; then
+    echo "Multiple devices connected. Re-run with: scripts/redeploy.sh -s <serial>"
+    echo
+    echo "Available devices:"
+    adb devices | awk 'NR>1 && $2=="device" {print $1}' | while read -r serial; do
+      # `</dev/null` keeps adb shell from slurping the rest of this loop's stdin.
+      model=$(adb -s "$serial" shell </dev/null getprop ro.product.model 2>/dev/null | tr -d '\r')
+      printf "  %-52s %s\n" "$serial" "$model"
+    done
+    exit 1
+  fi
+fi
 
 cd "$(dirname "$0")/.."
 

@@ -172,7 +172,7 @@ Goal: answer R3 (ViewModel instancing across activity + overlay) without touchin
 - `app/src/test/java/com/mapo/service/keyboard/KeyboardControllerTest.kt` (new, 20 tests)
 - `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (real-controller wiring in setUp + `rebuildSubject`)
 
-### Brick 3 — Host-agnostic `KeyboardHost` composable — 🟡 CODE LANDED (device verification pending)
+### Brick 3 — Host-agnostic `KeyboardHost` composable — ✅ COMPLETED
 
 Goal: make the keyboard UI mountable from anywhere.
 
@@ -219,7 +219,9 @@ Compile + tests green. Activity-mode rendering is the higher-risk path (this is 
 
 If everything renders identically, Brick 3 closes. Brick 4 (production overlay keyboard via QS tile + real `KeyboardHost(mode = Overlay, ...)`) is next.
 
-### Brick 4 — Production overlay-mounted keyboard — 🟡 CODE LANDED (device verification pending)
+Device verification (2026-05-18): all 5 checks clean — render, key injection, long-press tab context menu, edit mode (drag/resize/+), drawer + profile + remap toggle. Brick 3 closed.
+
+### Brick 4 — Production overlay-mounted keyboard — ✅ COMPLETED
 
 Goal: end-to-end overlay keyboard with QS tile activation.
 
@@ -309,7 +311,9 @@ Compile + tests green. Brick 4 is the first time the actual run-mode keyboard re
 
 If all of those work, Brick 4 closes. Brick 5 is cleanup: remove Thor-first scaffolding, verify Thor still works as a secondary device.
 
-### Brick 5 — Thor compatibility + cleanup — 🟡 CODE LANDED (Thor device verification pending)
+Device verification (2026-05-18): QS tile path, drawer path, and all cross-checks (gamepad-to-game, physical remap, back-button) clean. Brick 4 closed.
+
+### Brick 5 — Thor compatibility + cleanup — ✅ COMPLETED
 
 Goal: validate Thor as a secondary supported device; strip Thor-first scaffolding.
 
@@ -377,6 +381,10 @@ Single-screen phone (new primary target) should be unaffected by this brick — 
 4. Activity-mode keyboard (Mapo's bottom-screen activity view) should still render and respond to taps — that's the secondary-device path `ApplyMainScreenWindowBehavior` is now documented to serve.
 
 If those work, the refactor is closed. The follow-up "overlay follows the foreground app's screen on Thor" item is filed as a future brick separate from this plan.
+
+Device verification (2026-05-18): Thor — overlay defaults to top screen, gamepad input drives top-screen game while overlay up, back-button reaches foreground app while Mapo backgrounded, bottom-screen activity-mode keyboard still renders + taps inject. All clean. Brick 5 closed.
+
+**Refactor complete (2026-05-18).** All 5 bricks closed. Single-screen Android is now the primary target; Thor remains a supported secondary device. Deferred follow-ups (none blocking): foreground-display-aware Thor routing in `KeyboardDisplayRouter`; embedding auto-switch prompt inside keyboard overlay; FGS notification action button. Phase 6 motion-capture refactor is the next workstream (still blocked behind its own motion-capture work, but unblocked at the architecture layer).
 
 ---
 

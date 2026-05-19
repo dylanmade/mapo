@@ -94,6 +94,11 @@ dependencies {
     // Kotlinx immutable collections (stable Compose params)
     implementation(libs.kotlinx.collections.immutable)
 
+    // Hidden API bypass — required so InputAccessibilityService can route injected
+    // KeyEvents to a non-default display (Thor's bottom screen). See onCreate in
+    // MapoApplication for the exemption call.
+    implementation(libs.hidden.api.bypass)
+
     // Room
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

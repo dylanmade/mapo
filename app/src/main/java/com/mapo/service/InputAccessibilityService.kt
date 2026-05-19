@@ -114,6 +114,39 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     private var safeR = 980f
     private var safeB = 1670f
 
+    // ── Injection display routing ─────────────────────────────────────────────
+
+    /**
+     * Display ID injected input events are routed to. The KeyEvent constructor leaves
+     * displayId unset, which the system input dispatcher treats as "default display" —
+     * so on dual-display devices (AYN Thor) injected keys would always land on the top
+     * screen, never reaching a game running on the bottom screen. Tracked here and
+     * stamped onto each event in [injectRawKeyEvent].
+     *
+     * Single-screen devices stay on [Display.DEFAULT_DISPLAY] permanently.
+     */
+    @Volatile
+    private var focusedAppDisplayId: Int = Display.DEFAULT_DISPLAY
+
+    private val inputEventSetDisplayIdMethod: java.lang.reflect.Method? by lazy {
+        try {
+            android.view.InputEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
+                .also { Log.i(TAG, "InputEvent.setDisplayId reflection OK") }
+        } catch (e: Throwable) {
+            Log.w(TAG, "InputEvent.setDisplayId unavailable — multi-display key injection disabled", e)
+            null
+        }
+    }
+
+    private val inputEventGetDisplayIdMethod: java.lang.reflect.Method? by lazy {
+        try {
+            android.view.InputEvent::class.java.getMethod("getDisplayId")
+        } catch (e: Throwable) {
+            Log.w(TAG, "InputEvent.getDisplayId unavailable — displayId verification disabled", e)
+            null
+        }
+    }
+
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -147,6 +180,12 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         cursorY = h / 2f
         Log.i(TAG, "Service connected — display=${w}x${h} safeZone=[$safeL,$safeT,$safeR,$safeB]")
 
+        // Seed the injection target display so the very first remap fires on the right
+        // screen even before any window-state-change has arrived since service connect.
+        focusedAppDisplayId = computeFocusedAppDisplayId().takeIf { it >= 0 } ?: Display.DEFAULT_DISPLAY
+        Log.i(TAG, "Service connected — focusedAppDisplayId=$focusedAppDisplayId")
+        dumpAllDisplays("onServiceConnected")
+
         // Probe attaches once the service is connected so the WindowManager call has
         // a valid context. Logs traffic (or lack of it) under MotionCaptureOverlay.TAG.
         motionProbe = MotionCaptureOverlay(
@@ -163,11 +202,155 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-        val pkg = event.packageName?.toString() ?: return
-        Log.d(TAG, "window state changed → pkg=$pkg className=${event.className}")
-        foregroundAppMonitor.reportForegroundPackage(pkg)
+        if (event == null) return
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> handleWindowStateChanged(event)
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> handleWindowsChanged(event)
+            else -> Unit
+        }
     }
+
+    private fun handleWindowStateChanged(event: AccessibilityEvent) {
+        val pkg = event.packageName?.toString() ?: return
+        val eventDisplayId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            event.displayId else Display.DEFAULT_DISPLAY
+        Log.d(TAG, "window state changed → pkg=$pkg className=${event.className} eventDisplayId=$eventDisplayId")
+        foregroundAppMonitor.reportForegroundPackage(pkg)
+        refreshFocusedDisplay("windowStateChange/$pkg")
+        if (pkg != packageName) dumpAllDisplays("windowStateChange/$pkg")
+    }
+
+    /**
+     * TYPE_WINDOWS_CHANGED fires on adds/removes/bounds-changes/etc. across the whole
+     * window list — crucially, it captures the AYN Thor's "quick switch" path where the
+     * user taps an already-running app's icon on the other screen, and the OS migrates
+     * the window between displays *without* emitting a TYPE_WINDOW_STATE_CHANGED.
+     * Without this hook, the focused-display cache would stay pointed at the old screen
+     * and remap output would land there.
+     */
+    private fun handleWindowsChanged(event: AccessibilityEvent) {
+        val eventDisplayId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            event.displayId else Display.DEFAULT_DISPLAY
+        Log.d(TAG, "windows changed → eventDisplayId=$eventDisplayId changeTypes=0x${event.windowChanges.toString(16)}")
+        refreshFocusedDisplay("windowsChanged/$eventDisplayId")
+    }
+
+    private fun refreshFocusedDisplay(reason: String) {
+        val previous = focusedAppDisplayId
+        val refreshed = computeFocusedAppDisplayId()
+        if (refreshed >= 0 && refreshed != previous) {
+            Log.i(TAG, "focusedAppDisplayId: $previous → $refreshed ($reason)")
+            focusedAppDisplayId = refreshed
+        }
+    }
+
+    /**
+     * Walk all displays and return the id of the first one whose currently-active
+     * (or focused) application window belongs to something other than Mapo. Falls
+     * back to [Display.DEFAULT_DISPLAY] on single-display devices or when no other
+     * application window can be located. Called at service connect to seed
+     * [focusedAppDisplayId]; steady-state updates happen in [onAccessibilityEvent].
+     */
+    /**
+     * Dump the full multi-display window topology to logcat. One-shot diagnostic for
+     * working out whether a given device actually exposes its secondary screens as
+     * separate Android displays — which is what we depend on for cross-display
+     * injection routing.
+     */
+    private fun dumpAllDisplays(reason: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            Log.i(TAG, "dumpAllDisplays[$reason]: pre-R, single-display only")
+            return
+        }
+        val all = try { windowsOnAllDisplays } catch (e: Exception) {
+            Log.w(TAG, "dumpAllDisplays[$reason]: windowsOnAllDisplays threw", e); return
+        }
+        if (all.size() == 0) {
+            Log.i(TAG, "dumpAllDisplays[$reason]: empty")
+            return
+        }
+        val sb = StringBuilder("dumpAllDisplays[$reason]: displays=${all.size()}")
+        for (i in 0 until all.size()) {
+            val displayId = all.keyAt(i)
+            val windows = all.valueAt(i)
+            sb.append("\n  display=$displayId windows=${windows.size}")
+            for (w in windows) {
+                val pkg = w.root?.packageName?.toString() ?: "?"
+                sb.append("\n    [type=${w.type} active=${w.isActive} focused=${w.isFocused} layer=${w.layer}] pkg=$pkg")
+            }
+        }
+        Log.i(TAG, sb.toString())
+    }
+
+    /**
+     * Walk every display and return the id of the one whose foregrounded application
+     * is the user's intended target. Returns -1 ("no candidate found") when nothing
+     * suitable exists — callers should fall back to the previously-cached value rather
+     * than blindly defaulting to display 0.
+     *
+     * Per-display tier order:
+     *   1. Match against `ForegroundAppMonitor.currentPackage` (the most-recent
+     *      non-Mapo foreground report) — strongest signal of user intent.
+     *   2. Else: any non-Mapo non-system TYPE_APPLICATION on a non-default display.
+     *   3. Else: any non-Mapo non-system TYPE_APPLICATION on the default display.
+     *
+     * Permissiveness: we accept TYPE_APPLICATION windows even if neither isActive nor
+     * isFocused. On the AYN Thor's quick-switch path (user taps a running app's icon on
+     * the other screen), the migrated window's focus/active flags lag the move — strict
+     * filtering would leave us blind to where the window actually went.
+     */
+    private fun computeFocusedAppDisplayId(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return Display.DEFAULT_DISPLAY
+        val all = try {
+            windowsOnAllDisplays
+        } catch (e: Exception) {
+            Log.w(TAG, "computeFocusedAppDisplayId: windowsOnAllDisplays threw", e)
+            return -1
+        }
+
+        val foregroundPkg = foregroundAppMonitor.currentPackage.value
+        var nonDefaultCandidate: Int = -1
+        var defaultCandidate: Int = -1
+        for (i in 0 until all.size()) {
+            val displayId = all.keyAt(i)
+            val windows = all.valueAt(i)
+            val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            val candidate = apps.firstOrNull { it.isActive }
+                ?: apps.firstOrNull { it.isFocused }
+                ?: apps.firstOrNull()
+                ?: continue
+            val pkg = candidate.root?.packageName?.toString() ?: continue
+            if (pkg.isBlank() || pkg == packageName) continue
+            // System-UI filter MUST run before the foreground-match check. Otherwise
+            // launcher window-state-change events during the AYN Thor's quick-switch
+            // path pollute ForegroundAppMonitor.currentPackage with "com.android.launcher3";
+            // the foreground-match then returns display 0 (where launcher lives) instead
+            // of the display the user actually moved the app to.
+            if (isSystemUiPackage(pkg)) continue
+            if (foregroundPkg != null && pkg == foregroundPkg) return displayId
+            if (displayId != Display.DEFAULT_DISPLAY && nonDefaultCandidate == -1) {
+                nonDefaultCandidate = displayId
+            } else if (displayId == Display.DEFAULT_DISPLAY && defaultCandidate == -1) {
+                defaultCandidate = displayId
+            }
+        }
+        return when {
+            nonDefaultCandidate >= 0 -> nonDefaultCandidate
+            defaultCandidate >= 0 -> defaultCandidate
+            else -> -1
+        }
+    }
+
+    /**
+     * Packages that should not pull the injection target display around just because they
+     * happen to have an active window. The launcher in particular is always the active app
+     * on display 0 on a Thor when a game is on display 4 — without this filter, every
+     * launcher window-state-change would steal the cache back to display 0.
+     */
+    private fun isSystemUiPackage(pkg: String): Boolean =
+        pkg == "com.android.systemui" ||
+        pkg == "com.android.launcher3" ||
+        pkg == "com.android.settings"
 
     override fun queryPrimaryDisplayForegroundPackage(): String? {
         val primaryWindows: List<AccessibilityWindowInfo> = try {
@@ -202,6 +385,20 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     // ── Physical button interception (remap) ──────────────────────────────────
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        // Log the intercepted event's displayId for diagnostics. Cache refresh happens
+        // in injectRawKeyEvent (and via TYPE_WINDOWS_CHANGED) so it also covers virtual
+        // button taps, which bypass onKeyEvent entirely.
+        val incomingDisplay = readEventDisplayIdOrInvalid(event)
+        val topologyDisplay = computeFocusedAppDisplayId()
+        Log.d(TAG, "onKeyEvent[displayId]: incoming=$incomingDisplay topology=$topologyDisplay cached=$focusedAppDisplayId keyCode=${event.keyCode}")
+        // One-shot dump on every DOWN edge so we can see the actual window snapshot at
+        // press time — necessary to verify whether windowsOnAllDisplays is fresh after
+        // a Thor "quick switch" (which may not refresh the accessibility framework's
+        // window cache through normal channels).
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            dumpAllDisplays("onKeyEvent/keyCode=${event.keyCode}")
+        }
+
         if (dispatcher.overlayFocus.value == OverlayFocusKind.PROMPT) {
             // Translate gamepad A/B into ENTER/BACK so DPAD-navigated overlay buttons
             // can be activated. DPAD events pass through unchanged so Compose's focus
@@ -320,7 +517,10 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     private var segEndY = 960f
 
     override fun startMouseDrag() {
-        Log.d(TAG, "startMouseDrag — cursor reset to center")
+        // Refresh once at drag start — the cached display will be used for every
+        // segment of this drag (dispatchMoveSegment doesn't refresh per-segment).
+        refreshFocusedDisplay("startMouseDrag")
+        Log.d(TAG, "startMouseDrag — cursor reset to center, display=$focusedAppDisplayId")
         isDragging = true
         segmentActive = false
         currentStroke = null
@@ -357,7 +557,7 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         }
         currentStroke = if (willContinue) stroke else null
         val ok = dispatchGesture(
-            GestureDescription.Builder().addStroke(stroke).build(),
+            buildGesture { addStroke(stroke) },
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription) {
                     segmentActive = false
@@ -390,14 +590,15 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     }
 
     fun injectMouseTap() {
-        Log.d(TAG, "injectMouseTap at ($cursorX,$cursorY)")
+        refreshFocusedDisplay("injectMouseTap")
+        Log.d(TAG, "injectMouseTap at ($cursorX,$cursorY) display=$focusedAppDisplayId")
         val path = Path().apply { moveTo(cursorX, cursorY) }
         // 50ms duration: long enough for DOSBox/RetroArch and other apps with stricter
         // touch handlers to register the touch as a real tap, while still well under
         // ViewConfiguration.getTapTimeout() (~100ms) so it doesn't read as a long press.
         val stroke = GestureDescription.StrokeDescription(path, 0L, 50L)
         val ok = dispatchGesture(
-            GestureDescription.Builder().addStroke(stroke).build(),
+            buildGesture { addStroke(stroke) },
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription) { Log.d(TAG, "injectMouseTap: completed") }
                 override fun onCancelled(g: GestureDescription) { Log.w(TAG, "injectMouseTap: cancelled") }
@@ -415,19 +616,21 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
      * reflection, no INJECT_EVENTS permission required. Same technique used by DS Keyboard.
      */
     private fun dispatchMultiFingerTap(fingerCount: Int, label: String) {
-        Log.d(TAG, "$label at ($cursorX,$cursorY) — $fingerCount-finger tap")
+        refreshFocusedDisplay(label)
+        Log.d(TAG, "$label at ($cursorX,$cursorY) display=$focusedAppDisplayId — $fingerCount-finger tap")
         val spacing = 30f  // px between fingers
-        val builder = GestureDescription.Builder()
         // Lay fingers symmetrically around the cursor anchor.
         val totalSpan = spacing * (fingerCount - 1)
         val startX = cursorX - totalSpan / 2f
-        for (i in 0 until fingerCount) {
-            val x = startX + i * spacing
-            val path = Path().apply { moveTo(x, cursorY) }
-            builder.addStroke(GestureDescription.StrokeDescription(path, 0L, 50L))
+        val gesture = buildGesture {
+            for (i in 0 until fingerCount) {
+                val x = startX + i * spacing
+                val path = Path().apply { moveTo(x, cursorY) }
+                addStroke(GestureDescription.StrokeDescription(path, 0L, 50L))
+            }
         }
         val ok = dispatchGesture(
-            builder.build(),
+            gesture,
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription) { Log.d(TAG, "$label: completed") }
                 override fun onCancelled(g: GestureDescription) { Log.w(TAG, "$label: cancelled") }
@@ -444,22 +647,24 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
      * events. dy > 0 → scroll up (fingers drag down, Android natural scroll convention).
      */
     fun injectMouseScroll(dx: Float, dy: Float) {
-        Log.d(TAG, "injectMouseScroll dx=$dx dy=$dy — two-finger drag")
+        refreshFocusedDisplay("injectMouseScroll")
+        Log.d(TAG, "injectMouseScroll dx=$dx dy=$dy display=$focusedAppDisplayId — two-finger drag")
         val spacing = 30f
         val dragDistance = 200f
         // dy>0 means scroll up → fingers move down (positive Y in screen coords).
         val deltaY = if (dy > 0f) dragDistance else -dragDistance
         val deltaX = if (dx != 0f) (if (dx > 0f) dragDistance else -dragDistance) else 0f
-        val builder = GestureDescription.Builder()
-        listOf(-spacing / 2f, spacing / 2f).forEach { offsetX ->
-            val path = Path().apply {
-                moveTo(cursorX + offsetX, cursorY)
-                lineTo(cursorX + offsetX + deltaX, cursorY + deltaY)
+        val gesture = buildGesture {
+            listOf(-spacing / 2f, spacing / 2f).forEach { offsetX ->
+                val path = Path().apply {
+                    moveTo(cursorX + offsetX, cursorY)
+                    lineTo(cursorX + offsetX + deltaX, cursorY + deltaY)
+                }
+                addStroke(GestureDescription.StrokeDescription(path, 0L, 200L))
             }
-            builder.addStroke(GestureDescription.StrokeDescription(path, 0L, 200L))
         }
         val ok = dispatchGesture(
-            builder.build(),
+            gesture,
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription) { Log.d(TAG, "injectMouseScroll: completed") }
                 override fun onCancelled(g: GestureDescription) { Log.w(TAG, "injectMouseScroll: cancelled") }
@@ -476,6 +681,26 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     }
     fun injectMouseForwardClick() {
         Log.w(TAG, "injectMouseForwardClick: no reliable cross-app touch gesture exists for this — noop")
+    }
+
+    /**
+     * Build a [GestureDescription] targeted at [focusedAppDisplayId]. Without this the
+     * default-display fallback inside `GestureDescription` would route every trackpad /
+     * mouse tap to the top screen at the cursor anchor — visible as ghost taps near
+     * the center of the wrong display whenever the user is playing on the secondary
+     * screen of a dual-display device.
+     */
+    private inline fun buildGesture(strokes: GestureDescription.Builder.() -> Unit): GestureDescription {
+        val builder = GestureDescription.Builder()
+        builder.strokes()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                builder.setDisplayId(focusedAppDisplayId)
+            } catch (e: Throwable) {
+                Log.w(TAG, "GestureDescription.Builder.setDisplayId($focusedAppDisplayId) threw", e)
+            }
+        }
+        return builder.build()
     }
 
     @Suppress("DEPRECATION")
@@ -503,11 +728,34 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
 
     @SuppressLint("PrivateApi")
     private fun injectRawKeyEvent(event: KeyEvent) {
+        // Refresh from window topology right before we inject. This is the single
+        // chokepoint both physical-remap (onKeyEvent → evaluator → injectKeyDown/Up) and
+        // virtual-button-tap (Compose → InputDispatcher.injectKey → injectKey/injectKeyDown/Up)
+        // funnel through. Refreshing here means cross-display moves (notably the AYN
+        // Thor's "quick switch" path that skips TYPE_WINDOW_STATE_CHANGED) are caught
+        // at injection time even when no proactive event fired.
+        refreshFocusedDisplay("pre-injection")
+        setEventDisplayId(event, focusedAppDisplayId)
         injectInputEvent(event)
+    }
+
+    /**
+     * Stamp the target display onto the event before injection. Required for the
+     * AYN Thor's bottom screen — without it the system input dispatcher routes the
+     * event to the default (top) display, where Mapo, not the game, has focus.
+     */
+    private fun setEventDisplayId(event: android.view.InputEvent, displayId: Int) {
+        val method = inputEventSetDisplayIdMethod ?: return
+        try {
+            method.invoke(event, displayId)
+        } catch (e: Throwable) {
+            Log.w(TAG, "setEventDisplayId failed (displayId=$displayId)", e)
+        }
     }
 
     @SuppressLint("PrivateApi")
     private fun injectInputEvent(event: android.view.InputEvent) {
+        val displayId = readEventDisplayId(event)
         try {
             val imClass = Class.forName("android.hardware.input.InputManager")
             val im = imClass.getDeclaredMethod("getInstance").invoke(null)
@@ -516,9 +764,33 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
                 android.view.InputEvent::class.java,
                 Int::class.javaPrimitiveType
             ).invoke(im, event, 0) as? Boolean ?: false // 0 = INJECT_INPUT_EVENT_MODE_ASYNC
-            Log.d(TAG, "injectInputEvent result=$result type=${event.javaClass.simpleName} source=0x${event.source.toString(16)}")
+            Log.d(TAG, "injectInputEvent result=$result type=${event.javaClass.simpleName} source=0x${event.source.toString(16)} eventDisplay=$displayId cachedFocusedDisplay=$focusedAppDisplayId")
         } catch (e: Exception) {
             Log.e(TAG, "injectInputEvent failed: $event", e)
+        }
+    }
+
+    /**
+     * Returns the event's displayId via reflection, or [Display.INVALID_DISPLAY] if the
+     * method is unavailable or threw. Caller is responsible for treating INVALID_DISPLAY
+     * as "unknown" (don't propagate it as a routing target).
+     */
+    private fun readEventDisplayIdOrInvalid(event: android.view.InputEvent): Int {
+        val m = inputEventGetDisplayIdMethod ?: return Display.INVALID_DISPLAY
+        return try {
+            (m.invoke(event) as? Int) ?: Display.INVALID_DISPLAY
+        } catch (e: Throwable) {
+            Display.INVALID_DISPLAY
+        }
+    }
+
+    /** Same as [readEventDisplayIdOrInvalid] but formatted for logcat. */
+    private fun readEventDisplayId(event: android.view.InputEvent): String {
+        val m = inputEventGetDisplayIdMethod ?: return "?(no-method)"
+        return try {
+            (m.invoke(event) as? Int)?.toString() ?: "?(null)"
+        } catch (e: Throwable) {
+            "?(threw:${e.javaClass.simpleName})"
         }
     }
 }

@@ -32,6 +32,7 @@ import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.resolveActionSet
 import com.mapo.data.repository.AppProfileBindingRepository
 import com.mapo.data.repository.ControllerConfigRepository
+import com.mapo.data.repository.InstalledAppsRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
@@ -88,6 +89,7 @@ class MainViewModel @Inject constructor(
     private val profileRepository: ProfileRepository,
     private val controllerConfigRepository: ControllerConfigRepository,
     private val appProfileBindingRepository: AppProfileBindingRepository,
+    private val installedAppsRepository: InstalledAppsRepository,
     private val autoSwitchSettings: AutoSwitchSettings,
     private val autoSwitcher: ProfileAutoSwitcher,
     private val foregroundAppFilter: ForegroundAppFilter,
@@ -160,6 +162,13 @@ class MainViewModel @Inject constructor(
     // via `appLabels[pkg] ?: pkg` — never call PackageManager from composition.
     private val _appLabels = MutableStateFlow<Map<String, String>>(emptyMap())
     val appLabels: StateFlow<Map<String, String>> = _appLabels.asStateFlow()
+
+    // Launchable apps available to bind. Empty until `loadInstalledApps()` is
+    // called — sheet opens on demand, no point eagerly walking PackageManager.
+    private val _installedApps =
+        MutableStateFlow<List<InstalledAppsRepository.InstalledApp>>(emptyList())
+    val installedApps: StateFlow<List<InstalledAppsRepository.InstalledApp>> =
+        _installedApps.asStateFlow()
 
     val autoSwitchEvents: SharedFlow<ProfileAutoSwitcher.UiEvent> = autoSwitcher.events
 
@@ -371,6 +380,29 @@ class MainViewModel @Inject constructor(
 
     fun deleteBinding(packageName: String, subId: String = "") {
         viewModelScope.launch { appProfileBindingRepository.unbind(packageName, subId) }
+    }
+
+    /**
+     * Bind every package in [packages] to [profileId]. Used by the
+     * Auto-Switch app-picker sheet (Brick 2). Existing bindings on those
+     * packages are silently re-pointed to the new profile, mirroring
+     * single-bind semantics — the picker UI shows the user the override
+     * before they confirm.
+     */
+    fun bindAppsToProfile(profileId: Long, packages: Set<String>) {
+        if (packages.isEmpty()) return
+        viewModelScope.launch { appProfileBindingRepository.bindMany(profileId, packages) }
+    }
+
+    /**
+     * Populate [installedApps] for the app-picker sheet. Cheap to call
+     * repeatedly — the repo does a single PackageManager pass off the IO
+     * dispatcher. Called when the sheet opens.
+     */
+    fun loadInstalledApps() {
+        viewModelScope.launch {
+            _installedApps.value = installedAppsRepository.launchableApps()
+        }
     }
 
     /**

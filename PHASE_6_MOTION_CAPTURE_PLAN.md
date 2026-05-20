@@ -139,20 +139,39 @@ Compile + full unit test suite green. Worth a quick device sanity:
 5. Open a layer view → mode picker visible but dimmed (read-only by design in this brick).
 6. Existing remap behavior unchanged: bindings under the same source still fire as before.
 
-### Brick 2 — Profile↔app multi-binding editor
+### Brick 2 — Profile↔app multi-binding editor — ✅ COMPLETED
 
 **Goal:** User can add/remove app associations to a profile from inside Mapo (not only via the auto-switch create-profile prompt). `AppProfileBindingRepository` already supports many-apps-per-profile; the gap is UI.
 
-**Files:**
-- `app/src/main/java/com/mapo/ui/screen/AutoSwitchScreen.kt` — add an "Add app" affordance per profile; the existing list (lines 141–158) is delete-only today.
-- New: `app/src/main/java/com/mapo/ui/screen/AppPickerSheet.kt` — M3 `ModalBottomSheet` listing installed launchable packages, filtered by query, single- or multi-select.
-- `app/src/main/java/com/mapo/ui/viewmodel/AutoSwitchViewModel.kt` — `bindMany(profileId, packages)` and an `availableApps` StateFlow.
-- `app/src/main/java/com/mapo/data/repository/AppProfileBindingRepository.kt` — optional atomic `bindMany`; no schema change.
-- New: `app/src/test/java/com/mapo/ui/viewmodel/AutoSwitchViewModelMultiBindTest.kt`.
+**Files actually landed:**
+- `app/src/main/AndroidManifest.xml` — added `<queries>` block for `ACTION_MAIN` / `CATEGORY_LAUNCHER` (mandatory on Android 11+ to enumerate other apps; narrower than `QUERY_ALL_PACKAGES`).
+- New: `app/src/main/java/com/mapo/data/repository/InstalledAppsRepository.kt` — `@Singleton` with `launchableApps()` suspend fn. Single PM pass off the IO dispatcher; dedupes by package; sorts by label.
+- `app/src/main/java/com/mapo/data/repository/AppProfileBindingRepository.kt` — new `bindMany(profileId, packageNames)`. Loop over `dao.upsert` (REPLACE semantics so re-binding re-points the package).
+- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` — new `installedAppsRepository` injection, `installedApps: StateFlow<List<InstalledApp>>`, `bindAppsToProfile(profileId, packages)`, `loadInstalledApps()`. (Note: the plan called for a separate `AutoSwitchViewModel` but the existing auto-switch surface lives in `MainViewModel`; we kept that pattern rather than fork off a new VM.)
+- New: `app/src/main/java/com/mapo/ui/screen/AppPickerSheet.kt` — M3 `ModalBottomSheet` with `OutlinedTextField` search, multi-select checkboxes, "already bound" / "bound elsewhere" supporting text. `surfaceContainerLow` per M3 standards memo; `LazyColumn` with stable keys.
+- `app/src/main/java/com/mapo/ui/screen/AutoSwitchScreen.kt` — restructured from flat binding list into per-profile sections. Each section has a header with profile name + "Add app" `TextButton`; an empty-state helper subtext when the profile has no bindings (per list-item-helper-subtext memo); bindings rendered as before. Picker sheet is opened by tapping "Add app", parented by `pickerTargetProfile` state.
+- `app/src/main/res/values/strings.xml` — added 12 new strings under the "Brick 2 multi-binding editor" comment.
+- `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` — updated 3 `MainViewModel(...)` construction sites (setUp + rebuildSubject + the inline rebuild in `viewingActionSetId_resetsToNull...`) to pass the new `installedAppsRepository` mock.
+- New: `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelMultiBindTest.kt` — 3 tests: forwards-to-repository, empty-set-is-no-op, loadInstalledApps populates StateFlow.
 
 **Exit criteria:** Without launching a game, user can add apps to a profile; the binding shows in the list and is picked up by `ProfileAutoSwitcher` on next foreground change. Sequenced here so Brick 4's gating predicate has a UI to populate it.
 
-**Risks:** PackageManager label enumeration cost — many devices list 200+ launchable apps. Sheet uses `LazyColumn` + label caching (PM `getApplicationLabel` is expensive in a loop).
+**Deviations / decisions:**
+- No new `AutoSwitchViewModel`. Auto-switch state lives in `MainViewModel`; adding the multi-bind functionality there keeps a single source of truth and avoids the cross-VM data plumbing for `appLabels` / `appProfileBindings`.
+- Picker reloads installed apps on every open (cheap PM pass off IO dispatcher) rather than caching. Live install/uninstall pickup beats a stale cache.
+- `bindMany` is a loop of `upsert`, not a transactional `@Transaction` Room method. The Auto-Switch screen is informational, not safety-critical; partial failure (extremely unlikely on a single connection) is preferable to introducing a transactional DAO method just for this.
+- Per-profile grouping in the AutoSwitchScreen list. Plan said "Add app affordance per profile"; grouping into profile sections (with the affordance in the section header) is the clearest M3 UX for that.
+
+**Hand-off — device verification:**
+1. Open drawer → Auto-switch → screen now shows each profile as a section header with an "Add app" text button.
+2. Tap "Add app" → bottom sheet opens listing every launchable app, sorted by label, with a search field.
+3. Type a partial name → list filters.
+4. Multi-select 2-3 apps → confirm button reads "Bind N apps" → tap → sheet closes, the bindings appear under the chosen profile.
+5. Re-open picker for the same profile → previously-bound apps show "Already bound here" subtext; apps bound to a different profile show "Currently bound to '…' — will switch".
+6. Background app, foreground a bound app → profile switches (existing `ProfileAutoSwitcher` path; no regression).
+7. Profile with zero bindings shows helper subtext "No apps bound to this profile yet." instead of going entirely blank.
+
+**Risks:** PackageManager label enumeration cost — many devices list 200+ launchable apps. Sheet uses `LazyColumn` + label resolution in a single pass off the IO dispatcher.
 
 ### Brick 3 — `MotionCaptureOverlayManager` (production focused overlay, attach/detach only)
 

@@ -8,6 +8,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Visibility into launchable activities so the app-picker in Auto-Switch
+         can enumerate installed games / apps on Android 11+ (package-visibility
+         restrictions). Narrowest scope that satisfies the use case — we don't
+         need QUERY_ALL_PACKAGES. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:name=".MapoApplication"
         android:allowBackup="false"

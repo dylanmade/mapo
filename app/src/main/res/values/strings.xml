@@ -28,6 +28,20 @@
     <string name="auto_switch_prompt_no">No</string>
     <string name="auto_switch_prompt_never">Never for this app</string>
 
+    <!-- Brick 2 multi-binding editor (per-profile app picker). -->
+    <string name="auto_switch_add_app">Add app</string>
+    <string name="auto_switch_add_app_to_profile">Add app to “%1$s”</string>
+    <string name="auto_switch_picker_title">Pick apps</string>
+    <string name="auto_switch_picker_subtitle">Selected apps will be bound to “%1$s”.</string>
+    <string name="auto_switch_picker_search_hint">Search apps</string>
+    <string name="auto_switch_picker_confirm">Bind %1$d apps</string>
+    <string name="auto_switch_picker_confirm_one">Bind 1 app</string>
+    <string name="auto_switch_picker_loading">Loading installed apps…</string>
+    <string name="auto_switch_picker_empty">No apps found.</string>
+    <string name="auto_switch_picker_already_bound">Already bound here</string>
+    <string name="auto_switch_picker_bound_elsewhere">Currently bound to “%1$s” — will switch</string>
+    <string name="auto_switch_profile_section_empty">No apps bound to this profile yet.</string>
+
     <string name="blocklist_drawer_label">Edit blocklist</string>
     <string name="theme_studio_drawer_label">Theme Studio</string>
     <string name="keyboard_overlay_tile_label">Mapo keyboard</string>

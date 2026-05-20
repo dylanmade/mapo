@@ -13,6 +13,7 @@ import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.repository.AppProfileBindingRepository
 import com.mapo.data.repository.ControllerConfigRepository
+import com.mapo.data.repository.InstalledAppsRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
@@ -57,6 +58,7 @@ class MainViewModelTest {
     private lateinit var profileRepo: ProfileRepository
     private lateinit var controllerConfigRepo: ControllerConfigRepository
     private lateinit var bindingRepo: AppProfileBindingRepository
+    private lateinit var installedAppsRepo: InstalledAppsRepository
     private lateinit var settings: AutoSwitchSettings
     private lateinit var autoSwitcher: ProfileAutoSwitcher
     private lateinit var filter: ForegroundAppFilter
@@ -88,6 +90,7 @@ class MainViewModelTest {
         profileRepo = mockk(relaxed = true)
         controllerConfigRepo = mockk(relaxed = true)
         bindingRepo = mockk(relaxed = true)
+        installedAppsRepo = mockk(relaxed = true)
         settings = mockk(relaxed = true)
         autoSwitcher = mockk(relaxed = true)
         filter = mockk(relaxed = true)
@@ -122,6 +125,7 @@ class MainViewModelTest {
             profileRepository = profileRepo,
             controllerConfigRepository = controllerConfigRepo,
             appProfileBindingRepository = bindingRepo,
+            installedAppsRepository = installedAppsRepo,
             autoSwitchSettings = settings,
             autoSwitcher = autoSwitcher,
             foregroundAppFilter = filter,
@@ -492,6 +496,7 @@ class MainViewModelTest {
             profileRepository = profileRepo,
             controllerConfigRepository = controllerConfigRepo,
             appProfileBindingRepository = bindingRepo,
+            installedAppsRepository = installedAppsRepo,
             autoSwitchSettings = settings,
             autoSwitcher = autoSwitcher,
             foregroundAppFilter = filter,
@@ -896,6 +901,7 @@ class MainViewModelTest {
         profileRepository = profileRepo,
         controllerConfigRepository = controllerConfigRepo,
         appProfileBindingRepository = bindingRepo,
+        installedAppsRepository = installedAppsRepo,
         autoSwitchSettings = settings,
         autoSwitcher = autoSwitcher,
         foregroundAppFilter = filter,

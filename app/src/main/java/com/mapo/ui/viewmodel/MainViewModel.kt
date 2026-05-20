@@ -41,6 +41,7 @@ import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.InputDispatcher
+import com.mapo.service.input.MotionProbeAppOverlay
 import com.mapo.service.input.toCompiled
 import com.mapo.service.keyboard.KeyboardController
 import com.mapo.service.overlay.keyboard.KeyboardOverlayPresenter
@@ -93,6 +94,7 @@ class MainViewModel @Inject constructor(
     private val keyboardTemplateRepository: KeyboardTemplateRepository,
     private val inputDispatcher: InputDispatcher,
     private val keyboardOverlayPresenter: KeyboardOverlayPresenter,
+    private val motionProbeAppOverlay: MotionProbeAppOverlay,
     private val keyboardController: KeyboardController,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel(), KeyboardHostState {
@@ -1269,5 +1271,16 @@ class MainViewModel @Inject constructor(
      */
     fun toggleKeyboardOverlay() {
         keyboardOverlayPresenter.toggle()
+    }
+
+    /**
+     * Debug-only — toggles the motion-capture probe (focused TYPE_APPLICATION_OVERLAY)
+     * used to characterize focus side effects before committing to a Phase 6 design.
+     * Remove once that decision is locked.
+     */
+    val motionProbeActive: StateFlow<Boolean> = motionProbeAppOverlay.active
+
+    fun toggleMotionProbe() {
+        motionProbeAppOverlay.toggle()
     }
 }

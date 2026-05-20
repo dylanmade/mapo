@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -33,6 +34,7 @@ fun ProfileDrawerContent(
     onOpenBlocklist: () -> Unit,
     onOpenThemeStudio: () -> Unit,
     onToggleKeyboardOverlay: () -> Unit,
+    onToggleMotionProbe: () -> Unit,
 ) {
     // surfaceContainerHigh — drawer sheet (canonical M3 elevated container per Reply)
     ModalDrawerSheet(
@@ -105,6 +107,17 @@ fun ProfileDrawerContent(
                     selected = false,
                     onClick = onToggleKeyboardOverlay,
                     icon = { Icon(Icons.Default.Keyboard, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+            // Debug-only — focused TYPE_APPLICATION_OVERLAY probe for Phase 6
+            // motion-capture side-effect characterization. Remove with the probe.
+            item {
+                NavigationDrawerItem(
+                    label = { Text(stringResource(R.string.motion_probe_drawer_label)) },
+                    selected = false,
+                    onClick = onToggleMotionProbe,
+                    icon = { Icon(Icons.Default.BugReport, contentDescription = null) },
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
             }

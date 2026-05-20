@@ -300,6 +300,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     scope.launch { drawerState.close() }
                     viewModel.toggleKeyboardOverlay()
                 },
+                onToggleMotionProbe = {
+                    scope.launch { drawerState.close() }
+                    viewModel.toggleMotionProbe()
+                },
             )
         }
     ) {

@@ -32,6 +32,7 @@
     <string name="theme_studio_drawer_label">Theme Studio</string>
     <string name="keyboard_overlay_tile_label">Mapo keyboard</string>
     <string name="keyboard_overlay_drawer_label">Toggle keyboard overlay</string>
+    <string name="motion_probe_drawer_label">Toggle motion probe (debug)</string>
     <string name="blocklist_screen_title">Blocklist</string>
     <string name="blocklist_header">Apps Mapo will never prompt you about</string>
     <string name="blocklist_empty">No apps blocked. When you tap “Never for this app” on a prompt, the app will appear here.</string>

@@ -2,6 +2,7 @@ package com.mapo.service.input
 
 import android.util.Log
 import com.mapo.data.model.steam.ActivatorType
+import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.InputSource
@@ -81,10 +82,18 @@ data class InputAddress(
     val inputKey: String,
 )
 
-/** All activators wired to one [InputAddress]. */
+/**
+ * All activators wired to one [InputAddress], plus the [BindingMode] this address's
+ * binding group was configured under. The mode determines how the evaluator interprets
+ * the source's events — digital modes route directly via [onKeyEvent]; analog modes
+ * (`JOYSTICK_*`, `MOUSE_*`, `TRIGGER` soft-press, etc.) consume `MotionEvent`s through
+ * the source's [com.mapo.service.input.modes.SourceMode] handler. Brick 1 of Phase 6:
+ * mode is now carried in the compiled snapshot; runtime consumption lands in Brick 5+.
+ */
 data class CompiledInput(
     val groupInputId: Long,
     val activators: List<CompiledActivator>,
+    val mode: BindingMode,
 )
 
 /**
@@ -295,7 +304,11 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                         settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson),
                     )
                 }
-                inputs[address] = CompiledInput(inputGraph.input.id, compiledActivators)
+                inputs[address] = CompiledInput(
+                    groupInputId = inputGraph.input.id,
+                    activators = compiledActivators,
+                    mode = preset.group.group.mode,
+                )
             }
         }
         return inputs

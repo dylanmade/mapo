@@ -89,6 +89,22 @@ enum class InputSource {
     GYRO,
 }
 
+fun BindingMode.displayName(): String = when (this) {
+    BindingMode.SINGLE_BUTTON -> "Single Button"
+    BindingMode.BUTTON_PAD -> "Button Pad"
+    BindingMode.DPAD -> "D-Pad"
+    BindingMode.JOYSTICK_MOVE -> "Joystick Move"
+    BindingMode.JOYSTICK_CAMERA -> "Joystick Camera"
+    BindingMode.MOUSE_JOYSTICK -> "Mouse Joystick"
+    BindingMode.ABSOLUTE_MOUSE -> "Absolute Mouse"
+    BindingMode.TRIGGER -> "Trigger"
+    BindingMode.SCROLL_WHEEL -> "Scroll Wheel"
+    BindingMode.TWO_D_SCROLL -> "2D Scroll"
+    BindingMode.REFERENCE -> "Reference"
+    BindingMode.RADIAL_MENU -> "Radial Menu"
+    BindingMode.TOUCH_MENU -> "Touch Menu"
+}
+
 fun InputSource.displayName(): String = when (this) {
     InputSource.BUTTON_DIAMOND -> "Face Buttons"
     InputSource.DPAD -> "D-Pad"

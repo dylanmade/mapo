@@ -32,7 +32,7 @@ class FilterToOverridesTest {
     @Test
     fun dropsRowsWithoutOverride_andTheirSubheader() {
         val items = listOf(
-            RemapPaneItem.Subheader("face.header", "Face Buttons", "Button Pad"),
+            RemapPaneItem.Subheader("face.header", "Face Buttons"),
             RemapPaneItem.BindingRow("face.a", "A", InputSource.BUTTON_DIAMOND, "button_a"),
             RemapPaneItem.BindingRow("face.b", "B", InputSource.BUTTON_DIAMOND, "button_b"),
         )
@@ -47,7 +47,7 @@ class FilterToOverridesTest {
     @Test
     fun keepsOverriddenRow_andResurrectsItsSubheader() {
         val items = listOf(
-            RemapPaneItem.Subheader("face.header", "Face Buttons", "Button Pad"),
+            RemapPaneItem.Subheader("face.header", "Face Buttons"),
             RemapPaneItem.BindingRow("face.a", "A", InputSource.BUTTON_DIAMOND, "button_a"),
             RemapPaneItem.BindingRow("face.b", "B", InputSource.BUTTON_DIAMOND, "button_b"),
         )
@@ -63,9 +63,9 @@ class FilterToOverridesTest {
     @Test
     fun dropsSubheaderWithNoSurvivingRows_evenWhenLaterSubheaderHasSurvivors() {
         val items = listOf(
-            RemapPaneItem.Subheader("face.header", "Face Buttons", "Button Pad"),
+            RemapPaneItem.Subheader("face.header", "Face Buttons"),
             RemapPaneItem.BindingRow("face.a", "A", InputSource.BUTTON_DIAMOND, "button_a"),
-            RemapPaneItem.Subheader("bumpers.header", "Bumpers", "Single Button"),
+            RemapPaneItem.Subheader("bumpers.header", "Bumpers"),
             RemapPaneItem.BindingRow("bumpers.l1", "L1", InputSource.LEFT_BUMPER, "click"),
         )
         // Override on L1 only — Face Buttons subheader should drop entirely.
@@ -79,9 +79,9 @@ class FilterToOverridesTest {
     @Test
     fun keepsBothSubheadersWhenEachHasASurvivor() {
         val items = listOf(
-            RemapPaneItem.Subheader("face.header", "Face Buttons", "Button Pad"),
+            RemapPaneItem.Subheader("face.header", "Face Buttons"),
             RemapPaneItem.BindingRow("face.a", "A", InputSource.BUTTON_DIAMOND, "button_a"),
-            RemapPaneItem.Subheader("bumpers.header", "Bumpers", "Single Button"),
+            RemapPaneItem.Subheader("bumpers.header", "Bumpers"),
             RemapPaneItem.BindingRow("bumpers.l1", "L1", InputSource.LEFT_BUMPER, "click"),
         )
         val layer = layerGraphWith(
@@ -102,7 +102,7 @@ class FilterToOverridesTest {
     @Test
     fun disabledRows_alwaysHidden() {
         val items = listOf(
-            RemapPaneItem.Subheader("triggers.header", "Triggers", "Trigger"),
+            RemapPaneItem.Subheader("triggers.header", "Triggers"),
             RemapPaneItem.DisabledRow("triggers.l2soft", "L2 Soft Pull"),
             RemapPaneItem.BindingRow("triggers.l2full", "L2 Full Pull", InputSource.LEFT_TRIGGER, "click"),
         )
@@ -119,9 +119,9 @@ class FilterToOverridesTest {
         // Verifies the "pendingSubheader" reset semantics: when face.a doesn't pass,
         // the queued Face Buttons subheader must NOT carry over into bumpers.
         val items = listOf(
-            RemapPaneItem.Subheader("face.header", "Face Buttons", "Button Pad"),
+            RemapPaneItem.Subheader("face.header", "Face Buttons"),
             RemapPaneItem.BindingRow("face.a", "A", InputSource.BUTTON_DIAMOND, "button_a"),
-            RemapPaneItem.Subheader("bumpers.header", "Bumpers", "Single Button"),
+            RemapPaneItem.Subheader("bumpers.header", "Bumpers"),
             RemapPaneItem.BindingRow("bumpers.r1", "R1", InputSource.RIGHT_BUMPER, "click"),
         )
         val layer = layerGraphWith(overrides = listOf(InputSource.RIGHT_BUMPER to "click"))

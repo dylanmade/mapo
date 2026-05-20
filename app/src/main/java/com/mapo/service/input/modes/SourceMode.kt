@@ -1,6 +1,7 @@
 package com.mapo.service.input.modes
 
 import com.mapo.data.model.steam.BindingMode
+import com.mapo.data.model.steam.InputSource
 
 /**
  * Runtime handler for a binding_group's [BindingMode] — the foundation laid by Brick 6.1
@@ -160,4 +161,43 @@ fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.REFERENCE,
     BindingMode.RADIAL_MENU,
     BindingMode.TOUCH_MENU -> StubMode(this)
+}
+
+/**
+ * Catalog of which [BindingMode]s the user can pick for each physical [InputSource]
+ * via the Remap Controls subheader mode dropdown (Phase 6 Brick 1).
+ *
+ * Returns an empty list for sources that don't expose a mode choice (a single-button
+ * bumper has only one sensible mode, so we hide the picker rather than show a
+ * one-item dropdown). Sources with multiple valid modes show the dropdown.
+ *
+ * Modes that aren't yet implemented at runtime still appear here — selecting one
+ * persists the mode but routes through [StubMode] at evaluation time until the
+ * matching analog handler lands. The picker is the wire; the handler ships per
+ * later brick.
+ */
+object SourceModeCatalog {
+    fun modesValidFor(source: InputSource): List<BindingMode> = when (source) {
+        InputSource.BUTTON_DIAMOND -> listOf(BindingMode.BUTTON_PAD)
+        InputSource.DPAD -> listOf(
+            BindingMode.DPAD,
+            BindingMode.JOYSTICK_MOVE,
+            BindingMode.MOUSE_JOYSTICK,
+            BindingMode.SCROLL_WHEEL,
+        )
+        InputSource.LEFT_BUMPER, InputSource.RIGHT_BUMPER -> listOf(BindingMode.SINGLE_BUTTON)
+        InputSource.LEFT_TRIGGER, InputSource.RIGHT_TRIGGER -> listOf(
+            BindingMode.TRIGGER,
+            BindingMode.SINGLE_BUTTON,
+        )
+        InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK -> listOf(
+            BindingMode.JOYSTICK_MOVE,
+            BindingMode.JOYSTICK_CAMERA,
+            BindingMode.MOUSE_JOYSTICK,
+            BindingMode.DPAD,
+            BindingMode.SCROLL_WHEEL,
+            BindingMode.ABSOLUTE_MOUSE,
+        )
+        else -> emptyList()
+    }
 }

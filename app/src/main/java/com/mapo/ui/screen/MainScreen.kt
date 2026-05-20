@@ -534,6 +534,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onClearLayerOverride = { layerId, inputSource, groupInputKey ->
                         viewModel.clearLayerOverride(layerId, inputSource, groupInputKey)
                     },
+                    onSetBindingGroupMode = { bindingGroupId, mode ->
+                        viewModel.setBindingGroupMode(bindingGroupId, mode)
+                    },
                     onBack = { navController.popBackStack() },
                     onOpenInputEditor = { inputSource, groupInputKey, label ->
                         // Brick 5.5.c: in overlay mode, eagerly materialize the layer

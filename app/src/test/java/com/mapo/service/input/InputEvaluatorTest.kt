@@ -1,6 +1,7 @@
 package com.mapo.service.input
 
 import com.mapo.data.model.steam.ActivatorType
+import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.InputSource
 import io.mockk.every
@@ -970,13 +971,13 @@ class InputEvaluatorTest {
         layers: List<Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>>,
     ): CompiledConfig {
         val baseInputs = base.associate { (addr, activators) ->
-            addr to CompiledInput(groupInputId = 0L, activators = activators)
+            addr to CompiledInput(groupInputId = 0L, activators = activators, mode = BindingMode.SINGLE_BUTTON)
         }
         val compiledLayers = layers.associate { (layerId, entries) ->
             layerId to CompiledLayer(
                 layerId = layerId,
                 inputs = entries.associate { (addr, activators) ->
-                    addr to CompiledInput(groupInputId = 0L, activators = activators)
+                    addr to CompiledInput(groupInputId = 0L, activators = activators, mode = BindingMode.SINGLE_BUTTON)
                 },
             )
         }
@@ -1344,13 +1345,13 @@ class InputEvaluatorTest {
             layers: List<Pair<Long, List<Pair<InputAddress, List<CompiledActivator>>>>>,
         ): CompiledActionSet {
             val baseInputs = base.associate { (addr, activators) ->
-                addr to CompiledInput(groupInputId = 0L, activators = activators)
+                addr to CompiledInput(groupInputId = 0L, activators = activators, mode = BindingMode.SINGLE_BUTTON)
             }
             val compiledLayers = layers.associate { (layerId, entries) ->
                 layerId to CompiledLayer(
                     layerId = layerId,
                     inputs = entries.associate { (addr, activators) ->
-                        addr to CompiledInput(groupInputId = 0L, activators = activators)
+                        addr to CompiledInput(groupInputId = 0L, activators = activators, mode = BindingMode.SINGLE_BUTTON)
                     },
                 )
             }
@@ -1436,7 +1437,7 @@ class InputEvaluatorTest {
         vararg entries: Pair<InputAddress, List<CompiledActivator>>,
     ): CompiledConfig {
         val inputs = entries.associate { (addr, activators) ->
-            addr to CompiledInput(groupInputId = 0L, activators = activators)
+            addr to CompiledInput(groupInputId = 0L, activators = activators, mode = BindingMode.SINGLE_BUTTON)
         }
         return CompiledConfig(
             startingActionSetId = setId,
@@ -1457,7 +1458,7 @@ class InputEvaluatorTest {
             CompiledActionSet(
                 setId,
                 entries.associate { (addr, activators) ->
-                    addr to CompiledInput(groupInputId = 0L, activators = activators)
+                    addr to CompiledInput(groupInputId = 0L, activators = activators, mode = BindingMode.SINGLE_BUTTON)
                 },
             )
         return CompiledConfig(

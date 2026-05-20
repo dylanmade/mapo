@@ -822,6 +822,82 @@ class CompiledConfigTest {
         assertNotNull(compiled.lookup(InputSource.LEFT_JOYSTICK, "totally_made_up"))
     }
 
+    @Test
+    fun bindingGroupMode_propagatesToCompiledInput() {
+        // Phase 6 Brick 1: BindingGroup.mode is carried into the compiled snapshot so the
+        // runtime evaluator can dispatch motion events through the correct SourceMode.
+        val cfg = configWith(
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.LEFT_TRIGGER, state = "active",
+                    group = groupWith(
+                        mode = BindingMode.TRIGGER,
+                        inputs = listOf(
+                            inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "SPACE"))))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val compiled = cfg.toCompiled()
+        val hit = compiled.lookup(InputSource.LEFT_TRIGGER, "click")
+
+        assertNotNull(hit)
+        assertEquals(BindingMode.TRIGGER, hit!!.mode)
+    }
+
+    @Test
+    fun bindingGroupMode_layerOverride_carriesItsOwnMode() {
+        // Layer overrides may use a different mode from the base set's group — when the
+        // user reconfigures a source per-layer (FC1, Steam-Input-parity), the compile
+        // step must carry each scope's mode independently. Brick 1 just verifies the
+        // mechanics; analog-mode runtime behavior lands later.
+        val setWithOverlay = ActionSetGraph(
+            actionSet = ActionSet(id = 11L, controllerProfileId = 1L, name = "default", title = "Default"),
+            layers = listOf(
+                ActionLayerGraph(
+                    layer = ActionLayer(id = 300L, parentActionSetId = 11L, name = "scope", title = "Scope"),
+                    bindingGroups = emptyList(),
+                    preset = listOf(
+                        presetEntry(
+                            inputSource = InputSource.RIGHT_JOYSTICK, state = "active",
+                            group = groupWith(
+                                mode = BindingMode.MOUSE_JOYSTICK,
+                                inputs = listOf(
+                                    inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.MOUSE_BUTTON, "MOUSE_RIGHT"))))),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            preset = listOf(
+                presetEntry(
+                    inputSource = InputSource.RIGHT_JOYSTICK, state = "active",
+                    group = groupWith(
+                        mode = BindingMode.JOYSTICK_CAMERA,
+                        inputs = listOf(
+                            inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "F"))))),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val cfg = ControllerConfig(
+            controllerProfile = sampleControllerProfile(),
+            actionSets = listOf(setWithOverlay),
+        )
+
+        val compiled = cfg.toCompiled()
+        val compiledSet = compiled.sets.getValue(11L)
+        val baseHit = compiledSet.inputs[InputAddress(InputSource.RIGHT_JOYSTICK, "click")]
+        val layerHit = compiledSet.layers.getValue(300L).inputs[InputAddress(InputSource.RIGHT_JOYSTICK, "click")]
+
+        assertEquals(BindingMode.JOYSTICK_CAMERA, baseHit!!.mode)
+        assertEquals(BindingMode.MOUSE_JOYSTICK, layerHit!!.mode)
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun sampleControllerProfile() = ControllerProfile(

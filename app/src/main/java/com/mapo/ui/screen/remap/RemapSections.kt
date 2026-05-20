@@ -18,11 +18,18 @@ import com.mapo.ui.component.layout.SectionedPaneItem
 sealed class RemapPaneItem {
     abstract val key: String
 
-    /** Section subheader with a (disabled) mode-dropdown affordance. */
+    /**
+     * Section subheader with an optional mode-dropdown affordance.
+     *
+     * When [inputSource] is non-null the subheader renders a mode picker bound to the
+     * source's [com.mapo.data.model.steam.BindingGroup.mode]; when null (e.g. the
+     * Bumpers / Menu Buttons sections, which span multiple sources that all use
+     * `SINGLE_BUTTON`), no picker is rendered.
+     */
     data class Subheader(
         override val key: String,
         val title: String,
-        val modeDropdownLabel: String,
+        val inputSource: InputSource? = null,
     ) : RemapPaneItem()
 
     /** A live, bindable row. Resolves to one activator in the active config. */
@@ -60,39 +67,41 @@ object RemapSections {
 
     val contentBySection: Map<String, List<RemapPaneItem>> = mapOf(
         SECTION_BUTTONS to listOf(
-            RemapPaneItem.Subheader("buttons.face.header", "Face Buttons", "Button Pad"),
+            RemapPaneItem.Subheader("buttons.face.header", "Face Buttons", InputSource.BUTTON_DIAMOND),
             RemapPaneItem.BindingRow("buttons.face.a", "A", InputSource.BUTTON_DIAMOND, "button_a"),
             RemapPaneItem.BindingRow("buttons.face.b", "B", InputSource.BUTTON_DIAMOND, "button_b"),
             RemapPaneItem.BindingRow("buttons.face.x", "X", InputSource.BUTTON_DIAMOND, "button_x"),
             RemapPaneItem.BindingRow("buttons.face.y", "Y", InputSource.BUTTON_DIAMOND, "button_y"),
-            RemapPaneItem.Subheader("buttons.bumpers.header", "Bumpers", "Single Button"),
+            // Bumpers + Menu Buttons span multiple sources, each individually
+            // SINGLE_BUTTON — no mode choice to surface here.
+            RemapPaneItem.Subheader("buttons.bumpers.header", "Bumpers"),
             RemapPaneItem.BindingRow("buttons.bumpers.l1", "L1", InputSource.LEFT_BUMPER, "click"),
             RemapPaneItem.BindingRow("buttons.bumpers.r1", "R1", InputSource.RIGHT_BUMPER, "click"),
-            RemapPaneItem.Subheader("buttons.menu.header", "Menu Buttons", "Single Button"),
+            RemapPaneItem.Subheader("buttons.menu.header", "Menu Buttons"),
             RemapPaneItem.BindingRow("buttons.menu.start", "Start", InputSource.SWITCH_START, "click"),
             RemapPaneItem.BindingRow("buttons.menu.select", "Select", InputSource.SWITCH_SELECT, "click"),
         ),
         SECTION_DPAD to listOf(
-            RemapPaneItem.Subheader("dpad.header", "Directional Pad Behavior", "D-Pad"),
+            RemapPaneItem.Subheader("dpad.header", "Directional Pad Behavior", InputSource.DPAD),
             RemapPaneItem.BindingRow("dpad.up", "D-Pad Up", InputSource.DPAD, "dpad_north"),
             RemapPaneItem.BindingRow("dpad.down", "D-Pad Down", InputSource.DPAD, "dpad_south"),
             RemapPaneItem.BindingRow("dpad.left", "D-Pad Left", InputSource.DPAD, "dpad_west"),
             RemapPaneItem.BindingRow("dpad.right", "D-Pad Right", InputSource.DPAD, "dpad_east"),
         ),
         SECTION_TRIGGERS to listOf(
-            RemapPaneItem.Subheader("triggers.left.header", "Left Trigger Behavior", "Trigger"),
+            RemapPaneItem.Subheader("triggers.left.header", "Left Trigger Behavior", InputSource.LEFT_TRIGGER),
             RemapPaneItem.BindingRow("triggers.left.full", "L2 Full Pull", InputSource.LEFT_TRIGGER, "click"),
             RemapPaneItem.DisabledRow("triggers.left.soft", "L2 Soft Pull"),
             RemapPaneItem.DisabledRow("triggers.left.analog", "Analog Output Trigger"),
-            RemapPaneItem.Subheader("triggers.right.header", "Right Trigger Behavior", "Trigger"),
+            RemapPaneItem.Subheader("triggers.right.header", "Right Trigger Behavior", InputSource.RIGHT_TRIGGER),
             RemapPaneItem.BindingRow("triggers.right.full", "R2 Full Pull", InputSource.RIGHT_TRIGGER, "click"),
             RemapPaneItem.DisabledRow("triggers.right.soft", "R2 Soft Pull"),
             RemapPaneItem.DisabledRow("triggers.right.analog", "Analog Output Trigger"),
         ),
         SECTION_JOYSTICKS to listOf(
-            RemapPaneItem.Subheader("joysticks.left.header", "Left Joystick Behavior", "Joystick Move"),
+            RemapPaneItem.Subheader("joysticks.left.header", "Left Joystick Behavior", InputSource.LEFT_JOYSTICK),
             RemapPaneItem.BindingRow("joysticks.left.click", "L3 (Stick Click)", InputSource.LEFT_JOYSTICK, "click"),
-            RemapPaneItem.Subheader("joysticks.right.header", "Right Joystick Behavior", "Joystick Move"),
+            RemapPaneItem.Subheader("joysticks.right.header", "Right Joystick Behavior", InputSource.RIGHT_JOYSTICK),
             RemapPaneItem.BindingRow("joysticks.right.click", "R3 (Stick Click)", InputSource.RIGHT_JOYSTICK, "click"),
         ),
         // Gyro: rail entry is disabled. If the user lands on the section anyway,

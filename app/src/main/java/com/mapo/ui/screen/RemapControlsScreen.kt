@@ -50,10 +50,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
+import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
+import com.mapo.data.model.steam.InputSource
 import com.mapo.data.model.steam.displayLabel
 import com.mapo.data.model.steam.displayName
+import com.mapo.service.input.modes.SourceModeCatalog
 import com.mapo.ui.component.layout.SectionedListDetailPane
 import com.mapo.ui.screen.remap.RemapPaneItem
 import com.mapo.ui.screen.remap.RemapSections
@@ -78,6 +81,7 @@ fun RemapControlsScreen(
     onDuplicateLayer: (sourceLayerId: Long, newTitle: String) -> Unit = { _, _ -> },
     onDeleteLayer: (layerId: Long) -> Unit = {},
     onClearLayerOverride: (layerId: Long, inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit = { _, _, _ -> },
+    onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit = { _, _ -> },
 ) {
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
 
@@ -160,6 +164,7 @@ fun RemapControlsScreen(
                     val layerId = viewingLayer?.layer?.id ?: return@RemapDetailPane
                     onClearLayerOverride(layerId, inputSource, groupInputKey)
                 },
+                onSetBindingGroupMode = onSetBindingGroupMode,
             )
         }
     }
@@ -573,6 +578,7 @@ private fun RemapDetailPane(
     firstRowFocusRequester: FocusRequester,
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
     onClearOverride: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit,
+    onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
 ) {
     val rawItems = RemapSections.contentBySection[sectionId]
 
@@ -616,7 +622,12 @@ private fun RemapDetailPane(
                     Modifier.focusRequester(firstRowFocusRequester)
                 } else Modifier
                 when (item) {
-                    is RemapPaneItem.Subheader -> SubheaderRow(item)
+                    is RemapPaneItem.Subheader -> SubheaderRow(
+                        item = item,
+                        viewingSet = viewingSet,
+                        viewingLayer = viewingLayer,
+                        onSetBindingGroupMode = onSetBindingGroupMode,
+                    )
                     is RemapPaneItem.BindingRow -> BindingRowItem(
                         item = item,
                         viewingSet = viewingSet,
@@ -698,7 +709,12 @@ private fun OverridesFilterToggle(
 }
 
 @Composable
-private fun SubheaderRow(item: RemapPaneItem.Subheader) {
+private fun SubheaderRow(
+    item: RemapPaneItem.Subheader,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
+    onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -709,36 +725,78 @@ private fun SubheaderRow(item: RemapPaneItem.Subheader) {
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(4.dp))
-        // Disabled mode-dropdown affordance. Lands the visual real estate now; Phase 6
-        // wires it to a real picker.
-        DisabledModeDropdown(item.modeDropdownLabel)
+        val source = item.inputSource
+        if (source != null && viewingSet != null) {
+            // Phase 6 Brick 1: real mode dropdown. Resolves the effective mode from
+            // (a) the viewing layer's override, falling back to (b) the base set.
+            // Layer-mode-override editing isn't exposed yet — the picker is read-only
+            // when a layer is being viewed and the source has no layer override; the
+            // user changes mode by switching back to the base set's view.
+            val setBindingGroup = viewingSet.presetFor(source)?.group?.group
+            val layerBindingGroup = viewingLayer?.presetFor(source)?.group?.group
+            val effectiveGroup = layerBindingGroup ?: setBindingGroup
+            val validModes = SourceModeCatalog.modesValidFor(source)
+            if (effectiveGroup != null && validModes.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                val pickerEnabled = viewingLayer == null && validModes.size > 1
+                ModePicker(
+                    currentMode = effectiveGroup.mode,
+                    validModes = validModes,
+                    enabled = pickerEnabled,
+                    onPick = { mode -> onSetBindingGroupMode(effectiveGroup.id, mode) },
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun DisabledModeDropdown(label: String) {
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.alpha(0.5f),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+private fun ModePicker(
+    currentMode: BindingMode,
+    validModes: List<BindingMode>,
+    enabled: Boolean,
+    onPick: (BindingMode) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Surface(
+            shape = MaterialTheme.shapes.small,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier
+                .alpha(if (enabled) 1.0f else 0.5f)
+                .clickable(enabled = enabled) { expanded = true },
         ) {
-            Text(
-                text = "Mode: $label",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(4.dp))
-            Icon(
-                imageVector = Icons.Filled.ArrowDropDown,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Mode: ${currentMode.displayName()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.Filled.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            validModes.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(mode.displayName()) },
+                    onClick = {
+                        expanded = false
+                        if (mode != currentMode) onPick(mode)
+                    },
+                )
+            }
         }
     }
 }

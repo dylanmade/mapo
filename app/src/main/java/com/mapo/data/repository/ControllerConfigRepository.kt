@@ -794,6 +794,20 @@ class ControllerConfigRepository @Inject constructor(
     }
 
     /**
+     * Change [bindingGroupId]'s [BindingMode] without touching its group inputs or
+     * activator wiring. Phase 6 Brick 1: the Remap Controls subheader's mode dropdown
+     * routes here. Sub-input keys that aren't valid for the new mode are silently
+     * filtered by the compile step's `SourceMode.accepts()` check rather than deleted
+     * — leaves the rows intact in case the user picks back to the original mode.
+     */
+    suspend fun updateBindingGroupMode(bindingGroupId: Long, mode: BindingMode) {
+        val existing = bindingGroupDao.getById(bindingGroupId) ?: return
+        if (existing.mode == mode) return
+        bindingGroupDao.update(existing.copy(mode = mode))
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
      * Replace [activatorId]'s settingsJson with [settingsJson] verbatim. Called from the
      * activator settings editor; the editor builds the JSON via
      * `CompiledActivatorSettings.toJson()` so the keys stay in sync with the parser.

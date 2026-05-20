@@ -554,6 +554,20 @@ class MainViewModel @Inject constructor(
     }
 
     /**
+     * Phase 6 Brick 1: change the [BindingMode] of an existing binding group. Wired from
+     * the Remap Controls subheader's mode dropdown. The repository handles the dedupe
+     * (no-op when the mode hasn't changed); group inputs that aren't valid for the new
+     * mode aren't deleted — the compile step's `SourceMode.accepts()` check silently
+     * filters them, so a mode switch is reversible by picking the original back.
+     */
+    fun setBindingGroupMode(bindingGroupId: Long, mode: com.mapo.data.model.steam.BindingMode) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            controllerConfigRepository.updateBindingGroupMode(bindingGroupId, mode)
+        }
+    }
+
+    /**
      * Append a new activator of [type] to the input identified by [groupInputId].
      * Used by the per-input editor screen's `[+ Add Activator]` action.
      */

@@ -8,6 +8,9 @@ import com.mapo.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -121,8 +124,21 @@ class InputEvaluator @Inject constructor(
      *  - Explicit `remove_layer X; add_layer X` is how the user moves a layer to the top.
      *  - `CHANGE_PRESET` clears the stack (per the docs: "Switching action sets clears
      *    ALL layers of the old set").
+     *
+     * **Brick 4 publish mirror.** [activeLayerIdsFlow] mirrors this deque as an immutable
+     * list every time the stack mutates so [MotionCaptureCoordinator][com.mapo.service.input.capture.MotionCaptureCoordinator]
+     * can re-evaluate its attach predicate without polling. Internal code keeps using
+     * the deque directly — the flow is observation-only.
      */
     private val activeLayers = ArrayDeque<Long>()
+
+    private val _activeLayerIdsFlow = MutableStateFlow<List<Long>>(emptyList())
+    /** Bottom-of-stack first; top-of-stack is the last entry. Empty when no layers active. */
+    val activeLayerIdsFlow: StateFlow<List<Long>> = _activeLayerIdsFlow.asStateFlow()
+
+    private fun publishActiveLayers() {
+        _activeLayerIdsFlow.value = activeLayers.toList()
+    }
 
     /**
      * Per-address `hold_layer` link (Brick 5.1). When a binding emits `hold_layer N`
@@ -141,6 +157,18 @@ class InputEvaluator @Inject constructor(
      * config's starting set.
      */
     private var activeSetId: Long = 0L
+        set(value) {
+            field = value
+            _activeSetIdFlow.value = value
+        }
+
+    private val _activeSetIdFlow = MutableStateFlow(0L)
+    /**
+     * Brick 4 publish mirror of [activeSetId]. 0L means "lazy-uninitialized" — same
+     * semantics as the internal field. [MotionCaptureCoordinator][com.mapo.service.input.capture.MotionCaptureCoordinator]
+     * observes this to re-evaluate the attach predicate on `CHANGE_PRESET`.
+     */
+    val activeSetIdFlow: StateFlow<Long> = _activeSetIdFlow.asStateFlow()
 
     /**
      * FULL_PRESS activators that have been deferred by a coexisting LONG_PRESS on the same
@@ -210,10 +238,16 @@ class InputEvaluator @Inject constructor(
      */
     fun handleMotion(event: MotionEvent): Boolean {
         val readings = MotionEventNormalizer.extract(event)
-        if (Log.isLoggable(TAG_MOTION, Log.VERBOSE)) {
-            for (r in readings) {
-                Log.v(TAG_MOTION, "axis ${r.source} x=${"%.3f".format(r.x)} y=${"%.3f".format(r.y)}")
+        // Always log: motion events are the only way to observe analog input
+        // flow end-to-end (Brick 3 device verification, Phase 6 analog mode
+        // development). Per feedback_input_logging, no input goes unlogged.
+        // Single line per event keeps the volume manageable vs. one line per
+        // axis when the stick is at rest with two non-zero axes.
+        if (readings.isNotEmpty()) {
+            val summary = readings.joinToString(" ") { r ->
+                "${r.source}(${"%.3f".format(r.x)},${"%.3f".format(r.y)})"
             }
+            Log.d(TAG_MOTION, "handleMotion action=${event.actionMasked} $summary")
         }
         return false
     }
@@ -717,6 +751,7 @@ class InputEvaluator @Inject constructor(
             return
         }
         activeLayers.addLast(layerId)
+        publishActiveLayers()
         Log.d(TAG, "add_layer($layerId): pushed; stack depth=${activeLayers.size}")
     }
 
@@ -726,6 +761,7 @@ class InputEvaluator @Inject constructor(
      */
     private fun removeLayer(layerId: Long) {
         if (activeLayers.remove(layerId)) {
+            publishActiveLayers()
             Log.d(TAG, "remove_layer($layerId): popped; stack depth=${activeLayers.size}")
         } else {
             Log.d(TAG, "remove_layer($layerId): not active — no-op")
@@ -818,8 +854,25 @@ class InputEvaluator @Inject constructor(
         if (activeLayers.isNotEmpty()) {
             Log.d(TAG, "flushAllRuntime: clearing ${activeLayers.size} active layer(s) $activeLayers")
             activeLayers.clear()
+            publishActiveLayers()
         }
         heldLayerByAddress.clear()
+        flushAnalog()
+    }
+
+    /**
+     * Brick 4: release any analog-mode runtime state. Called from [flushAllRuntime]
+     * (set-switch path) so a profile-driven `CHANGE_PRESET` doesn't leak in-flight
+     * analog state — synthetic dpad edges held by a JOYSTICK_MOVE source, cursor-tick
+     * deltas pending in a Mouse mode, etc. — into the new set.
+     *
+     * Today a no-op: analog modes don't ship runtime state until Brick 5+. The hook
+     * is here so callers (coordinator + future set-switch glue) don't need a
+     * version-by-version conditional. Brick 5/6/7 fill in the body as each mode
+     * brings its own held state online.
+     */
+    fun flushAnalog() {
+        // Intentional no-op. Body lands per-mode in Brick 5+.
     }
 
     /** Test seam: which action set is currently active. Returns 0L before first event. */

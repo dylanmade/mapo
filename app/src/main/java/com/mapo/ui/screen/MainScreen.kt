@@ -222,6 +222,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val viewingActionSetId by viewModel.viewingActionSetId.collectAsStateWithLifecycle()
     val viewingLayerId by viewModel.viewingLayerId.collectAsStateWithLifecycle()
     val remapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
+    val analogModeTradeoffsAcked by viewModel.analogModeTradeoffsAcknowledged.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -537,6 +538,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onSetBindingGroupMode = { bindingGroupId, mode ->
                         viewModel.setBindingGroupMode(bindingGroupId, mode)
                     },
+                    analogModeTradeoffsAcknowledged = analogModeTradeoffsAcked,
+                    onAcknowledgeAnalogModeTradeoffs = viewModel::acknowledgeAnalogModeTradeoffs,
                     onBack = { navController.popBackStack() },
                     onOpenInputEditor = { inputSource, groupInputKey, label ->
                         // Brick 5.5.c: in overlay mode, eagerly materialize the layer

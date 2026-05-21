@@ -57,6 +57,7 @@ import com.mapo.data.model.steam.InputSource
 import com.mapo.data.model.steam.displayLabel
 import com.mapo.data.model.steam.displayName
 import com.mapo.service.input.modes.SourceModeCatalog
+import com.mapo.service.input.modes.requiresMotionCapture
 import com.mapo.ui.component.layout.SectionedListDetailPane
 import com.mapo.ui.screen.remap.RemapPaneItem
 import com.mapo.ui.screen.remap.RemapSections
@@ -82,6 +83,8 @@ fun RemapControlsScreen(
     onDeleteLayer: (layerId: Long) -> Unit = {},
     onClearLayerOverride: (layerId: Long, inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit = { _, _, _ -> },
     onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit = { _, _ -> },
+    analogModeTradeoffsAcknowledged: Boolean = true,
+    onAcknowledgeAnalogModeTradeoffs: () -> Unit = {},
 ) {
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
 
@@ -89,6 +92,19 @@ fun RemapControlsScreen(
     // dialogs are short-lived; rotation-survival isn't worth a custom Saver.
     var dialog by remember { mutableStateOf<ActionSetDialogState>(ActionSetDialogState.None) }
     var layerDialog by remember { mutableStateOf<LayerDialogState>(LayerDialogState.None) }
+
+    // Brick 4: stash an analog-mode pick if the tradeoffs dialog hasn't been
+    // acknowledged yet. `Pair(bindingGroupId, mode)`. The dialog renders below
+    // when this is non-null; confirming applies + acks, cancelling drops.
+    var pendingAnalogPick by remember { mutableStateOf<Pair<Long, BindingMode>?>(null) }
+
+    val gatedSetBindingGroupMode: (Long, BindingMode) -> Unit = { bindingGroupId, mode ->
+        if (mode.requiresMotionCapture() && !analogModeTradeoffsAcknowledged) {
+            pendingAnalogPick = bindingGroupId to mode
+        } else {
+            onSetBindingGroupMode(bindingGroupId, mode)
+        }
+    }
 
     // Resolve which set is currently being viewed in the editor. The viewing pointer is
     // user-driven (tab tap); when null, fall back to the controller_profile default so the
@@ -164,9 +180,21 @@ fun RemapControlsScreen(
                     val layerId = viewingLayer?.layer?.id ?: return@RemapDetailPane
                     onClearLayerOverride(layerId, inputSource, groupInputKey)
                 },
-                onSetBindingGroupMode = onSetBindingGroupMode,
+                onSetBindingGroupMode = gatedSetBindingGroupMode,
             )
         }
+    }
+
+    val pendingPick = pendingAnalogPick
+    if (pendingPick != null) {
+        com.mapo.ui.screen.dialog.AnalogModeTradeoffsDialog(
+            onAcknowledge = {
+                onAcknowledgeAnalogModeTradeoffs()
+                onSetBindingGroupMode(pendingPick.first, pendingPick.second)
+                pendingAnalogPick = null
+            },
+            onDismiss = { pendingAnalogPick = null },
+        )
     }
 
     // Brick 4.4: management dialogs. Rendered outside the Scaffold so they overlay

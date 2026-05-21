@@ -147,12 +147,18 @@ class ControllerConfigRepositoryTest {
     }
 
     @Test
-    fun seedDefaultConfig_dpadGroup_hasDpadModeWithFourDirections() = runTest {
+    fun seedDefaultConfig_dpadGroup_defaultsToUnboundWithDirectionSubInputsAvailable() = runTest {
+        // Per the post-Brick-4 follow-up: analog-capable sources (dpad, triggers,
+        // sticks) default to UNBOUND on a fresh profile so Mapo doesn't intercept
+        // and the motion-capture overlay stays detached. The four direction
+        // sub-inputs are still seeded so picking a non-UNBOUND mode later doesn't
+        // need to backfill the rows — they're already present, the mode flip
+        // just changes how compile interprets them.
         subject.seedDefaultConfig(profileId = 1L)
         val cfg = subject.getActiveConfigOnce(1L)!!
         val dpad = cfg.activeActionSet!!.presetFor(InputSource.DPAD)!!.group
 
-        assertEquals(BindingMode.DPAD, dpad.group.mode)
+        assertEquals(BindingMode.UNBOUND, dpad.group.mode)
         assertEquals(
             setOf("dpad_north", "dpad_south", "dpad_east", "dpad_west"),
             dpad.inputs.map { it.input.inputKey }.toSet(),

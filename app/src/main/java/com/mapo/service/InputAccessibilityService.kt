@@ -20,8 +20,9 @@ import com.mapo.service.input.InputAddress
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.InputEvaluator
 import com.mapo.service.input.InputSink
-import com.mapo.service.input.MotionCaptureOverlay
 import com.mapo.service.input.OverlayFocusKind
+import com.mapo.service.input.capture.MotionCaptureCoordinator
+import com.mapo.service.input.capture.MotionCaptureOverlayManager
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -31,6 +32,8 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @Inject lateinit var foregroundAppMonitor: ForegroundAppMonitor
     @Inject lateinit var dispatcher: InputDispatcher
     @Inject lateinit var evaluator: InputEvaluator
+    @Inject lateinit var motionCaptureOverlayManager: MotionCaptureOverlayManager
+    @Inject lateinit var motionCaptureCoordinator: MotionCaptureCoordinator
 
     companion object {
         // Physical gamepad keycodes → DeviceButton enum
@@ -150,19 +153,6 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    /**
-     * Motion-capture overlay scaffold (Brick 6.2 / Phase 6). The `AccessibilityService`
-     * has no `onGenericMotionEvent` hook of its own; a focusable `TYPE_ACCESSIBILITY_OVERLAY`
-     * was the path discovered that captures analog motion events without root. **Currently
-     * inert.** The focusable variant proved viable for motion capture but caused
-     * system-wide focus side effects (IME, back gesture, cursor visibility, app switcher),
-     * so `MotionCaptureOverlay` was reverted to a non-focusable baseline — see the
-     * class doc on that file for the exact flag matrix today and
-     * `project_motion_capture_via_focusable_overlay.md` for the broader context.
-     * Phase 6 analog modes remain blocked behind a future revisit of this path.
-     */
-    private var motionProbe: MotionCaptureOverlay? = null
-
     override fun onServiceConnected() {
         super.onServiceConnected()
         dispatcher.register(this)
@@ -186,17 +176,16 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         Log.i(TAG, "Service connected — focusedAppDisplayId=$focusedAppDisplayId")
         dumpAllDisplays("onServiceConnected")
 
-        // Probe attaches once the service is connected so the WindowManager call has
-        // a valid context. Logs traffic (or lack of it) under MotionCaptureOverlay.TAG.
-        motionProbe = MotionCaptureOverlay(
-            service = this,
-            onMotion = { event -> evaluator.handleMotion(event) },
-        ).also { it.attach() }
+        // Production motion-capture overlay (Brick 3). The manager owns the
+        // window lifecycle; we just hand it the callback. The coordinator
+        // (Brick 4) decides when to actually attach based on the
+        // foreground-app × analog-mode-configured predicate.
+        motionCaptureOverlayManager.setMotionCallback { event -> evaluator.handleMotion(event) }
+        motionCaptureCoordinator.start()
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
-        motionProbe?.detach()
-        motionProbe = null
+        motionCaptureCoordinator.stop()
         dispatcher.unregister()
         return super.onUnbind(intent)
     }

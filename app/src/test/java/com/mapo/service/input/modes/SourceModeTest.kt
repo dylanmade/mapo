@@ -162,6 +162,7 @@ class SourceModeTest {
     @Test
     fun handlerRegistry_returnsStubForUnimplementedModes() {
         val implemented = setOf(
+            BindingMode.UNBOUND,
             BindingMode.SINGLE_BUTTON,
             BindingMode.BUTTON_PAD,
             BindingMode.DPAD,
@@ -176,5 +177,33 @@ class SourceModeTest {
             )
             assertEquals(mode, handler.mode)
         }
+    }
+
+    // ── Unbound mode (post-Brick-4 follow-up) ────────────────────────────────
+
+    @Test
+    fun unbound_acceptsNothing_andHasNoValidInputs() {
+        // UNBOUND means "Mapo does not intercept this source." Compile drops any
+        // sub-inputs registered under a binding group in this mode, so the
+        // activator engine never sees a configured input and physical events
+        // pass through.
+        assertEquals(emptySet<String>(), UnboundMode.validInputs())
+        assertFalse(UnboundMode.accepts("click"))
+        assertFalse(UnboundMode.accepts("dpad_north"))
+        assertFalse(UnboundMode.accepts("button_a"))
+        assertFalse(UnboundMode.accepts(""))
+    }
+
+    @Test
+    fun unbound_isNotInMotionCaptureSet() {
+        // Critical contract — defaulting analog sources to UNBOUND only achieves
+        // the "no focused-overlay side effects on a fresh profile" goal if the
+        // gating predicate doesn't treat UNBOUND as analog.
+        assertFalse(BindingMode.UNBOUND.requiresMotionCapture())
+    }
+
+    @Test
+    fun handlerRegistry_returnsUnboundModeForUnbound() {
+        assertSame(UnboundMode, BindingMode.UNBOUND.handler())
     }
 }

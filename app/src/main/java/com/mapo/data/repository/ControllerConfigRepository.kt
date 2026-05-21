@@ -964,8 +964,11 @@ class ControllerConfigRepository @Inject constructor(
                 "face_buttons", BindingMode.BUTTON_PAD,
                 listOf("button_a", "button_b", "button_x", "button_y"),
             ),
+            // Analog-capable sources default to UNBOUND: Mapo does not intercept
+            // until the user explicitly opts into a Mapo-managed mode (which is
+            // also what gates the focused motion-capture overlay's side effects).
             InputSource.DPAD to InputSourceSeed(
-                "dpad", BindingMode.DPAD,
+                "dpad", BindingMode.UNBOUND,
                 listOf("dpad_north", "dpad_south", "dpad_east", "dpad_west"),
             ),
             InputSource.LEFT_BUMPER to InputSourceSeed(
@@ -975,16 +978,16 @@ class ControllerConfigRepository @Inject constructor(
                 "right_bumper", BindingMode.SINGLE_BUTTON, listOf("click"),
             ),
             InputSource.LEFT_TRIGGER to InputSourceSeed(
-                "left_trigger", BindingMode.TRIGGER, listOf("click"),
+                "left_trigger", BindingMode.UNBOUND, listOf("click"),
             ),
             InputSource.RIGHT_TRIGGER to InputSourceSeed(
-                "right_trigger", BindingMode.TRIGGER, listOf("click"),
+                "right_trigger", BindingMode.UNBOUND, listOf("click"),
             ),
             InputSource.LEFT_JOYSTICK to InputSourceSeed(
-                "left_joystick", BindingMode.JOYSTICK_MOVE, listOf("click"),
+                "left_joystick", BindingMode.UNBOUND, listOf("click"),
             ),
             InputSource.RIGHT_JOYSTICK to InputSourceSeed(
-                "right_joystick", BindingMode.JOYSTICK_MOVE, listOf("click"),
+                "right_joystick", BindingMode.UNBOUND, listOf("click"),
             ),
             InputSource.SWITCH_START to InputSourceSeed(
                 "switch_start", BindingMode.SINGLE_BUTTON, listOf("click"),

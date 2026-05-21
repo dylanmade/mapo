@@ -21,6 +21,14 @@ enum class ControllerType {
  * Phase 1 ships the schema; mode runtime behavior lands in Phase 6.
  */
 enum class BindingMode {
+    /**
+     * Mapo does not intercept this source — physical events pass through to the
+     * foreground app untouched, no activators fire, and the motion-capture
+     * overlay stays detached. The default for analog-capable sources (sticks,
+     * dpad, triggers) so a freshly-seeded profile imposes zero side effects
+     * until the user explicitly opts into a Mapo-managed mode.
+     */
+    UNBOUND,
     SINGLE_BUTTON,
     DPAD,
     BUTTON_PAD,
@@ -90,6 +98,7 @@ enum class InputSource {
 }
 
 fun BindingMode.displayName(): String = when (this) {
+    BindingMode.UNBOUND -> "[Device default]"
     BindingMode.SINGLE_BUTTON -> "Single Button"
     BindingMode.BUTTON_PAD -> "Button Pad"
     BindingMode.DPAD -> "D-Pad"

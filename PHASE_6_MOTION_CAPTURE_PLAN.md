@@ -173,36 +173,89 @@ Compile + full unit test suite green. Worth a quick device sanity:
 
 **Risks:** PackageManager label enumeration cost — many devices list 200+ launchable apps. Sheet uses `LazyColumn` + label resolution in a single pass off the IO dispatcher.
 
-### Brick 3 — `MotionCaptureOverlayManager` (production focused overlay, attach/detach only)
+### Brick 3 — `MotionCaptureOverlayManager` (production focused overlay, attach/detach only) — ✅ COMPLETED
 
 **Goal:** Stand up the production focused-overlay window with a clean attach/detach API. Not yet gated by anything; controlled by a temporary "force attach" debug toggle in the drawer.
 
-**Files:**
-- New: `app/src/main/java/com/mapo/service/input/capture/MotionCaptureOverlayManager.kt` — generalize `MotionProbeAppOverlay`'s window mechanics into a `@Singleton` with `attach()` / `detach()` / `isAttached: StateFlow<Boolean>`. Hosts an invisible (transparent, 1×1) `View` whose `onGenericMotionEvent` routes through an injected callback. Borrows the keyboard FGS for process priority.
-- New: `app/src/main/java/com/mapo/service/input/capture/MotionCaptureView.kt` — `View` subclass with the motion-event override.
-- `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` — delete the old `MotionCaptureOverlay` attach (lines 191–194); wire `evaluator.handleMotion` callback through the new manager via DI.
-- New: `app/src/test/java/com/mapo/service/input/capture/MotionCaptureOverlayManagerTest.kt` (Robolectric — attach/detach state, callback wiring).
+**Files actually landed:**
+- New: `app/src/main/java/com/mapo/service/input/capture/MotionCaptureOverlayManager.kt` — `@Singleton` with `isAttached: StateFlow<Boolean>`, `attach()`, `detach()`, `toggle()`, `setMotionCallback(...)`. 1×1 transparent focused `TYPE_APPLICATION_OVERLAY`, top-left anchored, `FLAG_NOT_TOUCH_MODAL` (no `FLAG_NOT_FOCUSABLE`). Main-thread-serialized via `Handler(Looper.getMainLooper())`. Borrows `KeyboardOverlayService` FGS for process priority. `setMotionCallback` retroactively patches the live view if called after attach (avoids dropped events between attach and callback wiring).
+- New: `app/src/main/java/com/mapo/service/input/capture/MotionCaptureView.kt` — `View` subclass with `onMotion: ((MotionEvent) -> Unit)?` and `onGenericMotionEvent` override returning `false` (no behavioral steal).
+- `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` — `@Inject` the manager, call `setMotionCallback { evaluator.handleMotion(it) }` in `onServiceConnected`, call `detach()` in `onUnbind`. Removed the old `MotionCaptureOverlay` attach (lines 191–194). The old `MotionCaptureOverlay.kt` file is left untouched (Brick 8 deletes it).
+- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` — injected the manager, exposed `motionCaptureForceAttached: StateFlow<Boolean>` and `toggleMotionCaptureForceAttach()`.
+- `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` — new drawer item below the existing motion-probe debug item. Label switches between "Force motion capture ON (debug)" and "Force motion capture OFF (debug)" based on current state; uses `Icons.Default.Mouse`; renders `selected = true` when attached.
+- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` — collected `motionCaptureForceAttached` state; wired the drawer's new callback to `viewModel.toggleMotionCaptureForceAttach()`.
+- `app/src/main/res/values/strings.xml` — two new strings for the toggle label states.
+- Updated existing tests (`MainViewModelTest`, `MainViewModelMultiBindTest`) — added the new constructor arg (relaxed mock).
+- New: `app/src/test/java/com/mapo/service/input/capture/MotionCaptureOverlayManagerTest.kt` — 7 Robolectric tests covering initial state, idempotent detach, attach↔detach state flow, permission-denied no-op, retroactive callback wiring, toggle, idempotent attach. `mockkStatic(Settings::class)` for `canDrawOverlays`.
+- New: `app/src/test/java/com/mapo/service/input/capture/MotionCaptureViewTest.kt` — 2 Robolectric tests verifying the View forwards events and never consumes them.
 
 **Exit criteria:** Debug toggle attaches the new overlay; motion events flow into `InputEvaluator.handleMotion`; detaching restores normal IME/back/app-switcher behavior. Remap and activity unaffected.
 
+**Deviations / decisions:**
+- Manager exposes `setMotionCallback` (called by the service at connect) rather than taking the callback as a constructor param. Keeps the `@Singleton` constructor pure (Hilt-injectable) while still allowing the service-lifetime callback to be wired without a separate factory.
+- Retroactive callback patching: `setMotionCallback` after `attach()` updates the live view's `onMotion`. Prevents a startup race where the manager is attached (via debug toggle or future coordinator) before the service has finished wiring the callback.
+- Kept `MotionCaptureOverlay.kt` (old inert non-focused class) in place — `MotionProbeAppOverlay.kt` still calls `MotionCaptureOverlay.describe(...)` as a logging helper. Brick 8 will delete the file (and either inline `describe()` into the probe or move it elsewhere).
+- Debug toggle label flips between "ON" / "OFF" rather than showing a switch. Matches the existing drawer pattern (NavigationDrawerItem with label-only); avoids cramming a Switch into the drawer item layout.
+- No coordinator wiring this brick — `motionCaptureForceAttached` is the only thing driving `attach()` for now. Brick 4 replaces the toggle with the predicate.
+
+**Hand-off — device verification:**
+1. Open drawer → see the new "Force motion capture ON (debug)" item below the existing motion probe.
+2. Tap it → label switches to "Force motion capture OFF (debug)" (now attached). Drawer closes.
+3. Logcat: search for `MotionCaptureOverlay: attached — focused TYPE_APPLICATION_OVERLAY 1×1 active`.
+4. Foreground a game, move the analog sticks → logcat verbose motion events flow via `InputEvaluator.handleMotion` (under `MOTION_TAG`).
+5. While attached: IME / back gesture / app-switcher gesture are suspended (expected — same focused-overlay side effects characterized by the probe).
+6. Open drawer → tap the now-"OFF" item to detach. Drawer closes. Logcat: `MotionCaptureOverlay: detached`.
+7. IME / back / app-switcher gestures restore to normal immediately.
+8. Existing remap (digital buttons) keeps working through both attach and detach.
+
 **Risks:** Visible artifacts — the production window must be truly invisible (the probe is intentionally red). Verify 1×1 + `PixelFormat.TRANSPARENT` doesn't break event delivery on some OEMs.
 
-### Brick 4 — `MotionCaptureCoordinator` (gating + first-time tradeoffs dialog)
+### Brick 4 — `MotionCaptureCoordinator` (gating + first-time tradeoffs dialog) — ✅ COMPLETED
 
 **Goal:** Replace Brick 3's "force attach" with the real predicate (D3): attach only when `(foreground app ∈ active profile's bound apps) AND (any source in the resolved set/layer has an analog mode configured)`.
 
-**Files:**
-- New: `app/src/main/java/com/mapo/service/input/capture/MotionCaptureCoordinator.kt` — `@Singleton`, started from `InputAccessibilityService.onServiceConnected`. Combines `ForegroundAppMonitor.currentPackage` + `AppProfileBindingRepository.getAll()` + `InputDispatcher.compiledConfig` + `InputEvaluator.activeLayers` into a single attach/detach decision.
-- `app/src/main/java/com/mapo/service/input/InputEvaluator.kt` — expose `activeLayers` and `activeSetId` as `StateFlow`s (not just test seams). New `flushAnalog()` method for clean state on profile/set switch.
-- New: `app/src/main/java/com/mapo/ui/screen/dialog/AnalogModeTradeoffsDialog.kt` — one-time M3 dialog the first time any mode picker is set to an analog mode in the user's lifetime. Explains IME / back / app-switcher gestures suspended while the capture overlay is active. Acks persist in DataStore.
-- New: `app/src/main/java/com/mapo/data/AnalogModePreferences.kt` — DataStore wrapper for the ack.
-- New: `app/src/test/java/com/mapo/service/input/capture/MotionCaptureCoordinatorTest.kt` (Robolectric — predicate truth table).
+**Files actually landed:**
+- `app/src/main/java/com/mapo/service/input/modes/SourceMode.kt` — added `ANALOG_MODES_REQUIRING_MOTION_CAPTURE: Set<BindingMode>` constant (joystick / mouse / scroll modes — TRIGGER deliberately excluded; Brick 5 will revisit when Soft_Press lands) plus `BindingMode.requiresMotionCapture()` extension.
+- `app/src/main/java/com/mapo/service/input/InputEvaluator.kt` — exposed `activeSetIdFlow: StateFlow<Long>` and `activeLayerIdsFlow: StateFlow<List<Long>>` (publish-mirrors of the internal state; mutations call `publishActiveLayers()`). New `flushAnalog()` method — empty body for now, Brick 5+ fill it per mode. `flushAllRuntime` now calls `flushAnalog()` on set-switch.
+- New: `app/src/main/java/com/mapo/service/input/capture/MotionCaptureCoordinator.kt` — `@Singleton`. `start()` / `stop()` lifecycle. `evaluatePredicate(...)` extracted as a pure function for testability. Uses the 6-flow `combine` vararg form, casts indexed values to typed locals. On profile-id change in the combine collector, calls `inputEvaluator.flushAnalog()` before recomputing (idempotent no-op today; future-proofs the brick boundary).
+- `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` — injected the coordinator; `onServiceConnected` calls `coordinator.start()` after wiring the manager callback; `onUnbind` calls `coordinator.stop()`.
+- New: `app/src/main/java/com/mapo/data/settings/AnalogModePreferences.kt` — `@Singleton` SharedPreferences-backed ack store (chose SharedPreferences over DataStore to match the existing `AutoSwitchSettings` pattern — no new dependency to justify). `tradeoffsAcknowledged: StateFlow<Boolean>` + `setTradeoffsAcknowledged()`.
+- New: `app/src/main/java/com/mapo/ui/screen/dialog/AnalogModeTradeoffsDialog.kt` — M3 `AlertDialog` shown once on first analog-mode pick. Body explains the IME / back / app-switcher gesture suspension while the capture overlay is active.
+- `app/src/main/res/values/strings.xml` — 5 new strings under the Brick-4 comment for the dialog body + title + confirm button.
+- `app/src/main/java/com/mapo/ui/screen/RemapControlsScreen.kt` — new `analogModeTradeoffsAcknowledged` + `onAcknowledgeAnalogModeTradeoffs` params. Internal `gatedSetBindingGroupMode` wraps the original callback: analog mode pick + not yet acked → stash in `pendingAnalogPick` state and show the dialog. Confirm → ack and apply; cancel → drop.
+- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` — injected `AnalogModePreferences`. Exposed `analogModeTradeoffsAcknowledged: StateFlow<Boolean>` and `acknowledgeAnalogModeTradeoffs()`. **Removed** the Brick 3 force-attach surface (`motionCaptureForceAttached`, `toggleMotionCaptureForceAttach`); the coordinator drives attachment now.
+- `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` — removed the Brick 3 force-attach drawer item, its params, and the `Mouse` icon import.
+- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` — removed the force-attach state collection and drawer wiring; collected the new `analogModeTradeoffsAcked` and wired it + ack callback into `RemapControlsScreen`.
+- Updated existing tests (`MainViewModelTest`, `MainViewModelMultiBindTest`) — dropped the now-unused `motionCaptureOverlayManager` field/mock/constructor arg; added the `analogModePreferences` mock.
+- New: `app/src/test/java/com/mapo/service/input/capture/MotionCaptureCoordinatorTest.kt` — 8 truth-table tests covering null-foreground, null-profile, unbound-app, all-digital, base-set-analog, layer-overlay-analog, inactive-layer-with-analog, and the `activeSetId == 0L` lazy-uninit fallback to `startingActionSetId`.
 
 **Exit criteria:** Switching foreground app to/from a bound-with-analog-config app attaches/detaches the overlay observably; unrelated apps don't attach. First analog-mode pick triggers the dialog. Remap unaffected throughout.
 
+**Deviations / decisions:**
+- SharedPreferences instead of DataStore for the tradeoffs ack — matches the rest of the codebase, no new dependency.
+- `combine` of 6 flows uses the vararg form with indexed casts. (Kotlin's `combine` only has typed overloads up to 5 flows.) Casts are localized to one function and the surrounding types are concrete.
+- TRIGGER is NOT in `ANALOG_MODES_REQUIRING_MOTION_CAPTURE` for this brick. Brick 5 will move it in once Soft_Press requires motion capture (likely conditional on activator config to avoid attaching for vanilla trigger clicks).
+- `flushAnalog()` shipped as an empty no-op rather than deferred. The hook is at the right call sites today (`flushAllRuntime` + coordinator profile-switch) so Brick 5+ just fill in the body.
+- The mode picker dialog is rendered inside `RemapControlsScreen` rather than the screen's parent. Keeps the pending-pick state local to the only place that produces it.
+
+**Hand-off — device verification:**
+
+Setup:
+1. Open Auto-Switch → bind a launchable app to your active profile (e.g. GameNative).
+2. Open Remap Controls → Joysticks → pick "Mouse Joystick" for the left joystick. (As of the post-Brick-4 follow-up, every analog-capable source — sticks, dpad, triggers — defaults to `[Device default]` / UNBOUND on a fresh profile; the overlay stays detached until you explicitly pick an analog mode for at least one source.)
+3. First analog-mode pick should trigger the "Heads up — analog modes need a capture overlay" dialog. Read it, tap "Got it".
+4. The mode persists. Subsequent analog-mode picks (e.g., switching the right joystick to "Joystick Camera") proceed silently — dialog was already acknowledged.
+
+Predicate verification (use `adb logcat | grep MotionCaptureCoord`):
+5. Background to the bound app → logcat shows `attached — focused TYPE_APPLICATION_OVERLAY 1×1 active` (manager) and `decision: shouldAttach=true` (coordinator). Motion events flow.
+6. Switch to an UNBOUND app (e.g. Chrome) → logcat shows `decision: shouldAttach=false` and the overlay detaches. IME / back / app-switcher gestures work normally in the unbound app.
+7. Switch back to the bound app → re-attaches.
+8. To verify the predicate flips false the other direction: in Remap Controls, switch **every** analog-mode source back to `[Device default]` (the gating predicate is per-set: if ANY source in the active set has an analog mode, the overlay attaches — so leaving just one analog stick configured keeps it attached). Once no source in the set is analog, the coordinator detaches even while the bound app is still foreground.
+9. Re-set an analog mode on any source → re-attaches.
+
 **Risks:**
-- Cold-launch race — `compiledConfig` lazy-loads after first event; coordinator must tolerate `EMPTY` config.
-- `ProfileAutoSwitcher` may swap profile mid-attached-overlay; coordinator must call `InputEvaluator.flushAnalog()` to release any in-flight synthetic state before re-evaluating.
+- Cold-launch race — `compiledConfig` lazy-loads after first event; coordinator tolerates `EMPTY` config via `compiled.sets[resolvedSetId] ?: return false`.
+- `ProfileAutoSwitcher` may swap profile mid-attached-overlay; coordinator calls `InputEvaluator.flushAnalog()` on profile-id transition (today a no-op — Brick 5+ fill).
 
 ### Brick 5 — First analog mode: Trigger Soft_Press
 

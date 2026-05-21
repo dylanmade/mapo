@@ -36,6 +36,7 @@ import com.mapo.data.repository.InstalledAppsRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
+import com.mapo.data.settings.AnalogModePreferences
 import com.mapo.data.settings.AutoSwitchSettings
 import com.mapo.di.IoDispatcher
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
@@ -91,6 +92,7 @@ class MainViewModel @Inject constructor(
     private val appProfileBindingRepository: AppProfileBindingRepository,
     private val installedAppsRepository: InstalledAppsRepository,
     private val autoSwitchSettings: AutoSwitchSettings,
+    private val analogModePreferences: AnalogModePreferences,
     private val autoSwitcher: ProfileAutoSwitcher,
     private val foregroundAppFilter: ForegroundAppFilter,
     private val keyboardTemplateRepository: KeyboardTemplateRepository,
@@ -1328,5 +1330,18 @@ class MainViewModel @Inject constructor(
 
     fun toggleMotionProbe() {
         motionProbeAppOverlay.toggle()
+    }
+
+    /**
+     * Brick 4: has the user acknowledged the analog-mode tradeoffs dialog?
+     * Drives whether picking an analog mode in Remap Controls shows the
+     * one-time explainer or proceeds silently. Acks persist across launches
+     * via [AnalogModePreferences].
+     */
+    val analogModeTradeoffsAcknowledged: StateFlow<Boolean> =
+        analogModePreferences.tradeoffsAcknowledged
+
+    fun acknowledgeAnalogModeTradeoffs() {
+        analogModePreferences.setTradeoffsAcknowledged()
     }
 }

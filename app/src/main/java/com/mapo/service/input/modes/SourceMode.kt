@@ -55,6 +55,24 @@ sealed interface SourceMode {
 }
 
 /**
+ * Pass-through: Mapo does not intercept this source. No sub-inputs are accepted,
+ * so the compile step drops any rows under a binding group in this mode and the
+ * activator engine never sees a configured input for the source — physical events
+ * flow to the foreground app untouched.
+ *
+ * This is the default mode for analog-capable sources (sticks, dpad, triggers)
+ * on freshly-seeded profiles. The user must explicitly pick an analog mode for
+ * Mapo to start interpreting the source, which is also what gates the
+ * [MotionCaptureCoordinator][com.mapo.service.input.capture.MotionCaptureCoordinator]'s
+ * focused-overlay attach — keeping the overlay's side effects (IME / back / app-
+ * switcher gesture suspension) out of profiles that haven't opted in.
+ */
+object UnboundMode : SourceMode {
+    override val mode: BindingMode = BindingMode.UNBOUND
+    override fun validInputs(): Set<String> = emptySet()
+}
+
+/**
  * One-click input source — bumpers, triggers (digital threshold only until [BindingMode.TRIGGER]
  * lands), stick clicks, start/select buttons. Exactly one sub-input: `click`.
  */
@@ -148,6 +166,7 @@ data class StubMode(override val mode: BindingMode) : SourceMode {
  * which is what makes 6.1 a non-breaking foundation rather than a hard cutover.
  */
 fun BindingMode.handler(): SourceMode = when (this) {
+    BindingMode.UNBOUND -> UnboundMode
     BindingMode.SINGLE_BUTTON -> SingleButtonMode
     BindingMode.BUTTON_PAD -> ButtonPadMode
     BindingMode.DPAD -> DpadMode
@@ -176,10 +195,40 @@ fun BindingMode.handler(): SourceMode = when (this) {
  * matching analog handler lands. The picker is the wire; the handler ships per
  * later brick.
  */
+/**
+ * Modes whose runtime behavior depends on analog `MotionEvent` capture
+ * (Brick 4's gating predicate). When at least one source in the
+ * resolved-active set/layer has a mode in this set, the
+ * [MotionCaptureCoordinator][com.mapo.service.input.capture.MotionCaptureCoordinator]
+ * attaches the focused capture overlay; otherwise it stays detached so
+ * IME / back gesture / app-switcher continue working normally outside the
+ * active gameplay window.
+ *
+ * **What's in:** the analog stick / mouse / scroll modes whose `evaluate()`
+ * hook needs a motion stream. **What's out:** digital modes
+ * (SINGLE_BUTTON, BUTTON_PAD, DPAD, REFERENCE) and modes that don't yet
+ * have an analog dependency (TRIGGER — Brick 5 will revisit when
+ * Soft_Press lands and may move TRIGGER into this set conditionally on
+ * activator config; RADIAL_MENU / TOUCH_MENU — open question, parked
+ * digital for now).
+ */
+val ANALOG_MODES_REQUIRING_MOTION_CAPTURE: Set<BindingMode> = setOf(
+    BindingMode.JOYSTICK_MOVE,
+    BindingMode.JOYSTICK_CAMERA,
+    BindingMode.MOUSE_JOYSTICK,
+    BindingMode.ABSOLUTE_MOUSE,
+    BindingMode.SCROLL_WHEEL,
+    BindingMode.TWO_D_SCROLL,
+)
+
+/** Convenience predicate over the analog-modes set; see [ANALOG_MODES_REQUIRING_MOTION_CAPTURE]. */
+fun BindingMode.requiresMotionCapture(): Boolean = this in ANALOG_MODES_REQUIRING_MOTION_CAPTURE
+
 object SourceModeCatalog {
     fun modesValidFor(source: InputSource): List<BindingMode> = when (source) {
         InputSource.BUTTON_DIAMOND -> listOf(BindingMode.BUTTON_PAD)
         InputSource.DPAD -> listOf(
+            BindingMode.UNBOUND,
             BindingMode.DPAD,
             BindingMode.JOYSTICK_MOVE,
             BindingMode.MOUSE_JOYSTICK,
@@ -187,10 +236,12 @@ object SourceModeCatalog {
         )
         InputSource.LEFT_BUMPER, InputSource.RIGHT_BUMPER -> listOf(BindingMode.SINGLE_BUTTON)
         InputSource.LEFT_TRIGGER, InputSource.RIGHT_TRIGGER -> listOf(
+            BindingMode.UNBOUND,
             BindingMode.TRIGGER,
             BindingMode.SINGLE_BUTTON,
         )
         InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK -> listOf(
+            BindingMode.UNBOUND,
             BindingMode.JOYSTICK_MOVE,
             BindingMode.JOYSTICK_CAMERA,
             BindingMode.MOUSE_JOYSTICK,

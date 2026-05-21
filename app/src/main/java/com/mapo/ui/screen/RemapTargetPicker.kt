@@ -187,7 +187,7 @@ private fun CategoryList(
     onPickLayer: () -> Unit,
 ) {
     Column {
-        CategoryRow("Unbound / None", matchesCategory(current, PickerCategory.Unbound), showChevron = false, onClick = onUnbound)
+        CategoryRow("[Device default]", matchesCategory(current, PickerCategory.Unbound), showChevron = false, onClick = onUnbound)
         HorizontalDivider()
         CategoryRow("Gamepad", matchesCategory(current, PickerCategory.Gamepad), onClick = onPickGamepad)
         HorizontalDivider()

@@ -47,6 +47,13 @@
     <string name="keyboard_overlay_tile_label">Mapo keyboard</string>
     <string name="keyboard_overlay_drawer_label">Toggle keyboard overlay</string>
     <string name="motion_probe_drawer_label">Toggle motion probe (debug)</string>
+
+    <!-- Brick 4 analog-mode tradeoffs dialog (shown once on first analog-mode pick). -->
+    <string name="analog_mode_tradeoffs_title">Heads up — analog modes need a capture overlay</string>
+    <string name="analog_mode_tradeoffs_intro">Analog modes (joystick → mouse, dpad, scroll wheel, etc.) work by capturing motion events through an invisible window overlay. While a bound game is foregrounded with any analog mode configured, the overlay is active.</string>
+    <string name="analog_mode_tradeoffs_list">While the overlay is active:\n  • The on-screen keyboard (IME) won\'t appear\n  • The system back gesture is suspended\n  • The app-switcher gesture is suspended</string>
+    <string name="analog_mode_tradeoffs_outro">The overlay detaches automatically the moment you background the game, so navigation gestures work everywhere outside the active gameplay window.</string>
+    <string name="analog_mode_tradeoffs_confirm">Got it</string>
     <string name="blocklist_screen_title">Blocklist</string>
     <string name="blocklist_header">Apps Mapo will never prompt you about</string>
     <string name="blocklist_empty">No apps blocked. When you tap “Never for this app” on a prompt, the app will appear here.</string>

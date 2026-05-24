@@ -18,6 +18,7 @@ object MapoRoute {
     const val AUTO_SWITCH = "auto_switch"
     const val BLOCKLIST = "blocklist"
     const val THEME_STUDIO = "theme_studio"
+    const val SHIZUKU_SETUP = "shizuku_setup"
 
     // ── Remap-target picker (full-screen, multi-step: category → filtered list) ────
     //

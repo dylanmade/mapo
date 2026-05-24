@@ -24,12 +24,12 @@ class AutoSwitchSettings @Inject constructor(
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _autoSwitchEnabled = MutableStateFlow(
-        prefs.getBoolean(KEY_AUTO_SWITCH_ENABLED, true)
+        prefs.getBoolean(KEY_AUTO_SWITCH_ENABLED, false)
     )
     val autoSwitchEnabled: StateFlow<Boolean> = _autoSwitchEnabled.asStateFlow()
 
     private val _autoCreateProfilesEnabled = MutableStateFlow(
-        prefs.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, true)
+        prefs.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, false)
     )
     val autoCreateProfilesEnabled: StateFlow<Boolean> = _autoCreateProfilesEnabled.asStateFlow()
 
@@ -41,10 +41,10 @@ class AutoSwitchSettings @Inject constructor(
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
         when (key) {
             KEY_AUTO_SWITCH_ENABLED ->
-                _autoSwitchEnabled.value = sp.getBoolean(KEY_AUTO_SWITCH_ENABLED, true)
+                _autoSwitchEnabled.value = sp.getBoolean(KEY_AUTO_SWITCH_ENABLED, false)
             KEY_AUTO_CREATE_PROFILES_ENABLED ->
                 _autoCreateProfilesEnabled.value =
-                    sp.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, true)
+                    sp.getBoolean(KEY_AUTO_CREATE_PROFILES_ENABLED, false)
             KEY_IGNORED_PACKAGES ->
                 _ignoredPackages.value =
                     sp.getStringSet(KEY_IGNORED_PACKAGES, emptySet())?.toSet() ?: emptySet()

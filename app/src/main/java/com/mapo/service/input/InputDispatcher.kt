@@ -61,7 +61,7 @@ class InputDispatcher @Inject constructor() {
     private val _compiledConfig = MutableStateFlow(CompiledConfig.EMPTY)
     val compiledConfig: StateFlow<CompiledConfig> = _compiledConfig.asStateFlow()
 
-    private val _remapEnabled = MutableStateFlow(false)
+    private val _remapEnabled = MutableStateFlow(true)
     val remapEnabled: StateFlow<Boolean> = _remapEnabled.asStateFlow()
 
     private val _overlayFocus = MutableStateFlow(OverlayFocusKind.NONE)

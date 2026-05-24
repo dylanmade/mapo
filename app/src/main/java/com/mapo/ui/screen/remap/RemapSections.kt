@@ -91,11 +91,18 @@ object RemapSections {
         SECTION_TRIGGERS to listOf(
             RemapPaneItem.Subheader("triggers.left.header", "Left Trigger Behavior", InputSource.LEFT_TRIGGER),
             RemapPaneItem.BindingRow("triggers.left.full", "L2 Full Pull", InputSource.LEFT_TRIGGER, "click"),
-            RemapPaneItem.DisabledRow("triggers.left.soft", "L2 Soft Pull"),
+            // Soft Pull lights up when the trigger mode is set to TRIGGER (its
+            // compile-time validInputs include `soft_press`); under the default
+            // UNBOUND mode the binding-row look-up returns null and the row reads
+            // as bindable-but-empty, mirroring how a Full Pull row reads when no
+            // activator is wired. Brick 5 follow-up unified the soft-press model:
+            // soft-pull behavior comes from any activator type bound here, not
+            // from a SOFT_PRESS activator type on the click row.
+            RemapPaneItem.BindingRow("triggers.left.soft", "L2 Soft Pull", InputSource.LEFT_TRIGGER, "soft_press"),
             RemapPaneItem.DisabledRow("triggers.left.analog", "Analog Output Trigger"),
             RemapPaneItem.Subheader("triggers.right.header", "Right Trigger Behavior", InputSource.RIGHT_TRIGGER),
             RemapPaneItem.BindingRow("triggers.right.full", "R2 Full Pull", InputSource.RIGHT_TRIGGER, "click"),
-            RemapPaneItem.DisabledRow("triggers.right.soft", "R2 Soft Pull"),
+            RemapPaneItem.BindingRow("triggers.right.soft", "R2 Soft Pull", InputSource.RIGHT_TRIGGER, "soft_press"),
             RemapPaneItem.DisabledRow("triggers.right.analog", "Analog Output Trigger"),
         ),
         SECTION_JOYSTICKS to listOf(

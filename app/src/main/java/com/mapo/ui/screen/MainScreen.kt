@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -297,6 +299,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.THEME_STUDIO)
                 },
+                onOpenShizukuSetup = {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(MapoRoute.SHIZUKU_SETUP)
+                },
                 onToggleKeyboardOverlay = {
                     scope.launch { drawerState.close() }
                     viewModel.toggleKeyboardOverlay()
@@ -330,13 +336,30 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     snackbarHost = {
                         val prompt = pendingPrompt
                         if (prompt != null) {
-                            Snackbar(
-                                modifier = Modifier.padding(12.dp),
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurface,
-                                actionOnNewLine = true,
-                                action = {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // Non-blocking inline banner (Card) instead of a Snackbar — the
+                            // 3-action prompt violates Snackbar's single-action contract,
+                            // and a banner-shaped card communicates "decision required" without
+                            // pretending to be a passive toast.
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurface,
+                                ),
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.auto_switch_prompt_title, prompt.appLabel),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                                    ) {
                                         TextButton(
                                             onClick = {
                                                 viewModel.ignorePackageForever(prompt.pkg)
@@ -360,8 +383,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                                         ) { Text(stringResource(R.string.auto_switch_prompt_yes)) }
                                     }
                                 }
-                            ) {
-                                Text(stringResource(R.string.auto_switch_prompt_title, prompt.appLabel))
                             }
                         } else {
                             SnackbarHost(snackbarHostState) { data ->
@@ -719,6 +740,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     defaultDisplayFontName = com.mapo.ui.theme.DEFAULT_DISPLAY_FONT_NAME,
                     defaultBodyFontName = com.mapo.ui.theme.DEFAULT_BODY_FONT_NAME,
                 )
+            }
+            composable(MapoRoute.SHIZUKU_SETUP) {
+                ShizukuSetupScreen(onBack = { navController.popBackStack() })
             }
             composable(
                 route = MapoRoute.CONFIGURE_BUTTON,

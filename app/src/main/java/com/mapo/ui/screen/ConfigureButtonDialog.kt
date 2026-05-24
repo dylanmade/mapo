@@ -418,7 +418,7 @@ private fun GestureRow(label: String, target: RemapTarget, onClick: () -> Unit) 
         )
         OutlinedButton(
             onClick = onClick,
-            shape = RoundedCornerShape(6.dp),
+            shape = MaterialTheme.shapes.small,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
             modifier = Modifier.weight(1f),
         ) {
@@ -516,38 +516,39 @@ internal fun RegionRowItem(
     onTapPreview: String,
     onClick: () -> Unit,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val labelPreview = region?.label ?: onTapPreview
+    val iconVec = MapoIcons.resolve(region?.icon)
+    // Settings-row treatment (row-doctrine #4): ListItem with leading position indicator,
+    // supporting content for label+icon preview, trailing for the per-region size.
+    ListItem(
+        leadingContent = { RegionPositionIndicator(position) },
+        headlineContent = { Text(position.displayName()) },
+        supportingContent = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (iconVec != null) {
+                    Icon(iconVec, contentDescription = null, modifier = Modifier.size(14.dp))
+                }
+                Text(
+                    text = labelPreview.ifEmpty { "—" },
+                    color = if (region == null) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        },
+        trailingContent = {
+            Text(
+                text = if (region == null) "default" else "${region.sizeSp.toInt()}sp",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-    ) {
-        RegionPositionIndicator(position)
-        Text(
-            position.displayName(),
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.width(96.dp),
-        )
-        val labelPreview = region?.label ?: onTapPreview
-        val iconVec = MapoIcons.resolve(region?.icon)
-        if (iconVec != null) {
-            Icon(iconVec, contentDescription = null, modifier = Modifier.size(14.dp))
-        }
-        Text(
-            text = labelPreview.ifEmpty { "—" },
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (region == null) MaterialTheme.colorScheme.onSurfaceVariant
-            else MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = if (region == null) "default" else "${region.sizeSp.toInt()}sp",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+            .clickable { onClick() },
+    )
 }
 
 /**
@@ -587,7 +588,7 @@ private fun RegionPositionIndicator(position: RegionPosition) {
 private fun ResetButton(label: String, onClick: () -> Unit) {
     OutlinedButton(
         onClick = onClick,
-        shape = RoundedCornerShape(6.dp),
+        shape = MaterialTheme.shapes.small,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
@@ -715,16 +716,23 @@ internal fun RegionEditDialog(
                     value = region.sizeSp,
                     onChange = { v -> region = region.copy(sizeSp = v) },
                 )
+
+                // Clear lives in the body (destructive in-place action) rather than the
+                // dismiss-button slot, which M3 reserves for a single Cancel-style action.
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    onClick = onClear,
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) { Text("Clear region") }
             }
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(region) }) { Text("OK") }
         },
         dismissButton = {
-            Row {
-                TextButton(onClick = onClear) { Text("Clear") }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-            }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
 

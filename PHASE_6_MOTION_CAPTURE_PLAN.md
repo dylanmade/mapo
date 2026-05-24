@@ -257,19 +257,44 @@ Predicate verification (use `adb logcat | grep MotionCaptureCoord`):
 - Cold-launch race — `compiledConfig` lazy-loads after first event; coordinator tolerates `EMPTY` config via `compiled.sets[resolvedSetId] ?: return false`.
 - `ProfileAutoSwitcher` may swap profile mid-attached-overlay; coordinator calls `InputEvaluator.flushAnalog()` on profile-id transition (today a no-op — Brick 5+ fill).
 
-### Brick 5 — First analog mode: Trigger Soft_Press
+### Brick 5 — First analog mode: Trigger Soft_Press — ✅ COMPLETED 2026-05-20
 
-**Goal:** Ship the first real `SourceMode.evaluate()`. LEFT/RIGHT_TRIGGER analog pull crossing the configured `soft_threshold` synthesizes a `(source, "soft_press")` sub-input edge into the activator engine; the existing `SOFT_PRESS` activator type fires.
+**Goal:** Ship the first real `SourceMode.evaluate()`. LEFT/RIGHT_TRIGGER analog pull crossing the configured `soft_threshold` synthesizes a SOFT_PRESS-activator fire on the source's `"click"` sub-input. Hysteresis on release.
 
-**Files:**
-- `app/src/main/java/com/mapo/service/input/modes/SourceMode.kt` — add `evaluate()` to the interface (D1); implement on `TriggerMode`. Settings: `soft_threshold` + hysteresis (5% default, Steam-compatible).
-- `app/src/main/java/com/mapo/service/input/InputEvaluator.kt` — `handleMotion` becomes a real dispatcher: per-reading, look up the source's compiled mode, call `mode.evaluate(...)`, route synthetic-digital edges back through `onPress`/`onRelease`. Remove the `else -> ` "skipping" branch for `SOFT_PRESS` in `onPress`.
-- `app/src/main/java/com/mapo/service/input/AnalogEvent.kt` — verify trigger axes surface as `(LEFT_TRIGGER, magnitude)` / `(RIGHT_TRIGGER, magnitude)` (Brick 6.2 work already did this — verify).
-- New: `app/src/test/java/com/mapo/service/input/modes/TriggerModeSoftPressTest.kt`.
+**Files actually landed:**
+- `app/src/main/java/com/mapo/service/input/modes/SourceMode.kt` — added `evaluate()` to the interface (D1), `ModeContext` data class (settings + prior-latched + layer ids), `MouseEmitter` placeholder interface + `NOOP` singleton (D2 lock for Brick 7). `TriggerMode` implements `evaluate()` with hysteresis edge detection; added `SYNTH_SOFT_PRESS = "soft_press"` constant. Settings: `click_threshold=0.95`, `soft_threshold=0.10`, `soft_hysteresis=0.05` (Steam-default). `TriggerSettings.parse()` is tolerant of missing keys / malformed JSON (falls back to defaults). Added `BindingMode.TRIGGER` to `ANALOG_MODES_REQUIRING_MOTION_CAPTURE`.
+- `app/src/main/java/com/mapo/service/input/CompiledConfig.kt` — added `modeSettingsJson: String = ""` to `CompiledInput`, threaded through `toCompiled()` from `preset.group.group.settingsJson`.
+- `app/src/main/java/com/mapo/service/input/InputEvaluator.kt` — `handleMotion` becomes a real dispatcher: per-reading walks layers + base set for the source's mode, calls `mode.evaluate(reading, ctx, digitalEmit, MouseEmitter.NOOP)`. Synthetic edges route through `dispatchSyntheticEdge` — `"soft_press"` is special-cased to fire/release SOFT_PRESS-type activators on the source's `"click"` address; other sub-input strings route through `onPress`/`onRelease` (Brick 6 hook). Added `analogLatched` per-(source × virtual sub-input) state map. Removed the `else -> "skipping"` branch in `onPress` and added an explicit `ActivatorType.SOFT_PRESS -> { /* analog path owns this */ }` no-op so the hardware DOWN passes through naturally. `flushAnalog()` body filled in: for each latched virtual edge, synthesize a falling-edge dispatch (releases held bindings through the same release path a real motion-driven UP would use).
+- `app/src/main/java/com/mapo/ui/screen/InputEditorScreen.kt` — `UNIMPLEMENTED_ACTIVATORS` is now empty; SOFT_PRESS no longer surfaces a "Coming soon" hint.
+- New: `app/src/test/java/com/mapo/service/input/modes/TriggerModeSoftPressTest.kt` — 11 focused tests (rising-edge fire-once, sustained-no-refire, hysteresis dead-band, falling-edge fire-once, custom threshold honored, missing-keys / malformed JSON tolerance, defaults pinned, validInputs shape). Robolectric runner — plain JUnit gets the `isReturnDefaultValues=true` stub of `org.json.JSONObject` and every reading would read 0.0.
 
-**Exit criteria:** Configure LT to mode `TRIGGER`, bind a `SOFT_PRESS` activator on the `"soft_press"` sub-input to a key, soft-pull LT in a game → key fires; full-pull → existing click path still fires. Other analog modes still `StubMode`.
+**Deviations from plan:**
+- **Soft Pull row unified after first device verification (2026-05-20).** Initial implementation kept Soft_Press as an activator type on the `"click"` sub-input — but `RemapSections.kt` already had a `RemapPaneItem.DisabledRow("triggers.left.soft", "L2 Soft Pull")` placeholder waiting for analog. The UI design always intended Soft Pull as a separate sub-input row. After device verification surfaced both the firing failure and the user's "how does this differ from Soft Pull?" confusion, I unified: added `"soft_press"` to `TriggerMode.validInputs` + the trigger seed; converted L2/R2 Soft Pull from `DisabledRow` → live `BindingRow` at `(LEFT/RIGHT_TRIGGER, "soft_press")`; simplified `dispatchSyntheticEdge` to route the synthetic edge through normal `onPress`/`onRelease` (no special-casing); removed `SOFT_PRESS` from the activator-type dropdown (`ACTIVATOR_RENDER_ORDER` in `InputEditorScreen.kt`) — the enum value stays for VDF import. `handleSoftPressEdge` and `releaseAnalogActivatorsAt` helpers retired. The defensive `ActivatorType.SOFT_PRESS -> { /* no-op */ }` case in `onPress` stays in case any legacy data carries that activator type on the click row.
+- **`MouseEmitter` is an empty interface for now**, not the full Brick-7 sink. Locked the signature for D1; Brick 7 fills in the methods.
+- **TRIGGER unconditionally added to the motion-capture set.** A loose-but-correct gating: a binding_group in TRIGGER mode with no soft-pull activators bound doesn't strictly need motion capture. A tighter predicate that inspects activator presence is a coordinator-side refinement; deferred — code comment in `ANALOG_MODES_REQUIRING_MOTION_CAPTURE` flags the trade-off.
 
-**Risks:** Without hysteresis, a wobbly finger flutters the synthetic edge — bake in 5% as default.
+**Hand-off — device verification (post-Soft-Pull-unification):**
+
+Setup (**wipe app data first** — the new seed adds a `"soft_press"` sub-input row to every trigger binding_group; existing profiles created before this change won't have it):
+1. Clear-app-data Mapo, re-install the new APK, set up a fresh profile.
+2. Auto-Switch → bind a launchable app (e.g. GameNative) to the active profile.
+3. Open Remap Controls → Left Trigger → mode dropdown → pick "Trigger". First analog-mode pick triggers the tradeoffs dialog → "Got it".
+4. Under the Left Trigger subheader you should now see **two live rows**: "L2 Full Pull" (hardware threshold) and "L2 Soft Pull" (analog soft-pull). The "Analog Output Trigger" row is still a disabled placeholder.
+5. Tap the "L2 Soft Pull" row → InputEditor opens. Add a Regular Press activator → bind ENTER (or any recognizable key).
+
+Predicate verification (use `adb logcat "MotionCaptureCoord:D" "InputEvaluator:D" "InputEvaluator.Motion:D" "*:S"`):
+6. Foreground the bound app → coordinator attaches; `decision: shouldAttach=true`.
+7. Pull LT softly past ~10% → `synthetic edge: LEFT_TRIGGER.soft_press DOWN`; ENTER fires DOWN on the foreground app.
+8. Sustain the pull → no re-fire.
+9. Wobble around the threshold (e.g. 0.08 ↔ 0.12) → no flutter (within hysteresis band).
+10. Release fully (below ~5%) → `synthetic edge: LEFT_TRIGGER.soft_press UP`; ENTER releases.
+11. Full-pull past the hardware click threshold → if no activator is wired on "L2 Full Pull" (the `"click"` sub-input), the hardware L2 click passes through to the foreground app naturally.
+12. (Optional) Bind a different key to L2 Full Pull — soft-pull and full-pull fire independently.
+13. (Optional) Set LT back to `[Device default]` — coordinator detaches if no other source is analog; IME / back / app-switcher gestures return.
+
+**Risks (settled):**
+- Hysteresis (5% Steam default) bakes in non-flutter behavior — verified by the dead-band test.
+- Hardware UP releasing both Full- and Soft-Pull HeldEntries when both fire on (source, "click") is not a concern with the unified design — they live on different addresses now (`"click"` vs `"soft_press"`).
 
 ### Brick 6 — Joystick Move (synthetic dpad-direction edges)
 

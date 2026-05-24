@@ -745,17 +745,45 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @SuppressLint("PrivateApi")
     private fun injectInputEvent(event: android.view.InputEvent) {
         val displayId = readEventDisplayId(event)
-        try {
-            val imClass = Class.forName("android.hardware.input.InputManager")
-            val im = imClass.getDeclaredMethod("getInstance").invoke(null)
-            val result = imClass.getDeclaredMethod(
-                "injectInputEvent",
-                android.view.InputEvent::class.java,
-                Int::class.javaPrimitiveType
-            ).invoke(im, event, 0) as? Boolean ?: false // 0 = INJECT_INPUT_EVENT_MODE_ASYNC
-            Log.d(TAG, "injectInputEvent result=$result type=${event.javaClass.simpleName} source=0x${event.source.toString(16)} eventDisplay=$displayId cachedFocusedDisplay=$focusedAppDisplayId")
-        } catch (e: Exception) {
-            Log.e(TAG, "injectInputEvent failed: $event", e)
+        val doInject: () -> Unit = {
+            // DIAGNOSTIC (Brick 5 follow-up — Approach A device-test 2026-05-21):
+            // dump windows AT the moment of inject so we can see whether the
+            // overlay's removeView actually propagated to the dispatcher's
+            // focus state. If gamenative shows focused=true here, the inject
+            // should route to it; if Mapo's overlay still shows focused=true
+            // the dispatcher hasn't caught up to the WMS state change yet.
+            val keyCode = (event as? KeyEvent)?.keyCode ?: -1
+            dumpAllDisplays("pre-inject keyCode=$keyCode")
+            try {
+                val imClass = Class.forName("android.hardware.input.InputManager")
+                val im = imClass.getDeclaredMethod("getInstance").invoke(null)
+                val result = imClass.getDeclaredMethod(
+                    "injectInputEvent",
+                    android.view.InputEvent::class.java,
+                    Int::class.javaPrimitiveType
+                ).invoke(im, event, 0) as? Boolean ?: false // 0 = INJECT_INPUT_EVENT_MODE_ASYNC
+                Log.d(TAG, "injectInputEvent result=$result type=${event.javaClass.simpleName} source=0x${event.source.toString(16)} eventDisplay=$displayId cachedFocusedDisplay=$focusedAppDisplayId")
+            } catch (e: Exception) {
+                Log.e(TAG, "injectInputEvent failed: $event", e)
+            }
+        }
+        // Brick 5 follow-up (Approach C): if the motion-capture overlay is
+        // attached it holds key focus on the target display so it can read
+        // gamepad MotionEvents — any KeyEvent we inject here would route to
+        // the overlay instead of the foreground game. The overlay manager
+        // toggles FLAG_NOT_FOCUSABLE for the duration of the inject so the
+        // foreground window regains focus; flag restored before the next
+        // motion event arrives.
+        //
+        // No-op when the overlay isn't attached (the common case for
+        // hardware-button-to-key remaps in non-analog profiles). Only the
+        // gesture-driven mouse path (dispatchTargetAsClick) bypasses this
+        // chokepoint entirely because dispatchGesture is coordinate-based,
+        // not focus-based.
+        if (event is KeyEvent) {
+            motionCaptureOverlayManager.withFocusReleasedForInject(doInject)
+        } else {
+            doInject()
         }
     }
 

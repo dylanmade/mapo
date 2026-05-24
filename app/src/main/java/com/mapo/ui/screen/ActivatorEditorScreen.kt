@@ -4,24 +4,23 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -325,39 +324,32 @@ private fun ChordPartnerRow(
     partnerKey: String?,
     onPick: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (partnerSourceLabel != null && partnerKey != null)
-                        "$partnerSourceLabel · $partnerKey"
-                    else "Not set",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (partnerSourceLabel != null)
-                        MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = "The chord activator only fires when this partner is currently held.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.width(8.dp))
+    // Settings-row treatment (row-doctrine #4): ListItem with the partner value as headline,
+    // helper as supporting text, and the Set/Change button in the trailing slot.
+    ListItem(
+        headlineContent = {
+            Text(
+                text = if (partnerSourceLabel != null && partnerKey != null)
+                    "$partnerSourceLabel · $partnerKey"
+                else "Not set",
+                color = if (partnerSourceLabel != null)
+                    MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        supportingContent = {
+            Text(text = "The chord activator only fires when this partner is currently held.")
+        },
+        trailingContent = {
             FilledTonalButton(onClick = onPick) {
                 Text(
                     text = if (partnerSourceLabel == null) "Set" else "Change",
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
-        }
-    }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /**
@@ -372,31 +364,15 @@ private fun SettingsSwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
-        onClick = { onCheckedChange(!checked) },
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Text(
-                    text = helper,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-            )
-        }
-    }
+    // Settings-row treatment (row-doctrine #4): ListItem with label headline, helper as
+    // supporting text, and trailing Switch. Whole row is the tap target so the row
+    // owns the toggle (onCheckedChange = null on the Switch itself).
+    ListItem(
+        headlineContent = { Text(text = label) },
+        supportingContent = { Text(text = helper) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) },
+    )
 }

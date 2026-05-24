@@ -96,7 +96,7 @@ class KeyboardController @Inject constructor(
     private val _selectedIndex = MutableStateFlow(0)
     val selectedIndex: StateFlow<Int> = _selectedIndex.asStateFlow()
 
-    private val _remapEnabled = MutableStateFlow(false)
+    private val _remapEnabled = MutableStateFlow(true)
     val remapEnabled: StateFlow<Boolean> = _remapEnabled.asStateFlow()
 
     /**

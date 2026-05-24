@@ -19,3 +19,5 @@ dependencyResolutionManagement {
 rootProject.name = "mapo"
 include(":app")
 include(":themestudio")
+include(":input-shared")
+include(":shizuku-service")

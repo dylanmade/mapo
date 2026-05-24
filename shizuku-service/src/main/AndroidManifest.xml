@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- No <application> Hilt entry on purpose: this module is consumed by :app,
+         which owns the <application>. Shizuku locates the UserService class via
+         ComponentName at runtime — the <service> declaration here is for tooling
+         and PackageManager discovery, NOT for Mapo to bind locally. -->
+</manifest>

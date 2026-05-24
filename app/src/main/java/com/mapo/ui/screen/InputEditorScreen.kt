@@ -27,6 +27,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -185,9 +187,14 @@ fun InputEditorScreen(
     }
 }
 
+/**
+ * Order activator chips render in (and the picker dropdown lists in). SOFT_PRESS
+ * is intentionally absent — Mapo expresses soft-pull behavior via the trigger's
+ * dedicated `"soft_press"` sub-input row ("L2/R2 Soft Pull" in the UI), not via
+ * an activator type. The enum value stays alive for VDF import only.
+ */
 private val ACTIVATOR_RENDER_ORDER = listOf(
     ActivatorType.FULL_PRESS,
-    ActivatorType.SOFT_PRESS,
     ActivatorType.LONG_PRESS,
     ActivatorType.DOUBLE_PRESS,
     ActivatorType.START_PRESS,
@@ -220,12 +227,12 @@ fun ActivatorType.displayLabel(): String = when (this) {
  * Activators whose runtime impl hasn't landed yet. UI lets the user pick them so the
  * affordance is visible, but we surface a "Coming soon" hint.
  *
- *  - SOFT_PRESS: needs analog trigger capture (Phase 6 — see Phase 2.3 descope).
- *  - CHORDED_PRESS landed in Brick 3.3.
+ * Empty as of Brick 5 (Phase 6) — SOFT_PRESS is now the first real analog activator,
+ * routed via [TriggerMode][com.mapo.service.input.modes.TriggerMode]'s soft-threshold
+ * detection on the focused motion-capture overlay. Re-populate if a later activator
+ * type lands with deferred runtime.
  */
-private val UNIMPLEMENTED_ACTIVATORS = setOf(
-    ActivatorType.SOFT_PRESS,
-)
+private val UNIMPLEMENTED_ACTIVATORS = emptySet<ActivatorType>()
 
 @Composable
 private fun ActivatorRow(
@@ -313,34 +320,28 @@ private fun CommandRow(
     onTap: () -> Unit,
     onRemove: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = !unimplemented, onClick = onTap),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = output.displayLabel(config),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (output == BindingOutput.Unbound)
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    else MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = if (unimplemented)
-                        "Runtime support coming soon — saved settings won't fire yet."
-                    else "Tap to choose what this command emits.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (canRemove) {
+    // Settings-row treatment (row-doctrine #4): ListItem with the command label as
+    // headline, helper as supporting text, and the remove [×] in the trailing slot.
+    // Container retains the surfaceContainerHigh fill so it reads as a tappable card
+    // distinct from the editor's surface plane behind it.
+    ListItem(
+        headlineContent = {
+            Text(
+                text = output.displayLabel(config),
+                color = if (output == BindingOutput.Unbound)
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.primary,
+            )
+        },
+        supportingContent = {
+            Text(
+                text = if (unimplemented)
+                    "Runtime support coming soon — saved settings won't fire yet."
+                else "Tap to choose what this command emits.",
+            )
+        },
+        trailingContent = if (canRemove) {
+            {
                 IconButton(
                     onClick = onRemove,
                     modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
@@ -352,8 +353,14 @@ private fun CommandRow(
                     )
                 }
             }
-        }
-    }
+        } else null,
+        colors = ListItemDefaults.colors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !unimplemented, onClick = onTap),
+    )
 }
 
 @Composable
@@ -363,10 +370,11 @@ private fun ActivatorTypeDropdown(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    // surfaceContainerHigh — unified pill-dropdown container per row-doctrine memo.
     Surface(
         modifier = modifier,
         shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
         onClick = { expanded = true },
     ) {
         Row(

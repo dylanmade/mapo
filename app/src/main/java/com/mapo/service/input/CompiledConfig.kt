@@ -94,6 +94,14 @@ data class CompiledInput(
     val groupInputId: Long,
     val activators: List<CompiledActivator>,
     val mode: BindingMode,
+    /**
+     * The binding_group's `settingsJson` — duplicated onto every sub-input under
+     * the group so the evaluator's analog-mode dispatcher can hand it to the
+     * mode handler ([SourceMode.evaluate][com.mapo.service.input.modes.SourceMode.evaluate])
+     * without an extra lookup. Defaults to `""` so test fixtures that don't care
+     * about mode settings don't need to thread a value through every constructor.
+     */
+    val modeSettingsJson: String = "",
 )
 
 /**
@@ -308,6 +316,7 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                     groupInputId = inputGraph.input.id,
                     activators = compiledActivators,
                     mode = preset.group.group.mode,
+                    modeSettingsJson = preset.group.group.settingsJson,
                 )
             }
         }

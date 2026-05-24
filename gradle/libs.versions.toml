@@ -15,6 +15,7 @@ navigationCompose = "2.9.0"
 gson = "2.11.0"
 kotlinxCollectionsImmutable = "0.4.0"
 hiddenApiBypass = "4.3"
+shizuku = "13.1.5"
 
 # Testing
 junit = "4.13.2"
@@ -69,6 +70,15 @@ kotlinx-collections-immutable = { group = "org.jetbrains.kotlinx", name = "kotli
 # (required for the AYN Thor's bottom screen).
 hidden-api-bypass = { group = "org.lsposed.hiddenapibypass", name = "hiddenapibypass", version.ref = "hiddenApiBypass" }
 
+# Shizuku (rikka.app). Optional dependency that powers Mapo's analog input modes:
+# the UserService runs in Shizuku's shell-uid context, reads `/dev/input/event*`
+# directly (no focused-overlay required for motion capture), and injects key events
+# via `IInputManager.injectInputEvent` from shell-context (bypasses focus routing).
+# Without Shizuku, Mapo's digital remap continues to work via the existing reflection
+# inject path — analog modes are simply gated.
+shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
+shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
+
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
@@ -89,5 +99,6 @@ robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "kotlin" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

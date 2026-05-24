@@ -3,8 +3,14 @@ package com.mapo.service.input
 import android.util.Log
 import android.view.MotionEvent
 import com.mapo.data.model.steam.ActivatorType
+import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.BindingOutput
+import com.mapo.data.model.steam.InputSource
 import com.mapo.di.ApplicationScope
+import com.mapo.service.input.modes.ModeContext
+import com.mapo.service.input.modes.MouseEmitter
+import com.mapo.service.input.modes.TriggerMode
+import com.mapo.service.input.modes.handler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -178,6 +184,20 @@ class InputEvaluator @Inject constructor(
      */
     private val longPressDeferrals = HashMap<InputAddress, CompiledActivator>()
 
+    /**
+     * Brick 5: synthetic-edge latch state per (source, virtual sub-input).
+     * Modes write here indirectly via [SourceMode.evaluate][com.mapo.service.input.modes.SourceMode.evaluate]'s
+     * `digitalEmit` callback — when that callback fires `(subInput, true)` the
+     * corresponding key flips to true here, `(subInput, false)` removes it. The
+     * evaluator hands the per-source slice back to evaluate() on the next motion
+     * event as `ctx.priorLatched`, which lets modes do hysteresis edge detection
+     * without holding state themselves (modes are singletons).
+     *
+     * Persists across motion events; cleared per-source by [flushAnalog] on
+     * profile/set switch.
+     */
+    private val analogLatched = HashMap<InputAddress, Boolean>()
+
     private fun stateFor(id: Long): ActivatorRuntimeState =
         activatorState.getOrPut(id) { ActivatorRuntimeState() }
 
@@ -226,31 +246,107 @@ class InputEvaluator @Inject constructor(
     }
 
     /**
-     * **Brick 6.2 probe stub.** Receive a raw [MotionEvent] from the motion-capture
-     * overlay (or activity positive control) and extract normalized [AnalogEvent]s for
-     * downstream analog modes. Today: no analog modes consume the readings — the only
-     * effect is verbose logging under the same tag the overlay uses. Returns false so
-     * the platform input pipeline keeps routing the event normally.
+     * Brick 5: motion-event dispatcher. Extracts normalized [AnalogEvent]s and routes
+     * each through its source's resolved [SourceMode][com.mapo.service.input.modes.SourceMode].
+     * The mode does any edge detection / continuous-output translation it needs and
+     * emits synthetic sub-input edges via the `digitalEmit` callback; the dispatcher
+     * routes those back into the activator engine.
      *
-     * Analog mode consumption lands brick-by-brick from 6.3 (Trigger soft-press) onward.
-     * When that work begins, this method routes [AnalogEvent]s into per-source mode
-     * handlers and starts producing real `GroupInput` events into the activator engine.
+     * **What's wired this brick:**
+     *  - Trigger SOFT_PRESS — when the analog magnitude crosses `soft_threshold`
+     *    (with hysteresis on release), the synthetic `"soft_press"` edge fires
+     *    SOFT_PRESS-type activators on the source's `"click"` sub-input.
+     *
+     * **Future:** Brick 6 (Joystick Move) emits synthetic `"dpad_north"` / etc.
+     * edges which route through the normal digital path; Brick 7 (Mouse modes)
+     * uses the `MouseEmitter` continuous-output sink instead.
+     *
+     * Returns false so the platform input pipeline keeps routing the underlying
+     * MotionEvent normally — Mapo doesn't consume the gesture, it just samples it.
      */
     fun handleMotion(event: MotionEvent): Boolean {
         val readings = MotionEventNormalizer.extract(event)
-        // Always log: motion events are the only way to observe analog input
-        // flow end-to-end (Brick 3 device verification, Phase 6 analog mode
-        // development). Per feedback_input_logging, no input goes unlogged.
-        // Single line per event keeps the volume manageable vs. one line per
-        // axis when the stick is at rest with two non-zero axes.
+        // Per feedback_input_logging: input events always logged. Single line per
+        // event keeps the volume manageable vs. one line per axis when the stick
+        // is at rest with two non-zero axes.
         if (readings.isNotEmpty()) {
             val summary = readings.joinToString(" ") { r ->
                 "${r.source}(${"%.3f".format(r.x)},${"%.3f".format(r.y)})"
             }
             Log.d(TAG_MOTION, "handleMotion action=${event.actionMasked} $summary")
         }
+
+        val set = resolveActiveSet() ?: return false
+        for (reading in readings) {
+            val resolved = findSourceModeFor(set, reading.source) ?: continue
+            val handler = resolved.mode.handler()
+            // Priors slice — only this source's virtual sub-input latch state.
+            val priors = analogLatched.entries
+                .filter { it.key.source == reading.source }
+                .associate { it.key.inputKey to it.value }
+            val ctx = ModeContext(
+                source = reading.source,
+                settingsJson = resolved.settingsJson,
+                priorLatched = priors,
+                activeLayerIds = activeLayers.toList(),
+            )
+            handler.evaluate(
+                reading,
+                ctx,
+                digitalEmit = { subInput, isDown ->
+                    dispatchSyntheticEdge(reading.source, subInput, isDown)
+                },
+                mouse = MouseEmitter.NOOP,
+            )
+        }
         return false
     }
+
+    /**
+     * Resolve which mode + settings apply to [source] given the active set + layer
+     * stack. Walks layers top-down (highest priority first) looking for any
+     * compiled input on this source — if found, that layer's binding_group's mode
+     * + settings win. Falls back to the base set otherwise. Returns null when no
+     * binding_group covers the source (e.g. the source is UNBOUND or never seeded).
+     */
+    private fun findSourceModeFor(set: CompiledActionSet, source: InputSource): SourceModeView? {
+        if (activeLayers.isNotEmpty()) {
+            for (i in activeLayers.indices.reversed()) {
+                val layer = set.layers[activeLayers[i]] ?: continue
+                val match = layer.inputs.entries.firstOrNull { it.key.source == source }?.value
+                if (match != null) return SourceModeView(match.mode, match.modeSettingsJson)
+            }
+        }
+        val base = set.inputs.entries.firstOrNull { it.key.source == source }?.value
+            ?: return null
+        return SourceModeView(base.mode, base.modeSettingsJson)
+    }
+
+    /**
+     * Route a mode's synthetic edge into the activator engine via the normal
+     * digital press/release path. The mode emits a virtual sub-input key
+     * (e.g. `"soft_press"` for triggers, `"dpad_north"` for joysticks in
+     * Brick 6); the corresponding `CompiledInput(source, subInput)` resolves
+     * via [lookupActive] and the activator engine handles fire / release
+     * exactly as if a physical DOWN/UP had arrived at that address.
+     *
+     * For this to work, the mode's [SourceMode.validInputs] must declare the
+     * sub-input — otherwise the compile step drops it and `lookupActive`
+     * returns null, leaving the synthetic edge inert (which is also the
+     * correct outcome when the source isn't in the right mode).
+     */
+    private fun dispatchSyntheticEdge(source: InputSource, subInput: String, isDown: Boolean) {
+        val address = InputAddress(source, subInput)
+        if (isDown) onPress(address) else onRelease(address)
+        if (isDown) analogLatched[address] = true else analogLatched.remove(address)
+        Log.d(TAG_MOTION, "synthetic edge: $source.$subInput ${if (isDown) "DOWN" else "UP"}")
+    }
+
+    /**
+     * Lightweight return type for [findSourceModeFor]; keeps the resolved
+     * mode + settings together without leaking [CompiledInput] internals.
+     */
+    private data class SourceModeView(val mode: BindingMode, val settingsJson: String)
 
     private fun onPress(address: InputAddress): Boolean {
         // Record the physical state up-front so any CHORDED_PRESS activator triggered by
@@ -336,6 +432,17 @@ class InputEvaluator @Inject constructor(
                     // through, but no DOWN-side emission.
                     consumed = true
                 }
+                ActivatorType.SOFT_PRESS -> {
+                    // Brick 5 follow-up: SOFT_PRESS is no longer a user-pickable
+                    // activator type — the user expresses soft-pull behavior by
+                    // adding any activator type to the trigger's `soft_press`
+                    // sub-input row (UI: "L2/R2 Soft Pull"). This case stays as
+                    // a defensive no-op for legacy data + the eventual VDF import
+                    // path (Steam's SOFT_PRESS activator translates into a Mapo
+                    // activator on the `soft_press` sub-input, but if any legacy
+                    // SOFT_PRESS row survives on `click`, treat it as inert here
+                    // rather than firing on the hardware threshold).
+                }
                 ActivatorType.CHORDED_PRESS -> {
                     val partner = activator.settings.chordPartner
                     when {
@@ -361,10 +468,6 @@ class InputEvaluator @Inject constructor(
                         }
                     }
                     consumed = true
-                }
-                else -> {
-                    Log.d(TAG, "onPress: skipping ${activator.type} activator (later brick)")
-                    if (compiledInput.activators.isNotEmpty()) consumed = true
                 }
             }
         }
@@ -862,17 +965,30 @@ class InputEvaluator @Inject constructor(
 
     /**
      * Brick 4: release any analog-mode runtime state. Called from [flushAllRuntime]
-     * (set-switch path) so a profile-driven `CHANGE_PRESET` doesn't leak in-flight
-     * analog state — synthetic dpad edges held by a JOYSTICK_MOVE source, cursor-tick
-     * deltas pending in a Mouse mode, etc. — into the new set.
+     * (set-switch path) and from `MotionCaptureCoordinator` on profile transitions
+     * so a `CHANGE_PRESET` or profile swap doesn't leak in-flight analog state —
+     * synthetic SOFT_PRESS edges latched on a trigger, synthetic dpad edges (Brick
+     * 6) held by a JOYSTICK_MOVE source, etc. — into the new set / profile.
      *
-     * Today a no-op: analog modes don't ship runtime state until Brick 5+. The hook
-     * is here so callers (coordinator + future set-switch glue) don't need a
-     * version-by-version conditional. Brick 5/6/7 fill in the body as each mode
-     * brings its own held state online.
+     * Brick 5 fills in trigger Soft_Press. For each latched virtual sub-input we
+     * synthesize the matching UP edge so any held bindings the analog path put
+     * into [held] get released through the same release path a real falling
+     * edge would use — guarantees parity with normal release semantics (fire-end
+     * delay, hold-to-repeat cancellation, etc.).
      */
     fun flushAnalog() {
-        // Intentional no-op. Body lands per-mode in Brick 5+.
+        if (analogLatched.isEmpty()) return
+        Log.d(TAG, "flushAnalog: releasing ${analogLatched.size} latched synthetic edge(s)")
+        // Snapshot before mutation — dispatchSyntheticEdge writes back into
+        // analogLatched on each call.
+        val snapshot = analogLatched.keys.toList()
+        for (address in snapshot) {
+            dispatchSyntheticEdge(address.source, address.inputKey, isDown = false)
+        }
+        // Safety: dispatchSyntheticEdge should have cleared each entry on its
+        // own (isDown=false → remove), but a future mode that skips on stale
+        // state could leave an orphan. Clear unconditionally.
+        analogLatched.clear()
     }
 
     /** Test seam: which action set is currently active. Returns 0L before first event. */

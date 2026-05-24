@@ -977,11 +977,16 @@ class ControllerConfigRepository @Inject constructor(
             InputSource.RIGHT_BUMPER to InputSourceSeed(
                 "right_bumper", BindingMode.SINGLE_BUTTON, listOf("click"),
             ),
+            // Triggers carry two sub-inputs: "click" (hardware threshold —
+            // KEYCODE_BUTTON_L2 / R2) and "soft_press" (analog soft-pull,
+            // fired via motion-event hysteresis in TriggerMode.evaluate).
+            // The mode defaults to UNBOUND on a fresh profile; switching to
+            // TRIGGER mode is what activates both rows.
             InputSource.LEFT_TRIGGER to InputSourceSeed(
-                "left_trigger", BindingMode.UNBOUND, listOf("click"),
+                "left_trigger", BindingMode.UNBOUND, listOf("click", "soft_press"),
             ),
             InputSource.RIGHT_TRIGGER to InputSourceSeed(
-                "right_trigger", BindingMode.UNBOUND, listOf("click"),
+                "right_trigger", BindingMode.UNBOUND, listOf("click", "soft_press"),
             ),
             InputSource.LEFT_JOYSTICK to InputSourceSeed(
                 "left_joystick", BindingMode.UNBOUND, listOf("click"),

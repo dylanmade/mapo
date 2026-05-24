@@ -26,6 +26,19 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Mapo">
 
+        <!-- Shizuku provider. The Shizuku Manager app talks to us via this
+             ContentProvider to deliver the binder + permission grant results.
+             Required even when Shizuku Manager isn't installed (then it just
+             never gets queried). See rikka-apps/Shizuku-API docs. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

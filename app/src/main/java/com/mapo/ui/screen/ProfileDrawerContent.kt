@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.SecurityUpdateGood
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -33,6 +34,7 @@ fun ProfileDrawerContent(
     onOpenAutoSwitch: () -> Unit,
     onOpenBlocklist: () -> Unit,
     onOpenThemeStudio: () -> Unit,
+    onOpenShizukuSetup: () -> Unit,
     onToggleKeyboardOverlay: () -> Unit,
     onToggleMotionProbe: () -> Unit,
 ) {
@@ -95,6 +97,15 @@ fun ProfileDrawerContent(
                     selected = false,
                     onClick = onOpenThemeStudio,
                     icon = { Icon(Icons.Default.Palette, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+            item {
+                NavigationDrawerItem(
+                    label = { Text(stringResource(R.string.shizuku_drawer_label)) },
+                    selected = false,
+                    onClick = onOpenShizukuSetup,
+                    icon = { Icon(Icons.Default.SecurityUpdateGood, contentDescription = null) },
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
             }

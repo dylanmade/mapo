@@ -10,12 +10,14 @@ import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import com.mapo.service.overlay.keyboard.KeyboardOverlayService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.CountDownLatch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -52,6 +54,12 @@ class MotionCaptureOverlayManager @Inject constructor(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var attachedView: MotionCaptureView? = null
+    /**
+     * Live [WindowManager.LayoutParams] for the currently-attached overlay.
+     * Retained alongside [attachedView] so [withFocusReleasedForInject] can
+     * mutate the focusable flag without having to rebuild the params.
+     */
+    private var attachedParams: WindowManager.LayoutParams? = null
 
     private val _isAttached = MutableStateFlow(false)
     val isAttached: StateFlow<Boolean> = _isAttached.asStateFlow()
@@ -157,6 +165,7 @@ class MotionCaptureOverlayManager @Inject constructor(
         try {
             wm.addView(view, params)
             attachedView = view
+            attachedParams = params
             // Borrow the keyboard overlay's foreground-service for process
             // priority. While Mapo's activity is backgrounded (the normal case
             // during gameplay) Android 12+ will otherwise drop our process
@@ -173,6 +182,7 @@ class MotionCaptureOverlayManager @Inject constructor(
 
     private fun detachInternal(view: MotionCaptureView) {
         attachedView = null
+        attachedParams = null
         view.onMotion = null
         try {
             (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.removeView(view)
@@ -184,6 +194,113 @@ class MotionCaptureOverlayManager @Inject constructor(
         // keeps running until the process exits.
         _isAttached.value = false
         Log.i(TAG, "detached")
+    }
+
+    /**
+     * Brick 5 follow-up: relinquish key focus for the duration of [block].
+     *
+     * **Why.** The motion-capture overlay holds focus on its display so it
+     * can receive `MotionEvent`s from the gamepad — that's the only way to
+     * read joystick / trigger axes on Android 13 (no `AccessibilityService
+     * .onMotionEvent` until API 34, no `InputMonitor` without signature-
+     * privileged permission). But any `KeyEvent` Mapo injects via
+     * `InputManager.injectInputEvent` routes to the focused window on the
+     * target display — i.e. lands in the overlay, not in the foreground
+     * game. Briefly removing the overlay from `WindowManager` forces focus
+     * onto the next-lowest focusable window (the game); the inject lands
+     * there; we then re-add the overlay to resume motion capture.
+     *
+     * **Why removeView / addView and not a flag toggle.** Approach C
+     * (toggle `FLAG_NOT_FOCUSABLE` via `updateViewLayout`) was tried
+     * 2026-05-21 — failed on Thor. `updateViewLayout` queues the layout
+     * update; focus reassignment is dispatched asynchronously and the
+     * inject ran before it propagated. `removeView` is synchronous w.r.t.
+     * focus reassignment: the window's surface is destroyed in the call,
+     * so WindowManager has to reassign focus before returning. Validated
+     * empirically by user device-test feedback in that session.
+     *
+     * **Thread model.** `WindowManager` operations require the thread
+     * that originally added the view (the main thread). Callers from
+     * coroutine dispatchers (e.g. hold-to-repeat timers) post-and-wait
+     * via a [CountDownLatch]; callers already on main run inline.
+     *
+     * No-op fast path: when the overlay isn't currently attached there's
+     * no focus to release — [block] runs directly.
+     */
+    fun withFocusReleasedForInject(block: () -> Unit) {
+        val view = attachedView
+        val params = attachedParams
+        if (view == null || params == null) {
+            block()
+            return
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            doDetachInjectReattach(view, params, block)
+        } else {
+            // Off main: post to main and synchronously wait. The latch
+            // dance is required because WindowManager operations must run
+            // on the view-creating thread. The added thread-hop is paid
+            // only on coroutine-driven injects (e.g. hold-to-repeat timers).
+            val latch = CountDownLatch(1)
+            var thrown: Throwable? = null
+            mainHandler.post {
+                try {
+                    doDetachInjectReattach(view, params, block)
+                } catch (t: Throwable) {
+                    thrown = t
+                } finally {
+                    latch.countDown()
+                }
+            }
+            latch.await()
+            thrown?.let { throw it }
+        }
+    }
+
+    private fun doDetachInjectReattach(
+        view: View,
+        params: WindowManager.LayoutParams,
+        block: () -> Unit,
+    ) {
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        if (wm == null) {
+            block()
+            return
+        }
+        // We deliberately don't go through detachInternal()/attachInternal()
+        // here — those mutate _isAttached state and null out the motion
+        // callback. From the outside the overlay should remain "attached"
+        // across this transient gymnastics; only the WindowManager's view
+        // tree changes for the few ms of the inject.
+        val removed = try {
+            wm.removeView(view)
+            true
+        } catch (e: Exception) {
+            // Race: detach() ran on another caller between our null check
+            // and the removeView call. Proceed without the detach — the
+            // inject path is still safe to run, it just won't bypass focus.
+            Log.w(TAG, "focus-release: removeView failed — inject without detach", e)
+            false
+        }
+        try {
+            if (removed) Log.d(TAG, "focus-release: overlay detached for inject")
+            block()
+        } finally {
+            if (removed) {
+                try {
+                    wm.addView(view, params)
+                    Log.d(TAG, "focus-release: overlay reattached")
+                } catch (e: Exception) {
+                    // Re-add failed (window destroyed under us, OOM, etc.).
+                    // The overlay is now genuinely detached — sync our cached
+                    // state so a subsequent attach() rebuilds fresh.
+                    Log.e(TAG, "focus-release: reattach failed — clearing attached state", e)
+                    attachedView = null
+                    attachedParams = null
+                    _isAttached.value = false
+                }
+            }
+        }
     }
 
     private fun runOnMain(block: () -> Unit) {

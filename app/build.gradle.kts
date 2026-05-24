@@ -99,6 +99,15 @@ dependencies {
     // MapoApplication for the exemption call.
     implementation(libs.hidden.api.bypass)
 
+    // Shizuku (Phase 6 analog modes). The `provider` artifact ships a ContentProvider
+    // that publishes Mapo's binder to the Shizuku Manager app for permission routing;
+    // declared in AndroidManifest.xml. The `api` artifact is the public surface
+    // (state listeners, permission requests, UserService binding helpers). All
+    // Shizuku.* references go through `service/shizuku/ShizukuFacade.kt` so missing
+    // Shizuku Manager surfaces as a clean state rather than a class-load crash.
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
+
     // Room
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
@@ -107,6 +116,13 @@ dependencies {
     // Theme Studio (in-tree dev tool; will move to debugImplementation once
     // release builds need slimming, or extract to a standalone repo)
     implementation(project(":themestudio"))
+
+    // Shizuku UserService + shared AIDL contracts. :input-shared holds the AIDL
+    // and Parcelable DTOs; :shizuku-service holds the UserService implementation
+    // class that Shizuku launches under shell UID. :app bundles both into its
+    // APK (Shizuku loads the UserService class from there).
+    implementation(project(":input-shared"))
+    implementation(project(":shizuku-service"))
 
     // JVM unit tests
     testImplementation(libs.junit)

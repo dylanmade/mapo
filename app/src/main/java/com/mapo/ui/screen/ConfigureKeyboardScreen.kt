@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -380,7 +379,7 @@ private fun KeyboardTab(
     Spacer(Modifier.height(4.dp))
     OutlinedButton(
         onClick = onResetRequested,
-        shape = RoundedCornerShape(6.dp),
+        shape = MaterialTheme.shapes.small,
         colors = ButtonDefaults.outlinedButtonColors(
             contentColor = MaterialTheme.colorScheme.error,
         ),
@@ -498,7 +497,7 @@ private fun ButtonsTab(
             val fresh = GridLayout(name = "", columns = 1, rows = 1, buttons = emptyList())
             onUpdate(layout.withDefaultButtonFrom(fresh.defaultButtonTemplate()))
         },
-        shape = RoundedCornerShape(6.dp),
+        shape = MaterialTheme.shapes.small,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),

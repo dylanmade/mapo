@@ -104,15 +104,18 @@ class SourceModeTest {
     // ── Brick 6.4: Trigger mode ──────────────────────────────────────────────
 
     @Test
-    fun trigger_validInputs_isJustClick() {
-        // Analog triggers have one sub-input — `click`. The actual pull-threshold
-        // analog gating lives in settings, not in additional sub-inputs.
-        assertEquals(setOf("click"), TriggerMode.validInputs())
+    fun trigger_validInputs_areClickAndSoftPress() {
+        // Triggers carry two sub-inputs: "click" (hardware threshold) and
+        // "soft_press" (analog soft-pull, fired by TriggerMode.evaluate's
+        // hysteresis edge detection). Both are real bindable rows in the UI
+        // (L2/R2 Full Pull, L2/R2 Soft Pull).
+        assertEquals(setOf("click", "soft_press"), TriggerMode.validInputs())
     }
 
     @Test
-    fun trigger_acceptsClick_rejectsOthers() {
+    fun trigger_acceptsClickAndSoftPress_rejectsOthers() {
         assertTrue(TriggerMode.accepts("click"))
+        assertTrue(TriggerMode.accepts("soft_press"))
         assertFalse(TriggerMode.accepts("edge"))
         assertFalse(TriggerMode.accepts("button_a"))
         assertFalse(TriggerMode.accepts("dpad_north"))

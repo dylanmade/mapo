@@ -47,6 +47,19 @@
     <string name="keyboard_overlay_tile_label">Mapo keyboard</string>
     <string name="keyboard_overlay_drawer_label">Toggle keyboard overlay</string>
     <string name="motion_probe_drawer_label">Toggle motion probe (debug)</string>
+    <string name="shizuku_drawer_label">Shizuku setup</string>
+
+    <!-- Brick A — Shizuku Setup screen (minimal). Polished in Brick G. -->
+    <string name="shizuku_screen_title">Shizuku</string>
+    <string name="shizuku_intro">Shizuku is required for Mapo\'s analog input modes (stick → mouse, soft trigger pulls, etc.). Digital remap (gamepad button → keyboard) works without Shizuku.</string>
+    <string name="shizuku_state_not_installed">Shizuku is not installed.</string>
+    <string name="shizuku_state_installed_not_running">Shizuku is installed, but the service is not running.</string>
+    <string name="shizuku_state_running_not_granted">Shizuku is running. Mapo needs your permission.</string>
+    <string name="shizuku_state_granted">Shizuku is ready.</string>
+    <string name="shizuku_install_button">Install Shizuku</string>
+    <string name="shizuku_open_app_button">Open Shizuku app</string>
+    <string name="shizuku_grant_button">Grant Mapo permission</string>
+    <string name="shizuku_back">Back</string>
 
     <!-- Brick 4 analog-mode tradeoffs dialog (shown once on first analog-mode pick). -->
     <string name="analog_mode_tradeoffs_title">Heads up — analog modes need a capture overlay</string>

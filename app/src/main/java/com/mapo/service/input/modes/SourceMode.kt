@@ -2,6 +2,9 @@ package com.mapo.service.input.modes
 
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.InputSource
+import com.mapo.service.input.AnalogEvent
+import org.json.JSONException
+import org.json.JSONObject
 
 /**
  * Runtime handler for a binding_group's [BindingMode] — the foundation laid by Brick 6.1
@@ -52,6 +55,68 @@ sealed interface SourceMode {
      * true unconditionally so unimplemented modes don't drop their existing data.
      */
     fun accepts(inputKey: String): Boolean = inputKey in validInputs()
+
+    /**
+     * Brick 5 — D1 evaluation hook. Translates a normalized [AnalogEvent] for this
+     * source into per-sub-input synthetic edges and (later — Brick 7) continuous
+     * mouse output. Called per motion-event sample by
+     * [InputEvaluator.handleMotion][com.mapo.service.input.InputEvaluator.handleMotion]
+     * once a source's mode is resolved.
+     *
+     *  - [reading] — the source's current x/y/timestamp (pre-deadzone; modes
+     *    apply deadzones themselves via [AnalogEvent.withDeadzone] or
+     *    per-mode settings).
+     *  - [ctx] — settings JSON + the prior latched-state map for this source's
+     *    virtual sub-inputs, so modes can do edge detection without holding
+     *    state themselves (modes are singletons).
+     *  - [digitalEmit] — emit a synthetic press/release edge on a virtual sub-
+     *    input. The dispatcher routes the edge into the activator engine; the
+     *    exact mapping is mode-aware (e.g. Trigger's "soft_press" key resolves
+     *    to SOFT_PRESS-type activators on the source's `"click"` sub-input).
+     *  - [mouse] — continuous cursor / scroll output sink for the modes that
+     *    need it (Brick 7's Mouse-Joystick / Joystick-Camera). Digital-only
+     *    modes ignore it.
+     *
+     * Default: no-op. Digital modes (Single Button / Button Pad / Dpad), the
+     * pass-through [UnboundMode], and [StubMode] all stay on the default.
+     */
+    fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        // default no-op
+    }
+}
+
+/**
+ * Per-call context handed to [SourceMode.evaluate]. Carries the settings JSON
+ * for the source's binding_group and the prior latched-state map for any
+ * synthetic sub-inputs the mode emits — modes are singletons, so per-source
+ * state lives upstream in the dispatcher and is passed in here.
+ *
+ * [activeLayerIds] is included so future modes can resolve overlay settings
+ * (Brick 6+); Brick 5 doesn't read it.
+ */
+data class ModeContext(
+    val source: InputSource,
+    val settingsJson: String,
+    val priorLatched: Map<String, Boolean>,
+    val activeLayerIds: List<Long>,
+)
+
+/**
+ * Continuous-output sink for analog modes whose output is mouse motion or
+ * scroll rather than synthetic-digital edges (D2). Brick 7 fleshes this out
+ * with `moveCursorBy(dx, dy)` / scroll deltas; Brick 5 only locks the shape
+ * so [SourceMode.evaluate]'s signature doesn't churn between bricks.
+ */
+interface MouseEmitter {
+    companion object {
+        /** No-op sink for digital modes and for tests; Brick 7 supplies the real one. */
+        val NOOP: MouseEmitter = object : MouseEmitter {}
+    }
 }
 
 /**
@@ -122,31 +187,102 @@ object DpadMode : SourceMode {
 }
 
 /**
- * Analog-trigger source (LEFT_TRIGGER, RIGHT_TRIGGER). One sub-input: `click`.
- * Physical key path: hardware threshold on the trigger pull surfaces as
- * `KEYCODE_BUTTON_L2` / `KEYCODE_BUTTON_R2`, which the accessibility service routes
- * to `InputAddress(LEFT_TRIGGER, "click")` / `(RIGHT_TRIGGER, "click")` today.
+ * Analog-trigger source (LEFT_TRIGGER, RIGHT_TRIGGER). Two sub-inputs:
+ *  - `click` — the hardware threshold sub-input. Fires via the accessibility
+ *    service's `KEYCODE_BUTTON_L2` / `KEYCODE_BUTTON_R2` digital edge. Any
+ *    activator type (FULL_PRESS, LONG_PRESS, DOUBLE_PRESS, RELEASE_PRESS,
+ *    CHORDED_PRESS) is valid on this row. UI label: "L2/R2 Full Pull".
+ *  - `soft_press` — the analog soft-pull sub-input. Fires via [evaluate] on
+ *    motion events captured by the focused overlay when the analog magnitude
+ *    crosses `soft_threshold` (with `soft_hysteresis` on release). Any
+ *    activator type is valid here too — most users pick FULL_PRESS so the
+ *    soft pull fires their chosen command once per pull. UI label: "L2/R2 Soft Pull".
  *
- * **Settings shape (data-model only until motion capture returns).**
- *  - `click_threshold` — analog pull magnitude (0..1) at which the click sub-input
- *    fires. Steam-default 0.95. Inert in 6.4 because we have no analog source feeding
- *    it; the digital hardware threshold (whatever the device decides) is what we get.
- *  - Future settings (response curve, soft-press threshold, output range remap) will
- *    join this JSON when analog input is plugged back in.
+ * **Why a separate sub-input and not a SOFT_PRESS activator type on `click`?**
+ * Steam Input exposes BOTH a SOFT_PRESS activator and a Soft Pull trigger slot,
+ * which is the same behavior expressed two ways. Mapo unifies on the sub-input
+ * model — one place for the user to express "fire when the trigger is in the
+ * soft range" — and retires SOFT_PRESS as a picker option (it stays in the
+ * enum solely so VDF import can translate Steam's `SOFT_PRESS` activator into
+ * a Mapo activator on the `"soft_press"` sub-input).
  *
- * **Soft_Press activator status.** Steam Input pairs Trigger mode with the
- * `Soft_Press` activator type — fires when the analog pull crosses a soft threshold
- * before the click threshold. The activator type exists in our enum
- * ([ActivatorType.SOFT_PRESS][com.mapo.data.model.steam.ActivatorType.SOFT_PRESS])
- * but the evaluator currently skips it (digital triggers don't surface the
- * "below-click" pull state). Becomes active when the motion-capture refactor lands.
+ * **Settings:**
+ *  - `click_threshold` — Steam-default 0.95. Documented; inert on Android
+ *    today because the hardware decides where the digital click edge sits.
+ *  - `soft_threshold` — Steam-default 0.10. Analog magnitude at which a
+ *    soft-pull press fires.
+ *  - `soft_hysteresis` — Steam-default 0.05. Dead-band width on release;
+ *    soft-pull releases when magnitude drops below
+ *    `(soft_threshold - soft_hysteresis)`. Prevents wobbly-finger flutter at
+ *    the threshold edge.
  */
 object TriggerMode : SourceMode {
     override val mode: BindingMode = BindingMode.TRIGGER
     override fun validInputs(): Set<String> = INPUTS
-    /** Steam-default click threshold at 95% pull; runtime-inert in 6.4 (digital only). */
-    override fun defaultSettingsJson(): String = """{"click_threshold":0.95}"""
-    private val INPUTS = setOf("click")
+    override fun defaultSettingsJson(): String =
+        """{"click_threshold":0.95,"soft_threshold":0.10,"soft_hysteresis":0.05}"""
+    private val INPUTS = setOf("click", SOFT_PRESS_SUB_INPUT)
+
+    /** Sub-input key for the analog soft-pull row. */
+    const val SOFT_PRESS_SUB_INPUT: String = "soft_press"
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        val settings = TriggerSettings.parse(ctx.settingsJson)
+        val magnitude = reading.x  // triggers are 0..1 on x; y is always 0
+        val priorLatched = ctx.priorLatched[SOFT_PRESS_SUB_INPUT] == true
+        val nowLatched = if (priorLatched) {
+            // Stay latched until magnitude drops below the lower hysteresis band.
+            magnitude >= (settings.softThreshold - settings.softHysteresis)
+        } else {
+            // Latch when magnitude crosses the threshold upward.
+            magnitude >= settings.softThreshold
+        }
+        if (nowLatched != priorLatched) {
+            digitalEmit(SOFT_PRESS_SUB_INPUT, nowLatched)
+        }
+    }
+}
+
+/**
+ * Parsed [TriggerMode] settings. Tolerant of missing keys (falls back to Steam
+ * defaults), so a binding_group seeded before this brick — which only had
+ * `click_threshold` in its JSON — keeps working without a migration.
+ */
+internal data class TriggerSettings(
+    val clickThreshold: Float,
+    val softThreshold: Float,
+    val softHysteresis: Float,
+) {
+    companion object {
+        const val DEFAULT_CLICK_THRESHOLD = 0.95f
+        const val DEFAULT_SOFT_THRESHOLD = 0.10f
+        const val DEFAULT_SOFT_HYSTERESIS = 0.05f
+
+        fun parse(json: String): TriggerSettings {
+            if (json.isBlank()) return defaults()
+            return try {
+                val obj = JSONObject(json)
+                TriggerSettings(
+                    clickThreshold = obj.optDouble("click_threshold", DEFAULT_CLICK_THRESHOLD.toDouble()).toFloat(),
+                    softThreshold = obj.optDouble("soft_threshold", DEFAULT_SOFT_THRESHOLD.toDouble()).toFloat(),
+                    softHysteresis = obj.optDouble("soft_hysteresis", DEFAULT_SOFT_HYSTERESIS.toDouble()).toFloat(),
+                )
+            } catch (_: JSONException) {
+                defaults()
+            }
+        }
+
+        private fun defaults() = TriggerSettings(
+            clickThreshold = DEFAULT_CLICK_THRESHOLD,
+            softThreshold = DEFAULT_SOFT_THRESHOLD,
+            softHysteresis = DEFAULT_SOFT_HYSTERESIS,
+        )
+    }
 }
 
 /**
@@ -205,14 +341,20 @@ fun BindingMode.handler(): SourceMode = when (this) {
  * active gameplay window.
  *
  * **What's in:** the analog stick / mouse / scroll modes whose `evaluate()`
- * hook needs a motion stream. **What's out:** digital modes
- * (SINGLE_BUTTON, BUTTON_PAD, DPAD, REFERENCE) and modes that don't yet
- * have an analog dependency (TRIGGER — Brick 5 will revisit when
- * Soft_Press lands and may move TRIGGER into this set conditionally on
- * activator config; RADIAL_MENU / TOUCH_MENU — open question, parked
- * digital for now).
+ * hook needs a motion stream, plus [BindingMode.TRIGGER] (added in Brick 5
+ * for Soft_Press — the soft threshold can only be detected from the analog
+ * pull magnitude, not the hardware click edge). **What's out:** digital
+ * modes (SINGLE_BUTTON, BUTTON_PAD, DPAD, REFERENCE, UNBOUND) and
+ * RADIAL_MENU / TOUCH_MENU (open question, parked digital for now).
+ *
+ * **Refinement note.** Adding TRIGGER unconditionally is correct but loose:
+ * a binding_group in TRIGGER mode with only a FULL_PRESS activator (no
+ * SOFT_PRESS) doesn't actually need motion capture. A future refinement
+ * could tighten the predicate to inspect activator types — but that's a
+ * bigger gating-coordinator change, deferred until the cost is felt.
  */
 val ANALOG_MODES_REQUIRING_MOTION_CAPTURE: Set<BindingMode> = setOf(
+    BindingMode.TRIGGER,
     BindingMode.JOYSTICK_MOVE,
     BindingMode.JOYSTICK_CAMERA,
     BindingMode.MOUSE_JOYSTICK,

@@ -1,6 +1,7 @@
 package com.mapo.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -89,43 +90,42 @@ fun AutoSwitchScreen(
                 .padding(contentPadding)
                 .fillMaxSize()
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            // Settings-row treatment (row-doctrine #4): ListItem with trailing Switch,
+            // whole-row clickable so the tap target matches M3 settings idiom.
+            ListItem(
+                headlineContent = {
+                    Text(text = stringResource(R.string.auto_switch_setting_label))
+                },
+                trailingContent = {
+                    Switch(checked = enabled, onCheckedChange = null)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    text = stringResource(R.string.auto_switch_setting_label),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f)
-                )
-                Switch(
-                    checked = enabled,
-                    onCheckedChange = { viewModel.setAutoSwitchEnabled(it) }
-                )
-            }
+                    .clickable { viewModel.setAutoSwitchEnabled(!enabled) },
+            )
             HorizontalDivider()
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            ListItem(
+                headlineContent = {
+                    Text(text = stringResource(R.string.auto_create_profiles_setting_label))
+                },
+                trailingContent = {
+                    Switch(
+                        enabled = enabled,
+                        checked = autoCreateEnabled,
+                        onCheckedChange = null,
+                    )
+                },
+                colors = ListItemDefaults.colors(
+                    headlineColor = if (enabled) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    text = stringResource(R.string.auto_create_profiles_setting_label),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (enabled) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-                Switch(
-                    enabled = enabled,
-                    checked = autoCreateEnabled,
-                    onCheckedChange = { viewModel.setAutoCreateProfilesEnabled(it) }
-                )
-            }
+                    .clickable(enabled = enabled) {
+                        viewModel.setAutoCreateProfilesEnabled(!autoCreateEnabled)
+                    },
+            )
             HorizontalDivider()
 
             Text(

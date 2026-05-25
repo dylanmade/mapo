@@ -132,8 +132,8 @@ class InputEvaluator @Inject constructor(
      *    ALL layers of the old set").
      *
      * **Brick 4 publish mirror.** [activeLayerIdsFlow] mirrors this deque as an immutable
-     * list every time the stack mutates so [MotionCaptureCoordinator][com.mapo.service.input.capture.MotionCaptureCoordinator]
-     * can re-evaluate its attach predicate without polling. Internal code keeps using
+     * list every time the stack mutates so [ShizukuMotionCoordinator][com.mapo.service.shizuku.ShizukuMotionCoordinator]
+     * can re-evaluate its gating predicate without polling. Internal code keeps using
      * the deque directly — the flow is observation-only.
      */
     private val activeLayers = ArrayDeque<Long>()
@@ -171,8 +171,8 @@ class InputEvaluator @Inject constructor(
     private val _activeSetIdFlow = MutableStateFlow(0L)
     /**
      * Brick 4 publish mirror of [activeSetId]. 0L means "lazy-uninitialized" — same
-     * semantics as the internal field. [MotionCaptureCoordinator][com.mapo.service.input.capture.MotionCaptureCoordinator]
-     * observes this to re-evaluate the attach predicate on `CHANGE_PRESET`.
+     * semantics as the internal field. [ShizukuMotionCoordinator][com.mapo.service.shizuku.ShizukuMotionCoordinator]
+     * observes this to re-evaluate the gating predicate on `CHANGE_PRESET`.
      */
     val activeSetIdFlow: StateFlow<Long> = _activeSetIdFlow.asStateFlow()
 
@@ -999,7 +999,7 @@ class InputEvaluator @Inject constructor(
 
     /**
      * Brick 4: release any analog-mode runtime state. Called from [flushAllRuntime]
-     * (set-switch path) and from `MotionCaptureCoordinator` on profile transitions
+     * (set-switch path) and from `ShizukuMotionCoordinator` on profile transitions
      * so a `CHANGE_PRESET` or profile swap doesn't leak in-flight analog state —
      * synthetic SOFT_PRESS edges latched on a trigger, synthetic dpad edges (Brick
      * 6) held by a JOYSTICK_MOVE source, etc. — into the new set / profile.

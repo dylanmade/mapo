@@ -17,7 +17,8 @@ import com.mapo.data.repository.InstalledAppsRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
-import com.mapo.data.settings.AnalogModePreferences
+import com.mapo.data.settings.ShizukuRequiredPreferences
+import com.mapo.service.shizuku.ShizukuConnection
 import com.mapo.data.settings.AutoSwitchSettings
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
@@ -61,7 +62,8 @@ class MainViewModelTest {
     private lateinit var bindingRepo: AppProfileBindingRepository
     private lateinit var installedAppsRepo: InstalledAppsRepository
     private lateinit var settings: AutoSwitchSettings
-    private lateinit var analogModePrefs: AnalogModePreferences
+    private lateinit var shizukuRequiredPrefs: ShizukuRequiredPreferences
+    private lateinit var shizukuConnection: ShizukuConnection
     private lateinit var autoSwitcher: ProfileAutoSwitcher
     private lateinit var filter: ForegroundAppFilter
     private lateinit var templateRepo: KeyboardTemplateRepository
@@ -94,7 +96,8 @@ class MainViewModelTest {
         bindingRepo = mockk(relaxed = true)
         installedAppsRepo = mockk(relaxed = true)
         settings = mockk(relaxed = true)
-        analogModePrefs = mockk(relaxed = true)
+        shizukuRequiredPrefs = mockk(relaxed = true)
+        shizukuConnection = mockk(relaxed = true)
         autoSwitcher = mockk(relaxed = true)
         filter = mockk(relaxed = true)
         templateRepo = mockk(relaxed = true)
@@ -130,7 +133,8 @@ class MainViewModelTest {
             appProfileBindingRepository = bindingRepo,
             installedAppsRepository = installedAppsRepo,
             autoSwitchSettings = settings,
-            analogModePreferences = analogModePrefs,
+            shizukuRequiredPreferences = shizukuRequiredPrefs,
+            shizukuConnection = shizukuConnection,
             autoSwitcher = autoSwitcher,
             foregroundAppFilter = filter,
             keyboardTemplateRepository = templateRepo,
@@ -502,7 +506,8 @@ class MainViewModelTest {
             appProfileBindingRepository = bindingRepo,
             installedAppsRepository = installedAppsRepo,
             autoSwitchSettings = settings,
-            analogModePreferences = analogModePrefs,
+            shizukuRequiredPreferences = shizukuRequiredPrefs,
+            shizukuConnection = shizukuConnection,
             autoSwitcher = autoSwitcher,
             foregroundAppFilter = filter,
             keyboardTemplateRepository = templateRepo,
@@ -908,7 +913,8 @@ class MainViewModelTest {
         appProfileBindingRepository = bindingRepo,
         installedAppsRepository = installedAppsRepo,
         autoSwitchSettings = settings,
-        analogModePreferences = analogModePrefs,
+        shizukuRequiredPreferences = shizukuRequiredPrefs,
+        shizukuConnection = shizukuConnection,
         autoSwitcher = autoSwitcher,
         foregroundAppFilter = filter,
         keyboardTemplateRepository = templateRepo,

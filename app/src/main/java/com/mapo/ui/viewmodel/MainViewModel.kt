@@ -36,9 +36,10 @@ import com.mapo.data.repository.InstalledAppsRepository
 import com.mapo.data.repository.KeyboardTemplateRepository
 import com.mapo.data.repository.LayoutRepository
 import com.mapo.data.repository.ProfileRepository
-import com.mapo.data.settings.AnalogModePreferences
+import com.mapo.data.settings.ShizukuRequiredPreferences
 import com.mapo.data.settings.AutoSwitchSettings
 import com.mapo.di.IoDispatcher
+import com.mapo.service.shizuku.ShizukuConnection
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.CompiledConfig
@@ -92,7 +93,8 @@ class MainViewModel @Inject constructor(
     private val appProfileBindingRepository: AppProfileBindingRepository,
     private val installedAppsRepository: InstalledAppsRepository,
     private val autoSwitchSettings: AutoSwitchSettings,
-    private val analogModePreferences: AnalogModePreferences,
+    private val shizukuRequiredPreferences: ShizukuRequiredPreferences,
+    shizukuConnection: ShizukuConnection,
     private val autoSwitcher: ProfileAutoSwitcher,
     private val foregroundAppFilter: ForegroundAppFilter,
     private val keyboardTemplateRepository: KeyboardTemplateRepository,
@@ -1333,15 +1335,30 @@ class MainViewModel @Inject constructor(
     }
 
     /**
-     * Brick 4: has the user acknowledged the analog-mode tradeoffs dialog?
-     * Drives whether picking an analog mode in Remap Controls shows the
-     * one-time explainer or proceeds silently. Acks persist across launches
-     * via [AnalogModePreferences].
+     * Brick G: has the user acknowledged the Shizuku-required dialog?
+     * Drives whether picking an analog mode in Remap Controls (while Shizuku
+     * is NOT ready) shows the one-time explainer or proceeds silently.
+     * Persists across launches via [ShizukuRequiredPreferences].
      */
-    val analogModeTradeoffsAcknowledged: StateFlow<Boolean> =
-        analogModePreferences.tradeoffsAcknowledged
+    val shizukuRequiredAcknowledged: StateFlow<Boolean> =
+        shizukuRequiredPreferences.acknowledged
 
-    fun acknowledgeAnalogModeTradeoffs() {
-        analogModePreferences.setTradeoffsAcknowledged()
+    /**
+     * Brick G: re-export of [ShizukuConnection.isReadyFlow] so screens can
+     * decide whether the Shizuku-required dialog applies without each one
+     * injecting the connection directly. True iff Shizuku is `Granted` and
+     * the binder is alive.
+     */
+    val shizukuReady: StateFlow<Boolean> = shizukuConnection.isReadyFlow
+
+    /**
+     * Brick G: full Shizuku state — `NotInstalled` / `InstalledNotRunning` /
+     * `RunningNotGranted` / `Granted`. Used by [ShizukuRequiredDialog] to show
+     * state-appropriate copy and the matching primary CTA.
+     */
+    val shizukuState: StateFlow<com.mapo.service.shizuku.ShizukuState> = shizukuConnection.state
+
+    fun acknowledgeShizukuRequired() {
+        shizukuRequiredPreferences.setAcknowledged()
     }
 }

@@ -83,8 +83,11 @@ fun RemapControlsScreen(
     onDeleteLayer: (layerId: Long) -> Unit = {},
     onClearLayerOverride: (layerId: Long, inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit = { _, _, _ -> },
     onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit = { _, _ -> },
-    analogModeTradeoffsAcknowledged: Boolean = true,
-    onAcknowledgeAnalogModeTradeoffs: () -> Unit = {},
+    shizukuRequiredAcknowledged: Boolean = true,
+    shizukuReady: Boolean = true,
+    shizukuState: com.mapo.service.shizuku.ShizukuState = com.mapo.service.shizuku.ShizukuState.Granted,
+    onAcknowledgeShizukuRequired: () -> Unit = {},
+    onOpenShizukuSetup: () -> Unit = {},
 ) {
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
 
@@ -93,13 +96,14 @@ fun RemapControlsScreen(
     var dialog by remember { mutableStateOf<ActionSetDialogState>(ActionSetDialogState.None) }
     var layerDialog by remember { mutableStateOf<LayerDialogState>(LayerDialogState.None) }
 
-    // Brick 4: stash an analog-mode pick if the tradeoffs dialog hasn't been
-    // acknowledged yet. `Pair(bindingGroupId, mode)`. The dialog renders below
-    // when this is non-null; confirming applies + acks, cancelling drops.
+    // Brick G: stash an analog-mode pick if Shizuku isn't ready AND the
+    // explainer hasn't been acknowledged. `Pair(bindingGroupId, mode)`. The
+    // dialog renders below when this is non-null. Once Shizuku is Granted OR
+    // the user has acked, picks proceed silently.
     var pendingAnalogPick by remember { mutableStateOf<Pair<Long, BindingMode>?>(null) }
 
     val gatedSetBindingGroupMode: (Long, BindingMode) -> Unit = { bindingGroupId, mode ->
-        if (mode.requiresMotionCapture() && !analogModeTradeoffsAcknowledged) {
+        if (mode.requiresMotionCapture() && !shizukuReady && !shizukuRequiredAcknowledged) {
             pendingAnalogPick = bindingGroupId to mode
         } else {
             onSetBindingGroupMode(bindingGroupId, mode)
@@ -187,11 +191,17 @@ fun RemapControlsScreen(
 
     val pendingPick = pendingAnalogPick
     if (pendingPick != null) {
-        com.mapo.ui.screen.dialog.AnalogModeTradeoffsDialog(
-            onAcknowledge = {
-                onAcknowledgeAnalogModeTradeoffs()
+        com.mapo.ui.screen.dialog.ShizukuRequiredDialog(
+            shizukuState = shizukuState,
+            onSetUp = {
+                // Apply the mode + ack + navigate to Setup. The user is on a
+                // path to make Shizuku work; the binding will activate when
+                // they finish. If they bail mid-setup, the binding stays —
+                // the ShizukuKeyInjector gate keeps it inert until Granted.
                 onSetBindingGroupMode(pendingPick.first, pendingPick.second)
+                onAcknowledgeShizukuRequired()
                 pendingAnalogPick = null
+                onOpenShizukuSetup()
             },
             onDismiss = { pendingAnalogPick = null },
         )

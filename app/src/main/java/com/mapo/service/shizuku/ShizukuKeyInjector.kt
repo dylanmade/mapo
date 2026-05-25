@@ -2,7 +2,6 @@ package com.mapo.service.shizuku
 
 import android.os.RemoteException
 import android.util.Log
-import com.mapo.service.input.capture.MotionCaptureCoordinator
 import com.mapo.shizuku.InjectKeyRequest
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,7 +30,7 @@ import javax.inject.Singleton
 @Singleton
 class ShizukuKeyInjector @Inject constructor(
     private val shizukuConnection: ShizukuConnection,
-    private val motionCaptureCoordinator: MotionCaptureCoordinator,
+    private val shizukuMotionCoordinator: ShizukuMotionCoordinator,
 ) {
 
     /**
@@ -52,7 +51,7 @@ class ShizukuKeyInjector @Inject constructor(
      */
     fun tryInject(keyCode: Int, action: Int, displayId: Int, eventTime: Long): Boolean {
         if (!shizukuConnection.isReadyFlow.value) return false
-        if (!motionCaptureCoordinator.shizukuModeActive.value) return false
+        if (!shizukuMotionCoordinator.shizukuModeActive.value) return false
         val service = shizukuConnection.service.value ?: return false
         return try {
             val ok = service.injectKeyEvent(

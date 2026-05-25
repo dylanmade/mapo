@@ -128,9 +128,9 @@ interface MouseEmitter {
  * This is the default mode for analog-capable sources (sticks, dpad, triggers)
  * on freshly-seeded profiles. The user must explicitly pick an analog mode for
  * Mapo to start interpreting the source, which is also what gates the
- * [MotionCaptureCoordinator][com.mapo.service.input.capture.MotionCaptureCoordinator]'s
- * focused-overlay attach — keeping the overlay's side effects (IME / back / app-
- * switcher gesture suspension) out of profiles that haven't opted in.
+ * [ShizukuMotionCoordinator][com.mapo.service.shizuku.ShizukuMotionCoordinator]'s
+ * `/dev/input` enumeration — keeping `:shizuku-service` idle (battery) on
+ * profiles that haven't opted in.
  */
 object UnboundMode : SourceMode {
     override val mode: BindingMode = BindingMode.UNBOUND
@@ -332,13 +332,13 @@ fun BindingMode.handler(): SourceMode = when (this) {
  * later brick.
  */
 /**
- * Modes whose runtime behavior depends on analog `MotionEvent` capture
- * (Brick 4's gating predicate). When at least one source in the
- * resolved-active set/layer has a mode in this set, the
- * [MotionCaptureCoordinator][com.mapo.service.input.capture.MotionCaptureCoordinator]
- * attaches the focused capture overlay; otherwise it stays detached so
- * IME / back gesture / app-switcher continue working normally outside the
- * active gameplay window.
+ * Modes whose runtime behavior depends on analog input capture (Brick F's
+ * gating predicate). When at least one source in the resolved-active set/layer
+ * has a mode in this set, the
+ * [ShizukuMotionCoordinator][com.mapo.service.shizuku.ShizukuMotionCoordinator]
+ * enables the Shizuku UserService's `/dev/input` reader; otherwise the service
+ * stays idle so CPU + battery are unaffected outside the active gameplay
+ * window.
  *
  * **What's in:** the analog stick / mouse / scroll modes whose `evaluate()`
  * hook needs a motion stream, plus [BindingMode.TRIGGER] (added in Brick 5

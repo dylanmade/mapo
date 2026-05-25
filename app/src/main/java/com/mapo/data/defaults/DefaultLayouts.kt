@@ -174,10 +174,26 @@ object DefaultLayouts {
     // a built-in template only; not seeded into a new profile's initial keyboards.
     val trackpadL: GridLayout = trackpadLayout(name = "Trackpad (L)", trackpadOnLeft = true)
 
+    // 12×6 grid with two columns of buttons hugging each edge and an 8-column gutter
+    // through the middle — leaves the center of the screen free for the game underneath.
+    val default: GridLayout = GridLayout(
+        name = "Default",
+        columns = 12,
+        rows = 6,
+        buttons = buildList {
+            for (row in 0 until 6) {
+                add(GridButton(label = "", col = 0,  row = row))
+                add(GridButton(label = "", col = 1,  row = row))
+                add(GridButton(label = "", col = 10, row = row))
+                add(GridButton(label = "", col = 11, row = row))
+            }
+        },
+    )
+
     /** Layouts seeded into a new profile on first use. Order is the initial tab order. */
-    val all: List<GridLayout> = listOf(keysMain, keysAlt, mouse, trackpadR)
+    val all: List<GridLayout> = listOf(default, keysMain, keysAlt, mouse, trackpadR)
 
     /** Built-in template catalog shown in the "Add from template" picker. Includes [trackpadL]
      *  as a non-default option so users can pick the mirrored variant without it auto-seeding. */
-    val builtInTemplates: List<GridLayout> = listOf(keysMain, keysAlt, mouse, trackpadR, trackpadL)
+    val builtInTemplates: List<GridLayout> = listOf(default, keysMain, keysAlt, mouse, trackpadR, trackpadL)
 }

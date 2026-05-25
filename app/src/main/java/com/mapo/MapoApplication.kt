@@ -6,6 +6,7 @@ import android.util.Log
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.overlay.OverlayCoordinator
 import com.mapo.service.shizuku.ShizukuConnection
+import com.mapo.service.shizuku.ShizukuHealthNotification
 import com.mapo.service.shizuku.ShizukuMotionStream
 import dagger.hilt.android.HiltAndroidApp
 import org.lsposed.hiddenapibypass.HiddenApiBypass
@@ -33,11 +34,19 @@ class MapoApplication : Application() {
      */
     @Inject lateinit var shizukuMotionStream: ShizukuMotionStream
 
+    /**
+     * Brick G: persistent health notification. Subscribes from app start so
+     * the post-game / next-launch reminder fires even if the user never opens
+     * a Mapo activity during the session that broke Shizuku.
+     */
+    @Inject lateinit var shizukuHealthNotification: ShizukuHealthNotification
+
     override fun onCreate() {
         super.onCreate()
         installHiddenApiExemptions()
         autoSwitcher.start()
         overlayCoordinator.start()
+        shizukuHealthNotification.start()
         // Touch the Shizuku singletons so Hilt actually constructs them.
         // Field access by itself is enough; `lateinit` injection has already
         // run by this point (Application is the Hilt root).

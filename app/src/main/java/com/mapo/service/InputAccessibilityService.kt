@@ -21,9 +21,9 @@ import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.InputEvaluator
 import com.mapo.service.input.InputSink
 import com.mapo.service.input.OverlayFocusKind
-import com.mapo.service.input.capture.MotionCaptureCoordinator
 import com.mapo.service.input.capture.MotionCaptureOverlayManager
 import com.mapo.service.shizuku.ShizukuKeyInjector
+import com.mapo.service.shizuku.ShizukuMotionCoordinator
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -34,7 +34,7 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @Inject lateinit var dispatcher: InputDispatcher
     @Inject lateinit var evaluator: InputEvaluator
     @Inject lateinit var motionCaptureOverlayManager: MotionCaptureOverlayManager
-    @Inject lateinit var motionCaptureCoordinator: MotionCaptureCoordinator
+    @Inject lateinit var shizukuMotionCoordinator: ShizukuMotionCoordinator
     @Inject lateinit var shizukuKeyInjector: ShizukuKeyInjector
 
     companion object {
@@ -178,16 +178,17 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         Log.i(TAG, "Service connected — focusedAppDisplayId=$focusedAppDisplayId")
         dumpAllDisplays("onServiceConnected")
 
-        // Production motion-capture overlay (Brick 3). The manager owns the
-        // window lifecycle; we just hand it the callback. The coordinator
-        // (Brick 4) decides when to actually attach based on the
-        // foreground-app × analog-mode-configured predicate.
+        // Brick F: ShizukuMotionCoordinator drives the Shizuku UserService's
+        // /dev/input enumeration off the gating predicate. The legacy
+        // focused-overlay's motionCallback wiring stays installed for now —
+        // Brick H deletes the overlay machinery entirely. Until then the
+        // overlay is just dead weight that nothing attaches.
         motionCaptureOverlayManager.setMotionCallback { event -> evaluator.handleMotion(event) }
-        motionCaptureCoordinator.start()
+        shizukuMotionCoordinator.start()
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
-        motionCaptureCoordinator.stop()
+        shizukuMotionCoordinator.stop()
         dispatcher.unregister()
         return super.onUnbind(intent)
     }

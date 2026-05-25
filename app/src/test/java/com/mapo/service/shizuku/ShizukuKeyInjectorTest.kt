@@ -3,7 +3,6 @@
 package com.mapo.service.shizuku
 
 import android.os.RemoteException
-import com.mapo.service.input.capture.MotionCaptureCoordinator
 import com.mapo.shizuku.IMapoInputService
 import com.mapo.shizuku.InjectKeyRequest
 import io.mockk.every
@@ -46,7 +45,7 @@ class ShizukuKeyInjectorTest {
         every { connection.isReadyFlow } returns readyFlow
         every { connection.service } returns serviceFlow
 
-        val coordinator = mockk<MotionCaptureCoordinator>(relaxed = true)
+        val coordinator = mockk<ShizukuMotionCoordinator>(relaxed = true)
         val modeFlow: StateFlow<Boolean> = MutableStateFlow(modeActive)
         every { coordinator.shizukuModeActive } returns modeFlow
 

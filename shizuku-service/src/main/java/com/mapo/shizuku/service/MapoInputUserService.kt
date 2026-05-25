@@ -80,7 +80,31 @@ class MapoInputUserService : IMapoInputService.Stub() {
     /** Set when the reader thread should refresh its FD list (devices map changed). */
     private val devicesDirty = AtomicBoolean(false)
 
+    /**
+     * Effective run-gate. Threads run iff (callbacks registered AND
+     * [enumerationEnabled]). Tracked as an [AtomicBoolean] for the thread-safe
+     * compareAndSet-driven start/stop transition.
+     */
     private val running = AtomicBoolean(false)
+
+    /**
+     * Did at least one client register a callback. Flipped by [registerCallback]
+     * and [unregisterCallback]; never directly drives [running] — the gate
+     * recompute does.
+     */
+    private val callbacksActive = AtomicBoolean(false)
+
+    /**
+     * **Brick F.** Coordinator-driven master switch. When the Shizuku motion
+     * coordinator's predicate goes false (no analog mode in scope, foreground
+     * app not bound, etc.), it calls `setEnumerationEnabled(false)` and the
+     * reader/watcher threads stop + FDs close — saves battery from per-event
+     * polling when nothing in :app cares about analog input. Default `true`
+     * so Brick C / D / E device-verification paths (which talk to the service
+     * directly without a coordinator) keep working.
+     */
+    @Volatile
+    private var enumerationEnabled: Boolean = true
     private var readerThread: Thread? = null
     private var watcherThread: Thread? = null
 
@@ -95,8 +119,9 @@ class MapoInputUserService : IMapoInputService.Stub() {
         callbacks.register(cb)
         val count = callbacks.registeredCallbackCount
         Log.i(TAG, "callback registered; count=$count")
-        if (count == 1 && running.compareAndSet(false, true)) {
-            startThreads()
+        if (count == 1) {
+            callbacksActive.set(true)
+            recomputeRunning()
         }
     }
 
@@ -105,8 +130,9 @@ class MapoInputUserService : IMapoInputService.Stub() {
         callbacks.unregister(cb)
         val count = callbacks.registeredCallbackCount
         Log.i(TAG, "callback unregistered; count=$count")
-        if (count == 0 && running.compareAndSet(true, false)) {
-            stopThreads()
+        if (count == 0) {
+            callbacksActive.set(false)
+            recomputeRunning()
         }
     }
 
@@ -180,10 +206,22 @@ class MapoInputUserService : IMapoInputService.Stub() {
     }
 
     override fun setEnumerationEnabled(on: Boolean) {
-        // Brick F's coordinator drives this off the gating predicate. Brick C's
-        // lifecycle is tied to registerCallback count instead — for now this is
-        // an observation hook only.
-        Log.d(TAG, "setEnumerationEnabled stub (Brick F coordinator will drive this): on=$on")
+        Log.i(TAG, "setEnumerationEnabled($on)")
+        enumerationEnabled = on
+        recomputeRunning()
+    }
+
+    /**
+     * Apply the effective run-gate: threads run iff (callback registered AND
+     * [enumerationEnabled]). Idempotent; starts/stops only on transition.
+     */
+    private fun recomputeRunning() {
+        val shouldRun = callbacksActive.get() && enumerationEnabled
+        if (shouldRun) {
+            if (running.compareAndSet(false, true)) startThreads()
+        } else {
+            if (running.compareAndSet(true, false)) stopThreads()
+        }
     }
 
     override fun destroy() {

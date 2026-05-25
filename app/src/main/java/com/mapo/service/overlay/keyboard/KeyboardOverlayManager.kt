@@ -9,7 +9,6 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.Display
-import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
@@ -162,18 +161,13 @@ class KeyboardOverlayManager @Inject constructor(
         val flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-        // ~40% of screen height anchored bottom. POC sizing — Brick 3 wires the
-        // real keyboard host, which carries its own sizing policy.
-        val height = (ctx.resources.displayMetrics.heightPixels * 0.40f).toInt()
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
-            height,
+            WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             flags,
             PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.BOTTOM
-        }
+        )
     }
 
     private fun startService() {

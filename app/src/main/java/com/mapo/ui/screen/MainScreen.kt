@@ -224,7 +224,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val viewingActionSetId by viewModel.viewingActionSetId.collectAsStateWithLifecycle()
     val viewingLayerId by viewModel.viewingLayerId.collectAsStateWithLifecycle()
     val remapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
-    val analogModeTradeoffsAcked by viewModel.analogModeTradeoffsAcknowledged.collectAsStateWithLifecycle()
+    val shizukuRequiredAcked by viewModel.shizukuRequiredAcknowledged.collectAsStateWithLifecycle()
+    val shizukuReady by viewModel.shizukuReady.collectAsStateWithLifecycle()
+    val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -559,8 +561,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onSetBindingGroupMode = { bindingGroupId, mode ->
                         viewModel.setBindingGroupMode(bindingGroupId, mode)
                     },
-                    analogModeTradeoffsAcknowledged = analogModeTradeoffsAcked,
-                    onAcknowledgeAnalogModeTradeoffs = viewModel::acknowledgeAnalogModeTradeoffs,
+                    shizukuRequiredAcknowledged = shizukuRequiredAcked,
+                    shizukuReady = shizukuReady,
+                    shizukuState = shizukuState,
+                    onAcknowledgeShizukuRequired = viewModel::acknowledgeShizukuRequired,
+                    onOpenShizukuSetup = { navController.navigate(MapoRoute.SHIZUKU_SETUP) },
                     onBack = { navController.popBackStack() },
                     onOpenInputEditor = { inputSource, groupInputKey, label ->
                         // Brick 5.5.c: in overlay mode, eagerly materialize the layer

@@ -13,6 +13,9 @@ import com.mapo.service.input.InputEvaluator
 import com.mapo.service.input.modes.requiresMotionCapture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.onEach
@@ -63,6 +66,22 @@ class MotionCaptureCoordinator @Inject constructor(
 
     @Volatile
     private var lastActiveProfileId: Long? = null
+
+    private val _shizukuModeActive = MutableStateFlow(false)
+    /**
+     * **Brick E.** True whenever the gating predicate currently says "an analog
+     * mode is in play for the foreground app" — same signal that drives the
+     * focused overlay's attach/detach today. The Shizuku inject gate
+     * ([com.mapo.service.shizuku.ShizukuKeyInjector]) reads this so the Shizuku
+     * path is taken only while motion-capture is in use (i.e., the moments
+     * where the legacy focused overlay would have stolen focus and necessitated
+     * the inject-time detach dance).
+     *
+     * Brick F renames this coordinator and pivots the body to drive the
+     * Shizuku UserService bind/unbind off the same predicate. Until then, this
+     * flag is a thin re-export of the existing `shouldAttach` decision.
+     */
+    val shizukuModeActive: StateFlow<Boolean> = _shizukuModeActive.asStateFlow()
 
     /**
      * Begin observing the gating predicate. Idempotent — re-starting an
@@ -127,12 +146,14 @@ class MotionCaptureCoordinator @Inject constructor(
         collectionJob?.cancel()
         collectionJob = null
         overlayManager.detach()
+        _shizukuModeActive.value = false
         Log.i(TAG, "stop: subscriptions cancelled, overlay detached")
     }
 
     private fun applyDecision(shouldAttach: Boolean) {
         Log.d(TAG, "decision: shouldAttach=$shouldAttach (currentlyAttached=${overlayManager.isAttached.value})")
         if (shouldAttach) overlayManager.attach() else overlayManager.detach()
+        _shizukuModeActive.value = shouldAttach
     }
 
     /**

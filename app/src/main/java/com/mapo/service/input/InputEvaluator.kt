@@ -261,6 +261,11 @@ class InputEvaluator @Inject constructor(
      * edges which route through the normal digital path; Brick 7 (Mouse modes)
      * uses the `MouseEmitter` continuous-output sink instead.
      *
+     * **Brick D (Shizuku pivot):** thin adapter around [dispatchReadings] now. The
+     * production analog source post-Brick-H is [handleAnalogReadings], driven by
+     * Shizuku raw events. This entry stays for `MotionEvent`-shaped tests and any
+     * legacy code path that still feeds the platform analog stream.
+     *
      * Returns false so the platform input pipeline keeps routing the underlying
      * MotionEvent normally — Mapo doesn't consume the gesture, it just samples it.
      */
@@ -275,8 +280,38 @@ class InputEvaluator @Inject constructor(
             }
             Log.d(TAG_MOTION, "handleMotion action=${event.actionMasked} $summary")
         }
+        dispatchReadings(readings)
+        return false
+    }
 
-        val set = resolveActiveSet() ?: return false
+    /**
+     * Brick D: Shizuku-driven entry point. Each [AnalogEvent] in [readings] is the
+     * current value of one [InputSource] as observed by `:shizuku-service`'s
+     * `/dev/input/event*` reader, already normalized to the same coordinate
+     * conventions [AnalogEvent] documents.
+     *
+     * Unlike [handleMotion] there's no `MotionEvent` to consume / pass through —
+     * the call comes from `ShizukuMotionStream` collecting AIDL callbacks, not
+     * from the platform input pipeline.
+     */
+    fun handleAnalogReadings(readings: List<AnalogEvent>) {
+        if (readings.isEmpty()) return
+        val summary = readings.joinToString(" ") { r ->
+            "${r.source}(${"%.3f".format(r.x)},${"%.3f".format(r.y)})"
+        }
+        Log.d(TAG_MOTION, "handleAnalogReadings $summary")
+        dispatchReadings(readings)
+    }
+
+    /**
+     * Shared dispatch loop for both motion entry points. Walks each reading,
+     * resolves its source's mode (with the active layer stack overlaid), and
+     * lets the mode emit synthetic edges / continuous output. The mode handler
+     * call is the only place that sees the reading — everything else is bookkeeping
+     * around the active set + latched-edge priors.
+     */
+    private fun dispatchReadings(readings: List<AnalogEvent>) {
+        val set = resolveActiveSet() ?: return
         for (reading in readings) {
             val resolved = findSourceModeFor(set, reading.source) ?: continue
             val handler = resolved.mode.handler()
@@ -299,7 +334,6 @@ class InputEvaluator @Inject constructor(
                 mouse = MouseEmitter.NOOP,
             )
         }
-        return false
     }
 
     /**

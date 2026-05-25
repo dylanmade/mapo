@@ -23,6 +23,7 @@ import com.mapo.service.input.InputSink
 import com.mapo.service.input.OverlayFocusKind
 import com.mapo.service.input.capture.MotionCaptureCoordinator
 import com.mapo.service.input.capture.MotionCaptureOverlayManager
+import com.mapo.service.shizuku.ShizukuKeyInjector
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -34,6 +35,7 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @Inject lateinit var evaluator: InputEvaluator
     @Inject lateinit var motionCaptureOverlayManager: MotionCaptureOverlayManager
     @Inject lateinit var motionCaptureCoordinator: MotionCaptureCoordinator
+    @Inject lateinit var shizukuKeyInjector: ShizukuKeyInjector
 
     companion object {
         // Physical gamepad keycodes → DeviceButton enum
@@ -745,15 +747,23 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @SuppressLint("PrivateApi")
     private fun injectInputEvent(event: android.view.InputEvent) {
         val displayId = readEventDisplayId(event)
+        // Brick E: when Shizuku is ready AND we're inside an analog-mode window,
+        // route through the shell-uid UserService. Shell UID inject is
+        // focus-bypassed, so the legacy detach-inject-reattach dance below is
+        // unnecessary on that path. tryInject returns false on RemoteException
+        // (Shizuku crashed) so digital remap survives via the reflection
+        // fallback below.
+        if (event is KeyEvent && shizukuKeyInjector.tryInject(
+                keyCode = event.keyCode,
+                action = event.action,
+                displayId = focusedAppDisplayId,
+                eventTime = event.eventTime,
+            )
+        ) {
+            return
+        }
+
         val doInject: () -> Unit = {
-            // DIAGNOSTIC (Brick 5 follow-up — Approach A device-test 2026-05-21):
-            // dump windows AT the moment of inject so we can see whether the
-            // overlay's removeView actually propagated to the dispatcher's
-            // focus state. If gamenative shows focused=true here, the inject
-            // should route to it; if Mapo's overlay still shows focused=true
-            // the dispatcher hasn't caught up to the WMS state change yet.
-            val keyCode = (event as? KeyEvent)?.keyCode ?: -1
-            dumpAllDisplays("pre-inject keyCode=$keyCode")
             try {
                 val imClass = Class.forName("android.hardware.input.InputManager")
                 val im = imClass.getDeclaredMethod("getInstance").invoke(null)
@@ -775,11 +785,9 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         // foreground window regains focus; flag restored before the next
         // motion event arrives.
         //
-        // No-op when the overlay isn't attached (the common case for
-        // hardware-button-to-key remaps in non-analog profiles). Only the
-        // gesture-driven mouse path (dispatchTargetAsClick) bypasses this
-        // chokepoint entirely because dispatchGesture is coordinate-based,
-        // not focus-based.
+        // Brick H deletes the focused-overlay machinery entirely; until then
+        // this wrapper stays as the fallback path for the (now rare) case where
+        // Shizuku isn't gated in. No-op when the overlay isn't attached.
         if (event is KeyEvent) {
             motionCaptureOverlayManager.withFocusReleasedForInject(doInject)
         } else {

@@ -1,5 +1,6 @@
 package com.mapo.shizuku.service
 
+import android.os.Build
 import android.os.RemoteCallbackList
 import android.os.RemoteException
 import android.os.SystemClock
@@ -8,6 +9,9 @@ import android.system.Os
 import android.system.OsConstants
 import android.system.StructPollfd
 import android.util.Log
+import android.view.InputDevice
+import android.view.KeyCharacterMap
+import android.view.KeyEvent
 import com.mapo.shizuku.IMapoInputCallback
 import com.mapo.shizuku.IMapoInputService
 import com.mapo.shizuku.InjectKeyRequest
@@ -16,6 +20,7 @@ import com.mapo.shizuku.LinuxInputConstants
 import com.mapo.shizuku.LinuxInputConstants.EVENT_SIZE_BYTES
 import com.mapo.shizuku.RawAnalogEvent
 import com.mapo.shizuku.ShizukuServiceHealth
+import org.lsposed.hiddenapibypass.HiddenApiBypass
 import java.io.File
 import java.io.FileDescriptor
 import java.nio.ByteBuffer
@@ -47,7 +52,11 @@ import kotlin.math.min
  *  - No EVIOCGABS ioctl-based range query (would need JNI). Axis normalization
  *    uses observed min/max per axis (self-calibrating once the user moves the
  *    stick to extremes). Brick D may revisit if device-specific tuning is needed.
- *  - [injectKeyEvent] / [setEnumerationEnabled] remain stubs from Brick B.
+ *
+ * **Brick E.** [injectKeyEvent] is live: reconstructs a `KeyEvent` from
+ * [InjectKeyRequest], stamps `displayId` via HiddenApiBypass reflection, calls
+ * `IInputManager.injectInputEvent` from this shell-uid context (focus-bypassed).
+ * [setEnumerationEnabled] still a stub — Brick F's coordinator will drive it.
  *
  * **Threading.** Two background threads owned by this service:
  *  - `mapo-input-reader`: blocks on `Os.poll` over all open device FDs, parses
@@ -58,6 +67,10 @@ import kotlin.math.min
  * **No Hilt / Compose / Room.** This process boots fast; keep deps minimal.
  */
 class MapoInputUserService : IMapoInputService.Stub() {
+
+    init {
+        installHiddenApiExemptions()
+    }
 
     private val callbacks = RemoteCallbackList<IMapoInputCallback>()
 
@@ -98,11 +111,72 @@ class MapoInputUserService : IMapoInputService.Stub() {
     }
 
     override fun injectKeyEvent(req: InjectKeyRequest?): Boolean {
-        // Brick E implements: reconstruct KeyEvent, stamp displayId via
-        // HiddenApiBypass, reflective IInputManager.injectInputEvent call from
-        // shell context.
-        Log.d(TAG, "injectKeyEvent stub returning false (Brick E will implement): req=$req")
-        return false
+        if (req == null) return false
+        return try {
+            val event = KeyEvent(
+                /* downTime = */ req.eventTime,
+                /* eventTime = */ req.eventTime,
+                /* action = */ req.action,
+                /* keyCode = */ req.keyCode,
+                /* repeat = */ 0,
+                /* metaState = */ 0,
+                /* deviceId = */ KeyCharacterMap.VIRTUAL_KEYBOARD,
+                /* scanCode = */ 0,
+                /* flags = */ 0,
+                /* source = */ InputDevice.SOURCE_KEYBOARD,
+            )
+            stampDisplayId(event, req.displayId)
+            invokeInjectInputEvent(event)
+        } catch (t: Throwable) {
+            Log.w(TAG, "injectKeyEvent failed for req=$req", t)
+            false
+        }
+    }
+
+    /**
+     * Stamp the target display onto [event]. The shell-uid process this code
+     * runs in is generally exempt from hidden-API enforcement, but variations
+     * across OEMs make installing the exemption explicit the only portable
+     * approach — see [installHiddenApiExemptions]. The reflective method
+     * reference is cached on first use.
+     */
+    private fun stampDisplayId(event: KeyEvent, displayId: Int) {
+        val m = setDisplayIdMethod ?: return
+        try {
+            m.invoke(event, displayId)
+        } catch (t: Throwable) {
+            Log.w(TAG, "setDisplayId($displayId) failed", t)
+        }
+    }
+
+    /**
+     * Reflectively call `IInputManager.injectInputEvent(event, ASYNC)`. Same
+     * call site the legacy `:app`-process reflection inject uses — only the
+     * calling UID differs (shell here vs. app there), and that UID difference
+     * is what makes Shizuku's path focus-bypassed.
+     */
+    private fun invokeInjectInputEvent(event: KeyEvent): Boolean {
+        val imClass = Class.forName("android.hardware.input.InputManager")
+        val im = imClass.getDeclaredMethod("getInstance").invoke(null)
+        val result = imClass.getDeclaredMethod(
+            "injectInputEvent",
+            android.view.InputEvent::class.java,
+            Int::class.javaPrimitiveType,
+        ).invoke(im, event, INJECT_INPUT_EVENT_MODE_ASYNC) as? Boolean ?: false
+        if (!result) {
+            Log.w(TAG, "IInputManager.injectInputEvent returned false (keyCode=${event.keyCode})")
+        }
+        return result
+    }
+
+    private val setDisplayIdMethod: java.lang.reflect.Method? by lazy {
+        try {
+            android.view.InputEvent::class.java
+                .getMethod("setDisplayId", Int::class.javaPrimitiveType)
+        } catch (t: Throwable) {
+            Log.w(TAG, "InputEvent.setDisplayId reflection unavailable", t)
+            null
+        }
     }
 
     override fun setEnumerationEnabled(on: Boolean) {
@@ -503,11 +577,33 @@ class MapoInputUserService : IMapoInputService.Stub() {
         fun normalizeAsHat(value: Int): Float = value.toFloat().coerceIn(-1f, 1f)
     }
 
+    /**
+     * Exempt `android.view.InputEvent`'s `setDisplayId(int)` from hidden-API
+     * enforcement so [stampDisplayId] can route injects to a non-default
+     * display (notably the AYN Thor's bottom screen, displayId=4). Mirrors the
+     * `:app`-side exemption in `MapoApplication.installHiddenApiExemptions`,
+     * scoped to this separate process. No-op on Android <9. Failures are
+     * logged, not fatal — without the exemption injects still work on the
+     * default display, just not the bottom screen.
+     */
+    private fun installHiddenApiExemptions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        try {
+            HiddenApiBypass.addHiddenApiExemptions("Landroid/view/InputEvent;")
+            Log.i(TAG, "HiddenApiBypass exemption installed for InputEvent")
+        } catch (t: Throwable) {
+            Log.w(TAG, "HiddenApiBypass install failed", t)
+        }
+    }
+
     companion object {
         private const val TAG = "MapoInputUserService"
 
         /** Bumped whenever the AIDL contract or wire format changes shape. */
         const val PROTOCOL_VERSION: Int = 1
+
+        /** `IInputManager#INJECT_INPUT_EVENT_MODE_ASYNC`. */
+        private const val INJECT_INPUT_EVENT_MODE_ASYNC: Int = 0
 
         /** `Os.poll` timeout (ms) when we have devices. Lets the loop wake
          *  periodically to refresh its FD list after device add/remove. */

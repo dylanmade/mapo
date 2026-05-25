@@ -35,6 +35,13 @@ kotlin {
 dependencies {
     implementation(project(":input-shared"))
 
-    // No other prod deps. If this list ever grows beyond input-shared, reconsider:
-    // every dep here ships in the shell-uid process and slows its cold start.
+    // Brick E: HiddenApiBypass is required so the shell-uid service process can
+    // reflect on `android.view.InputEvent#setDisplayId(int)` for multi-display
+    // routing. Shell UID hidden-API enforcement varies across vendors / Android
+    // versions — installing the exemption explicitly is the only portable way.
+    // Single small jar; doesn't pull other deps.
+    implementation(libs.hidden.api.bypass)
+
+    // Reconsider before adding anything else here: every dep ships in the
+    // shell-uid process and slows its cold start.
 }

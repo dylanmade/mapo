@@ -1,0 +1,77 @@
+package com.mapo.service.shizuku
+
+import android.os.RemoteException
+import android.util.Log
+import com.mapo.service.input.capture.MotionCaptureCoordinator
+import com.mapo.shizuku.InjectKeyRequest
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * **Brick E.** Single decision point for "should this `KeyEvent` inject go
+ * through the shell-uid Shizuku UserService instead of the legacy in-process
+ * reflection path?"
+ *
+ * Pulled into its own class — rather than living as a private method on
+ * `InputAccessibilityService` — because `AccessibilityService` instances are
+ * a pain to construct in tests and the gate is the only piece of Brick E that
+ * actually needs unit coverage. The Robolectric service infra adds noise
+ * without insight; a plain `@Singleton` does not.
+ *
+ * **Why this gate exists (and not just `isReadyFlow.value`)**: until Brick H
+ * deletes the focused-overlay machinery, the inject chokepoint still wraps
+ * KeyEvent injects in `motionCaptureOverlayManager.withFocusReleasedForInject`
+ * — the legacy detach-inject-reattach dance. Going through Shizuku doesn't
+ * need that dance (shell-uid inject is focus-bypassed), so when both paths
+ * could fire we want Shizuku to short-circuit before the wrapper runs. The
+ * `shizukuModeActive` clause scopes the Shizuku route to *exactly* the moments
+ * the legacy overlay would have been attached, leaving the standard reflection
+ * path alone for the no-analog-mode case where the gate doesn't kick in.
+ */
+@Singleton
+class ShizukuKeyInjector @Inject constructor(
+    private val shizukuConnection: ShizukuConnection,
+    private val motionCaptureCoordinator: MotionCaptureCoordinator,
+) {
+
+    /**
+     * Try to route a key inject through the Shizuku UserService.
+     *
+     * Returns `true` when the Shizuku path was taken (regardless of whether
+     * the underlying inject's success boolean came back true or false — the
+     * caller should NOT fall back, because the reflection path inside `:app`
+     * would still hit the same focus problem this brick exists to bypass).
+     *
+     * Returns `false` in two cases, both of which mean "caller, run your
+     * existing reflection fallback":
+     *  - The gate said no (Shizuku not ready, mode not active, or the service
+     *    binder is currently null).
+     *  - The gate said yes but the binder threw [RemoteException] — Shizuku
+     *    crashed mid-call. Falling back keeps digital remap alive during
+     *    Shizuku flaps.
+     */
+    fun tryInject(keyCode: Int, action: Int, displayId: Int, eventTime: Long): Boolean {
+        if (!shizukuConnection.isReadyFlow.value) return false
+        if (!motionCaptureCoordinator.shizukuModeActive.value) return false
+        val service = shizukuConnection.service.value ?: return false
+        return try {
+            val ok = service.injectKeyEvent(
+                InjectKeyRequest(
+                    keyCode = keyCode,
+                    action = action,
+                    displayId = displayId,
+                    eventTime = eventTime,
+                ),
+            )
+            Log.d(TAG, "shizuku inject result=$ok keyCode=$keyCode displayId=$displayId")
+            true
+        } catch (e: RemoteException) {
+            Log.w(TAG, "Shizuku injectKeyEvent threw RemoteException — falling back to reflection", e)
+            false
+        }
+    }
+
+    companion object {
+        private const val TAG = "ShizukuKeyInjector"
+    }
+}

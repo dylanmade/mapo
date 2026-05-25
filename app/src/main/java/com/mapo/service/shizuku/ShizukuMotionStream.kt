@@ -2,8 +2,13 @@ package com.mapo.service.shizuku
 
 import android.os.RemoteException
 import android.util.Log
+import androidx.annotation.VisibleForTesting
+import com.mapo.data.model.steam.InputSource
 import com.mapo.di.ApplicationScope
+import com.mapo.service.input.AnalogEvent
+import com.mapo.service.input.InputEvaluator
 import com.mapo.shizuku.IMapoInputCallback
+import com.mapo.shizuku.InputSourceId
 import com.mapo.shizuku.RawAnalogEvent
 import com.mapo.shizuku.ShizukuServiceHealth
 import kotlinx.coroutines.CoroutineScope
@@ -19,18 +24,27 @@ import javax.inject.Singleton
  * to [ShizukuConnection.service] and re-registers our callback every time the
  * binder cycles (service restart, Shizuku service flap, etc.).
  *
- * **Brick C scope.** Emits raw `RawAnalogEvent`s onto [analogEvents] and logs
- * each at debug level. No conversion to `AnalogReading` yet — Brick D plumbs
- * the conversion + feeds `InputEvaluator.handleAnalogReadings`.
+ * **Brick D scope.** Each [RawAnalogEvent] is converted to an [AnalogEvent]
+ * (sourceId → InputSource enum, ns → ms) and handed to
+ * [InputEvaluator.handleAnalogReadings] one event at a time. The mode evaluator
+ * is event-driven; per-event dispatch keeps latency at zero added milliseconds,
+ * which matters more than the saved evaluator passes a batching window would
+ * give us. If future profiling shows mode resolution as a hot loop, add a
+ * per-source dedupe window here without touching the evaluator's contract.
  *
- * **Threading.** [callback] methods run on a binder thread. We emit via a
- * SharedFlow that downstream consumers can collect on whatever scope they like.
- * Buffer capacity is sized for occasional bursts (a stick deflection can fire
- * 10-20 events per axis in a few ms while reaching its extreme).
+ * [analogEvents] still publishes the raw stream for observation/debugging —
+ * dropping it would lose the AYN-Thor-style verification path.
+ *
+ * **Threading.** [callback] methods run on a binder thread; [_analogEvents]
+ * with `extraBufferCapacity = 256` decouples binder-thread tryEmit from the
+ * scope's collector so a slow [InputEvaluator] pass can't backpressure
+ * `/dev/input` reads. DROP_OLDEST overflow: under a 256-event burst we
+ * intentionally drop the oldest unprocessed event rather than block the binder.
  */
 @Singleton
 class ShizukuMotionStream @Inject constructor(
     private val connection: ShizukuConnection,
+    private val inputEvaluator: InputEvaluator,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
 
@@ -41,7 +55,13 @@ class ShizukuMotionStream @Inject constructor(
     )
     val analogEvents: SharedFlow<RawAnalogEvent> = _analogEvents.asSharedFlow()
 
-    private val callback = object : IMapoInputCallback.Stub() {
+    /**
+     * Internal so tests can drive the dispatch path directly without spinning up
+     * a live Shizuku binding. Production code never touches it — the
+     * UserService talks to us through this Stub.
+     */
+    @VisibleForTesting
+    internal val callback = object : IMapoInputCallback.Stub() {
         override fun onAnalogEvent(event: RawAnalogEvent?) {
             if (event == null) return
             Log.d(TAG, "RawAnalogEvent ${event.sourceOrdinal} x=${event.x} y=${event.y}")
@@ -81,6 +101,45 @@ class ShizukuMotionStream @Inject constructor(
                 // service garbage-collect us.
             }
         }
+
+        // Brick D: feed converted events into the activator engine.
+        scope.launch {
+            _analogEvents.collect { raw ->
+                val converted = convertToAnalogEvent(raw) ?: return@collect
+                try {
+                    inputEvaluator.handleAnalogReadings(listOf(converted))
+                } catch (t: Throwable) {
+                    // Defensive: a misbehaving SourceMode shouldn't kill the
+                    // motion stream — next event resumes the pipeline.
+                    Log.w(TAG, "handleAnalogReadings threw on $converted", t)
+                }
+            }
+        }
+    }
+
+    /**
+     * Map [RawAnalogEvent] (sourceId-keyed, normalized values, ns timestamp) to
+     * the in-app [AnalogEvent] (InputSource-keyed, ms timestamp). Returns null
+     * for `InputSourceId.UNKNOWN` or any future ID `:app` doesn't know about —
+     * silently dropping is the correct degraded behavior across an out-of-sync
+     * service binary.
+     */
+    @VisibleForTesting
+    internal fun convertToAnalogEvent(raw: RawAnalogEvent): AnalogEvent? {
+        val source = when (raw.sourceOrdinal) {
+            InputSourceId.DPAD -> InputSource.DPAD
+            InputSourceId.LEFT_JOYSTICK -> InputSource.LEFT_JOYSTICK
+            InputSourceId.RIGHT_JOYSTICK -> InputSource.RIGHT_JOYSTICK
+            InputSourceId.LEFT_TRIGGER -> InputSource.LEFT_TRIGGER
+            InputSourceId.RIGHT_TRIGGER -> InputSource.RIGHT_TRIGGER
+            else -> return null
+        }
+        return AnalogEvent(
+            source = source,
+            x = raw.x,
+            y = raw.y,
+            timestampMs = raw.timestampNs / 1_000_000L,
+        )
     }
 
     companion object {

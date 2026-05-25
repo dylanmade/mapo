@@ -126,26 +126,48 @@ class ShizukuConnection @Inject constructor(
         facade.addPermissionResultListener(permissionResultListener)
         refresh()
         scope.launch {
-            // Background poll. Stops being load-bearing once Granted because the
-            // listeners cover the granted-state lifecycle; but a fresh install of
-            // Shizuku Manager after Mapo boots needs this tick to be discovered.
-            while (true) {
-                if (_state.value !is ShizukuState.Granted) {
+            // Background poll. Runs unconditionally — Shizuku's listeners cover
+            // grant flow (OnRequestPermissionResultListener fires on our own
+            // requestPermission() calls) and binder lifecycle (OnBinderReceived
+            // / OnBinderDead), BUT *not* external permission revocation through
+            // Shizuku Manager's own UI. Without this tick, a user who revokes
+            // Mapo's authorization in Shizuku stays stuck at Granted in our
+            // state machine and the toast / health-notification / inject-gate
+            // never trip. (Bug discovered on-device 2026-05-24.) Same 2s cadence
+            // Shizuku Manager uses for its own self-status polling.
+            //
+            // Wrapped in try/catch so an unexpected throw from `refresh()` (or
+            // any of its Shizuku-binder transitive calls) doesn't propagate to
+            // the global uncaught-exception handler and tear down the app
+            // process. We've never observed this in normal flow but revocation
+            // races (Brick G follow-up 2026-05-24) push the binder through
+            // unusual lifecycles.
+            try {
+                while (true) {
                     refresh()
+                    delay(POLL_INTERVAL_MS)
                 }
-                delay(POLL_INTERVAL_MS)
+            } catch (t: Throwable) {
+                Log.e(TAG, "poll loop crashed — state may stale until binder churn", t)
             }
         }
         // Drive UserService binding off the granted-state flow. When we move
         // into Granted we bind; when we leave we unbind. Idempotent — `bindRequested`
         // suppresses redundant calls if `state` flaps within a tick.
         scope.launch {
-            state.collect { current ->
-                if (current is ShizukuState.Granted) {
-                    bindService()
-                } else {
-                    unbindService()
+            try {
+                state.collect { current ->
+                    if (current is ShizukuState.Granted) {
+                        bindService()
+                    } else {
+                        unbindService()
+                    }
                 }
+            } catch (t: Throwable) {
+                // Same rationale as the poll loop. Bind/unbind paths are
+                // wrapped at the facade level via `safe { }`, but defense in
+                // depth — revocation can throw from unusual call sites.
+                Log.e(TAG, "state.collect bind/unbind loop crashed", t)
             }
         }
     }

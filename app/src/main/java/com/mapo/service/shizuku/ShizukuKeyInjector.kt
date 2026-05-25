@@ -64,8 +64,12 @@ class ShizukuKeyInjector @Inject constructor(
             )
             Log.d(TAG, "shizuku inject result=$ok keyCode=$keyCode displayId=$displayId")
             true
-        } catch (e: RemoteException) {
-            Log.w(TAG, "Shizuku injectKeyEvent threw RemoteException — falling back to reflection", e)
+        } catch (t: Throwable) {
+            // Broad catch: revocation tears down the binder before our state
+            // machine sees it. Beyond RemoteException, expect SecurityException
+            // / IllegalStateException on revoke-race. All are non-fatal — caller
+            // falls back to the reflection inject so digital remap survives.
+            Log.w(TAG, "Shizuku injectKeyEvent threw — falling back to reflection", t)
             false
         }
     }

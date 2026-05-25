@@ -128,52 +128,60 @@ class ShizukuMotionCoordinator @Inject constructor(
         // the vararg form and unpack by index. The casts are local and the
         // surrounding fields keep their concrete types.
         collectionJob = applicationScope.launch {
-            combine(
-                foregroundAppMonitor.currentPackage,
-                profileRepository.activeProfile,
-                appProfileBindingRepository.getAll(),
-                inputDispatcher.compiledConfig,
-                inputEvaluator.activeSetIdFlow,
-                inputEvaluator.activeLayerIdsFlow,
-                shizukuConnection.isReadyFlow,
-            ) { values ->
-                @Suppress("UNCHECKED_CAST")
-                val foregroundPkg = values[0] as String?
-                @Suppress("UNCHECKED_CAST")
-                val activeProfile = values[1] as Profile?
-                @Suppress("UNCHECKED_CAST")
-                val bindings = values[2] as List<AppProfileBinding>
-                val compiled = values[3] as CompiledConfig
-                val activeSetId = values[4] as Long
-                @Suppress("UNCHECKED_CAST")
-                val activeLayers = values[5] as List<Long>
-                val shizukuReady = values[6] as Boolean
+            try {
+                combine(
+                    foregroundAppMonitor.currentPackage,
+                    profileRepository.activeProfile,
+                    appProfileBindingRepository.getAll(),
+                    inputDispatcher.compiledConfig,
+                    inputEvaluator.activeSetIdFlow,
+                    inputEvaluator.activeLayerIdsFlow,
+                    shizukuConnection.isReadyFlow,
+                ) { values ->
+                    @Suppress("UNCHECKED_CAST")
+                    val foregroundPkg = values[0] as String?
+                    @Suppress("UNCHECKED_CAST")
+                    val activeProfile = values[1] as Profile?
+                    @Suppress("UNCHECKED_CAST")
+                    val bindings = values[2] as List<AppProfileBinding>
+                    val compiled = values[3] as CompiledConfig
+                    val activeSetId = values[4] as Long
+                    @Suppress("UNCHECKED_CAST")
+                    val activeLayers = values[5] as List<Long>
+                    val shizukuReady = values[6] as Boolean
 
-                val activeProfileId = activeProfile?.id
-                // Flush any analog state when the active profile switches —
-                // synthetic dpad edges from the prior set must not leak into
-                // the new one. Today this is a no-op for non-trigger modes
-                // (Brick K+ fill the body for joystick modes).
-                if (activeProfileId != lastActiveProfileId) {
-                    Log.d(TAG, "active profile switched $lastActiveProfileId → $activeProfileId; flushing analog state")
-                    inputEvaluator.flushAnalog()
-                    lastActiveProfileId = activeProfileId
+                    val activeProfileId = activeProfile?.id
+                    // Flush any analog state when the active profile switches —
+                    // synthetic dpad edges from the prior set must not leak into
+                    // the new one. Today this is a no-op for non-trigger modes
+                    // (Brick K+ fill the body for joystick modes).
+                    if (activeProfileId != lastActiveProfileId) {
+                        Log.d(TAG, "active profile switched $lastActiveProfileId → $activeProfileId; flushing analog state")
+                        inputEvaluator.flushAnalog()
+                        lastActiveProfileId = activeProfileId
+                    }
+                    evaluatePredicate(
+                        foregroundPkg = foregroundPkg,
+                        activeProfileId = activeProfileId,
+                        bindings = bindings.asSequence()
+                            .filter { it.profileId == activeProfileId }
+                            .mapTo(mutableSetOf()) { it.packageName },
+                        compiled = compiled,
+                        activeSetId = activeSetId,
+                        activeLayers = activeLayers,
+                        shizukuReady = shizukuReady,
+                    )
                 }
-                evaluatePredicate(
-                    foregroundPkg = foregroundPkg,
-                    activeProfileId = activeProfileId,
-                    bindings = bindings.asSequence()
-                        .filter { it.profileId == activeProfileId }
-                        .mapTo(mutableSetOf()) { it.packageName },
-                    compiled = compiled,
-                    activeSetId = activeSetId,
-                    activeLayers = activeLayers,
-                    shizukuReady = shizukuReady,
-                )
+                    .distinctUntilChanged()
+                    .onEach { breakdown -> applyDecision(breakdown) }
+                    .collect { /* drain — apply is in onEach */ }
+            } catch (t: Throwable) {
+                // Top-level guard against revocation-race throws propagating to
+                // the global uncaught-exception handler (Brick G follow-up
+                // 2026-05-24). All inner calls have their own try/catch, but
+                // an unforeseen path could still throw here.
+                Log.e(TAG, "predicate combine loop crashed", t)
             }
-                .distinctUntilChanged()
-                .onEach { breakdown -> applyDecision(breakdown) }
-                .collect { /* drain — apply is in onEach */ }
         }
     }
 
@@ -240,10 +248,14 @@ class ShizukuMotionCoordinator @Inject constructor(
         }
         try {
             service.setEnumerationEnabled(on)
-        } catch (e: RemoteException) {
-            // Shizuku died mid-call. Predicate will catch up next emission via
-            // isReadyFlow flip.
-            Log.w(TAG, "setEnumerationEnabled($on) threw RemoteException", e)
+        } catch (t: Throwable) {
+            // Broad catch: when Shizuku revokes our permission it tears down
+            // the UserService process *before* our state machine reacts. The
+            // binder transaction can throw RemoteException (DeadObjectException),
+            // SecurityException (permission lost mid-call), or IllegalStateException
+            // (Shizuku-internal proxy state). All are non-fatal — predicate
+            // catches up on the next isReadyFlow emission.
+            Log.w(TAG, "setEnumerationEnabled($on) threw", t)
         }
     }
 

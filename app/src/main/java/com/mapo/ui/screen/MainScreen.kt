@@ -115,6 +115,7 @@ import com.mapo.data.model.gestureTarget
 import com.mapo.data.model.onDoubleTapTarget
 import com.mapo.data.model.onHoldTarget
 import com.mapo.data.model.onTapTarget
+import com.mapo.service.overlay.keyboard.overlayTouchable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -1270,6 +1271,7 @@ internal fun KeyGrid(
                 )
                 Box(
                     modifier = Modifier
+                        .overlayTouchable()
                         .absoluteOffset(x = bx, y = by)
                         .size(width = bw, height = bh)
                         .pointerInput(button.id + "_tp") {
@@ -1363,6 +1365,7 @@ internal fun KeyGrid(
                 // affects drawing only, not the gesture-coord frame.
                 Box(
                     modifier = Modifier
+                        .overlayTouchable()
                         .absoluteOffset(x = bx, y = by)
                         .size(width = bw, height = bh)
                         .zIndex(if (isDragging) 10f else 0f)

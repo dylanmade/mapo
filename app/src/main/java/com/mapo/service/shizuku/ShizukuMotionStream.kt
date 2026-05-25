@@ -83,36 +83,47 @@ class ShizukuMotionStream @Inject constructor(
 
     init {
         scope.launch {
-            connection.service.collect { svc ->
-                if (svc != null) {
-                    try {
-                        svc.registerCallback(callback)
-                        Log.i(TAG, "registered callback on UserService")
-                    } catch (e: RemoteException) {
-                        Log.w(TAG, "registerCallback failed; UserService may be dying", e)
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "registerCallback unexpected failure", e)
+            try {
+                connection.service.collect { svc ->
+                    if (svc != null) {
+                        try {
+                            svc.registerCallback(callback)
+                            Log.i(TAG, "registered callback on UserService")
+                        } catch (e: RemoteException) {
+                            Log.w(TAG, "registerCallback failed; UserService may be dying", e)
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "registerCallback unexpected failure", e)
+                        }
                     }
+                    // Intentionally NOT calling unregisterCallback on null transition:
+                    // the binder is dead → the callback's binder is implicitly dropped
+                    // by RemoteCallbackList on the service side. Calling unregister via
+                    // a dead binder throws DeadObjectException; better to let the
+                    // service garbage-collect us.
                 }
-                // Intentionally NOT calling unregisterCallback on null transition:
-                // the binder is dead → the callback's binder is implicitly dropped
-                // by RemoteCallbackList on the service side. Calling unregister via
-                // a dead binder throws DeadObjectException; better to let the
-                // service garbage-collect us.
+            } catch (t: Throwable) {
+                // Top-level guard so an unhandled throw doesn't propagate to the
+                // global uncaught-exception handler and tear down the app
+                // process (Brick G revocation-race follow-up 2026-05-24).
+                Log.e(TAG, "service.collect callback-registration loop crashed", t)
             }
         }
 
         // Brick D: feed converted events into the activator engine.
         scope.launch {
-            _analogEvents.collect { raw ->
-                val converted = convertToAnalogEvent(raw) ?: return@collect
-                try {
-                    inputEvaluator.handleAnalogReadings(listOf(converted))
-                } catch (t: Throwable) {
-                    // Defensive: a misbehaving SourceMode shouldn't kill the
-                    // motion stream — next event resumes the pipeline.
-                    Log.w(TAG, "handleAnalogReadings threw on $converted", t)
+            try {
+                _analogEvents.collect { raw ->
+                    val converted = convertToAnalogEvent(raw) ?: return@collect
+                    try {
+                        inputEvaluator.handleAnalogReadings(listOf(converted))
+                    } catch (t: Throwable) {
+                        // Defensive: a misbehaving SourceMode shouldn't kill the
+                        // motion stream — next event resumes the pipeline.
+                        Log.w(TAG, "handleAnalogReadings threw on $converted", t)
+                    }
                 }
+            } catch (t: Throwable) {
+                Log.e(TAG, "analogEvents collector crashed", t)
             }
         }
     }

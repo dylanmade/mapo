@@ -1,5 +1,6 @@
 package com.mapo.ui.screen.keyboard
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mapo.service.overlay.keyboard.overlayTouchable
 import com.mapo.ui.screen.BottomBar
 import com.mapo.ui.screen.KeyGrid
 import com.mapo.ui.screen.KeyboardSurface
@@ -113,24 +115,29 @@ fun KeyboardHost(
                 // For Brick 3 minimum-viable wiring, reuse `KeyboardTopBar` with all
                 // edit-related callbacks as no-ops and `isEditMode = false`. Visual
                 // polish (slim variant, hide unused buttons) is a Brick 4 refinement.
-                KeyboardTopBar(
-                    layouts = layouts,
-                    selectedIndex = selectedIndex,
-                    isEditMode = false,
-                    tabContextMenuFor = null,
-                    onSelectIndex = state::selectLayout,
-                    onLongPressMenu = {},
-                    onReorder = { _, _ -> },
-                    onCloseMenu = {},
-                    onMenuEditButtons = {},
-                    onToggleEditMode = {},
-                    onMenuConfigure = {},
-                    onMenuDuplicate = {},
-                    onMenuRemove = {},
-                    onMenuSaveTemplate = {},
-                    onOpenDrawer = mode.onOpenMapoActivity,
-                    onAddKeyboard = {},
-                )
+                // Top/bottom bars are always-touchable strips in overlay mode — gaps
+                // between tabs / between bar controls should still feel "live", not
+                // passthrough.
+                Box(modifier = Modifier.overlayTouchable()) {
+                    KeyboardTopBar(
+                        layouts = layouts,
+                        selectedIndex = selectedIndex,
+                        isEditMode = false,
+                        tabContextMenuFor = null,
+                        onSelectIndex = state::selectLayout,
+                        onLongPressMenu = {},
+                        onReorder = { _, _ -> },
+                        onCloseMenu = {},
+                        onMenuEditButtons = {},
+                        onToggleEditMode = {},
+                        onMenuConfigure = {},
+                        onMenuDuplicate = {},
+                        onMenuRemove = {},
+                        onMenuSaveTemplate = {},
+                        onOpenDrawer = mode.onOpenMapoActivity,
+                        onAddKeyboard = {},
+                    )
+                }
 
                 KeyboardSurface(
                     layout = displayLayout,
@@ -160,12 +167,14 @@ fun KeyboardHost(
                     )
                 }
 
-                BottomBar(
-                    remapEnabled = remapEnabled,
-                    onToggleRemap = state::toggleRemap,
-                    onLeftAction = mode.onHideOverlay,
-                    leftActionLabel = "Hide",
-                )
+                Box(modifier = Modifier.overlayTouchable()) {
+                    BottomBar(
+                        remapEnabled = remapEnabled,
+                        onToggleRemap = state::toggleRemap,
+                        onLeftAction = mode.onHideOverlay,
+                        leftActionLabel = "Hide",
+                    )
+                }
             }
         }
     }

@@ -20,6 +20,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,6 +59,8 @@ import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.InputSource
 import com.mapo.data.model.steam.displayLabel
 import com.mapo.data.model.steam.displayName
+import androidx.compose.ui.res.stringResource
+import com.mapo.R
 import com.mapo.service.input.modes.SourceModeCatalog
 import com.mapo.service.input.modes.requiresMotionCapture
 import com.mapo.ui.component.layout.SectionedListDetailPane
@@ -132,6 +137,18 @@ fun RemapControlsScreen(
     // when the next overlay session starts.
     if (viewingLayer == null && onlyOverrides) onlyOverrides = false
 
+    // Brick G follow-up: walk the current config for any analog-mode binding.
+    // If one exists AND Shizuku isn't ready, the banner below surfaces the gap
+    // inline — covers the case where the user previously applied analog modes
+    // (so the first-time dialog won't re-fire) and then Shizuku flipped away
+    // from Granted, leaving those bindings silently inert.
+    val hasAnalogModeInConfig = config?.actionSets?.any { set ->
+        set.preset.any { it.group.group.mode.requiresMotionCapture() } ||
+            set.layers.any { layer ->
+                layer.bindingGroups.any { it.group.mode.requiresMotionCapture() }
+            }
+    } == true
+
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -144,6 +161,9 @@ fun RemapControlsScreen(
                         }
                     },
                 )
+                if (hasAnalogModeInConfig && !shizukuReady) {
+                    ShizukuUnavailableBanner(onOpenSetup = onOpenShizukuSetup)
+                }
                 ActionSetAndLayersBar(
                     config = config,
                     viewingSetId = viewingSet?.actionSet?.id,
@@ -996,5 +1016,50 @@ private fun DetailPlaceholder(text: String) {
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * Brick G follow-up: full-width banner under the TopAppBar surfacing the
+ * "you have analog modes configured but Shizuku isn't ready" gap. Uses the
+ * errorContainer tonal role — M3 reserves errorContainer for actionable broken
+ * states, which matches: the user's analog bindings are functionally inert
+ * until they fix Shizuku.
+ *
+ * Predicate is evaluated by the caller (`hasAnalogModeInConfig && !shizukuReady`);
+ * this composable just renders when invoked.
+ */
+@Composable
+private fun ShizukuUnavailableBanner(onOpenSetup: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = stringResource(R.string.remap_shizuku_unavailable_banner),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(
+                onClick = onOpenSetup,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) {
+                Text(stringResource(R.string.remap_shizuku_unavailable_banner_cta))
+            }
+        }
     }
 }

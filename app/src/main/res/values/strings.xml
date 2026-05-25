@@ -94,6 +94,13 @@
     <string name="shizuku_health_channel_description">Persistent reminder when an analog mode is configured for the foreground app but Shizuku isn\'t connected.</string>
     <string name="shizuku_health_notification_title">Analog input paused</string>
     <string name="shizuku_health_notification_text">Shizuku isn\'t connected. Tap to set it up.</string>
+
+    <!-- Remap Controls inline banner (Brick G follow-up). Shown when any analog
+         mode is configured in the current controller config AND Shizuku is not
+         ready — surfaces the gap for users who applied analog modes before
+         Shizuku was set up, or whose Shizuku connection later broke. -->
+    <string name="remap_shizuku_unavailable_banner">Analog modes won\'t fire — Shizuku isn\'t connected.</string>
+    <string name="remap_shizuku_unavailable_banner_cta">Set up</string>
     <string name="blocklist_screen_title">Blocklist</string>
     <string name="blocklist_header">Apps Mapo will never prompt you about</string>
     <string name="blocklist_empty">No apps blocked. When you tap “Never for this app” on a prompt, the app will appear here.</string>

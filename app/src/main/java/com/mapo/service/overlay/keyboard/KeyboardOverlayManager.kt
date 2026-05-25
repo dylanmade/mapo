@@ -12,6 +12,7 @@ import android.view.Display
 import android.view.View
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -82,21 +83,42 @@ class KeyboardOverlayManager @Inject constructor(
             val windowManager = displayContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
             val owner = OverlayLifecycleOwner()
+            val touchableRegion = OverlayTouchableRegion()
             val composeView = ComposeView(displayContext).apply {
                 setViewTreeLifecycleOwner(owner)
                 setViewTreeViewModelStoreOwner(owner)
                 setViewTreeSavedStateRegistryOwner(owner)
                 defaultFocusHighlightEnabled = false
-                setContent { MapoTheme { content() } }
+                setContent {
+                    MapoTheme {
+                        CompositionLocalProvider(LocalOverlayTouchableRegion provides touchableRegion) {
+                            content()
+                        }
+                    }
+                }
             }
             owner.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
             owner.handleLifecycleEvent(Lifecycle.Event.ON_START)
             owner.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
+            // Window covers the full screen but only the registered rects accept touches —
+            // anything outside the union of rects falls through to the foreground app.
+            // Compose children opt in via Modifier.overlayTouchable(). The internal-insets
+            // listener is wired via reflection because the API is @hide; see
+            // [OverlayTouchableInsets] and the HiddenApiBypass exemption in MapoApplication.
+            val insetsHandle = OverlayTouchableInsets.install(composeView) { region ->
+                touchableRegion.snapshot().forEach { r -> region.union(r) }
+            }
+            // Compose reports new bounds via onGloballyPositioned after layout completes;
+            // requestLayout() schedules another pass which re-fires the inset listener with
+            // the fresh rect set. Cheap — no recomposition, just a layout/measure tick.
+            touchableRegion.setOnChanged { composeView.requestLayout() }
+
             try {
                 windowManager.addView(composeView, layoutParams(displayContext))
             } catch (e: Exception) {
                 Log.e(TAG, "addView($overlayId) failed", e)
+                OverlayTouchableInsets.uninstall(composeView, insetsHandle)
                 owner.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
                 return@runOnMain
             }
@@ -106,6 +128,7 @@ class KeyboardOverlayManager @Inject constructor(
                 owner = owner,
                 windowManager = windowManager,
                 displayId = displayId,
+                insetsHandle = insetsHandle,
             )
             if (wasEmpty) startService()
             Log.i(TAG, "attached '$overlayId' on display $displayId (active=${attached.size})")
@@ -128,6 +151,7 @@ class KeyboardOverlayManager @Inject constructor(
 
     private fun detachInternal(overlayId: String) {
         val entry = attached.remove(overlayId) ?: return
+        OverlayTouchableInsets.uninstall(entry.view, entry.insetsHandle)
         try {
             entry.windowManager.removeViewImmediate(entry.view)
         } catch (e: Exception) {
@@ -188,6 +212,9 @@ class KeyboardOverlayManager @Inject constructor(
         val owner: OverlayLifecycleOwner,
         val windowManager: WindowManager,
         val displayId: Int,
+        // Opaque handle from [OverlayTouchableInsets.install] — pass back to uninstall.
+        // Null if reflection failed on this Android build; uninstall handles null.
+        val insetsHandle: Any?,
     )
 
     companion object {

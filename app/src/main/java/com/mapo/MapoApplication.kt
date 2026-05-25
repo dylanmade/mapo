@@ -43,6 +43,7 @@ class MapoApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        installUncaughtExceptionLogger()
         installHiddenApiExemptions()
         autoSwitcher.start()
         overlayCoordinator.start()
@@ -54,23 +55,59 @@ class MapoApplication : Application() {
     }
 
     /**
-     * Exempts `android.view.InputEvent`'s hidden API methods (`setDisplayId(int)`,
-     * `getDisplayId()`) from runtime hidden-API enforcement so [InputAccessibilityService]
-     * can stamp a target display on injected `KeyEvent`s. Without this, every injected
-     * event defaults to `Display.DEFAULT_DISPLAY`, dropping any remap output meant for
-     * the AYN Thor's bottom screen.
+     * Chain a logger onto the JVM's default uncaught-exception handler so any
+     * thread crash leaves a tagged breadcrumb before the OS-default handler
+     * tears the process down. Critical for diagnosing the Shizuku-revocation
+     * teardown — Android's default handler prints the FATAL EXCEPTION block to
+     * the `AndroidRuntime` tag, but if anything intervenes (a native crash, a
+     * silent process exit) we'd otherwise have no signal. Logging here is
+     * additive — we still delegate to the original handler so default crash
+     * reporting is unaffected.
+     */
+    private fun installUncaughtExceptionLogger() {
+        val prior = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.e(
+                "MapoApplication",
+                "UNCAUGHT EXCEPTION on thread '${thread.name}' (id=${thread.id})",
+                throwable,
+            )
+            prior?.uncaughtException(thread, throwable)
+        }
+    }
+
+    /**
+     * Exempts hidden-API surfaces from runtime enforcement:
      *
-     * Scoped to the `InputEvent` class signature so we don't blanket-exempt the whole
-     * runtime. No-op on Android <9 (no hidden-API enforcement); the library handles the
+     *  - `android.view.InputEvent`: `setDisplayId(int)` / `getDisplayId()` so
+     *    [InputAccessibilityService] can stamp a target display on injected `KeyEvent`s.
+     *    Without this, every injected event defaults to `Display.DEFAULT_DISPLAY`,
+     *    dropping any remap output meant for the AYN Thor's bottom screen.
+     *
+     *  - `android.view.ViewTreeObserver`: `OnComputeInternalInsetsListener` /
+     *    `InternalInsetsInfo` so [com.mapo.service.overlay.keyboard.KeyboardOverlayManager]
+     *    can declare per-rect touchable regions on the system-overlay window — letting
+     *    touches in empty areas of the keyboard pass through to the foreground game.
+     *
+     * Scoped to specific class signatures so we don't blanket-exempt the whole runtime.
+     * No-op on Android <9 (no hidden-API enforcement); the library handles the
      * version-specific bypass mechanism internally.
      */
     private fun installHiddenApiExemptions() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
         try {
-            HiddenApiBypass.addHiddenApiExemptions("Landroid/view/InputEvent;")
-            Log.i("MapoApplication", "Hidden API exemption installed for InputEvent")
+            HiddenApiBypass.addHiddenApiExemptions(
+                "Landroid/view/InputEvent;",
+                // No trailing ';' — prefix match so the exemption reaches
+                // ViewTreeObserver$InternalInsetsInfo and ViewTreeObserver$OnComputeInternalInsetsListener
+                // as well as the outer class. The hidden-API descriptors look like
+                // `Landroid/view/ViewTreeObserver$InternalInsetsInfo;->TOUCHABLE_INSETS_REGION:I`,
+                // which a `;`-terminated prefix wouldn't match.
+                "Landroid/view/ViewTreeObserver",
+            )
+            Log.i("MapoApplication", "Hidden API exemptions installed (InputEvent, ViewTreeObserver)")
         } catch (e: Throwable) {
-            Log.w("MapoApplication", "Failed to install hidden API exemption for InputEvent", e)
+            Log.w("MapoApplication", "Failed to install hidden API exemptions", e)
         }
     }
 }

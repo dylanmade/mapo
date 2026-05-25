@@ -64,14 +64,21 @@ class ShizukuHealthNotification @Inject constructor(
         ensureChannel()
         Log.i(TAG, "start: subscribing to predicate inputs")
         collectionJob = applicationScope.launch {
-            combine(
-                coordinator.analogModeWanted,
-                shizukuConnection.isReadyFlow,
-            ) { wanted, ready -> shouldShow(wanted = wanted, shizukuReady = ready) }
-                .distinctUntilChanged()
-                .collect { showNotification ->
-                    if (showNotification) post() else cancel()
-                }
+            try {
+                combine(
+                    coordinator.analogModeWanted,
+                    shizukuConnection.isReadyFlow,
+                ) { wanted, ready -> shouldShow(wanted = wanted, shizukuReady = ready) }
+                    .distinctUntilChanged()
+                    .collect { showNotification ->
+                        if (showNotification) post() else cancel()
+                    }
+            } catch (t: Throwable) {
+                // Top-level guard so a NotificationManager throw or downstream
+                // crash doesn't propagate to the global uncaught-exception
+                // handler (Brick G revocation-race follow-up 2026-05-24).
+                Log.e(TAG, "health-notification combine loop crashed", t)
+            }
         }
     }
 

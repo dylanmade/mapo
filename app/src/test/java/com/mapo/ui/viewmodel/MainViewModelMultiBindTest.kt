@@ -17,7 +17,6 @@ import com.mapo.service.shizuku.ShizukuConnection
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.InputDispatcher
-import com.mapo.service.input.MotionProbeAppOverlay
 import com.mapo.service.keyboard.KeyboardController
 import com.mapo.service.overlay.keyboard.KeyboardOverlayPresenter
 import io.mockk.coEvery
@@ -63,7 +62,6 @@ class MainViewModelMultiBindTest {
     private lateinit var templateRepo: KeyboardTemplateRepository
     private lateinit var inputDispatcher: InputDispatcher
     private lateinit var keyboardOverlayPresenter: KeyboardOverlayPresenter
-    private lateinit var motionProbeAppOverlay: MotionProbeAppOverlay
     private lateinit var keyboardController: KeyboardController
 
     private val activeProfile = MutableStateFlow<Profile?>(null)
@@ -97,7 +95,6 @@ class MainViewModelMultiBindTest {
         templateRepo = mockk(relaxed = true)
         inputDispatcher = mockk(relaxed = true)
         keyboardOverlayPresenter = mockk(relaxed = true)
-        motionProbeAppOverlay = mockk(relaxed = true)
         keyboardController = KeyboardController(
             inputDispatcher = inputDispatcher,
             layoutRepository = layoutRepo,
@@ -132,7 +129,6 @@ class MainViewModelMultiBindTest {
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
             keyboardOverlayPresenter = keyboardOverlayPresenter,
-            motionProbeAppOverlay = motionProbeAppOverlay,
             keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
         )

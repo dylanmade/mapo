@@ -3,6 +3,8 @@ package com.mapo.service.input.modes
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.InputSource
 import com.mapo.service.input.AnalogEvent
+import kotlin.math.pow
+import kotlin.math.sqrt
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -108,14 +110,43 @@ data class ModeContext(
 
 /**
  * Continuous-output sink for analog modes whose output is mouse motion or
- * scroll rather than synthetic-digital edges (D2). Brick 7 fleshes this out
- * with `moveCursorBy(dx, dy)` / scroll deltas; Brick 5 only locks the shape
- * so [SourceMode.evaluate]'s signature doesn't churn between bricks.
+ * scroll rather than synthetic-digital edges (D2). Modes set a per-source
+ * pixel/second velocity each time they evaluate; the production
+ * implementation ([com.mapo.service.input.MouseEmitterImpl]) runs an
+ * integration loop while any source's velocity is non-zero and drives
+ * `dispatcher.injectMouseMove(dx, dy)` at roughly 120 Hz. When all sources
+ * return to zero the loop exits — event-driven everywhere else, time-stepped
+ * only while a continuous output is actually live.
+ *
+ * The contract intentionally does NOT take instantaneous `(dx, dy)` deltas
+ * from modes: a mode that fires once on stick deflection and never again
+ * (because the kernel goes silent at constant deflection) would freeze the
+ * cursor. The velocity-slot model lets the integration loop re-apply the
+ * latest known stick deflection across the silent window between source
+ * events.
  */
 interface MouseEmitter {
+    /**
+     * Set this source's contribution to cursor motion. `vxPxPerSec` and
+     * `vyPxPerSec` are in screen-pixels per second; passing `0f, 0f` removes
+     * the source from the active set (returning to deadzone center). Both LJ
+     * and RJ can drive the cursor concurrently — their contributions sum.
+     */
+    fun setStickVelocity(source: InputSource, vxPxPerSec: Float, vyPxPerSec: Float)
+
+    /**
+     * Clear all per-source velocity contributions. Called from
+     * `InputEvaluator.flushAnalog` on profile / action-set switch so a
+     * deflected stick doesn't leak motion across set boundaries.
+     */
+    fun clearAllVelocities()
+
     companion object {
-        /** No-op sink for digital modes and for tests; Brick 7 supplies the real one. */
-        val NOOP: MouseEmitter = object : MouseEmitter {}
+        /** No-op sink for digital modes and for tests. */
+        val NOOP: MouseEmitter = object : MouseEmitter {
+            override fun setStickVelocity(source: InputSource, vxPxPerSec: Float, vyPxPerSec: Float) {}
+            override fun clearAllVelocities() {}
+        }
     }
 }
 
@@ -286,6 +317,165 @@ internal data class TriggerSettings(
 }
 
 /**
+ * Stick-to-cursor analog mode optimized for menus and on-screen cursor work
+ * (the "use the stick like a mouse" feel). Sub-input: `click` — passes the
+ * stick-click through to the activator engine so the user can still bind
+ * thumb-stick presses to clicks / actions.
+ *
+ * **Settings — Steam defaults, tuned for cursor precision:**
+ *  - `deadzone` (0..1, Steam default 0.10) — radial inner deadzone applied
+ *    in normalized stick units.
+ *  - `sensitivity` (px/sec at full deflection, default 800) — velocity at
+ *    the outer edge of stick travel. Cursor-friendly default; FPS camera
+ *    work should pick [JoystickCameraMode] instead.
+ *  - `exponent` (response curve power, default 1.6) — `>1` makes near-center
+ *    deflection slower (precision), `<1` makes it faster (snap). Steam
+ *    Input's "Sensitivity Curve" maps roughly to this.
+ *  - `invert_y` (bool, default false) — flips the y axis; FPS conventions
+ *    vary by player.
+ *
+ * **What gets emitted.** Each [evaluate] call samples the stick's normalized
+ * (x, y), applies radial deadzone + curve + sensitivity, and writes the
+ * resulting (vx, vy) pixels-per-second into the [MouseEmitter] for this
+ * source. The emitter's integration loop keeps the cursor moving while the
+ * stick is held.
+ */
+object MouseJoystickMode : SourceMode {
+    override val mode: BindingMode = BindingMode.MOUSE_JOYSTICK
+    override fun validInputs(): Set<String> = INPUTS
+    override fun defaultSettingsJson(): String = StickToMouseSettings.MOUSE_JOYSTICK_DEFAULT_JSON
+    private val INPUTS = setOf("click")
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        val settings = StickToMouseSettings.parse(ctx.settingsJson, StickToMouseSettings.MOUSE_JOYSTICK_DEFAULTS)
+        val (vx, vy) = settings.toVelocity(reading.x, reading.y)
+        mouse.setStickVelocity(reading.source, vx, vy)
+    }
+}
+
+/**
+ * Stick-to-cursor analog mode optimized for camera control in shooters / 3D
+ * games (the "use the stick like a mouselook" feel). Same primitive as
+ * [MouseJoystickMode] — produces a velocity into [MouseEmitter] — but the
+ * defaults skew aggressive: higher sensitivity, larger deadzone for stable
+ * crosshair-at-rest, stronger curve so fine aim sits near center and snap
+ * turns live at the rim.
+ *
+ * Sub-input: `click` — same as [MouseJoystickMode].
+ *
+ * **Settings — Steam defaults, tuned for camera control:**
+ *  - `deadzone` 0.15
+ *  - `sensitivity` 1400 px/sec
+ *  - `exponent` 2.0
+ *  - `invert_y` false
+ */
+object JoystickCameraMode : SourceMode {
+    override val mode: BindingMode = BindingMode.JOYSTICK_CAMERA
+    override fun validInputs(): Set<String> = INPUTS
+    override fun defaultSettingsJson(): String = StickToMouseSettings.JOYSTICK_CAMERA_DEFAULT_JSON
+    private val INPUTS = setOf("click")
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        val settings = StickToMouseSettings.parse(ctx.settingsJson, StickToMouseSettings.JOYSTICK_CAMERA_DEFAULTS)
+        val (vx, vy) = settings.toVelocity(reading.x, reading.y)
+        mouse.setStickVelocity(reading.source, vx, vy)
+    }
+}
+
+/**
+ * Parsed settings + math shared by [MouseJoystickMode] and [JoystickCameraMode].
+ * Tolerant of missing keys; falls back to the mode's defaults (passed in by
+ * the caller because Mouse Joystick and Joystick Camera have different
+ * defaults).
+ *
+ * **toVelocity math:**
+ *  1. Magnitude `m = sqrt(x² + y²)`, clamped to [0, 1].
+ *  2. If `m <= deadzone` → return (0, 0). Cursor halts cleanly at rest.
+ *  3. Rescale `m' = (m - deadzone) / (1 - deadzone)` so a stick just past
+ *     the deadzone produces non-zero velocity (avoids dead-band stutter).
+ *  4. Apply curve: `m'' = m'^exponent`.
+ *  5. Direction is the original `(x, y) / m` unit vector; scale to
+ *     `m'' * sensitivity` pixels/sec on each axis.
+ *  6. `invert_y` flips the y output sign (UI flag, user preference).
+ */
+internal data class StickToMouseSettings(
+    val deadzone: Float,
+    val sensitivity: Float,
+    val exponent: Float,
+    val invertY: Boolean,
+) {
+    fun toVelocity(x: Float, y: Float): Pair<Float, Float> {
+        val magnitude = sqrt(x * x + y * y).coerceIn(0f, 1f)
+        if (magnitude <= deadzone) return 0f to 0f
+        val rescaled = ((magnitude - deadzone) / (1f - deadzone)).coerceIn(0f, 1f)
+        val shaped = rescaled.toDouble().pow(exponent.toDouble()).toFloat()
+        val outputMag = shaped * sensitivity
+        // Direction from raw (x, y); divide by raw magnitude (not rescaled) so
+        // direction is preserved across the deadzone rescale.
+        val ux = x / magnitude
+        val uy = y / magnitude
+        val vx = ux * outputMag
+        val vy = uy * outputMag * if (invertY) -1f else 1f
+        return vx to vy
+    }
+
+    companion object {
+        const val DEFAULT_DEADZONE_MOUSE = 0.10f
+        const val DEFAULT_SENSITIVITY_MOUSE = 800f
+        const val DEFAULT_EXPONENT_MOUSE = 1.6f
+
+        const val DEFAULT_DEADZONE_CAMERA = 0.15f
+        const val DEFAULT_SENSITIVITY_CAMERA = 1400f
+        const val DEFAULT_EXPONENT_CAMERA = 2.0f
+
+        val MOUSE_JOYSTICK_DEFAULTS = StickToMouseSettings(
+            deadzone = DEFAULT_DEADZONE_MOUSE,
+            sensitivity = DEFAULT_SENSITIVITY_MOUSE,
+            exponent = DEFAULT_EXPONENT_MOUSE,
+            invertY = false,
+        )
+        val JOYSTICK_CAMERA_DEFAULTS = StickToMouseSettings(
+            deadzone = DEFAULT_DEADZONE_CAMERA,
+            sensitivity = DEFAULT_SENSITIVITY_CAMERA,
+            exponent = DEFAULT_EXPONENT_CAMERA,
+            invertY = false,
+        )
+        val MOUSE_JOYSTICK_DEFAULT_JSON =
+            """{"deadzone":$DEFAULT_DEADZONE_MOUSE,"sensitivity":$DEFAULT_SENSITIVITY_MOUSE,"exponent":$DEFAULT_EXPONENT_MOUSE,"invert_y":false}"""
+        val JOYSTICK_CAMERA_DEFAULT_JSON =
+            """{"deadzone":$DEFAULT_DEADZONE_CAMERA,"sensitivity":$DEFAULT_SENSITIVITY_CAMERA,"exponent":$DEFAULT_EXPONENT_CAMERA,"invert_y":false}"""
+
+        fun parse(json: String, defaults: StickToMouseSettings): StickToMouseSettings {
+            if (json.isBlank()) return defaults
+            return try {
+                val obj = JSONObject(json)
+                StickToMouseSettings(
+                    deadzone = obj.optDouble("deadzone", defaults.deadzone.toDouble()).toFloat()
+                        .coerceIn(0f, 0.95f),
+                    sensitivity = obj.optDouble("sensitivity", defaults.sensitivity.toDouble()).toFloat()
+                        .coerceAtLeast(0f),
+                    exponent = obj.optDouble("exponent", defaults.exponent.toDouble()).toFloat()
+                        .coerceIn(0.1f, 10f),
+                    invertY = obj.optBoolean("invert_y", defaults.invertY),
+                )
+            } catch (_: JSONException) {
+                defaults
+            }
+        }
+    }
+}
+
+/**
  * Placeholder handler for a [BindingMode] whose runtime hasn't landed yet. Reports an
  * empty [validInputs] but [accepts] always returns true so the compile path doesn't drop
  * existing seeded data while we phase the rest of the modes in (6.2 onward). Disappears
@@ -307,9 +497,9 @@ fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.BUTTON_PAD -> ButtonPadMode
     BindingMode.DPAD -> DpadMode
     BindingMode.TRIGGER -> TriggerMode
+    BindingMode.MOUSE_JOYSTICK -> MouseJoystickMode
+    BindingMode.JOYSTICK_CAMERA -> JoystickCameraMode
     BindingMode.JOYSTICK_MOVE,
-    BindingMode.JOYSTICK_CAMERA,
-    BindingMode.MOUSE_JOYSTICK,
     BindingMode.ABSOLUTE_MOUSE,
     BindingMode.SCROLL_WHEEL,
     BindingMode.TWO_D_SCROLL,

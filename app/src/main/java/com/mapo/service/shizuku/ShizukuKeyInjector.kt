@@ -17,15 +17,13 @@ import javax.inject.Singleton
  * actually needs unit coverage. The Robolectric service infra adds noise
  * without insight; a plain `@Singleton` does not.
  *
- * **Why this gate exists (and not just `isReadyFlow.value`)**: until Brick H
- * deletes the focused-overlay machinery, the inject chokepoint still wraps
- * KeyEvent injects in `motionCaptureOverlayManager.withFocusReleasedForInject`
- * — the legacy detach-inject-reattach dance. Going through Shizuku doesn't
- * need that dance (shell-uid inject is focus-bypassed), so when both paths
- * could fire we want Shizuku to short-circuit before the wrapper runs. The
- * `shizukuModeActive` clause scopes the Shizuku route to *exactly* the moments
- * the legacy overlay would have been attached, leaving the standard reflection
- * path alone for the no-analog-mode case where the gate doesn't kick in.
+ * **Why the `shizukuModeActive` clause and not just `isReadyFlow.value`**: the
+ * Shizuku route exists to serve analog modes (which need focus-bypassed inject
+ * because the source modes are firing from a non-focused context). For the
+ * no-analog-mode case the in-process reflection path is equivalent in behavior
+ * and one binder hop cheaper. Gating on `shizukuModeActive` keeps the Shizuku
+ * route scoped to exactly the moments analog modes are live, leaving the
+ * reflection path as the everyday digital-remap floor.
  */
 @Singleton
 class ShizukuKeyInjector @Inject constructor(

@@ -3,15 +3,11 @@ package com.mapo.service.shizuku
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.os.RemoteException
 import android.util.Log
 import android.widget.Toast
-import com.mapo.data.model.AppProfileBinding
 import com.mapo.data.model.Profile
-import com.mapo.data.repository.AppProfileBindingRepository
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.di.ApplicationScope
-import com.mapo.service.foreground.ForegroundAppMonitor
 import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.InputEvaluator
@@ -30,18 +26,29 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * **Brick F.** Successor to `MotionCaptureCoordinator`. Drives the Shizuku
- * UserService's enumeration switch off the same gating predicate that used to
- * drive the focused-overlay attach — plus a new clause requiring Shizuku to be
- * ready, since analog modes don't work at all without it.
+ * **Brick F + Brick J follow-up.** Drives the Shizuku UserService's enumeration
+ * switch off a 3-clause predicate:
  *
- * Effective behavior:
- *  - **Foreground app bound to the active profile**, AND
- *  - **Active set (with overlaying layers applied) has at least one analog
- *    [com.mapo.data.model.steam.InputSource]** (per
- *    [com.mapo.service.input.modes.requiresMotionCapture]), AND
+ *  - **Remap toggle is on** ([InputDispatcher.remapEnabled]) — the master kill-
+ *    switch users flip with the gamepad button. Off → no Mapo input handling
+ *    of any kind, digital or analog.
+ *  - **Active profile's compiled config has at least one analog
+ *    [com.mapo.data.model.steam.InputSource]** in the active set or layers
+ *    (per [com.mapo.service.input.modes.requiresMotionCapture]).
  *  - **Shizuku connection is `Granted` and the UserService binder is alive**
  *    ([ShizukuConnection.isReadyFlow]).
+ *
+ * **History.** Pre-Brick-J the predicate also required "foreground app bound to
+ * the active profile." That was a leftover from the pre-Shizuku focused-overlay
+ * era: attaching the overlay disrupted IME / back gesture / app-switcher, so we
+ * had to gate the overlay's attach behind "we're definitely in a game." With
+ * Shizuku, `/dev/input` reads have zero user-visible side effect — the only
+ * reason to scope tighter than the active profile would be battery, and `Os.poll`
+ * at 250 ms is cheap. Brick J dropped the clause; analog modes now follow the
+ * active profile, which itself follows the user's auto-switch / manual choice.
+ * **Trade-off:** when the user has Mapo's own activity in the foreground with
+ * remap on, stick deflection will fire bindings inside Mapo. Toggle off the
+ * gamepad to edit safely. Same workflow as today's keyboard-blocklist nav.
  *
  * When all three hold: `IMapoInputService.setEnumerationEnabled(true)` — the
  * service starts reading `/dev/input/event*` and streaming `RawAnalogEvent`s.
@@ -68,9 +75,7 @@ import javax.inject.Singleton
 @Singleton
 class ShizukuMotionCoordinator @Inject constructor(
     @ApplicationContext private val appContext: Context,
-    private val foregroundAppMonitor: ForegroundAppMonitor,
     private val profileRepository: ProfileRepository,
-    private val appProfileBindingRepository: AppProfileBindingRepository,
     private val inputDispatcher: InputDispatcher,
     private val inputEvaluator: InputEvaluator,
     private val shizukuConnection: ShizukuConnection,
@@ -104,13 +109,11 @@ class ShizukuMotionCoordinator @Inject constructor(
 
     private val _analogModeWanted = MutableStateFlow(false)
     /**
-     * True iff the user has an analog mode configured for the currently-
-     * foregrounded app, regardless of Shizuku readiness. I.e., the
-     * `foregroundAppBound && analogModeInScope` partial predicate — the
-     * "shizukuReady" clause is intentionally NOT applied here.
-     *
-     * Used by [ShizukuHealthNotification] to detect the "wanted but Shizuku
-     * isn't ready" gap and post a reminder.
+     * True iff the user has remap enabled AND the active profile has an analog
+     * mode configured — i.e. the `remapEnabled && analogModeConfigured` partial
+     * predicate. The "shizukuReady" clause is intentionally NOT applied here:
+     * the health notification fires precisely when the user *wants* analog
+     * input but Shizuku isn't there to provide it.
      */
     val analogModeWanted: StateFlow<Boolean> = _analogModeWanted.asStateFlow()
 
@@ -124,51 +127,40 @@ class ShizukuMotionCoordinator @Inject constructor(
             return
         }
         Log.i(TAG, "start: subscribing to predicate inputs")
-        // `combine` only has named-lambda overloads up to 5 flows; for 6+ we use
-        // the vararg form and unpack by index. The casts are local and the
-        // surrounding fields keep their concrete types.
         collectionJob = applicationScope.launch {
             try {
                 combine(
-                    foregroundAppMonitor.currentPackage,
                     profileRepository.activeProfile,
-                    appProfileBindingRepository.getAll(),
                     inputDispatcher.compiledConfig,
                     inputEvaluator.activeSetIdFlow,
                     inputEvaluator.activeLayerIdsFlow,
+                    inputDispatcher.remapEnabled,
                     shizukuConnection.isReadyFlow,
                 ) { values ->
+                    val activeProfile = values[0] as Profile?
+                    val compiled = values[1] as CompiledConfig
+                    val activeSetId = values[2] as Long
                     @Suppress("UNCHECKED_CAST")
-                    val foregroundPkg = values[0] as String?
-                    @Suppress("UNCHECKED_CAST")
-                    val activeProfile = values[1] as Profile?
-                    @Suppress("UNCHECKED_CAST")
-                    val bindings = values[2] as List<AppProfileBinding>
-                    val compiled = values[3] as CompiledConfig
-                    val activeSetId = values[4] as Long
-                    @Suppress("UNCHECKED_CAST")
-                    val activeLayers = values[5] as List<Long>
-                    val shizukuReady = values[6] as Boolean
+                    val activeLayers = values[3] as List<Long>
+                    val remapEnabled = values[4] as Boolean
+                    val shizukuReady = values[5] as Boolean
 
                     val activeProfileId = activeProfile?.id
-                    // Flush any analog state when the active profile switches —
-                    // synthetic dpad edges from the prior set must not leak into
-                    // the new one. Today this is a no-op for non-trigger modes
-                    // (Brick K+ fill the body for joystick modes).
+                    // Flush analog state on profile switch so synthetic dpad
+                    // edges + Mouse Joystick velocity from the prior profile
+                    // don't leak across the boundary. `InputEvaluator.flushAnalog`
+                    // covers both: latched synthetic edges (Brick 5) AND
+                    // MouseEmitter velocity slots (Brick J).
                     if (activeProfileId != lastActiveProfileId) {
                         Log.d(TAG, "active profile switched $lastActiveProfileId → $activeProfileId; flushing analog state")
                         inputEvaluator.flushAnalog()
                         lastActiveProfileId = activeProfileId
                     }
                     evaluatePredicate(
-                        foregroundPkg = foregroundPkg,
-                        activeProfileId = activeProfileId,
-                        bindings = bindings.asSequence()
-                            .filter { it.profileId == activeProfileId }
-                            .mapTo(mutableSetOf()) { it.packageName },
                         compiled = compiled,
                         activeSetId = activeSetId,
                         activeLayers = activeLayers,
+                        remapEnabled = remapEnabled,
                         shizukuReady = shizukuReady,
                     )
                 }
@@ -208,14 +200,14 @@ class ShizukuMotionCoordinator @Inject constructor(
 
         tryToggleEnumeration(breakdown.shouldEnable)
         _shizukuModeActive.value = breakdown.shouldEnable
-        _analogModeWanted.value = breakdown.foregroundAppBound && breakdown.analogModeInScope
+        _analogModeWanted.value = breakdown.remapEnabled && breakdown.analogModeConfigured
     }
 
     /**
      * The degraded-mode transition: we WERE enumerating, Shizuku flipped
-     * not-ready while the other clauses still hold. (If foreground app changed
-     * away or the user disabled their analog mode, the user did that
-     * deliberately — no toast.)
+     * not-ready while the user's remap toggle + analog config still hold. (If
+     * the user toggled off the gamepad or removed their analog mode, the user
+     * did that deliberately — no toast.)
      *
      * Extracted as a pure helper so tests can poke the transition matrix
      * without staging coroutine flows.
@@ -227,8 +219,8 @@ class ShizukuMotionCoordinator @Inject constructor(
         if (prior == null) return false
         return prior.shouldEnable
             && !current.shizukuReady
-            && current.foregroundAppBound
-            && current.analogModeInScope
+            && current.remapEnabled
+            && current.analogModeConfigured
     }
 
     private fun showDegradedToast() {
@@ -265,24 +257,16 @@ class ShizukuMotionCoordinator @Inject constructor(
      * `shouldEnable` is just their conjunction.
      */
     internal fun evaluatePredicate(
-        foregroundPkg: String?,
-        activeProfileId: Long?,
-        bindings: Set<String>,
         compiled: CompiledConfig,
         activeSetId: Long,
         activeLayers: List<Long>,
+        remapEnabled: Boolean,
         shizukuReady: Boolean,
-    ): PredicateBreakdown {
-        val foregroundAppBound = foregroundPkg != null
-            && activeProfileId != null
-            && foregroundPkg in bindings
-        val analogModeInScope = foregroundAppBound && hasAnalogModeInScope(compiled, activeSetId, activeLayers)
-        return PredicateBreakdown(
-            foregroundAppBound = foregroundAppBound,
-            analogModeInScope = analogModeInScope,
-            shizukuReady = shizukuReady,
-        )
-    }
+    ): PredicateBreakdown = PredicateBreakdown(
+        remapEnabled = remapEnabled,
+        analogModeConfigured = hasAnalogModeInScope(compiled, activeSetId, activeLayers),
+        shizukuReady = shizukuReady,
+    )
 
     private fun hasAnalogModeInScope(
         compiled: CompiledConfig,
@@ -302,16 +286,16 @@ class ShizukuMotionCoordinator @Inject constructor(
     }
 
     /**
-     * Three-axis predicate result. `shouldEnable` is `foregroundAppBound &&
-     * analogModeInScope && shizukuReady` — all three required.
+     * Three-axis predicate result. `shouldEnable` is `remapEnabled &&
+     * analogModeConfigured && shizukuReady` — all three required.
      */
     internal data class PredicateBreakdown(
-        val foregroundAppBound: Boolean,
-        val analogModeInScope: Boolean,
+        val remapEnabled: Boolean,
+        val analogModeConfigured: Boolean,
         val shizukuReady: Boolean,
     ) {
         val shouldEnable: Boolean
-            get() = foregroundAppBound && analogModeInScope && shizukuReady
+            get() = remapEnabled && analogModeConfigured && shizukuReady
     }
 
     companion object {

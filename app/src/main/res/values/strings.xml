@@ -46,7 +46,6 @@
     <string name="theme_studio_drawer_label">Theme Studio</string>
     <string name="keyboard_overlay_tile_label">Mapo keyboard</string>
     <string name="keyboard_overlay_drawer_label">Toggle keyboard overlay</string>
-    <string name="motion_probe_drawer_label">Toggle motion probe (debug)</string>
     <string name="shizuku_drawer_label">Shizuku setup</string>
 
     <!-- Shizuku Setup screen. -->

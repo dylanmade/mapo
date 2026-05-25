@@ -310,10 +310,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     scope.launch { drawerState.close() }
                     viewModel.toggleKeyboardOverlay()
                 },
-                onToggleMotionProbe = {
-                    scope.launch { drawerState.close() }
-                    viewModel.toggleMotionProbe()
-                },
             )
         }
     ) {
@@ -1271,9 +1267,14 @@ internal fun KeyGrid(
                 )
                 Box(
                     modifier = Modifier
-                        .overlayTouchable()
                         .absoluteOffset(x = bx, y = by)
                         .size(width = bw, height = bh)
+                        // overlayTouchable MUST come after absoluteOffset/size in the chain.
+                        // Modifier order is outside-in; if onGloballyPositioned wraps
+                        // absoluteOffset, it reports the wrapper's natural bounds (anchored
+                        // at the parent's placement, ignoring the offset) instead of the
+                        // visually-placed content's bounds.
+                        .overlayTouchable()
                         .pointerInput(button.id + "_tp") {
                             var lastTapTimeMs = 0L
                             awaitPointerEventScope {
@@ -1365,9 +1366,12 @@ internal fun KeyGrid(
                 // affects drawing only, not the gesture-coord frame.
                 Box(
                     modifier = Modifier
-                        .overlayTouchable()
                         .absoluteOffset(x = bx, y = by)
                         .size(width = bw, height = bh)
+                        // See trackpad branch above — overlayTouchable must come after
+                        // absoluteOffset so onGloballyPositioned reports the offset
+                        // content's bounds, not the wrapper's anchored-at-parent bounds.
+                        .overlayTouchable()
                         .zIndex(if (isDragging) 10f else 0f)
                         .then(
                             if (isEditMode) Modifier.pointerInput(button.id) {

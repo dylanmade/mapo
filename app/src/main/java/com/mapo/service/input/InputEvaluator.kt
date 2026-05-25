@@ -61,6 +61,7 @@ import javax.inject.Singleton
 class InputEvaluator @Inject constructor(
     private val dispatcher: InputDispatcher,
     private val emitter: OutputEmitter,
+    private val mouseEmitter: MouseEmitterImpl,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
 
@@ -331,7 +332,7 @@ class InputEvaluator @Inject constructor(
                 digitalEmit = { subInput, isDown ->
                     dispatchSyntheticEdge(reading.source, subInput, isDown)
                 },
-                mouse = MouseEmitter.NOOP,
+                mouse = mouseEmitter,
             )
         }
     }
@@ -1011,6 +1012,12 @@ class InputEvaluator @Inject constructor(
      * delay, hold-to-repeat cancellation, etc.).
      */
     fun flushAnalog() {
+        // Brick J: zero continuous-mode velocities first so the MouseEmitter's
+        // integration loop sees an empty slot set on its next step and exits.
+        // Done before the synthetic-edge sweep because the edge sweep can
+        // re-fire bindings (release path), whereas the velocity flush is a
+        // pure clear with no downstream emit.
+        mouseEmitter.clearAllVelocities()
         if (analogLatched.isEmpty()) return
         Log.d(TAG, "flushAnalog: releasing ${analogLatched.size} latched synthetic edge(s)")
         // Snapshot before mutation — dispatchSyntheticEdge writes back into

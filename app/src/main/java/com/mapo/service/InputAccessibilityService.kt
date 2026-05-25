@@ -21,7 +21,6 @@ import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.InputEvaluator
 import com.mapo.service.input.InputSink
 import com.mapo.service.input.OverlayFocusKind
-import com.mapo.service.input.capture.MotionCaptureOverlayManager
 import com.mapo.service.shizuku.ShizukuKeyInjector
 import com.mapo.service.shizuku.ShizukuMotionCoordinator
 import dagger.hilt.android.AndroidEntryPoint
@@ -33,7 +32,6 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @Inject lateinit var foregroundAppMonitor: ForegroundAppMonitor
     @Inject lateinit var dispatcher: InputDispatcher
     @Inject lateinit var evaluator: InputEvaluator
-    @Inject lateinit var motionCaptureOverlayManager: MotionCaptureOverlayManager
     @Inject lateinit var shizukuMotionCoordinator: ShizukuMotionCoordinator
     @Inject lateinit var shizukuKeyInjector: ShizukuKeyInjector
 
@@ -105,19 +103,54 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         }
 
         private const val TAG = "InputAccessibilityService"
+
+        /** Cursor-bounds margins. See field-decl comment for per-edge rationale. */
+        private const val CURSOR_MARGIN_SIDE = 30
+        private const val CURSOR_MARGIN_TOP = 50
+        private const val CURSOR_MARGIN_BOTTOM = 80
     }
 
     // ── Cursor tracking ───────────────────────────────────────────────────────
 
     // Virtual gesture anchor — NOT the visible system cursor position.
-    // Gesture paths must stay within the safe zone to avoid system gesture zones
-    // (back gesture on left/right edges, home gesture at bottom, notifications at top).
+    // Bounds reserve thin margins around the four edges to avoid tripping
+    // system-level gesture detectors with synthetic touches:
+    //   - Top (~50 px): notification panel pull-down on swipe from the top edge.
+    //   - Bottom (~80 px): home / recents pill swipe-up. Slightly wider because
+    //     the navigation pill itself is ~30 px and we want headroom.
+    //   - Left/right (~30 px each): back gesture swipe-in from the side edge.
+    // These margins are MUCH tighter than the 100/80/100/250 px the trackpad
+    // path originally reserved — the bigger margins clipped off game HUDs in
+    // the bottom of the screen. Conservatively-tuned 2026-05-25 after the
+    // zero-margin revision triggered notification-panel pulls on stick motion
+    // toward the top edge.
     private var cursorX = 540f
     private var cursorY = 960f
-    private var safeL = 100f
-    private var safeT = 80f
-    private var safeR = 980f
-    private var safeB = 1670f
+    private var cursorBoundsL = 0f
+    private var cursorBoundsT = 0f
+    private var cursorBoundsR = 1920f
+    private var cursorBoundsB = 1080f
+
+    /**
+     * Brick J recenter-on-edge: set true by [injectMouseMove] when the cursor
+     * would clamp at a bound *and* we're in continuous-cursor mode. The next
+     * gesture-segment `onCompleted` handles it by dispatching a willContinue=
+     * false segment (lifting the touch), then resetting cursor coordinates to
+     * the display center. The MouseEmitter's next velocity tick starts a fresh
+     * stroke from center.
+     *
+     * **Why this is necessary.** Emulator apps (GameNative, RetroArch, DOSBox
+     * Pure) interpret touch deltas as *relative* mouse motion, not absolute
+     * positions. When Mapo's virtual touch hits a screen edge, deltas drop to
+     * zero and the emulator's mouse cursor freezes wherever it last had
+     * momentum — even though the user keeps deflecting the stick. The fix is
+     * to bound the touch's drift: when it approaches an edge, lift the touch
+     * and re-anchor at center so a non-zero delta can flow again. The trackpad
+     * path doesn't need this — finger-down is brief enough that drift stays
+     * bounded inside one gesture session.
+     */
+    @Volatile
+    private var pendingRecenter: Boolean = false
 
     // ── Injection display routing ─────────────────────────────────────────────
 
@@ -162,15 +195,15 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         setServiceInfo(info)
         val (w, h) = primaryDisplaySize()
-        // Keep gesture paths well away from system gesture zones.
-        // Left/right: ~100px avoids the back-gesture swipe zone.
-        // Top: ~80px avoids notification pull-down.
-        // Bottom: ~250px avoids home/recents swipe zone.
-        safeL = 100f;       safeT = 80f
-        safeR = w - 100f;   safeB = h - 250f
+        // Conservative margins to avoid tripping system gesture detectors with
+        // synthetic touches. See field-decl comment for per-edge rationale.
+        cursorBoundsL = CURSOR_MARGIN_SIDE.toFloat()
+        cursorBoundsT = CURSOR_MARGIN_TOP.toFloat()
+        cursorBoundsR = (w - CURSOR_MARGIN_SIDE).toFloat()
+        cursorBoundsB = (h - CURSOR_MARGIN_BOTTOM).toFloat()
         cursorX = w / 2f
         cursorY = h / 2f
-        Log.i(TAG, "Service connected — display=${w}x${h} safeZone=[$safeL,$safeT,$safeR,$safeB]")
+        Log.i(TAG, "Service connected — display=${w}x${h} cursorBounds=[$cursorBoundsL,$cursorBoundsT,$cursorBoundsR,$cursorBoundsB]")
 
         // Seed the injection target display so the very first remap fires on the right
         // screen even before any window-state-change has arrived since service connect.
@@ -179,11 +212,9 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         dumpAllDisplays("onServiceConnected")
 
         // Brick F: ShizukuMotionCoordinator drives the Shizuku UserService's
-        // /dev/input enumeration off the gating predicate. The legacy
-        // focused-overlay's motionCallback wiring stays installed for now —
-        // Brick H deletes the overlay machinery entirely. Until then the
-        // overlay is just dead weight that nothing attaches.
-        motionCaptureOverlayManager.setMotionCallback { event -> evaluator.handleMotion(event) }
+        // /dev/input enumeration off the gating predicate. Analog input arrives
+        // via ShizukuMotionStream → InputEvaluator.handleAnalogReadings, not
+        // through any AccessibilityService-side motion callback.
         shizukuMotionCoordinator.start()
     }
 
@@ -203,13 +234,23 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     }
 
     private fun handleWindowStateChanged(event: AccessibilityEvent) {
-        val pkg = event.packageName?.toString() ?: return
+        val eventPkg = event.packageName?.toString() ?: return
         val eventDisplayId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             event.displayId else Display.DEFAULT_DISPLAY
-        Log.d(TAG, "window state changed → pkg=$pkg className=${event.className} eventDisplayId=$eventDisplayId")
-        foregroundAppMonitor.reportForegroundPackage(pkg)
-        refreshFocusedDisplay("windowStateChange/$pkg")
-        if (pkg != packageName) dumpAllDisplays("windowStateChange/$pkg")
+        Log.d(TAG, "window state changed → pkg=$eventPkg className=${event.className} eventDisplayId=$eventDisplayId")
+        // Don't trust the event's packageName as the "foreground app." Transient
+        // overlays — systemui notification panel, status bar, IME, accessibility
+        // popups — fire WINDOW_STATE_CHANGED while the actual top TYPE_APPLICATION
+        // window doesn't change at all. Using the event package blindly would
+        // (a) flip our tracked foreground to systemui mid-game, then (b) never
+        // recover because the systemui dismiss fires no follow-up event for the
+        // unchanged gamenative window. Bug observed on-device 2026-05-25 with
+        // GameNative and a SystemUI transient: predicate flipped false, Shizuku
+        // enumeration stopped, never resumed until app-switch round-trip.
+        val realForegroundPkg = queryPrimaryDisplayForegroundPackage()
+        foregroundAppMonitor.reportForegroundPackage(realForegroundPkg)
+        refreshFocusedDisplay("windowStateChange/$eventPkg")
+        if (eventPkg != packageName) dumpAllDisplays("windowStateChange/$eventPkg")
     }
 
     /**
@@ -219,12 +260,19 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
      * the window between displays *without* emitting a TYPE_WINDOW_STATE_CHANGED.
      * Without this hook, the focused-display cache would stay pointed at the old screen
      * and remap output would land there.
+     *
+     * Also pumps the foreground-app cache via [queryPrimaryDisplayForegroundPackage] —
+     * same systemui-transient recovery rationale as in [handleWindowStateChanged].
+     * Without this, dismissing a transient overlay (which fires WINDOWS_CHANGED but
+     * not STATE_CHANGED for the underlying gamenative window) wouldn't restore the
+     * predicate.
      */
     private fun handleWindowsChanged(event: AccessibilityEvent) {
         val eventDisplayId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             event.displayId else Display.DEFAULT_DISPLAY
         Log.d(TAG, "windows changed → eventDisplayId=$eventDisplayId changeTypes=0x${event.windowChanges.toString(16)}")
         refreshFocusedDisplay("windowsChanged/$eventDisplayId")
+        foregroundAppMonitor.reportForegroundPackage(queryPrimaryDisplayForegroundPackage())
     }
 
     private fun refreshFocusedDisplay(reason: String) {
@@ -503,6 +551,15 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     // ── Mouse gesture injection (called from ViewModel for trackpad) ──────────
 
     private var isDragging = false
+    /**
+     * Brick J: parallel drag-active flag for analog stick → mouse modes.
+     * Both [isDragging] (trackpad finger-down) and [continuousCursorActive]
+     * (stick deflected) need `dispatchGesture` segment chaining to keep
+     * firing. The chain logic in [dispatchMoveSegment]'s callback OR-checks
+     * both so trackpad and analog can coexist if they ever overlap.
+     */
+    private var continuousCursorActive = false
+    private val anyCursorSessionActive: Boolean get() = isDragging || continuousCursorActive
     private var currentStroke: GestureDescription.StrokeDescription? = null
     private var segmentActive = false
     private var segEndX = 540f
@@ -516,22 +573,56 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         isDragging = true
         segmentActive = false
         currentStroke = null
-        // Reset to safe-zone center on every new finger-touch so the virtual anchor
-        // always has maximum headroom before approaching any system gesture zone.
-        cursorX = (safeL + safeR) / 2f
-        cursorY = (safeT + safeB) / 2f
+        // Reset to display center on every new finger-touch so the virtual anchor
+        // starts from a predictable spot for trackpad-driven cursor work.
+        cursorX = (cursorBoundsL + cursorBoundsR) / 2f
+        cursorY = (cursorBoundsT + cursorBoundsB) / 2f
         segEndX = cursorX
         segEndY = cursorY
     }
 
     override fun injectMouseMove(dx: Float, dy: Float) {
-        cursorX = (cursorX + dx).coerceIn(safeL, safeR)
-        cursorY = (cursorY + dy).coerceIn(safeT, safeB)
+        val targetX = cursorX + dx
+        val targetY = cursorY + dy
+        // Detect clamp-at-edge during continuous-cursor mode. In trackpad
+        // mode the user lifts and re-touches naturally — no need to recenter.
+        if (continuousCursorActive && (
+                targetX < cursorBoundsL || targetX > cursorBoundsR ||
+                    targetY < cursorBoundsT || targetY > cursorBoundsB
+                )) {
+            pendingRecenter = true
+        }
+        cursorX = targetX.coerceIn(cursorBoundsL, cursorBoundsR)
+        cursorY = targetY.coerceIn(cursorBoundsT, cursorBoundsB)
         if (!segmentActive) dispatchMoveSegment(willContinue = true)
     }
 
     override fun endMouseDrag() {
         isDragging = false
+        if (!segmentActive && currentStroke != null) dispatchMoveSegment(willContinue = false)
+    }
+
+    override fun beginContinuousCursor() {
+        refreshFocusedDisplay("beginContinuousCursor")
+        // Reset cursor to display center on every new continuous-cursor session.
+        // Matches the trackpad's startMouseDrag center-reset behavior. The
+        // previous "preserve cursor where last left it" approach left a stale
+        // virtual position after long stick deflections, which combined with
+        // emulator relative-motion interpretation could leave the in-game
+        // cursor stranded.
+        cursorX = (cursorBoundsL + cursorBoundsR) / 2f
+        cursorY = (cursorBoundsT + cursorBoundsB) / 2f
+        Log.d(TAG, "beginContinuousCursor — cursor reset to ($cursorX,$cursorY), display=$focusedAppDisplayId")
+        continuousCursorActive = true
+        pendingRecenter = false
+        segEndX = cursorX
+        segEndY = cursorY
+    }
+
+    override fun endContinuousCursor() {
+        Log.d(TAG, "endContinuousCursor")
+        continuousCursorActive = false
+        pendingRecenter = false
         if (!segmentActive && currentStroke != null) dispatchMoveSegment(willContinue = false)
     }
 
@@ -553,10 +644,29 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription) {
                     segmentActive = false
+                    // Recenter path: we hit a clamp edge in continuous-cursor
+                    // mode. End the current stroke (willContinue=false lifts
+                    // the touch), then reset cursor to display center. The
+                    // next velocity tick from MouseEmitter will dispatch a
+                    // fresh stroke that starts with a touch DOWN at center —
+                    // restoring the delta-flow emulators depend on.
+                    if (pendingRecenter && continuousCursorActive) {
+                        pendingRecenter = false
+                        if (currentStroke != null) {
+                            // Dispatch a zero-length lift segment to formally
+                            // end the touch. After its own onCompleted, the
+                            // cursor will be reset to center below.
+                            dispatchLiftAndRecenter()
+                            return
+                        }
+                        // No stroke to lift — just reset state in place.
+                        recenterCursorState()
+                        return
+                    }
                     when {
-                        isDragging && (cursorX != segEndX || cursorY != segEndY) ->
+                        anyCursorSessionActive && (cursorX != segEndX || cursorY != segEndY) ->
                             dispatchMoveSegment(willContinue = true)
-                        !isDragging && currentStroke != null ->
+                        !anyCursorSessionActive && currentStroke != null ->
                             dispatchMoveSegment(willContinue = false)
                     }
                 }
@@ -579,6 +689,56 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         } else {
             Log.w(TAG, "dispatchGesture returned false — skipping segment")
         }
+    }
+
+    /**
+     * Brick J recenter follow-up. Dispatch a willContinue=false segment that
+     * formally lifts the current touch. After the lift's `onCompleted`, we
+     * reset the cursor state to the display center via [recenterCursorState]
+     * and the chain ends — the MouseEmitter's next velocity tick will start
+     * a fresh gesture stroke (touch DOWN at center).
+     */
+    private fun dispatchLiftAndRecenter() {
+        val anchor = currentStroke ?: run {
+            recenterCursorState()
+            return
+        }
+        val path = Path().apply { moveTo(segEndX, segEndY) }
+        val liftStroke = anchor.continueStroke(path, 0L, 1L, /* willContinue = */ false)
+        currentStroke = null
+        val ok = dispatchGesture(
+            buildGesture { addStroke(liftStroke) },
+            object : GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription) {
+                    segmentActive = false
+                    recenterCursorState()
+                    Log.d(TAG, "recenter complete — cursor reset to ($cursorX,$cursorY)")
+                }
+                override fun onCancelled(g: GestureDescription) {
+                    segmentActive = false
+                    recenterCursorState()
+                }
+            }, null,
+        )
+        if (ok) {
+            segmentActive = true
+        } else {
+            // dispatchGesture refused the lift — fall back to in-place reset.
+            // The next dispatchMoveSegment will be a fresh stroke (currentStroke
+            // already null) but the system may still consider the prior touch
+            // held. Rare edge case; logging for diagnosis.
+            Log.w(TAG, "dispatchGesture(lift) returned false — recentering state without formal lift")
+            segmentActive = false
+            recenterCursorState()
+        }
+    }
+
+    /** Reset cursor + segment-end state to the display center. */
+    private fun recenterCursorState() {
+        cursorX = (cursorBoundsL + cursorBoundsR) / 2f
+        cursorY = (cursorBoundsT + cursorBoundsB) / 2f
+        segEndX = cursorX
+        segEndY = cursorY
     }
 
     fun injectMouseTap() {
@@ -764,35 +924,23 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
             return
         }
 
-        val doInject: () -> Unit = {
-            try {
-                val imClass = Class.forName("android.hardware.input.InputManager")
-                val im = imClass.getDeclaredMethod("getInstance").invoke(null)
-                val result = imClass.getDeclaredMethod(
-                    "injectInputEvent",
-                    android.view.InputEvent::class.java,
-                    Int::class.javaPrimitiveType
-                ).invoke(im, event, 0) as? Boolean ?: false // 0 = INJECT_INPUT_EVENT_MODE_ASYNC
-                Log.d(TAG, "injectInputEvent result=$result type=${event.javaClass.simpleName} source=0x${event.source.toString(16)} eventDisplay=$displayId cachedFocusedDisplay=$focusedAppDisplayId")
-            } catch (e: Exception) {
-                Log.e(TAG, "injectInputEvent failed: $event", e)
-            }
-        }
-        // Brick 5 follow-up (Approach C): if the motion-capture overlay is
-        // attached it holds key focus on the target display so it can read
-        // gamepad MotionEvents — any KeyEvent we inject here would route to
-        // the overlay instead of the foreground game. The overlay manager
-        // toggles FLAG_NOT_FOCUSABLE for the duration of the inject so the
-        // foreground window regains focus; flag restored before the next
-        // motion event arrives.
-        //
-        // Brick H deletes the focused-overlay machinery entirely; until then
-        // this wrapper stays as the fallback path for the (now rare) case where
-        // Shizuku isn't gated in. No-op when the overlay isn't attached.
-        if (event is KeyEvent) {
-            motionCaptureOverlayManager.withFocusReleasedForInject(doInject)
-        } else {
-            doInject()
+        // Reflection inject path — the no-Shizuku floor for digital remap. Sent
+        // straight through InputManager.injectInputEvent on the calling thread.
+        // The legacy detach-inject-reattach focus dance (used until Brick H
+        // when a focused TYPE_APPLICATION_OVERLAY held motion-capture focus)
+        // is gone — Shizuku is now the only motion-capture path, and shell-uid
+        // inject is focus-bypassed.
+        try {
+            val imClass = Class.forName("android.hardware.input.InputManager")
+            val im = imClass.getDeclaredMethod("getInstance").invoke(null)
+            val result = imClass.getDeclaredMethod(
+                "injectInputEvent",
+                android.view.InputEvent::class.java,
+                Int::class.javaPrimitiveType
+            ).invoke(im, event, 0) as? Boolean ?: false // 0 = INJECT_INPUT_EVENT_MODE_ASYNC
+            Log.d(TAG, "injectInputEvent result=$result type=${event.javaClass.simpleName} source=0x${event.source.toString(16)} eventDisplay=$displayId cachedFocusedDisplay=$focusedAppDisplayId")
+        } catch (e: Exception) {
+            Log.e(TAG, "injectInputEvent failed: $event", e)
         }
     }
 

@@ -3,9 +3,7 @@ package com.mapo.service.shizuku
 import android.content.Context
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.InputSource
-import com.mapo.data.repository.AppProfileBindingRepository
 import com.mapo.data.repository.ProfileRepository
-import com.mapo.service.foreground.ForegroundAppMonitor
 import com.mapo.service.input.CompiledActionSet
 import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.CompiledInput
@@ -22,25 +20,18 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Brick F: predicate truth-table + degraded-mode transition tests. Targets the
- * pure helpers extracted from the [combine] lambda — [ShizukuMotionCoordinator.evaluatePredicate]
- * and [ShizukuMotionCoordinator.shouldShowDegradedToast] — so tests don't have
- * to stage live coroutine flows.
+ * Predicate truth-table + degraded-mode transition tests. Targets the pure
+ * helpers extracted from the [combine] lambda —
+ * [ShizukuMotionCoordinator.evaluatePredicate] and
+ * [ShizukuMotionCoordinator.shouldShowDegradedToast] — so tests don't have to
+ * stage live coroutine flows.
  *
- * Cases covered:
- *  - No foreground package → predicate disables.
- *  - No active profile → predicate disables.
- *  - Foreground app NOT bound to active profile → predicate disables.
- *  - Foreground app bound but all-digital modes → predicate disables.
- *  - Foreground app bound, base set has analog mode, Shizuku ready → enables.
- *  - Same as above but Shizuku NOT ready → predicate disables (new Brick F
- *    third clause).
- *  - Foreground bound, digital base, active layer has analog mode → enables.
- *  - Layer has analog mode but layer not in active stack → disables.
- *  - `activeSetId == 0L` (lazy-uninit) falls back to startingActionSetId.
- *  - Degraded-mode transition (was enabled, Shizuku flipped not-ready, other
- *    clauses still hold) → true.
- *  - Non-degraded transitions (other clause flipped, no prior, etc.) → false.
+ * **Brick J follow-up**: predicate axes changed. Old `foregroundAppBound` clause
+ * is gone (was a pre-Shizuku focused-overlay relic); new `remapEnabled` clause
+ * gates everything on the master gamepad toggle. Axes now:
+ *  - `remapEnabled` — user's gamepad toggle.
+ *  - `analogModeConfigured` — active set + layers have any analog mode.
+ *  - `shizukuReady` — Shizuku is granted + binder alive.
  */
 class ShizukuMotionCoordinatorTest {
 
@@ -50,9 +41,7 @@ class ShizukuMotionCoordinatorTest {
     fun setUp() {
         coordinator = ShizukuMotionCoordinator(
             appContext = mockk<Context>(relaxed = true),
-            foregroundAppMonitor = mockk<ForegroundAppMonitor>(relaxed = true),
             profileRepository = mockk<ProfileRepository>(relaxed = true),
-            appProfileBindingRepository = mockk<AppProfileBindingRepository>(relaxed = true),
             inputDispatcher = mockk<InputDispatcher>(relaxed = true),
             inputEvaluator = mockk<InputEvaluator>(relaxed = true),
             shizukuConnection = mockk<ShizukuConnection>(relaxed = true),
@@ -63,126 +52,81 @@ class ShizukuMotionCoordinatorTest {
     // ── Predicate truth table ────────────────────────────────────────────────
 
     @Test
-    fun nullForegroundPackage_disables() {
+    fun remapDisabled_disables() {
         val b = coordinator.evaluatePredicate(
-            foregroundPkg = null,
-            activeProfileId = 1L,
-            bindings = setOf("com.example.game"),
             compiled = analogConfig(),
             activeSetId = 1L,
             activeLayers = emptyList(),
+            remapEnabled = false,
             shizukuReady = true,
         )
         assertFalse(b.shouldEnable)
-        assertFalse(b.foregroundAppBound)
+        assertFalse(b.remapEnabled)
     }
 
     @Test
-    fun nullActiveProfile_disables() {
+    fun allDigitalModes_disables() {
         val b = coordinator.evaluatePredicate(
-            foregroundPkg = "com.example.game",
-            activeProfileId = null,
-            bindings = setOf("com.example.game"),
-            compiled = analogConfig(),
-            activeSetId = 1L,
-            activeLayers = emptyList(),
-            shizukuReady = true,
-        )
-        assertFalse(b.shouldEnable)
-        assertFalse(b.foregroundAppBound)
-    }
-
-    @Test
-    fun unboundForegroundPackage_disables() {
-        val b = coordinator.evaluatePredicate(
-            foregroundPkg = "com.unrelated.app",
-            activeProfileId = 1L,
-            bindings = setOf("com.example.game"),
-            compiled = analogConfig(),
-            activeSetId = 1L,
-            activeLayers = emptyList(),
-            shizukuReady = true,
-        )
-        assertFalse(b.shouldEnable)
-        assertFalse(b.foregroundAppBound)
-    }
-
-    @Test
-    fun boundApp_butAllDigitalModes_disables() {
-        val b = coordinator.evaluatePredicate(
-            foregroundPkg = "com.example.game",
-            activeProfileId = 1L,
-            bindings = setOf("com.example.game"),
             compiled = digitalConfig(),
             activeSetId = 1L,
             activeLayers = emptyList(),
+            remapEnabled = true,
             shizukuReady = true,
         )
         assertFalse(b.shouldEnable)
-        assertTrue(b.foregroundAppBound)
-        assertFalse(b.analogModeInScope)
+        assertTrue(b.remapEnabled)
+        assertFalse(b.analogModeConfigured)
     }
 
     @Test
-    fun boundApp_andAnalogMode_andShizukuReady_enables() {
+    fun analogMode_remapEnabled_shizukuReady_enables() {
         val b = coordinator.evaluatePredicate(
-            foregroundPkg = "com.example.game",
-            activeProfileId = 1L,
-            bindings = setOf("com.example.game"),
             compiled = analogConfig(),
             activeSetId = 1L,
             activeLayers = emptyList(),
+            remapEnabled = true,
             shizukuReady = true,
         )
         assertTrue(b.shouldEnable)
-        assertTrue(b.foregroundAppBound)
-        assertTrue(b.analogModeInScope)
+        assertTrue(b.remapEnabled)
+        assertTrue(b.analogModeConfigured)
         assertTrue(b.shizukuReady)
     }
 
     @Test
-    fun boundApp_andAnalogMode_butShizukuNotReady_disables() {
-        // Brick F's new third clause. Cold-start "Shizuku not granted" case —
-        // predicate keeps Shizuku enumeration off until the user grants
-        // permission (Brick G's dialog territory).
+    fun analogMode_butShizukuNotReady_disables() {
         val b = coordinator.evaluatePredicate(
-            foregroundPkg = "com.example.game",
-            activeProfileId = 1L,
-            bindings = setOf("com.example.game"),
             compiled = analogConfig(),
             activeSetId = 1L,
             activeLayers = emptyList(),
+            remapEnabled = true,
             shizukuReady = false,
         )
         assertFalse(b.shouldEnable)
-        assertTrue(b.foregroundAppBound)
-        assertTrue(b.analogModeInScope)
+        assertTrue(b.remapEnabled)
+        assertTrue(b.analogModeConfigured)
         assertFalse(b.shizukuReady)
     }
 
     @Test
-    fun boundApp_digitalBase_activeLayerHasAnalog_enables() {
+    fun digitalBase_activeLayerHasAnalog_enables() {
         val b = coordinator.evaluatePredicate(
-            foregroundPkg = "com.example.game",
-            activeProfileId = 1L,
-            bindings = setOf("com.example.game"),
             compiled = digitalBase_analogLayerConfig(layerId = 99L),
             activeSetId = 1L,
             activeLayers = listOf(99L),
+            remapEnabled = true,
             shizukuReady = true,
         )
         assertTrue(b.shouldEnable)
     }
 
     @Test
-    fun boundApp_digitalBase_layerHasAnalogButNotActive_disables() {
+    fun digitalBase_layerHasAnalogButNotActive_disables() {
         val b = coordinator.evaluatePredicate(
-            foregroundPkg = "com.example.game",
-            activeProfileId = 1L,
-            bindings = setOf("com.example.game"),
             compiled = digitalBase_analogLayerConfig(layerId = 99L),
             activeSetId = 1L,
             activeLayers = emptyList(),
+            remapEnabled = true,
             shizukuReady = true,
         )
         assertFalse(b.shouldEnable)
@@ -193,12 +137,10 @@ class ShizukuMotionCoordinatorTest {
         // 0L is the "lazy-uninit" sentinel — coordinator should resolve via
         // compiled.startingActionSetId, NOT treat the active set as missing.
         val b = coordinator.evaluatePredicate(
-            foregroundPkg = "com.example.game",
-            activeProfileId = 1L,
-            bindings = setOf("com.example.game"),
             compiled = analogConfig(startingSetId = 7L),
             activeSetId = 0L,
             activeLayers = emptyList(),
+            remapEnabled = true,
             shizukuReady = true,
         )
         assertTrue(b.shouldEnable)
@@ -209,30 +151,29 @@ class ShizukuMotionCoordinatorTest {
     @Test
     fun degradedToast_fires_whenShizukuFlips_andOtherClausesHold() {
         val prior = ShizukuMotionCoordinator.PredicateBreakdown(
-            foregroundAppBound = true,
-            analogModeInScope = true,
+            remapEnabled = true,
+            analogModeConfigured = true,
             shizukuReady = true,
         )
         val current = ShizukuMotionCoordinator.PredicateBreakdown(
-            foregroundAppBound = true,
-            analogModeInScope = true,
+            remapEnabled = true,
+            analogModeConfigured = true,
             shizukuReady = false,
         )
         assertTrue(coordinator.shouldShowDegradedToast(prior, current))
     }
 
     @Test
-    fun degradedToast_silent_whenForegroundAppChanged() {
-        // User backgrounded the game — predicate disabled for benign reasons.
-        // No toast (would be noise; the user did this deliberately).
+    fun degradedToast_silent_whenUserToggledRemapOff() {
+        // User intentionally flipped the gamepad toggle — silent.
         val prior = ShizukuMotionCoordinator.PredicateBreakdown(
-            foregroundAppBound = true,
-            analogModeInScope = true,
+            remapEnabled = true,
+            analogModeConfigured = true,
             shizukuReady = true,
         )
         val current = ShizukuMotionCoordinator.PredicateBreakdown(
-            foregroundAppBound = false,
-            analogModeInScope = false,
+            remapEnabled = false,
+            analogModeConfigured = true,
             shizukuReady = true,
         )
         assertFalse(coordinator.shouldShowDegradedToast(prior, current))
@@ -240,12 +181,9 @@ class ShizukuMotionCoordinatorTest {
 
     @Test
     fun degradedToast_silent_onFirstEmission() {
-        // No prior → no transition → no toast. Avoids a false "Shizuku
-        // disconnected" the moment the coordinator first observes a Shizuku-
-        // not-ready cold start.
         val current = ShizukuMotionCoordinator.PredicateBreakdown(
-            foregroundAppBound = true,
-            analogModeInScope = true,
+            remapEnabled = true,
+            analogModeConfigured = true,
             shizukuReady = false,
         )
         assertFalse(coordinator.shouldShowDegradedToast(prior = null, current = current))
@@ -253,16 +191,15 @@ class ShizukuMotionCoordinatorTest {
 
     @Test
     fun degradedToast_silent_whenWeWereNeverEnabled() {
-        // Prior had Shizuku ready but no analog mode in scope (so not enabled).
-        // Shizuku flipping not-ready in this case is a non-event for the user.
+        // Prior had Shizuku ready but no analog mode configured (so not enabled).
         val prior = ShizukuMotionCoordinator.PredicateBreakdown(
-            foregroundAppBound = true,
-            analogModeInScope = false,
+            remapEnabled = true,
+            analogModeConfigured = false,
             shizukuReady = true,
         )
         val current = ShizukuMotionCoordinator.PredicateBreakdown(
-            foregroundAppBound = true,
-            analogModeInScope = false,
+            remapEnabled = true,
+            analogModeConfigured = false,
             shizukuReady = false,
         )
         assertFalse(coordinator.shouldShowDegradedToast(prior, current))
@@ -270,7 +207,6 @@ class ShizukuMotionCoordinatorTest {
 
     @Test
     fun predicate_shouldEnable_isTrueOnlyWhenAllThreeAxesHold() {
-        // Spot-check the data class's derived property.
         val all = ShizukuMotionCoordinator.PredicateBreakdown(true, true, true)
         assertEquals(true, all.shouldEnable)
         listOf(

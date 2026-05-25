@@ -37,6 +37,19 @@ interface InputSink {
     fun endMouseDrag()
 
     /**
+     * Brick J: begin a continuous-cursor session (analog stick → mouse modes).
+     * Mirrors the drag-active state [startMouseDrag] sets so the service's
+     * gesture-stroke chaining keeps `dispatchGesture` segments flowing, but —
+     * crucially — does NOT reset cursor position. The trackpad path resets the
+     * cursor to the safe-zone center on each finger-down; analog modes need
+     * the cursor to stay where the user last left it.
+     */
+    fun beginContinuousCursor()
+
+    /** Brick J: end a continuous-cursor session — pair with [beginContinuousCursor]. */
+    fun endContinuousCursor()
+
+    /**
      * Returns the package name of the foreground app on the device's primary (default)
      * display, or null if it can't be determined or matches Mapo itself. Implemented via
      * `getWindowsOnAllDisplays()` so it works across both screens of dual-display devices.
@@ -144,6 +157,14 @@ class InputDispatcher @Inject constructor() {
 
     fun endMouseDrag() {
         sink?.endMouseDrag()
+    }
+
+    fun beginContinuousCursor() {
+        sink?.beginContinuousCursor()
+    }
+
+    fun endContinuousCursor() {
+        sink?.endContinuousCursor()
     }
 
     fun queryPrimaryDisplayForegroundPackage(): String? =

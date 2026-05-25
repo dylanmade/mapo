@@ -26,6 +26,7 @@ class InputEvaluatorTest {
 
     private lateinit var dispatcher: InputDispatcher
     private lateinit var emitter: OutputEmitter
+    private lateinit var mouseEmitter: MouseEmitterImpl
     private val compiledConfig = MutableStateFlow(CompiledConfig.EMPTY)
     private val ENTER = BindingOutput.KeyPress("ENTER")
     private val ESCAPE = BindingOutput.KeyPress("ESCAPE")
@@ -41,9 +42,10 @@ class InputEvaluatorTest {
     fun setUp() {
         dispatcher = mockk(relaxed = true)
         emitter = mockk(relaxed = true)
+        mouseEmitter = mockk(relaxed = true)
         every { dispatcher.compiledConfig } returns compiledConfig
         every { emitter.emitPress(any()) } returns true  // default to "has release" semantics
-        subject = InputEvaluator(dispatcher, emitter, testScope)
+        subject = InputEvaluator(dispatcher, emitter, mouseEmitter, testScope)
     }
 
     // ── Pass-through (no config / no match) ───────────────────────────────────

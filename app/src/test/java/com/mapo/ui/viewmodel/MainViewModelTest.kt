@@ -24,7 +24,6 @@ import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.keyboard.KeyboardController
-import com.mapo.service.input.MotionProbeAppOverlay
 import com.mapo.service.overlay.keyboard.KeyboardOverlayPresenter
 import app.cash.turbine.test
 import io.mockk.coEvery
@@ -69,7 +68,6 @@ class MainViewModelTest {
     private lateinit var templateRepo: KeyboardTemplateRepository
     private lateinit var inputDispatcher: InputDispatcher
     private lateinit var keyboardOverlayPresenter: KeyboardOverlayPresenter
-    private lateinit var motionProbeAppOverlay: MotionProbeAppOverlay
     private lateinit var keyboardController: KeyboardController
 
     private val activeProfile = MutableStateFlow<Profile?>(null)
@@ -103,7 +101,6 @@ class MainViewModelTest {
         templateRepo = mockk(relaxed = true)
         inputDispatcher = mockk(relaxed = true)
         keyboardOverlayPresenter = mockk(relaxed = true)
-        motionProbeAppOverlay = mockk(relaxed = true)
         // Real KeyboardController with mocked deps — the controller's StateFlows /
         // mutators are the source of truth for `layouts`, `selectedIndex`,
         // `remapEnabled`, etc., so tests need a working instance, not a relaxed mock.
@@ -140,8 +137,7 @@ class MainViewModelTest {
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
             keyboardOverlayPresenter = keyboardOverlayPresenter,
-            motionProbeAppOverlay = motionProbeAppOverlay,
-            keyboardController = keyboardController,
+                keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
         )
     }
@@ -513,8 +509,7 @@ class MainViewModelTest {
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
             keyboardOverlayPresenter = keyboardOverlayPresenter,
-            motionProbeAppOverlay = motionProbeAppOverlay,
-            keyboardController = keyboardController,
+                keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
         )
         activeProfile.value = Profile(id = 1L, name = "P")
@@ -920,7 +915,6 @@ class MainViewModelTest {
         keyboardTemplateRepository = templateRepo,
         inputDispatcher = inputDispatcher,
         keyboardOverlayPresenter = keyboardOverlayPresenter,
-        motionProbeAppOverlay = motionProbeAppOverlay,
         keyboardController = keyboardController,
         ioDispatcher = testDispatcher,
     )

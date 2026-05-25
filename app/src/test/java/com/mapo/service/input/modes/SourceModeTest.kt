@@ -170,6 +170,8 @@ class SourceModeTest {
             BindingMode.BUTTON_PAD,
             BindingMode.DPAD,
             BindingMode.TRIGGER,
+            BindingMode.MOUSE_JOYSTICK,
+            BindingMode.JOYSTICK_CAMERA,
         )
         for (mode in BindingMode.values()) {
             if (mode in implemented) continue

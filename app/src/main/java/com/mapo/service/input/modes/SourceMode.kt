@@ -3,6 +3,7 @@ package com.mapo.service.input.modes
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.InputSource
 import com.mapo.service.input.AnalogEvent
+import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
 import org.json.JSONException
@@ -20,9 +21,9 @@ import org.json.JSONObject
  * compile/dispatch paths don't need to translate anything; the mode object's job is
  * purely to validate the schema and report defaults.
  *
- * **What later bricks add:** richer modes ([BindingMode.DPAD]'s 4/8-way quadrant gating,
- * [BindingMode.TRIGGER]'s click threshold, [BindingMode.JOYSTICK_MOVE]'s deadzones and
- * response curves, etc.) extend this same interface with an `evaluate(...)` hook that
+ * **What later bricks add:** richer modes ([BindingMode.TRIGGER]'s click threshold,
+ * [BindingMode.SCROLL_WHEEL]'s wheel cadence, [BindingMode.JOYSTICK_MOVE]'s XInput
+ * analog passthrough, etc.) extend this same interface with an `evaluate(...)` hook that
  * translates analog source state into per-sub-input events the activator engine consumes.
  * That hook isn't on the interface yet because the digital modes don't need it; it's
  * added when 6.3 (Trigger) brings the first analog mode online.
@@ -192,29 +193,155 @@ object ButtonPadMode : SourceMode {
 /**
  * 4-direction directional pad. Sub-inputs: `dpad_north`, `dpad_south`, `dpad_east`,
  * `dpad_west`, `click`. The four direction keys flow from physical
- * `KEYCODE_DPAD_UP/DOWN/LEFT/RIGHT` via the accessibility service. `click` is the
- * stick-click sub-input used when an analog stick is interpreted as a dpad — inert
- * on digital-only dpads but reserved here for parity with Steam Input.
+ * `KEYCODE_DPAD_UP/DOWN/LEFT/RIGHT` via the accessibility service for the [DPAD]
+ * source. When this mode is selected on a *joystick* source (LEFT_JOYSTICK /
+ * RIGHT_JOYSTICK), [evaluate] quantizes the analog (x, y) into the same
+ * sub-input vocabulary — WASD-style movement from the stick.
  *
- * **Settings (data-model only until analog input lands).** The `dpad_layout` setting
- * is part of the shape because analog Dpad mode (Steam parity) uses it to gate the
- * stick → direction mapping:
- *  - `4_way` — strict N/S/E/W; diagonals snap to one cardinal.
- *  - `8_way` — diagonals emit two adjacent direction inputs simultaneously.
- *  - `cross_gate` — physical-cross template (4-way with deadzone wedges).
- *  - `analog_emulation` — sticks emulated as a continuous analog dpad.
+ * `click` is the stick-click sub-input — pass-through to the activator engine.
  *
- * With Phase 6 motion-capture tabled, the settings have no runtime effect today —
- * the digital `KEYCODE_DPAD_*` path produces single-direction sub-input events and
- * the layout selection doesn't gate anything. The schema is laid down so the
- * eventual analog refactor doesn't need a settings-shape migration.
+ * **Settings (Steam-defaults-tuned for "movement" feel):**
+ *  - `dpad_layout` (`"4_way"` / `"8_way"`, default `"4_way"`) — quantization for
+ *    analog evaluation. `4_way` picks the dominant axis (|x| vs |y|); only one
+ *    direction at a time. `8_way` allows two adjacent directions simultaneously
+ *    (a NE push emits `dpad_north` + `dpad_east`). Inert when the mode is
+ *    attached to the digital DPAD source — physical `KEYCODE_DPAD_*` always
+ *    produces a single direction per press.
+ *  - `inner_deadzone` (0..1, default 0.20) — radial deadband for analog
+ *    evaluation. Below this magnitude no direction emits. Higher than cursor
+ *    modes' 0.10 because a spurious dpad fire is jarring vs. cursor noise
+ *    being negligible.
+ *  - `outer_deadzone` (0..1, default 0.05) — release-side hysteresis floor for
+ *    analog evaluation. Once any direction is latched, the radial magnitude
+ *    must drop below `(inner_deadzone - outer_deadzone)` for the directions
+ *    to release. Same shape as [TriggerSettings.softHysteresis]; prevents
+ *    direction-flutter at the rim of the deadband.
+ *
+ * **Why DPAD source is skipped in [evaluate].** Controllers vary: some report
+ * the physical dpad as `BTN_DPAD_*` key events only, some as `ABS_HAT0X/Y`
+ * axis events only, some as both. The accessibility service path through
+ * `onKeyEvent` is canonical for the digital DPAD source — it always fires
+ * cleanly on devices that report key events. To avoid double-firing
+ * `dpad_north` on controllers that report both, [evaluate] short-circuits
+ * for [InputSource.DPAD] and lets the digital path own the emit. Revisit if
+ * a target device ships HAT-only with no key events for the dpad.
+ *
+ * **8-way axial threshold.** A diagonal push (e.g. x=0.7, y=-0.7) trivially
+ * passes inner_deadzone, so both `dpad_north` and `dpad_east` need to fire.
+ * The per-axis floor is the inner_deadzone projected onto the diagonal —
+ * `inner_deadzone * sin(45°) ≈ inner_deadzone * 0.707`. With the 0.20
+ * default this is ≈0.141, so (0.7, -0.15) emits N+E but (0.7, -0.05) emits
+ * only E. Matches typical Steam-Input feel for low-angle pushes.
  */
 object DpadMode : SourceMode {
     override val mode: BindingMode = BindingMode.DPAD
     override fun validInputs(): Set<String> = INPUTS
-    /** Steam-default 4-way layout; runtime-inert in 6.3 (no analog source yet). */
-    override fun defaultSettingsJson(): String = """{"dpad_layout":"4_way"}"""
+    override fun defaultSettingsJson(): String = DpadSettings.DEFAULT_JSON
     private val INPUTS = setOf("dpad_north", "dpad_south", "dpad_east", "dpad_west", "click")
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        // The digital DPAD source emits dpad_* sub-inputs via the accessibility
+        // service's KEYCODE_DPAD_* path. Skip analog evaluation here to avoid
+        // double-fire on controllers that report both BTN_DPAD_* and ABS_HAT0*.
+        if (reading.source == InputSource.DPAD) return
+
+        val settings = DpadSettings.parse(ctx.settingsJson)
+        val priorN = ctx.priorLatched["dpad_north"] == true
+        val priorS = ctx.priorLatched["dpad_south"] == true
+        val priorE = ctx.priorLatched["dpad_east"] == true
+        val priorW = ctx.priorLatched["dpad_west"] == true
+
+        val mag = sqrt(reading.x * reading.x + reading.y * reading.y).coerceIn(0f, 1f)
+        val anyPrior = priorN || priorS || priorE || priorW
+        val releaseFloor = (settings.innerDeadzone - settings.outerDeadzone).coerceAtLeast(0f)
+        val active = if (anyPrior) mag >= releaseFloor else mag >= settings.innerDeadzone
+
+        // y > 0 is screen-down (matches AnalogEvent's documented convention) — so
+        // pushing the stick UP gives y < 0 and emits dpad_north. WASD-natural.
+        val wantN: Boolean
+        val wantS: Boolean
+        val wantE: Boolean
+        val wantW: Boolean
+        if (!active) {
+            wantN = false; wantS = false; wantE = false; wantW = false
+        } else if (settings.dpadLayout == DpadSettings.LAYOUT_8_WAY) {
+            val axial = settings.innerDeadzone * AXIAL_PROJECTION_45
+            wantN = reading.y < -axial
+            wantS = reading.y > axial
+            wantE = reading.x > axial
+            wantW = reading.x < -axial
+        } else {
+            // 4_way: dominant-axis quantization. Ties (|x| == |y| exactly) fall to
+            // the vertical branch — arbitrary but stable.
+            if (abs(reading.x) > abs(reading.y)) {
+                wantN = false; wantS = false
+                wantE = reading.x > 0f; wantW = reading.x < 0f
+            } else {
+                wantN = reading.y < 0f; wantS = reading.y > 0f
+                wantE = false; wantW = false
+            }
+        }
+
+        if (wantN != priorN) digitalEmit("dpad_north", wantN)
+        if (wantS != priorS) digitalEmit("dpad_south", wantS)
+        if (wantE != priorE) digitalEmit("dpad_east", wantE)
+        if (wantW != priorW) digitalEmit("dpad_west", wantW)
+    }
+
+    /** sin(45°) — per-axis floor projection for 8-way diagonal emit. */
+    private const val AXIAL_PROJECTION_45 = 0.7071068f
+}
+
+/**
+ * Parsed [DpadMode] settings. Tolerant of missing keys; falls back to Steam-shaped
+ * defaults so a binding_group seeded before this brick (e.g. one that only had
+ * `dpad_layout` in its JSON, or `{}` from a prior StubMode default) keeps
+ * working without a migration.
+ */
+internal data class DpadSettings(
+    val innerDeadzone: Float,
+    val outerDeadzone: Float,
+    val dpadLayout: String,
+) {
+    companion object {
+        const val DEFAULT_INNER_DEADZONE = 0.20f
+        const val DEFAULT_OUTER_DEADZONE = 0.05f
+        const val LAYOUT_4_WAY = "4_way"
+        const val LAYOUT_8_WAY = "8_way"
+        const val DEFAULT_LAYOUT = LAYOUT_4_WAY
+
+        val DEFAULT_JSON =
+            """{"inner_deadzone":$DEFAULT_INNER_DEADZONE,"outer_deadzone":$DEFAULT_OUTER_DEADZONE,"dpad_layout":"$DEFAULT_LAYOUT"}"""
+
+        fun parse(json: String): DpadSettings {
+            if (json.isBlank()) return defaults()
+            return try {
+                val obj = JSONObject(json)
+                val layoutRaw = obj.optString("dpad_layout", DEFAULT_LAYOUT)
+                val layout = if (layoutRaw == LAYOUT_4_WAY || layoutRaw == LAYOUT_8_WAY) layoutRaw else DEFAULT_LAYOUT
+                DpadSettings(
+                    innerDeadzone = obj.optDouble("inner_deadzone", DEFAULT_INNER_DEADZONE.toDouble())
+                        .toFloat().coerceIn(0f, 0.95f),
+                    outerDeadzone = obj.optDouble("outer_deadzone", DEFAULT_OUTER_DEADZONE.toDouble())
+                        .toFloat().coerceIn(0f, 0.95f),
+                    dpadLayout = layout,
+                )
+            } catch (_: JSONException) {
+                defaults()
+            }
+        }
+
+        private fun defaults() = DpadSettings(
+            innerDeadzone = DEFAULT_INNER_DEADZONE,
+            outerDeadzone = DEFAULT_OUTER_DEADZONE,
+            dpadLayout = DEFAULT_LAYOUT,
+        )
+    }
 }
 
 /**
@@ -533,18 +660,24 @@ fun BindingMode.handler(): SourceMode = when (this) {
  * **What's in:** the analog stick / mouse / scroll modes whose `evaluate()`
  * hook needs a motion stream, plus [BindingMode.TRIGGER] (added in Brick 5
  * for Soft_Press — the soft threshold can only be detected from the analog
- * pull magnitude, not the hardware click edge). **What's out:** digital
- * modes (SINGLE_BUTTON, BUTTON_PAD, DPAD, REFERENCE, UNBOUND) and
- * RADIAL_MENU / TOUCH_MENU (open question, parked digital for now).
+ * pull magnitude, not the hardware click edge), plus [BindingMode.DPAD]
+ * (added in Brick K — DpadMode's analog `evaluate()` quantizes a joystick's
+ * (x, y) into synthetic N/S/E/W edges; the physical DPAD source skips the
+ * analog path and uses `KEYCODE_DPAD_*` through the accessibility service).
+ * **What's out:** purely-digital modes (SINGLE_BUTTON, BUTTON_PAD, REFERENCE,
+ * UNBOUND) and RADIAL_MENU / TOUCH_MENU (open question, parked digital for now).
  *
- * **Refinement note.** Adding TRIGGER unconditionally is correct but loose:
- * a binding_group in TRIGGER mode with only a FULL_PRESS activator (no
- * SOFT_PRESS) doesn't actually need motion capture. A future refinement
- * could tighten the predicate to inspect activator types — but that's a
- * bigger gating-coordinator change, deferred until the cost is felt.
+ * **Refinement note.** Adding TRIGGER and DPAD unconditionally is correct
+ * but loose: a binding_group in TRIGGER mode with only a FULL_PRESS
+ * activator (no SOFT_PRESS) doesn't actually need motion capture; a
+ * binding_group in DPAD mode attached to the physical DPAD source doesn't
+ * either. A future refinement could tighten the predicate by inspecting the
+ * binding_group's source + activator types — but that's a bigger
+ * gating-coordinator change, deferred until the cost is felt.
  */
 val ANALOG_MODES_REQUIRING_MOTION_CAPTURE: Set<BindingMode> = setOf(
     BindingMode.TRIGGER,
+    BindingMode.DPAD,
     BindingMode.JOYSTICK_MOVE,
     BindingMode.JOYSTICK_CAMERA,
     BindingMode.MOUSE_JOYSTICK,

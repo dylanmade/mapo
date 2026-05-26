@@ -796,15 +796,16 @@ class CompiledConfigTest {
     @Test
     fun unimplementedMode_isPermissiveViaStubMode() {
         // Brick 6.1 introduced StubMode as the permissive fallback for modes whose
-        // runtime hasn't landed yet. Brick 6.3 promoted DPAD out of the stub bucket,
-        // so this test uses JOYSTICK_MOVE — still stubbed as of writing. Replace with
-        // another still-stub mode if/when JOYSTICK_MOVE gets its real handler.
+        // runtime hasn't landed yet. Brick 6.3 promoted DPAD out of the stub bucket;
+        // Brick K promoted JOYSTICK_MOVE. Now using ABSOLUTE_MOUSE — still stubbed
+        // as of writing. Replace with another still-stub mode if/when ABSOLUTE_MOUSE
+        // gets its real handler.
         val cfg = configWith(
             preset = listOf(
                 presetEntry(
                     inputSource = InputSource.LEFT_JOYSTICK, state = "active",
                     group = groupWith(
-                        mode = BindingMode.JOYSTICK_MOVE,
+                        mode = BindingMode.ABSOLUTE_MOUSE,
                         inputs = listOf(
                             inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
                             // Even a typo'd key passes through under a stub mode.

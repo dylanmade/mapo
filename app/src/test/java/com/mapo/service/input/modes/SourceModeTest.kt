@@ -82,9 +82,10 @@ class SourceModeTest {
 
     @Test
     fun dpad_defaultSettingsJson_includesFourWayLayout() {
-        // Settings shape laid down now so the eventual analog refactor doesn't have
-        // to migrate the JSON; 4_way is the Steam default and the most common choice.
-        // Runtime-inert in 6.3 (no analog source feeding the gating logic yet).
+        // Brick K added analog-evaluate to DpadMode (stick-as-dpad), so the
+        // defaults now carry inner_deadzone / outer_deadzone alongside the
+        // original dpad_layout. The 4_way default is the most common choice
+        // and the historical Steam default.
         val json = DpadMode.defaultSettingsJson()
         assertTrue(
             "Expected dpad_layout key in defaults; got: $json",
@@ -93,6 +94,10 @@ class SourceModeTest {
         assertTrue(
             "Expected 4_way default value; got: $json",
             json.contains("4_way"),
+        )
+        assertTrue(
+            "Expected inner_deadzone key in defaults; got: $json",
+            json.contains("inner_deadzone"),
         )
     }
 

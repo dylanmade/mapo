@@ -695,7 +695,7 @@ class InputEvaluator @Inject constructor(
         val holdable = mutableListOf<BindingOutput>()
         for (binding in bindings) {
             if (tryHandleControllerAction(binding, address)) continue
-            if (emitter.emitPress(binding)) holdable += binding
+            if (emitter.emitPress(binding, activator.settings.sendAsGesture)) holdable += binding
         }
 
         if (activator.settings.toggle) {
@@ -738,7 +738,7 @@ class InputEvaluator @Inject constructor(
                     // Repeat path: no owning address. `hold_layer` skips with a warning;
                     // `add_layer` / `remove_layer` repeat harmlessly (already-active is a no-op).
                     if (tryHandleControllerAction(binding, address = null)) continue
-                    val holdable = emitter.emitPress(binding)
+                    val holdable = emitter.emitPress(binding, activator.settings.sendAsGesture)
                     if (holdable) emitter.emitRelease(binding)
                 }
             }
@@ -762,7 +762,7 @@ class InputEvaluator @Inject constructor(
             // Tap path: no held semantics. `hold_layer` skips (logged) because it would
             // never get a release; sticky `add_layer` / `remove_layer` are fine.
             if (tryHandleControllerAction(binding, address = null)) continue
-            val holdable = emitter.emitPress(binding)
+            val holdable = emitter.emitPress(binding, activator.settings.sendAsGesture)
             if (holdable) emitter.emitRelease(binding)
         }
     }

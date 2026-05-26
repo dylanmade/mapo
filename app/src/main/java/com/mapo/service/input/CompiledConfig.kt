@@ -160,6 +160,19 @@ data class CompiledActivatorSettings(
      */
     val interruptable: Boolean = true,
     /**
+     * When true, mouse-output bindings on this activator emit through Android's
+     * `AccessibilityService.dispatchGesture` (synthetic touch) instead of the
+     * default uinput virtual-mouse path (`BTN_LEFT` / `BTN_RIGHT` / `REL_WHEEL`).
+     *
+     * Why this exists: emulator frontends with their own input layers (RetroArch
+     * libretro-pointer cores, GameNative's touch wrapper) consume synthetic
+     * touch events but ignore real mouse buttons. Standard Android apps respond
+     * to either, but prefer real mouse semantics. Default false (real mouse).
+     * Users flip on per-binding for emulator compatibility. No effect on
+     * non-mouse outputs (keyboard, gamepad).
+     */
+    val sendAsGesture: Boolean = false,
+    /**
      * Partner input that must be currently held for a [ActivatorType.CHORDED_PRESS] to fire.
      * Null on non-chord activators (and on chord activators that haven't picked a partner yet).
      */
@@ -188,6 +201,7 @@ data class CompiledActivatorSettings(
             fireEndDelayMs = 0L,
             cycleBindings = false,
             interruptable = true,
+            sendAsGesture = false,
             chordPartnerSource = null,
             chordPartnerKey = null,
         )
@@ -211,6 +225,7 @@ data class CompiledActivatorSettings(
                     fireEndDelayMs = obj.optLongOrNull("fire_end_delay_ms") ?: 0L,
                     cycleBindings = obj.optBooleanOrNull("cycle_bindings") ?: false,
                     interruptable = obj.optBooleanOrNull("interruptable") ?: true,
+                    sendAsGesture = obj.optBooleanOrNull("send_as_gesture") ?: false,
                     chordPartnerSource = obj.optInputSourceOrNull("chord_partner_source"),
                     chordPartnerKey = obj.optStringOrNull("chord_partner_key"),
                 )
@@ -239,6 +254,7 @@ data class CompiledActivatorSettings(
         obj.put("fire_end_delay_ms", fireEndDelayMs)
         obj.put("cycle_bindings", cycleBindings)
         obj.put("interruptable", interruptable)
+        obj.put("send_as_gesture", sendAsGesture)
         if (chordPartnerSource != null) obj.put("chord_partner_source", chordPartnerSource.name)
         if (chordPartnerKey != null) obj.put("chord_partner_key", chordPartnerKey)
         return obj.toString()

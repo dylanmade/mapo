@@ -246,6 +246,28 @@ class MapoInputUserService : IMapoInputService.Stub() {
         }
     }
 
+    override fun injectMouseButton(btnCode: Int, pressed: Boolean): Boolean {
+        if (!UinputMouse.isReady && !UinputMouse.open()) return false
+        return try {
+            UinputMouse.button(btnCode, pressed)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "injectMouseButton failed btnCode=0x${btnCode.toString(16)} pressed=$pressed", t)
+            false
+        }
+    }
+
+    override fun injectMouseScroll(dx: Int, dy: Int): Boolean {
+        if (!UinputMouse.isReady && !UinputMouse.open()) return false
+        return try {
+            UinputMouse.scroll(dx, dy)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "injectMouseScroll failed dx=$dx dy=$dy", t)
+            false
+        }
+    }
+
     override fun setEnumerationEnabled(on: Boolean) {
         Log.i(TAG, "setEnumerationEnabled($on)")
         enumerationEnabled = on

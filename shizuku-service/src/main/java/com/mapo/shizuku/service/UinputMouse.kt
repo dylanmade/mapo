@@ -85,10 +85,8 @@ object UinputMouse {
 
     /**
      * Press or release a mouse button. `btnCode` must be one of the
-     * `LinuxInputConstants.BTN_*` values. Unused in the cursor-motion spike;
-     * exposed for the eventual stick-click binding brick.
+     * `LinuxInputConstants.BTN_*` values (passed as ints across AIDL).
      */
-    @Suppress("unused")
     fun button(btnCode: Int, pressed: Boolean) {
         val f = fd
         if (f < 0) return
@@ -96,6 +94,21 @@ object UinputMouse {
             nativeButton(f, btnCode, if (pressed) 1 else 0)
         } catch (t: Throwable) {
             Log.w(TAG, "nativeButton threw", t)
+        }
+    }
+
+    /**
+     * Emit a scroll-wheel event. `dx`/`dy` are integer notch counts (1 =
+     * one wheel detent up/right, -1 = down/left). Most apps respond to
+     * `dy`; horizontal scroll is supported but used less often.
+     */
+    fun scroll(dx: Int, dy: Int) {
+        val f = fd
+        if (f < 0) return
+        try {
+            nativeScroll(f, dx, dy)
+        } catch (t: Throwable) {
+            Log.w(TAG, "nativeScroll threw", t)
         }
     }
 
@@ -120,5 +133,6 @@ object UinputMouse {
     @JvmStatic private external fun nativeOpen(): Int
     @JvmStatic private external fun nativeMove(fd: Int, dx: Int, dy: Int)
     @JvmStatic private external fun nativeButton(fd: Int, btnCode: Int, pressed: Int)
+    @JvmStatic private external fun nativeScroll(fd: Int, dx: Int, dy: Int)
     @JvmStatic private external fun nativeClose(fd: Int)
 }

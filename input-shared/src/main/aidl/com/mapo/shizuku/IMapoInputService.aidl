@@ -64,4 +64,21 @@ interface IMapoInputService {
      * runs on false.
      */
     boolean injectMouseMotion(float absX, float absY, float relDx, float relDy, int displayId) = 6;
+
+    /**
+     * Press or release a mouse button on the virtual uinput device. `btnCode`
+     * is one of the `LinuxInputConstants.BTN_*` values (LEFT/RIGHT/MIDDLE/
+     * SIDE/EXTRA). For a click, caller invokes this with `pressed=true` then
+     * `pressed=false` after a short interval (or back-to-back; modern apps
+     * tolerate either). Returns true iff the inject was dispatched.
+     */
+    boolean injectMouseButton(int btnCode, boolean pressed) = 7;
+
+    /**
+     * Emit a scroll-wheel event. `dx`/`dy` are integer notch counts
+     * (1 = one detent up/right, -1 = down/left). Apps respond to `dy`
+     * primarily; horizontal scroll is supported but used less often.
+     * Routed to REL_WHEEL / REL_HWHEEL on the virtual uinput device.
+     */
+    boolean injectMouseScroll(int dx, int dy) = 8;
 }

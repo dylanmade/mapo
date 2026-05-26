@@ -24,6 +24,7 @@ import com.mapo.service.input.OverlayFocusKind
 import com.mapo.service.shizuku.ShizukuKeyInjector
 import com.mapo.service.shizuku.ShizukuMotionCoordinator
 import com.mapo.service.shizuku.ShizukuMouseInjector
+import com.mapo.shizuku.LinuxInputConstants
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -500,8 +501,8 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
      * targets, the appropriate single gesture for mouse targets. Used by trackpad gesture
      * remapping and any other path that has a RemapTarget and wants to fire it as a tap.
      */
-    override fun dispatchTargetAsClick(target: RemapTarget) {
-        Log.d(TAG, "dispatchTargetAsClick target=$target")
+    override fun dispatchTargetAsClick(target: RemapTarget, sendAsGesture: Boolean) {
+        Log.d(TAG, "dispatchTargetAsClick target=$target sendAsGesture=$sendAsGesture")
         when (target) {
             is RemapTarget.Unbound -> { /* no-op */ }
             is RemapTarget.Keyboard -> {
@@ -517,13 +518,13 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
                 injectKeyDown(kc); injectKeyUp(kc)
             }
             is RemapTarget.Mouse -> when (target.code) {
-                "MOUSE_LEFT"    -> injectMouseTap()
-                "MOUSE_RIGHT"   -> injectMouseRightClick()
-                "MOUSE_MIDDLE"  -> injectMouseMiddleClick()
-                "MOUSE_BACK"    -> injectMouseBackClick()
-                "MOUSE_FORWARD" -> injectMouseForwardClick()
-                "SCROLL_UP"     -> injectMouseScroll(0f, 1f)
-                "SCROLL_DOWN"   -> injectMouseScroll(0f, -1f)
+                "MOUSE_LEFT"    -> injectMouseTap(sendAsGesture)
+                "MOUSE_RIGHT"   -> injectMouseRightClick(sendAsGesture)
+                "MOUSE_MIDDLE"  -> injectMouseMiddleClick(sendAsGesture)
+                "MOUSE_BACK"    -> injectMouseBackClick(sendAsGesture)
+                "MOUSE_FORWARD" -> injectMouseForwardClick(sendAsGesture)
+                "SCROLL_UP"     -> injectMouseScroll(0f, 1f, sendAsGesture)
+                "SCROLL_DOWN"   -> injectMouseScroll(0f, -1f, sendAsGesture)
                 else -> Log.w(TAG, "dispatchTargetAsClick: unknown mouse code ${target.code}")
             }
         }
@@ -547,46 +548,47 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     private var segEndY = 960f
 
     override fun startMouseDrag() {
-        // Refresh once at drag start — the cached display will be used for every
-        // segment of this drag (dispatchMoveSegment doesn't refresh per-segment).
         refreshFocusedDisplay("startMouseDrag")
-        Log.d(TAG, "startMouseDrag — cursor reset to center, display=$focusedAppDisplayId")
         isDragging = true
         segmentActive = false
         currentStroke = null
-        // Reset to display center on every new finger-touch so the virtual anchor
-        // starts from a predictable spot for trackpad-driven cursor work.
+        // Center-reset only matters for the dispatchGesture fallback (synthetic
+        // touch is absolute-positioned). The uinput path is pure relative and
+        // the OS owns the cursor position — center-resetting cursorX/Y here is
+        // harmless (it's just our bookkeeping anchor if Shizuku dies mid-drag).
         cursorX = (cursorBoundsL + cursorBoundsR) / 2f
         cursorY = (cursorBoundsT + cursorBoundsB) / 2f
         segEndX = cursorX
         segEndY = cursorY
+        Log.d(TAG, "startMouseDrag — display=$focusedAppDisplayId")
     }
 
     override fun injectMouseMove(dx: Float, dy: Float) {
-        if (continuousCursorActive) {
-            // Use full display rect (no margins) for the mouse-event path —
-            // SOURCE_MOUSE events don't trip notification/back/home gesture
-            // detectors the way synthetic touch does. The OS itself renders
-            // and bounds the cursor; we send hints.
+        // Unified mouse-output path: when Shizuku/uinput is available, ALL
+        // cursor motion — trackpad-finger-drag, analog-stick deflection —
+        // routes through the OS-rendered cursor via the virtual uinput
+        // SOURCE_MOUSE device. The OS owns position, bounding, and rendering;
+        // we just push relative deltas. This bypasses Android's touch gesture
+        // detectors (notification pull, back, home), which dispatchGesture
+        // synthetic touch was contaminating.
+        //
+        // dispatchGesture remains as the no-Shizuku floor: same primitive the
+        // pre-Shizuku trackpad has always used. Bounds margins kept for that
+        // path because synthetic touch *does* go through gesture detectors.
+        if (shizukuMouseInjector.tryInject(cursorX + dx, cursorY + dy, dx, dy, focusedAppDisplayId)) {
+            // Keep cursorX/Y updated as the "where would we anchor if Shizuku
+            // dies mid-drag" position for the fallback path. The OS owns the
+            // visible cursor; this is just bookkeeping.
             val (w, h) = primaryDisplaySize()
-            cursorX = (cursorX + dx).coerceIn(0f, w.toFloat() - 1f)
-            cursorY = (cursorY + dy).coerceIn(0f, h.toFloat() - 1f)
-            if (shizukuMouseInjector.tryInject(cursorX, cursorY, dx, dy, focusedAppDisplayId)) {
-                segEndX = cursorX
-                segEndY = cursorY
-                return
-            }
-            // Shizuku not ready / threw — fall through to touch path. Re-apply
-            // the margins clamp so the touch path stays out of gesture zones.
-            cursorX = cursorX.coerceIn(cursorBoundsL, cursorBoundsR)
-            cursorY = cursorY.coerceIn(cursorBoundsT, cursorBoundsB)
-        } else {
-            // Trackpad path — synthetic touch is the correct primitive here
-            // (the user is literally touching a virtual surface). Bounds
-            // margins prevent gesture-detector contact.
-            cursorX = (cursorX + dx).coerceIn(cursorBoundsL, cursorBoundsR)
-            cursorY = (cursorY + dy).coerceIn(cursorBoundsT, cursorBoundsB)
+            cursorX = (cursorX + dx).coerceIn(0f, w - 1f)
+            cursorY = (cursorY + dy).coerceIn(0f, h - 1f)
+            segEndX = cursorX
+            segEndY = cursorY
+            return
         }
+        // Fallback: dispatchGesture path with bounds margins.
+        cursorX = (cursorX + dx).coerceIn(cursorBoundsL, cursorBoundsR)
+        cursorY = (cursorY + dy).coerceIn(cursorBoundsT, cursorBoundsB)
         if (!segmentActive) dispatchMoveSegment(willContinue = true)
     }
 
@@ -662,37 +664,95 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         }
     }
 
-    fun injectMouseTap() {
-        refreshFocusedDisplay("injectMouseTap")
-        Log.d(TAG, "injectMouseTap at ($cursorX,$cursorY) display=$focusedAppDisplayId")
+    fun injectMouseTap(sendAsGesture: Boolean = false) =
+        injectMouseButtonClick(LinuxInputConstants.BTN_LEFT, "Left", sendAsGesture, ::dispatchSingleFingerTap)
+    fun injectMouseRightClick(sendAsGesture: Boolean = false) =
+        injectMouseButtonClick(LinuxInputConstants.BTN_RIGHT, "Right", sendAsGesture) { dispatchMultiFingerTap(2, "injectMouseRightClick") }
+    fun injectMouseMiddleClick(sendAsGesture: Boolean = false) =
+        injectMouseButtonClick(LinuxInputConstants.BTN_MIDDLE, "Middle", sendAsGesture) { dispatchMultiFingerTap(3, "injectMouseMiddleClick") }
+    fun injectMouseBackClick(sendAsGesture: Boolean = false) =
+        injectMouseButtonClick(LinuxInputConstants.BTN_SIDE, "Back", sendAsGesture) { Log.w(TAG, "Back click: no dispatchGesture fallback") }
+    fun injectMouseForwardClick(sendAsGesture: Boolean = false) =
+        injectMouseButtonClick(LinuxInputConstants.BTN_EXTRA, "Forward", sendAsGesture) { Log.w(TAG, "Forward click: no dispatchGesture fallback") }
+
+    /**
+     * Unified mouse-click entry point.
+     *
+     * When [sendAsGesture] is false (default), tries the Shizuku/uinput path
+     * first — the click is a real `BTN_*` press+release that mouse-aware
+     * apps respond to. Falls back to [touchFallback] if Shizuku isn't ready.
+     *
+     * When [sendAsGesture] is true, skips uinput entirely and goes straight
+     * to [touchFallback] — emits a synthetic touch event via dispatchGesture.
+     * Required for apps with their own input layers (RetroArch libretro
+     * pointer cores, GameNative's touch wrapper) that consume synthetic
+     * touch but ignore real mouse buttons. Set per-binding by the user via
+     * the activator settings UI.
+     */
+    private inline fun injectMouseButtonClick(
+        btnCode: Int,
+        label: String,
+        sendAsGesture: Boolean,
+        touchFallback: () -> Unit,
+    ) {
+        refreshFocusedDisplay("injectMouse${label}Click")
+        if (!sendAsGesture && shizukuMouseInjector.tryClick(btnCode)) {
+            Log.d(TAG, "injectMouse${label}Click via uinput btnCode=0x${btnCode.toString(16)}")
+            return
+        }
+        Log.d(TAG, "injectMouse${label}Click via dispatchGesture (sendAsGesture=$sendAsGesture)")
+        touchFallback()
+    }
+
+    /**
+     * Two-finger / vertical drag → scroll wheel. With Shizuku/uinput, sends
+     * REL_WHEEL (and REL_HWHEEL for horizontal) directly — apps see a real
+     * wheel event regardless of whether they have any touch-to-scroll
+     * gesture handling. Falls back to two-finger dispatchGesture drag (the
+     * old Wine-convention path).
+     */
+    fun injectMouseScroll(dx: Float, dy: Float, sendAsGesture: Boolean = false) {
+        refreshFocusedDisplay("injectMouseScroll")
+        if (!sendAsGesture) {
+            // Translate continuous float "scroll intensity" into integer notch counts.
+            // Caller passes 1.0 / -1.0 for one click; future smooth-scroll input could
+            // pass smaller fractions which would be rounded but still register.
+            val notchX = dx.toInt().let { if (it == 0 && dx != 0f) (if (dx > 0f) 1 else -1) else it }
+            val notchY = dy.toInt().let { if (it == 0 && dy != 0f) (if (dy > 0f) 1 else -1) else it }
+            if (shizukuMouseInjector.tryScroll(notchX, notchY)) {
+                Log.d(TAG, "injectMouseScroll via uinput notch=($notchX,$notchY)")
+                return
+            }
+        }
+        Log.d(TAG, "injectMouseScroll via dispatchGesture (sendAsGesture=$sendAsGesture) dx=$dx dy=$dy")
+        scrollFallbackDispatchGesture(dx, dy)
+    }
+
+    /** Single-finger dispatchGesture tap at the cursor — Shizuku-not-ready fallback for left-click. */
+    private fun dispatchSingleFingerTap() {
+        Log.d(TAG, "dispatchSingleFingerTap at ($cursorX,$cursorY) display=$focusedAppDisplayId")
         val path = Path().apply { moveTo(cursorX, cursorY) }
-        // 50ms duration: long enough for DOSBox/RetroArch and other apps with stricter
-        // touch handlers to register the touch as a real tap, while still well under
-        // ViewConfiguration.getTapTimeout() (~100ms) so it doesn't read as a long press.
+        // 50ms: registers as a tap, well under getTapTimeout() (~100ms) so doesn't read as long-press.
         val stroke = GestureDescription.StrokeDescription(path, 0L, 50L)
         val ok = dispatchGesture(
             buildGesture { addStroke(stroke) },
             object : GestureResultCallback() {
-                override fun onCompleted(g: GestureDescription) { Log.d(TAG, "injectMouseTap: completed") }
-                override fun onCancelled(g: GestureDescription) { Log.w(TAG, "injectMouseTap: cancelled") }
-            }, null
+                override fun onCompleted(g: GestureDescription) { Log.d(TAG, "tap: completed") }
+                override fun onCancelled(g: GestureDescription) { Log.w(TAG, "tap: cancelled") }
+            }, null,
         )
-        if (!ok) Log.w(TAG, "injectMouseTap: dispatchGesture returned false")
+        if (!ok) Log.w(TAG, "dispatchSingleFingerTap: dispatchGesture returned false")
     }
 
     /**
-     * Multi-finger tap gestures. Wine (and many touch-to-mouse layers) natively interpret
-     * 2-finger tap as right-click and 3-finger tap as middle-click. Single-finger tap stays
-     * as injectMouseTap for left-click.
-     *
-     * Implemented via dispatchGesture with multiple simultaneous strokes — public API, no
-     * reflection, no INJECT_EVENTS permission required. Same technique used by DS Keyboard.
+     * Multi-finger tap. Wine (and many touch-to-mouse layers) interpret 2-finger
+     * tap as right-click and 3-finger as middle-click. Used only as the
+     * Shizuku-not-ready fallback for right/middle clicks; uinput's real
+     * BTN_RIGHT/MIDDLE is the primary path now.
      */
     private fun dispatchMultiFingerTap(fingerCount: Int, label: String) {
-        refreshFocusedDisplay(label)
-        Log.d(TAG, "$label at ($cursorX,$cursorY) display=$focusedAppDisplayId — $fingerCount-finger tap")
-        val spacing = 30f  // px between fingers
-        // Lay fingers symmetrically around the cursor anchor.
+        Log.d(TAG, "$label at ($cursorX,$cursorY) display=$focusedAppDisplayId — $fingerCount-finger tap (fallback)")
+        val spacing = 30f
         val totalSpan = spacing * (fingerCount - 1)
         val startX = cursorX - totalSpan / 2f
         val gesture = buildGesture {
@@ -707,24 +767,15 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription) { Log.d(TAG, "$label: completed") }
                 override fun onCancelled(g: GestureDescription) { Log.w(TAG, "$label: cancelled") }
-            }, null
+            }, null,
         )
         if (!ok) Log.w(TAG, "$label: dispatchGesture returned false")
     }
 
-    fun injectMouseRightClick()  = dispatchMultiFingerTap(2, "injectMouseRightClick")
-    fun injectMouseMiddleClick() = dispatchMultiFingerTap(3, "injectMouseMiddleClick")
-
-    /**
-     * Two-finger vertical drag. Wine/touch-to-mouse layers translate this into scroll wheel
-     * events. dy > 0 → scroll up (fingers drag down, Android natural scroll convention).
-     */
-    fun injectMouseScroll(dx: Float, dy: Float) {
-        refreshFocusedDisplay("injectMouseScroll")
-        Log.d(TAG, "injectMouseScroll dx=$dx dy=$dy display=$focusedAppDisplayId — two-finger drag")
+    /** Wine-convention two-finger vertical drag as scroll. Shizuku-not-ready fallback. */
+    private fun scrollFallbackDispatchGesture(dx: Float, dy: Float) {
         val spacing = 30f
         val dragDistance = 200f
-        // dy>0 means scroll up → fingers move down (positive Y in screen coords).
         val deltaY = if (dy > 0f) dragDistance else -dragDistance
         val deltaX = if (dx != 0f) (if (dx > 0f) dragDistance else -dragDistance) else 0f
         val gesture = buildGesture {
@@ -739,21 +790,11 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         val ok = dispatchGesture(
             gesture,
             object : GestureResultCallback() {
-                override fun onCompleted(g: GestureDescription) { Log.d(TAG, "injectMouseScroll: completed") }
-                override fun onCancelled(g: GestureDescription) { Log.w(TAG, "injectMouseScroll: cancelled") }
-            }, null
+                override fun onCompleted(g: GestureDescription) { Log.d(TAG, "scroll fallback: completed") }
+                override fun onCancelled(g: GestureDescription) { Log.w(TAG, "scroll fallback: cancelled") }
+            }, null,
         )
-        if (!ok) Log.w(TAG, "injectMouseScroll: dispatchGesture returned false")
-    }
-
-    // No-op placeholders kept so dispatchTargetAsClick's match remains exhaustive and the picker
-    // can still expose MOUSE_BACK/MOUSE_FORWARD even though no reliable cross-app injection
-    // mechanism exists for them via accessibility gestures.
-    fun injectMouseBackClick() {
-        Log.w(TAG, "injectMouseBackClick: no reliable cross-app touch gesture exists for this — noop")
-    }
-    fun injectMouseForwardClick() {
-        Log.w(TAG, "injectMouseForwardClick: no reliable cross-app touch gesture exists for this — noop")
+        if (!ok) Log.w(TAG, "scrollFallbackDispatchGesture: dispatchGesture returned false")
     }
 
     /**

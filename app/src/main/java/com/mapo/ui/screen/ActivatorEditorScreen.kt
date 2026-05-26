@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mapo.data.model.steam.ActivatorType
+import com.mapo.data.model.steam.BindingOutputType
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.displayName
 import com.mapo.data.model.steam.resolveActionSet
@@ -94,7 +95,9 @@ fun ActivatorEditorScreen(
             return@Scaffold
         }
 
-        val (type, settings) = activatorContext
+        val type = activatorContext.type
+        val settings = activatorContext.settings
+        val hasMouseBinding = activatorContext.hasMouseBinding
         // Column + verticalScroll over LazyColumn here because the section count is small
         // and fixed — LazyColumn's below-the-viewport lazy composition would defeat
         // assertExists in Robolectric (per feedback_robolectric_compose_pitfalls).
@@ -213,6 +216,25 @@ fun ActivatorEditorScreen(
                     },
                 )
             }
+
+            // Mouse output: only relevant when at least one of this activator's bindings
+            // is mouse-shaped (MouseButton / MouseWheel). Lets the user pick between a
+            // real mouse event (uinput BTN_LEFT / REL_WHEEL — works in standard Android
+            // apps) and a synthetic touch event (dispatchGesture — works in emulator
+            // frontends like RetroArch with libretro-pointer cores or GameNative's touch
+            // wrapper that ignore real mouse buttons).
+            if (hasMouseBinding) {
+                SectionHeader("Mouse output")
+                SettingsSwitchRow(
+                    label = "Send as gesture",
+                    helper = "Emit as a synthetic touch event instead of a real mouse click. " +
+                        "Try enabling this if an app doesn't respond to mouse inputs.",
+                    checked = settings.sendAsGesture,
+                    onCheckedChange = { newValue ->
+                        onSettingsChange(activatorId, settings.copy(sendAsGesture = newValue))
+                    },
+                )
+            }
         }
     }
 }
@@ -224,18 +246,38 @@ fun ActivatorEditorScreen(
  * keying so it's cheap. An activator id from a different set won't resolve here — the
  * caller is expected to keep the viewing pointer aligned with how the editor was opened.
  */
+/**
+ * Resolved view of an activator for the editor: its type, parsed settings, and a
+ * derived flag that tells the UI whether the "Send as gesture" toggle should appear
+ * (only when at least one of the activator's bindings emits a mouse-shaped output —
+ * the toggle is a no-op for keyboard/gamepad bindings).
+ */
+private data class ActivatorContext(
+    val type: ActivatorType,
+    val settings: CompiledActivatorSettings,
+    val hasMouseBinding: Boolean,
+)
+
 private fun findActivatorContext(
     config: ControllerConfig?,
     activatorId: Long,
     viewingActionSetId: Long? = null,
-): Pair<ActivatorType, CompiledActivatorSettings>? {
+): ActivatorContext? {
     val activeSet = config?.resolveActionSet(viewingActionSetId) ?: return null
     for (preset in activeSet.preset) {
         for (input in preset.group.inputs) {
             for (graph in input.activators) {
                 if (graph.activator.id == activatorId) {
                     val settings = CompiledActivatorSettings.parse(graph.activator.settingsJson)
-                    return graph.activator.type to settings
+                    val hasMouseBinding = graph.bindings.any {
+                        it.outputType == BindingOutputType.MOUSE_BUTTON ||
+                            it.outputType == BindingOutputType.MOUSE_WHEEL
+                    }
+                    return ActivatorContext(
+                        type = graph.activator.type,
+                        settings = settings,
+                        hasMouseBinding = hasMouseBinding,
+                    )
                 }
             }
         }

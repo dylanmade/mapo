@@ -57,6 +57,62 @@ class ShizukuMouseInjector @Inject constructor(
         }
     }
 
+    /**
+     * Send a complete click (press + release) for the given button. `btnCode`
+     * is one of the `LinuxInputConstants.BTN_*` ints. Returns true iff the
+     * Shizuku path was taken; false means caller should fall back to
+     * dispatchGesture-based touch-tap synthesis.
+     */
+    fun tryClick(btnCode: Int): Boolean {
+        if (!shizukuConnection.isReadyFlow.value) return false
+        val service = shizukuConnection.service.value ?: return false
+        return try {
+            // Press + immediate release. Apps tolerate back-to-back btn-down/
+            // btn-up; the kernel batches the SYN_REPORTs and Android's
+            // InputDispatcher delivers them in order. No artificial delay
+            // needed (and adding one would just hurt latency).
+            service.injectMouseButton(btnCode, true)
+            service.injectMouseButton(btnCode, false)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "Shizuku injectMouseButton threw — falling back", t)
+            false
+        }
+    }
+
+    /**
+     * Hold or release a button — for future drag-and-drop / hold-to-click
+     * gestures. Caller is responsible for pairing every `true` with a
+     * matching `false`.
+     */
+    fun trySetButton(btnCode: Int, pressed: Boolean): Boolean {
+        if (!shizukuConnection.isReadyFlow.value) return false
+        val service = shizukuConnection.service.value ?: return false
+        return try {
+            service.injectMouseButton(btnCode, pressed)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "Shizuku injectMouseButton threw", t)
+            false
+        }
+    }
+
+    /**
+     * Scroll-wheel notch counts. `dy > 0` = scroll up (content moves down,
+     * standard convention). `dx` is horizontal scroll, supported but rare.
+     */
+    fun tryScroll(dx: Int, dy: Int): Boolean {
+        if (!shizukuConnection.isReadyFlow.value) return false
+        val service = shizukuConnection.service.value ?: return false
+        return try {
+            service.injectMouseScroll(dx, dy)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "Shizuku injectMouseScroll threw", t)
+            false
+        }
+    }
+
     companion object {
         private const val TAG = "ShizukuMouseInjector"
     }

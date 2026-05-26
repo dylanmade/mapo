@@ -140,6 +140,45 @@ Java_com_mapo_shizuku_service_UinputMouse_nativeMove(JNIEnv *env, jclass clazz, 
     }
 }
 
+// Write a scroll-wheel event group: REL_WHEEL (vertical) and/or REL_HWHEEL
+// (horizontal), then SYN_REPORT. Values are integer "click counts" — 1 means
+// one notch up/right, -1 means one notch down/left. Skips axes whose value
+// is zero so the SYN_REPORT only batches non-trivial events.
+JNIEXPORT void JNICALL
+Java_com_mapo_shizuku_service_UinputMouse_nativeScroll(JNIEnv *env, jclass clazz, jint fd, jint dx, jint dy) {
+    (void)env; (void)clazz;
+    if (fd < 0) return;
+
+    struct input_event ev[3];
+    memset(ev, 0, sizeof(ev));
+    int n = 0;
+
+    if (dy != 0) {
+        ev[n].type = EV_REL;
+        ev[n].code = REL_WHEEL;
+        ev[n].value = dy;
+        n++;
+    }
+    if (dx != 0) {
+        ev[n].type = EV_REL;
+        ev[n].code = REL_HWHEEL;
+        ev[n].value = dx;
+        n++;
+    }
+    if (n == 0) return; // nothing to scroll
+
+    ev[n].type = EV_SYN;
+    ev[n].code = SYN_REPORT;
+    ev[n].value = 0;
+    n++;
+
+    ssize_t expected = sizeof(struct input_event) * n;
+    ssize_t actual = write(fd, ev, expected);
+    if (actual != expected) {
+        LOGW("write scroll failed: expected=%zd actual=%zd errno=%d", expected, actual, errno);
+    }
+}
+
 // Write a button-state event followed by SYN_REPORT.
 // btnCode is BTN_LEFT/BTN_RIGHT/etc; pressed = 1 for down, 0 for up.
 // Unused in the spike but exposed for the eventual click-binding brick.

@@ -49,6 +49,17 @@ object LinuxInputConstants {
     const val ABS_MT_POSITION_Y: Int = 0x36
     const val ABS_MT_LAST: Int = 0x3D
 
+    // ── EV_KEY mouse button codes ────────────────────────────────────────────
+    // Used by :app to call `injectMouseButton(btnCode, pressed)` on Mapo's
+    // virtual mouse — sent across the AIDL boundary as ints so neither side
+    // has to depend on linux/input-event-codes.h. Five-button standard
+    // mouse: left/right/middle plus side/extra for browser-back/-forward.
+    const val BTN_LEFT: Int = 0x110
+    const val BTN_RIGHT: Int = 0x111
+    const val BTN_MIDDLE: Int = 0x112
+    const val BTN_SIDE: Int = 0x113
+    const val BTN_EXTRA: Int = 0x114
+
     /** `true` if [code] is in the multi-touch range — i.e. emitted only by touchscreens. */
     fun isMultiTouchAbs(code: Int): Boolean = code in ABS_MT_SLOT..ABS_MT_LAST
 

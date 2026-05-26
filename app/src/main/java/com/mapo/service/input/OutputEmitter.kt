@@ -33,8 +33,15 @@ class OutputEmitter @Inject constructor(
     private val dispatcher: InputDispatcher,
 ) {
 
-    /** Returns true if [output] has a matching release edge — i.e. the evaluator must hold it. */
-    fun emitPress(output: BindingOutput): Boolean = when (output) {
+    /**
+     * Returns true if [output] has a matching release edge — i.e. the evaluator must hold it.
+     *
+     * @param sendAsGesture only consulted for mouse-shaped outputs ([BindingOutput.MouseButton] /
+     *   [BindingOutput.MouseWheel]); other output kinds ignore it. When true, the click is
+     *   emitted as a synthetic touch via `AccessibilityService.dispatchGesture`; when false,
+     *   it's a real `BTN_LEFT`/`REL_WHEEL` mouse event via the uinput device.
+     */
+    fun emitPress(output: BindingOutput, sendAsGesture: Boolean = false): Boolean = when (output) {
         BindingOutput.Unbound -> false
         is BindingOutput.KeyPress -> {
             Log.d(TAG, "press KeyPress(${output.keyCode})")
@@ -47,13 +54,13 @@ class OutputEmitter @Inject constructor(
             true
         }
         is BindingOutput.MouseButton -> {
-            Log.d(TAG, "press MouseButton(${output.button})")
-            dispatcher.dispatchTargetAsClick(RemapTarget.Mouse(output.button))
+            Log.d(TAG, "press MouseButton(${output.button}) sendAsGesture=$sendAsGesture")
+            dispatcher.dispatchTargetAsClick(RemapTarget.Mouse(output.button), sendAsGesture)
             false
         }
         is BindingOutput.MouseWheel -> {
-            Log.d(TAG, "press MouseWheel(${output.direction})")
-            dispatcher.dispatchTargetAsClick(RemapTarget.Mouse(output.direction))
+            Log.d(TAG, "press MouseWheel(${output.direction}) sendAsGesture=$sendAsGesture")
+            dispatcher.dispatchTargetAsClick(RemapTarget.Mouse(output.direction), sendAsGesture)
             false
         }
         is BindingOutput.GameAction -> {

@@ -31,7 +31,13 @@ interface InputSink {
     /** Inject a key UP edge — pair with a prior [injectKeyDown] on the same code. */
     fun injectKeyUp(code: String): Boolean
 
-    fun dispatchTargetAsClick(target: RemapTarget)
+    /**
+     * Click-shaped output dispatch. For [RemapTarget.Mouse], [sendAsGesture] selects between
+     * synthetic touch via `AccessibilityService.dispatchGesture` (true — emulator-friendly)
+     * and real mouse buttons via uinput (false — standard-Android-app-friendly). Ignored
+     * for [RemapTarget.Keyboard] / [RemapTarget.Gamepad].
+     */
+    fun dispatchTargetAsClick(target: RemapTarget, sendAsGesture: Boolean = false)
     fun startMouseDrag()
     fun injectMouseMove(dx: Float, dy: Float)
     fun endMouseDrag()
@@ -143,8 +149,8 @@ class InputDispatcher @Inject constructor() {
 
     fun injectKeyUp(code: String): Boolean = sink?.injectKeyUp(code) ?: false
 
-    fun dispatchTargetAsClick(target: RemapTarget) {
-        sink?.dispatchTargetAsClick(target)
+    fun dispatchTargetAsClick(target: RemapTarget, sendAsGesture: Boolean = false) {
+        sink?.dispatchTargetAsClick(target, sendAsGesture)
     }
 
     fun startMouseDrag() {

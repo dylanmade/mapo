@@ -112,6 +112,10 @@ class MapoInputUserService : IMapoInputService.Stub() {
     @Volatile
     private var lastEventNs: Long = 0L
 
+    /** Diagnostic — incremented every [injectMouseMotion] call; logged every Nth. */
+    @Volatile
+    private var mouseInjectCount: Long = 0L
+
     override fun getProtocolVersion(): Int = PROTOCOL_VERSION
 
     override fun registerCallback(cb: IMapoInputCallback?) {
@@ -166,7 +170,7 @@ class MapoInputUserService : IMapoInputService.Stub() {
      * approach — see [installHiddenApiExemptions]. The reflective method
      * reference is cached on first use.
      */
-    private fun stampDisplayId(event: KeyEvent, displayId: Int) {
+    private fun stampDisplayId(event: android.view.InputEvent, displayId: Int) {
         val m = setDisplayIdMethod ?: return
         try {
             m.invoke(event, displayId)
@@ -181,7 +185,7 @@ class MapoInputUserService : IMapoInputService.Stub() {
      * calling UID differs (shell here vs. app there), and that UID difference
      * is what makes Shizuku's path focus-bypassed.
      */
-    private fun invokeInjectInputEvent(event: KeyEvent): Boolean {
+    private fun invokeInjectInputEvent(event: android.view.InputEvent): Boolean {
         val imClass = Class.forName("android.hardware.input.InputManager")
         val im = imClass.getDeclaredMethod("getInstance").invoke(null)
         val result = imClass.getDeclaredMethod(
@@ -190,7 +194,7 @@ class MapoInputUserService : IMapoInputService.Stub() {
             Int::class.javaPrimitiveType,
         ).invoke(im, event, INJECT_INPUT_EVENT_MODE_ASYNC) as? Boolean ?: false
         if (!result) {
-            Log.w(TAG, "IInputManager.injectInputEvent returned false (keyCode=${event.keyCode})")
+            Log.w(TAG, "IInputManager.injectInputEvent returned false (event=$event)")
         }
         return result
     }
@@ -202,6 +206,43 @@ class MapoInputUserService : IMapoInputService.Stub() {
         } catch (t: Throwable) {
             Log.w(TAG, "InputEvent.setDisplayId reflection unavailable", t)
             null
+        }
+    }
+
+    override fun injectMouseMotion(
+        absX: Float,
+        absY: Float,
+        relDx: Float,
+        relDy: Float,
+        displayId: Int,
+    ): Boolean {
+        // SOURCE_MOUSE MotionEvent injection via IInputManager was tried first
+        // (commit history pre-2026-05-25) and verified non-functional: the
+        // events are accepted but there's no SOURCE_MOUSE InputDevice
+        // registered with Android's InputReader, so no pointer controller
+        // exists and the events deliver to nothing visible. We instead create
+        // a kernel-level virtual mouse via /dev/uinput — the OS registers it
+        // as a real InputDevice, spawns the pointer controller, and renders
+        // the cursor itself. We just push REL_X/REL_Y deltas.
+        //
+        // absX/absY/displayId are unused under uinput — the OS owns cursor
+        // tracking, bounding, and display routing. Signature kept stable so
+        // we don't need an AIDL bump if we later add an alternate inject path.
+        if (!UinputMouse.isReady && !UinputMouse.open()) {
+            // SELinux or vendor-locked path. Caller should already be falling
+            // back to dispatchGesture in that case.
+            return false
+        }
+        return try {
+            mouseInjectCount++
+            if (mouseInjectCount % 120L == 1L) {
+                Log.d(TAG, "injectMouseMotion #$mouseInjectCount rel=($relDx,$relDy)")
+            }
+            UinputMouse.move(relDx.toInt(), relDy.toInt())
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "injectMouseMotion failed rel=($relDx,$relDy)", t)
+            false
         }
     }
 
@@ -230,6 +271,7 @@ class MapoInputUserService : IMapoInputService.Stub() {
         callbacks.kill()
         stopThreads()
         closeAllDevices()
+        UinputMouse.close()
         System.exit(0)
     }
 

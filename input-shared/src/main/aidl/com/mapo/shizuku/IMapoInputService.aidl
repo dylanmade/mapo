@@ -44,4 +44,24 @@ interface IMapoInputService {
      * no analog mode is active (battery + FD-pressure win).
      */
     void setEnumerationEnabled(boolean on) = 5;
+
+    /**
+     * **Spike (post-Brick-J).** Inject a SOURCE_MOUSE motion event so the
+     * foreground app sees pointer motion instead of synthetic touch. Caller
+     * tracks cursor position; service constructs the MotionEvent and routes
+     * it through `IInputManager.injectInputEvent` from the shell-uid process.
+     *
+     * Why this exists: synthetic touch (dispatchGesture) routes through the
+     * touch dispatcher, which runs gesture detectors (notification pull-down,
+     * back, home pill) before delivering to the app. Mouse motion routes
+     * through the pointer dispatcher and bypasses those detectors entirely —
+     * the same path a real USB mouse uses. Removes the entire "where to put
+     * the bounds margins" class of problems and the no-teleport vs
+     * relative-emulator-cursor tension.
+     *
+     * Returns true iff the inject succeeded (IInputManager.injectInputEvent
+     * returned true). Caller's fallback path (dispatchGesture-based touch)
+     * runs on false.
+     */
+    boolean injectMouseMotion(float absX, float absY, float relDx, float relDy, int displayId) = 6;
 }

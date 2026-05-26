@@ -23,6 +23,7 @@ import com.mapo.service.input.InputSink
 import com.mapo.service.input.OverlayFocusKind
 import com.mapo.service.shizuku.ShizukuKeyInjector
 import com.mapo.service.shizuku.ShizukuMotionCoordinator
+import com.mapo.service.shizuku.ShizukuMouseInjector
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -34,6 +35,7 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @Inject lateinit var evaluator: InputEvaluator
     @Inject lateinit var shizukuMotionCoordinator: ShizukuMotionCoordinator
     @Inject lateinit var shizukuKeyInjector: ShizukuKeyInjector
+    @Inject lateinit var shizukuMouseInjector: ShizukuMouseInjector
 
     companion object {
         // Physical gamepad keycodes → DeviceButton enum
@@ -130,27 +132,6 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     private var cursorBoundsT = 0f
     private var cursorBoundsR = 1920f
     private var cursorBoundsB = 1080f
-
-    /**
-     * Brick J recenter-on-edge: set true by [injectMouseMove] when the cursor
-     * would clamp at a bound *and* we're in continuous-cursor mode. The next
-     * gesture-segment `onCompleted` handles it by dispatching a willContinue=
-     * false segment (lifting the touch), then resetting cursor coordinates to
-     * the display center. The MouseEmitter's next velocity tick starts a fresh
-     * stroke from center.
-     *
-     * **Why this is necessary.** Emulator apps (GameNative, RetroArch, DOSBox
-     * Pure) interpret touch deltas as *relative* mouse motion, not absolute
-     * positions. When Mapo's virtual touch hits a screen edge, deltas drop to
-     * zero and the emulator's mouse cursor freezes wherever it last had
-     * momentum — even though the user keeps deflecting the stick. The fix is
-     * to bound the touch's drift: when it approaches an edge, lift the touch
-     * and re-anchor at center so a non-zero delta can flow again. The trackpad
-     * path doesn't need this — finger-down is brief enough that drift stays
-     * bounded inside one gesture session.
-     */
-    @Volatile
-    private var pendingRecenter: Boolean = false
 
     // ── Injection display routing ─────────────────────────────────────────────
 
@@ -582,18 +563,30 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     }
 
     override fun injectMouseMove(dx: Float, dy: Float) {
-        val targetX = cursorX + dx
-        val targetY = cursorY + dy
-        // Detect clamp-at-edge during continuous-cursor mode. In trackpad
-        // mode the user lifts and re-touches naturally — no need to recenter.
-        if (continuousCursorActive && (
-                targetX < cursorBoundsL || targetX > cursorBoundsR ||
-                    targetY < cursorBoundsT || targetY > cursorBoundsB
-                )) {
-            pendingRecenter = true
+        if (continuousCursorActive) {
+            // Use full display rect (no margins) for the mouse-event path —
+            // SOURCE_MOUSE events don't trip notification/back/home gesture
+            // detectors the way synthetic touch does. The OS itself renders
+            // and bounds the cursor; we send hints.
+            val (w, h) = primaryDisplaySize()
+            cursorX = (cursorX + dx).coerceIn(0f, w.toFloat() - 1f)
+            cursorY = (cursorY + dy).coerceIn(0f, h.toFloat() - 1f)
+            if (shizukuMouseInjector.tryInject(cursorX, cursorY, dx, dy, focusedAppDisplayId)) {
+                segEndX = cursorX
+                segEndY = cursorY
+                return
+            }
+            // Shizuku not ready / threw — fall through to touch path. Re-apply
+            // the margins clamp so the touch path stays out of gesture zones.
+            cursorX = cursorX.coerceIn(cursorBoundsL, cursorBoundsR)
+            cursorY = cursorY.coerceIn(cursorBoundsT, cursorBoundsB)
+        } else {
+            // Trackpad path — synthetic touch is the correct primitive here
+            // (the user is literally touching a virtual surface). Bounds
+            // margins prevent gesture-detector contact.
+            cursorX = (cursorX + dx).coerceIn(cursorBoundsL, cursorBoundsR)
+            cursorY = (cursorY + dy).coerceIn(cursorBoundsT, cursorBoundsB)
         }
-        cursorX = targetX.coerceIn(cursorBoundsL, cursorBoundsR)
-        cursorY = targetY.coerceIn(cursorBoundsT, cursorBoundsB)
         if (!segmentActive) dispatchMoveSegment(willContinue = true)
     }
 
@@ -604,17 +597,15 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
 
     override fun beginContinuousCursor() {
         refreshFocusedDisplay("beginContinuousCursor")
-        // Reset cursor to display center on every new continuous-cursor session.
-        // Matches the trackpad's startMouseDrag center-reset behavior. The
-        // previous "preserve cursor where last left it" approach left a stale
-        // virtual position after long stick deflections, which combined with
-        // emulator relative-motion interpretation could leave the in-game
-        // cursor stranded.
-        cursorX = (cursorBoundsL + cursorBoundsR) / 2f
-        cursorY = (cursorBoundsT + cursorBoundsB) / 2f
-        Log.d(TAG, "beginContinuousCursor — cursor reset to ($cursorX,$cursorY), display=$focusedAppDisplayId")
+        // Cursor position persists across continuous-cursor sessions — never
+        // teleport on session entry. Universal cursor convention: the cursor
+        // stays where the user last left it. At a screen boundary, motion
+        // toward the boundary is no-op (clamped); motion away resumes
+        // immediately. The bounds margins set in onServiceConnected keep the
+        // virtual touch out of system gesture trigger zones (notification
+        // pull, back, home pill).
+        Log.d(TAG, "beginContinuousCursor — resuming at ($cursorX,$cursorY), display=$focusedAppDisplayId")
         continuousCursorActive = true
-        pendingRecenter = false
         segEndX = cursorX
         segEndY = cursorY
     }
@@ -622,7 +613,6 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     override fun endContinuousCursor() {
         Log.d(TAG, "endContinuousCursor")
         continuousCursorActive = false
-        pendingRecenter = false
         if (!segmentActive && currentStroke != null) dispatchMoveSegment(willContinue = false)
     }
 
@@ -644,25 +634,6 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
             object : GestureResultCallback() {
                 override fun onCompleted(g: GestureDescription) {
                     segmentActive = false
-                    // Recenter path: we hit a clamp edge in continuous-cursor
-                    // mode. End the current stroke (willContinue=false lifts
-                    // the touch), then reset cursor to display center. The
-                    // next velocity tick from MouseEmitter will dispatch a
-                    // fresh stroke that starts with a touch DOWN at center —
-                    // restoring the delta-flow emulators depend on.
-                    if (pendingRecenter && continuousCursorActive) {
-                        pendingRecenter = false
-                        if (currentStroke != null) {
-                            // Dispatch a zero-length lift segment to formally
-                            // end the touch. After its own onCompleted, the
-                            // cursor will be reset to center below.
-                            dispatchLiftAndRecenter()
-                            return
-                        }
-                        // No stroke to lift — just reset state in place.
-                        recenterCursorState()
-                        return
-                    }
                     when {
                         anyCursorSessionActive && (cursorX != segEndX || cursorY != segEndY) ->
                             dispatchMoveSegment(willContinue = true)
@@ -689,56 +660,6 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         } else {
             Log.w(TAG, "dispatchGesture returned false — skipping segment")
         }
-    }
-
-    /**
-     * Brick J recenter follow-up. Dispatch a willContinue=false segment that
-     * formally lifts the current touch. After the lift's `onCompleted`, we
-     * reset the cursor state to the display center via [recenterCursorState]
-     * and the chain ends — the MouseEmitter's next velocity tick will start
-     * a fresh gesture stroke (touch DOWN at center).
-     */
-    private fun dispatchLiftAndRecenter() {
-        val anchor = currentStroke ?: run {
-            recenterCursorState()
-            return
-        }
-        val path = Path().apply { moveTo(segEndX, segEndY) }
-        val liftStroke = anchor.continueStroke(path, 0L, 1L, /* willContinue = */ false)
-        currentStroke = null
-        val ok = dispatchGesture(
-            buildGesture { addStroke(liftStroke) },
-            object : GestureResultCallback() {
-                override fun onCompleted(g: GestureDescription) {
-                    segmentActive = false
-                    recenterCursorState()
-                    Log.d(TAG, "recenter complete — cursor reset to ($cursorX,$cursorY)")
-                }
-                override fun onCancelled(g: GestureDescription) {
-                    segmentActive = false
-                    recenterCursorState()
-                }
-            }, null,
-        )
-        if (ok) {
-            segmentActive = true
-        } else {
-            // dispatchGesture refused the lift — fall back to in-place reset.
-            // The next dispatchMoveSegment will be a fresh stroke (currentStroke
-            // already null) but the system may still consider the prior touch
-            // held. Rare edge case; logging for diagnosis.
-            Log.w(TAG, "dispatchGesture(lift) returned false — recentering state without formal lift")
-            segmentActive = false
-            recenterCursorState()
-        }
-    }
-
-    /** Reset cursor + segment-end state to the display center. */
-    private fun recenterCursorState() {
-        cursorX = (cursorBoundsL + cursorBoundsR) / 2f
-        cursorY = (cursorBoundsT + cursorBoundsB) / 2f
-        segEndX = cursorX
-        segEndY = cursorY
     }
 
     fun injectMouseTap() {

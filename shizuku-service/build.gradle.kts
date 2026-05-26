@@ -18,6 +18,30 @@ android {
 
     defaultConfig {
         minSdk = 26
+
+        // Native uinput shim — creates a virtual SOURCE_MOUSE InputDevice via
+        // /dev/uinput so analog cursor modes deliver real OS-rendered cursor
+        // motion instead of failing-silently SOURCE_MOUSE MotionEvent injects.
+        // ABI filter list mirrors what the rest of the AGP build targets;
+        // anything missing here would crash with UnsatisfiedLinkError on that
+        // arch.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += ""
+                cFlags += listOf("-Wall", "-Wextra", "-Werror")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     compileOptions {

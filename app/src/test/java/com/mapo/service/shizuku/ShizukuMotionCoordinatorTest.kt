@@ -261,7 +261,7 @@ class ShizukuMotionCoordinatorTest {
                 InputAddress(InputSource.RIGHT_JOYSTICK, "click") to CompiledInput(
                     groupInputId = 20L,
                     activators = emptyList(),
-                    mode = BindingMode.MOUSE_JOYSTICK,
+                    mode = BindingMode.JOYSTICK_MOUSE,
                 ),
             ),
         )

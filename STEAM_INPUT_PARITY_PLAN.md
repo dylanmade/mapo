@@ -2,6 +2,8 @@
 
 ## Context
 
+> **2026-05-27 renumbering note.** Phase 7 (Steam Input parity foundation) was inserted between the original Phase 6 (input source modes) and the original Phase 7 (VDF import). The original Phase 7 + 8 shifted down to Phase 8 + 9. Inline cross-references throughout this document predate the renumbering and use the old numbers — read "Phase 7 (VDF import)" as "Phase 8 (VDF import)" and "Phase 8 (menu scaffold)" as "Phase 9 (menu scaffold)". The new Phase 7 details live in `~/.claude/plans/phase-7-steam-input-parity-foundation.md`.
+
 Mapo's `Remap Controls` feature today is a 1-to-1 physical-button → output mapping (16 digital buttons; keyboard / mouse / gamepad outputs). Steam Input is the gold-standard configurability model on the market: it adds **action sets**, **action layers**, **mode-shift**, **input source modes** (joystick variants, mouse modes, scroll, radial / touch menus), **activators** (long / double / start / release / chord / soft press, with turbo, toggle, cycle, delays), and a rich on-disk **VDF profile format** that already has a free Workshop ecosystem of community configurations.
 
 The long-term goal is parity with Steam Input + the ability to import community VDF configurations on Android. This plan is the staged execution of that goal.
@@ -739,7 +741,9 @@ In any activator's binding list: **Steam → Mode Shift**, target = (input sourc
 
 ---
 
-## Phase 6 — Input source modes
+## Phase 6 — Input source modes — ✅ COMPLETED (via Shizuku pivot 2026-05-25)
+
+> **Closed 2026-05-25.** The original Phase 6 plan below was reduced-scoped on 2026-05-16, then reopened via a Shizuku-based motion-capture pivot 2026-05-23 and fully shipped 2026-05-25. The shipped architecture differs substantially from the original plan — analog modes ride on a Shizuku UserService reading `/dev/input/event*` and a `/dev/uinput` virtual mouse, rather than the focused-overlay capture path originally outlined here. See `~/.claude/projects/-Users-dylanbperry-projects-mapo/memory/project_phase_6_shipped.md` for the final architecture and `~/.claude/plans/i-have-the-biggest-jazzy-micali.md` for the detailed brick-by-brick implementation record. Original plan content retained below for historical reference.
 
 ### Scope
 
@@ -950,7 +954,42 @@ Single Button, Button Pad, Dpad (digital — via `KEYCODE_DPAD_*`), Trigger (dig
 
 ---
 
-## Phase 7 — VDF import (legacy_set only)
+## Phase 7 (NEW) — Steam Input parity foundation
+
+> **Inserted 2026-05-27.** Detailed plan at `~/.claude/plans/phase-7-steam-input-parity-foundation.md`.
+
+### Scope
+
+Close the parity gaps surfaced by the 2026-05-25 → 2026-05-27 Steam Input documentation audit so that Phase 8 (VDF import) can round-trip Steam configs cleanly. Major work groups:
+
+- **Vocabulary + catalog rework** — rename `MOUSE_JOYSTICK` → `JOYSTICK_MOUSE`, drop `JOYSTICK_CAMERA` (fold to settings preset), drop `TWO_D_SCROLL`, rename `UNBOUND` → `DEVICE_DEFAULT`, add new `BindingMode.NONE` (Steam-parity silence), add `FLICK_STICK` / `MOUSE_REGION` / `HOTBAR_MENU` / `DIRECTIONAL_SWIPE` / `GYRO_TO_*` enum values. Sub-input names rename to Steam-verbatim. `SourceModeCatalog.modesValidFor` matches the canonical Steam per-source dropdowns. `SourceMode.validInputs()` becomes source-and-mode aware. Outer Ring Command sub-input added across joystick modes. Pass-through bug fix for face buttons.
+- **`DEVICE_DEFAULT` + `NONE` runtime distinction** — Mapo's `[Device Default]` (passthrough) and Steam-parity `None` (intercept + silence) are both available across all source dropdowns with distinct runtime behavior.
+- **Trigger picker rework** — `[Device Default]` / `None` / `Trigger (Digital)` / `Trigger (Analog)` source-aware display labels.
+- **Mode Shifting runtime** — dynamic mode swap while a designated button is held; data model has the slot, runtime currently a stub.
+- **Real Joystick Move** — XInput stick passthrough via `/dev/uinput` virtual gamepad (parallel to Phase 6's mouse uinput work).
+- **Mouse Region runtime** — applies to joystick + gyro sources; shared `MouseRegionMode` handler.
+- **Gyro sensor pipeline + gyro-driven mode runtimes** — Android `SensorManager` integration; modes: Gyro to Mouse, Gyro to Joystick Camera, Gyro to Joystick Deflection, Mouse Region on gyro, Directional Pad on gyro, Directional Swipe.
+- **Flick Stick** — joystick mode using stick flick + gyro tracking. Depends on the gyro pipeline.
+- **Per-mode settings parity** (final brick) — Cog-menu settings parity per mode (`dpad_layout` analog_emulation/cross_gate, joystick rotation/acceleration/anti_deadzone, etc.).
+
+### Brick layout
+
+A — Vocabulary + catalog rework. B — Mode Shifting runtime. C — Real Joystick Move + Mouse Region (joystick). D — Gyro sensor pipeline + gyro-driven modes. E — Flick Stick (depends on D). F — Per-mode settings parity. G — Final verification + close.
+
+### Out of scope (deferred post-Steam-Input-parity)
+
+- Scroll Wheel runtime (rare feature)
+- Mapo-extension mode dropdowns (e.g., dpad-as-mouse) — additive post-Phase-8
+- Menu rendering (Phase 9)
+- VDF export
+
+### Verify
+
+LJ in Joystick Move → GameNative game reads virtual XInput stick. LJ in Mouse Region → cursor at corresponding screen-region position. Holding RB activates a Mode Shift → LJ's behavior swaps until release. Gyro available on AYN Thor + Odin 2 Mini. Face buttons in `[Device Default]` pass through correctly. Trigger picker shows `[Device Default]` / `None` / `Trigger (Digital)` / `Trigger (Analog)`.
+
+---
+
+## Phase 8 — VDF import (legacy_set only)
 
 ### Scope
 
@@ -1014,7 +1053,7 @@ VDF targets a specific controller (`controller_neptune` / `controller_xboxelite`
 
 ---
 
-## Phase 8 — Radial / touch menu data scaffold
+## Phase 9 — Radial / touch menu data scaffold
 
 ### Scope
 
@@ -1171,6 +1210,7 @@ A consolidated list for quick scanning at execution time.
 | 3 | A Long Press of 0.3s emits a different binding than a tap. |
 | 4 | Switching action sets via a binding changes the live mapping. |
 | 5 | Holding RB activates a layer that overrides A's binding; releasing reverts. |
-| 6 | Right joystick set to Mouse Joystick mode moves the cursor. |
-| 7 | A real community Steam Deck VDF imports and the resulting Mapo config plays back equivalently. |
-| 8 | A menu can be authored end-to-end; firing its open-binding logs activation (overlay deferred). |
+| 6 ✅ | Right joystick set to Joystick Mouse mode moves the cursor (shipped via Shizuku pivot 2026-05-25). |
+| 7 | Real Joystick Move + Mouse Region + gyro modes work on AYN Thor; Mode Shift swap on button-hold reverts on release; face buttons in `[Device Default]` pass through cleanly. |
+| 8 | A real community Steam Deck VDF imports and the resulting Mapo config plays back equivalently. |
+| 9 | A menu can be authored end-to-end; firing its open-binding logs activation (overlay deferred). |

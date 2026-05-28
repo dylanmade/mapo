@@ -7,6 +7,7 @@ import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.InputSource
 import com.mapo.service.input.modes.StubMode
+import com.mapo.service.input.modes.acceptsFor
 import com.mapo.service.input.modes.handler
 import org.json.JSONException
 import org.json.JSONObject
@@ -306,17 +307,21 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
         val inputs = HashMap<InputAddress, CompiledInput>()
         for (preset in presetEntries) {
             if (preset.state != "active") continue
-            // Brick 6.1: consult the runtime mode handler to validate sub-input keys.
-            // Implemented modes drop unknown keys with a warning so misconfigured data
-            // can't silently emit phantom inputs; StubMode (modes whose runtime hasn't
-            // landed) accepts anything — keeps existing seeded DPAD/TRIGGER/etc. data
-            // working until 6.2+ flips them to real handlers.
-            val sourceMode = preset.group.group.mode.handler()
+            // Validate sub-input keys against the source-aware Steam vocabulary.
+            // Phase 7 Brick A: switched from mode-only `SourceMode.accepts` to the
+            // source-and-mode-aware `acceptsFor(source, mode, inputKey)` since the
+            // valid sub-input set depends on both — e.g. face-buttons-in-Dpad-mode
+            // binds A/B/X/Y, joystick-in-Dpad-mode binds Up/Down/Left/Right.
+            // StubMode (modes whose runtime hasn't landed) keeps the permissive
+            // fallback so seeded data for unimplemented modes isn't silently
+            // dropped before the corresponding brick ships.
+            val mode = preset.group.group.mode
+            val sourceMode = mode.handler()
             for (inputGraph in preset.group.inputs) {
                 val inputKey = inputGraph.input.inputKey
-                if (sourceMode !is StubMode && !sourceMode.accepts(inputKey)) {
+                if (sourceMode !is StubMode && !acceptsFor(preset.inputSource, mode, inputKey)) {
                     Log.w(TAG_COMPILE, "compile: dropping group_input '$inputKey' on " +
-                        "${preset.inputSource} — not valid for mode ${sourceMode.mode}")
+                        "${preset.inputSource} — not valid for (${preset.inputSource}, $mode)")
                     continue
                 }
                 val address = InputAddress(preset.inputSource, inputKey)

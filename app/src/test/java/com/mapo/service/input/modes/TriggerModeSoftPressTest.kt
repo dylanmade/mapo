@@ -46,7 +46,7 @@ class TriggerModeSoftPressTest {
     ) = ModeContext(
         source = InputSource.LEFT_TRIGGER,
         settingsJson = settingsJson,
-        priorLatched = mapOf(TriggerMode.SOFT_PRESS_SUB_INPUT to priorLatched),
+        priorLatched = mapOf(TriggerMode.SOFT_PULL_SUB_INPUT to priorLatched),
         activeLayerIds = emptyList(),
     )
 
@@ -61,7 +61,7 @@ class TriggerModeSoftPressTest {
     fun crossingThresholdUpward_emitsExactlyOneDown() {
         // Default soft_threshold = 0.10; reading at 0.15 crosses.
         TriggerMode.evaluate(reading(0.15f), ctx(priorLatched = false), emit, MouseEmitter.NOOP)
-        assertEquals(listOf(TriggerMode.SOFT_PRESS_SUB_INPUT to true), emits)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to true), emits)
     }
 
     @Test
@@ -83,7 +83,7 @@ class TriggerModeSoftPressTest {
     fun droppingBelowHysteresisFloor_emitsExactlyOneUp() {
         // Latched, magnitude drops to 0.04 — below (0.10 - 0.05)=0.05. Unlatch.
         TriggerMode.evaluate(reading(0.04f), ctx(priorLatched = true), emit, MouseEmitter.NOOP)
-        assertEquals(listOf(TriggerMode.SOFT_PRESS_SUB_INPUT to false), emits)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to false), emits)
     }
 
     @Test
@@ -98,7 +98,7 @@ class TriggerModeSoftPressTest {
     fun exactThreshold_latchesDown() {
         // The comparison is `magnitude >= soft_threshold`, so hitting 0.10 latches.
         TriggerMode.evaluate(reading(0.10f), ctx(priorLatched = false), emit, MouseEmitter.NOOP)
-        assertEquals(listOf(TriggerMode.SOFT_PRESS_SUB_INPUT to true), emits)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to true), emits)
     }
 
     @Test
@@ -110,7 +110,7 @@ class TriggerModeSoftPressTest {
 
         // 0.32 crosses custom threshold → DOWN.
         TriggerMode.evaluate(reading(0.32f), ctx(priorLatched = false, settings), emit, MouseEmitter.NOOP)
-        assertEquals(listOf(TriggerMode.SOFT_PRESS_SUB_INPUT to true), emits)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to true), emits)
     }
 
     @Test
@@ -121,7 +121,7 @@ class TriggerModeSoftPressTest {
         // still gets working soft-press out of the box.
         val legacy = """{"click_threshold":0.95}"""
         TriggerMode.evaluate(reading(0.15f), ctx(priorLatched = false, legacy), emit, MouseEmitter.NOOP)
-        assertEquals(listOf(TriggerMode.SOFT_PRESS_SUB_INPUT to true), emits)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to true), emits)
     }
 
     @Test
@@ -130,7 +130,7 @@ class TriggerModeSoftPressTest {
         // motion handling keeps running.
         val garbage = "{not valid json"
         TriggerMode.evaluate(reading(0.15f), ctx(priorLatched = false, garbage), emit, MouseEmitter.NOOP)
-        assertEquals(listOf(TriggerMode.SOFT_PRESS_SUB_INPUT to true), emits)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to true), emits)
     }
 
     @Test
@@ -144,14 +144,17 @@ class TriggerModeSoftPressTest {
     }
 
     @Test
-    fun validInputs_includeClickAndSoftPress() {
-        // Post-unification: "soft_press" is a real sub-input row on the trigger
-        // binding_group (the UI's "L2/R2 Soft Pull" row). It accepts any
-        // activator type the user picks; soft-pull behavior emerges from the
-        // mode's evaluate() emitting the synthetic edge against this sub-input,
-        // which routes through the normal onPress / onRelease activator engine.
-        assertEquals(setOf("click", TriggerMode.SOFT_PRESS_SUB_INPUT), TriggerMode.validInputs())
-        assertTrue(TriggerMode.accepts("click"))
-        assertTrue(TriggerMode.accepts(TriggerMode.SOFT_PRESS_SUB_INPUT))
+    fun validInputs_includeFullPullAndSoftPull() {
+        // Phase 7 Brick A: sub-inputs renamed to Steam-verbatim. The trigger has
+        // "full_pull" (hardware threshold via KEYCODE_BUTTON_L2/R2) and "soft_pull"
+        // (analog soft-pull via TriggerMode.evaluate's hysteresis). Both are real
+        // bindable rows in the UI (L2/R2 Full Pull, L2/R2 Soft Pull) accepting any
+        // activator type the user picks.
+        assertEquals(
+            setOf(TriggerMode.FULL_PULL_SUB_INPUT, TriggerMode.SOFT_PULL_SUB_INPUT),
+            TriggerMode.validInputs(),
+        )
+        assertTrue(TriggerMode.accepts(TriggerMode.FULL_PULL_SUB_INPUT))
+        assertTrue(TriggerMode.accepts(TriggerMode.SOFT_PULL_SUB_INPUT))
     }
 }

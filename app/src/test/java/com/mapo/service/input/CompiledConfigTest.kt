@@ -103,7 +103,7 @@ class CompiledConfigTest {
         val compiled = cfg.toCompiled()
 
         assertEquals(null, compiled.lookup(InputSource.BUTTON_DIAMOND, "button_b"))
-        assertEquals(null, compiled.lookup(InputSource.DPAD, "dpad_north"))
+        assertEquals(null, compiled.lookup(InputSource.DPAD, "dpad_up"))
     }
 
     @Test
@@ -126,7 +126,7 @@ class CompiledConfigTest {
                     group = groupWith(
                         mode = BindingMode.DPAD,
                         inputs = listOf(
-                            inputWith("dpad_north", listOf(activatorWith(bindings = listOf(unboundBinding())))),
+                            inputWith("dpad_up", listOf(activatorWith(bindings = listOf(unboundBinding())))),
                         ),
                     ),
                 ),
@@ -146,7 +146,7 @@ class CompiledConfigTest {
         )
         assertEquals(
             BindingOutput.Unbound,
-            compiled.lookup(InputSource.DPAD, "dpad_north")!!.activators[0].bindings.single(),
+            compiled.lookup(InputSource.DPAD, "dpad_up")!!.activators[0].bindings.single(),
         )
     }
 
@@ -608,7 +608,7 @@ class CompiledConfigTest {
             cycleBindings = true,
             interruptable = false,
             chordPartnerSource = InputSource.DPAD,
-            chordPartnerKey = "dpad_north",
+            chordPartnerKey = "dpad_up",
         )
         val roundTripped = CompiledActivatorSettings.parse(original.toJson())
         assertEquals(original, roundTripped)
@@ -695,7 +695,7 @@ class CompiledConfigTest {
                         mode = BindingMode.BUTTON_PAD,
                         inputs = listOf(
                             inputWith("button_a", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
-                            inputWith("dpad_north", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "X"))))),
+                            inputWith("dpad_up", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "X"))))),
                         ),
                     ),
                 ),
@@ -710,7 +710,7 @@ class CompiledConfigTest {
             BindingOutput.KeyPress("ENTER"),
             compiled.lookup(InputSource.BUTTON_DIAMOND, "button_a")!!.activators[0].bindings.single(),
         )
-        assertEquals(null, compiled.lookup(InputSource.BUTTON_DIAMOND, "dpad_north"))
+        assertEquals(null, compiled.lookup(InputSource.BUTTON_DIAMOND, "dpad_up"))
     }
 
     @Test
@@ -738,10 +738,12 @@ class CompiledConfigTest {
     }
 
     @Test
-    fun dpadMode_dropsSubInputsThatArentDpadKeysOrClick() {
-        // Brick 6.3: DPAD has a real handler now (not StubMode). Its sub-input
-        // vocabulary is the four directions + click. button_a under a DPAD group is
-        // schema misseed and gets dropped at compile time.
+    fun dpadMode_dropsSubInputsThatArentDpadDirections() {
+        // Phase 7 Brick A: switched to source-and-mode-aware sub-input validation.
+        // On the DPAD source in DPAD mode, valid sub-inputs are Up/Down/Left/Right
+        // only (per Steam's per-source dropdown table). `click` is a stick-click
+        // sub-input belonging to joystick sources — on the physical DPAD source
+        // it's now dropped at compile. `button_a` was always wrong here.
         val cfg = configWith(
             preset = listOf(
                 presetEntry(
@@ -749,7 +751,7 @@ class CompiledConfigTest {
                     group = groupWith(
                         mode = BindingMode.DPAD,
                         inputs = listOf(
-                            inputWith("dpad_north", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "UP"))))),
+                            inputWith("dpad_up", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "UP"))))),
                             inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
                             inputWith("button_a", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "Z"))))),
                         ),
@@ -760,17 +762,18 @@ class CompiledConfigTest {
 
         val compiled = cfg.toCompiled()
 
-        // dpad_north and click survive; button_a is dropped.
-        assertEquals(2, compiled.totalInputCount)
-        assertNotNull(compiled.lookup(InputSource.DPAD, "dpad_north"))
-        assertNotNull(compiled.lookup(InputSource.DPAD, "click"))
+        // Only dpad_up survives; click and button_a are both dropped on the DPAD source.
+        assertEquals(1, compiled.totalInputCount)
+        assertNotNull(compiled.lookup(InputSource.DPAD, "dpad_up"))
+        assertEquals(null, compiled.lookup(InputSource.DPAD, "click"))
         assertEquals(null, compiled.lookup(InputSource.DPAD, "button_a"))
     }
 
     @Test
-    fun triggerMode_acceptsOnlyClick() {
-        // Brick 6.4: TRIGGER has a real handler now. Sub-input vocabulary is just `click`
-        // — analog pull magnitude lives in settings, not in additional sub-inputs.
+    fun triggerMode_acceptsOnlyFullPullAndSoftPull() {
+        // Phase 7 Brick A: TRIGGER sub-inputs renamed to Steam-verbatim
+        // `full_pull` + `soft_pull`. `click` is no longer valid on trigger sources;
+        // misseeded rows are dropped at compile.
         val cfg = configWith(
             preset = listOf(
                 presetEntry(
@@ -778,7 +781,7 @@ class CompiledConfigTest {
                     group = groupWith(
                         mode = BindingMode.TRIGGER,
                         inputs = listOf(
-                            inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
+                            inputWith("full_pull", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
                             inputWith("button_a", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "Z"))))),
                         ),
                     ),
@@ -789,7 +792,7 @@ class CompiledConfigTest {
         val compiled = cfg.toCompiled()
 
         assertEquals(1, compiled.totalInputCount)
-        assertNotNull(compiled.lookup(InputSource.LEFT_TRIGGER, "click"))
+        assertNotNull(compiled.lookup(InputSource.LEFT_TRIGGER, "full_pull"))
         assertEquals(null, compiled.lookup(InputSource.LEFT_TRIGGER, "button_a"))
     }
 
@@ -805,7 +808,7 @@ class CompiledConfigTest {
                 presetEntry(
                     inputSource = InputSource.LEFT_JOYSTICK, state = "active",
                     group = groupWith(
-                        mode = BindingMode.ABSOLUTE_MOUSE,
+                        mode = BindingMode.MOUSE_REGION,
                         inputs = listOf(
                             inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
                             // Even a typo'd key passes through under a stub mode.
@@ -834,7 +837,7 @@ class CompiledConfigTest {
                     group = groupWith(
                         mode = BindingMode.TRIGGER,
                         inputs = listOf(
-                            inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "SPACE"))))),
+                            inputWith("full_pull", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "SPACE"))))),
                         ),
                     ),
                 ),
@@ -842,7 +845,7 @@ class CompiledConfigTest {
         )
 
         val compiled = cfg.toCompiled()
-        val hit = compiled.lookup(InputSource.LEFT_TRIGGER, "click")
+        val hit = compiled.lookup(InputSource.LEFT_TRIGGER, "full_pull")
 
         assertNotNull(hit)
         assertEquals(BindingMode.TRIGGER, hit!!.mode)
@@ -864,7 +867,7 @@ class CompiledConfigTest {
                         presetEntry(
                             inputSource = InputSource.RIGHT_JOYSTICK, state = "active",
                             group = groupWith(
-                                mode = BindingMode.MOUSE_JOYSTICK,
+                                mode = BindingMode.JOYSTICK_MOUSE,
                                 inputs = listOf(
                                     inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.MOUSE_BUTTON, "MOUSE_RIGHT"))))),
                                 ),
@@ -877,7 +880,7 @@ class CompiledConfigTest {
                 presetEntry(
                     inputSource = InputSource.RIGHT_JOYSTICK, state = "active",
                     group = groupWith(
-                        mode = BindingMode.JOYSTICK_CAMERA,
+                        mode = BindingMode.JOYSTICK_MOUSE,
                         inputs = listOf(
                             inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "F"))))),
                         ),
@@ -895,8 +898,8 @@ class CompiledConfigTest {
         val baseHit = compiledSet.inputs[InputAddress(InputSource.RIGHT_JOYSTICK, "click")]
         val layerHit = compiledSet.layers.getValue(300L).inputs[InputAddress(InputSource.RIGHT_JOYSTICK, "click")]
 
-        assertEquals(BindingMode.JOYSTICK_CAMERA, baseHit!!.mode)
-        assertEquals(BindingMode.MOUSE_JOYSTICK, layerHit!!.mode)
+        assertEquals(BindingMode.JOYSTICK_MOUSE, baseHit!!.mode)
+        assertEquals(BindingMode.JOYSTICK_MOUSE, layerHit!!.mode)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

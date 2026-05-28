@@ -83,26 +83,26 @@ object RemapSections {
         ),
         SECTION_DPAD to listOf(
             RemapPaneItem.Subheader("dpad.header", "Directional Pad Behavior", InputSource.DPAD),
-            RemapPaneItem.BindingRow("dpad.up", "D-Pad Up", InputSource.DPAD, "dpad_north"),
-            RemapPaneItem.BindingRow("dpad.down", "D-Pad Down", InputSource.DPAD, "dpad_south"),
-            RemapPaneItem.BindingRow("dpad.left", "D-Pad Left", InputSource.DPAD, "dpad_west"),
-            RemapPaneItem.BindingRow("dpad.right", "D-Pad Right", InputSource.DPAD, "dpad_east"),
+            RemapPaneItem.BindingRow("dpad.up", "D-Pad Up", InputSource.DPAD, "dpad_up"),
+            RemapPaneItem.BindingRow("dpad.down", "D-Pad Down", InputSource.DPAD, "dpad_down"),
+            RemapPaneItem.BindingRow("dpad.left", "D-Pad Left", InputSource.DPAD, "dpad_left"),
+            RemapPaneItem.BindingRow("dpad.right", "D-Pad Right", InputSource.DPAD, "dpad_right"),
         ),
         SECTION_TRIGGERS to listOf(
             RemapPaneItem.Subheader("triggers.left.header", "Left Trigger Behavior", InputSource.LEFT_TRIGGER),
-            RemapPaneItem.BindingRow("triggers.left.full", "L2 Full Pull", InputSource.LEFT_TRIGGER, "click"),
+            RemapPaneItem.BindingRow("triggers.left.full", "L2 Full Pull", InputSource.LEFT_TRIGGER, "full_pull"),
             // Soft Pull lights up when the trigger mode is set to TRIGGER (its
-            // compile-time validInputs include `soft_press`); under the default
-            // UNBOUND mode the binding-row look-up returns null and the row reads
-            // as bindable-but-empty, mirroring how a Full Pull row reads when no
+            // validInputs include `soft_pull`); under the default DEVICE_DEFAULT
+            // mode the binding-row look-up returns null and the row reads as
+            // bindable-but-empty, mirroring how a Full Pull row reads when no
             // activator is wired. Brick 5 follow-up unified the soft-press model:
             // soft-pull behavior comes from any activator type bound here, not
-            // from a SOFT_PRESS activator type on the click row.
-            RemapPaneItem.BindingRow("triggers.left.soft", "L2 Soft Pull", InputSource.LEFT_TRIGGER, "soft_press"),
+            // from a SOFT_PRESS activator type on the full_pull row.
+            RemapPaneItem.BindingRow("triggers.left.soft", "L2 Soft Pull", InputSource.LEFT_TRIGGER, "soft_pull"),
             RemapPaneItem.DisabledRow("triggers.left.analog", "Analog Output Trigger"),
             RemapPaneItem.Subheader("triggers.right.header", "Right Trigger Behavior", InputSource.RIGHT_TRIGGER),
-            RemapPaneItem.BindingRow("triggers.right.full", "R2 Full Pull", InputSource.RIGHT_TRIGGER, "click"),
-            RemapPaneItem.BindingRow("triggers.right.soft", "R2 Soft Pull", InputSource.RIGHT_TRIGGER, "soft_press"),
+            RemapPaneItem.BindingRow("triggers.right.full", "R2 Full Pull", InputSource.RIGHT_TRIGGER, "full_pull"),
+            RemapPaneItem.BindingRow("triggers.right.soft", "R2 Soft Pull", InputSource.RIGHT_TRIGGER, "soft_pull"),
             RemapPaneItem.DisabledRow("triggers.right.analog", "Analog Output Trigger"),
         ),
         SECTION_JOYSTICKS to listOf(

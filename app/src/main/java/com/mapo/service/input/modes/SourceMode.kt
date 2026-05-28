@@ -154,8 +154,11 @@ interface MouseEmitter {
 /**
  * Pass-through: Mapo does not intercept this source. No sub-inputs are accepted,
  * so the compile step drops any rows under a binding group in this mode and the
- * activator engine never sees a configured input for the source — physical events
- * flow to the foreground app untouched.
+ * activator engine never sees a configured input for the source. **Crucially,
+ * the runtime returns false from `onKeyEvent` for inputs under a
+ * `DEVICE_DEFAULT` source** — Android's hardware-native input flows untouched
+ * to the foreground app (e.g. physical face button A still produces native A
+ * to the launched game).
  *
  * This is the default mode for analog-capable sources (sticks, dpad, triggers)
  * on freshly-seeded profiles. The user must explicitly pick an analog mode for
@@ -163,9 +166,27 @@ interface MouseEmitter {
  * [ShizukuMotionCoordinator][com.mapo.service.shizuku.ShizukuMotionCoordinator]'s
  * `/dev/input` enumeration — keeping `:shizuku-service` idle (battery) on
  * profiles that haven't opted in.
+ *
+ * **Distinct from [NoneMode]** ([BindingMode.NONE]) which intercepts and
+ * silences. See [feedback_none_vs_device_default_distinction.md].
  */
-object UnboundMode : SourceMode {
-    override val mode: BindingMode = BindingMode.UNBOUND
+object DeviceDefaultMode : SourceMode {
+    override val mode: BindingMode = BindingMode.DEVICE_DEFAULT
+    override fun validInputs(): Set<String> = emptySet()
+}
+
+/**
+ * Silence: Mapo intercepts this source and emits nothing. The accessibility
+ * service consumes the event (returns true from `onKeyEvent`); no
+ * `BindingOutput` dispatches. The hardware-native event is suppressed —
+ * the foreground app sees nothing for this input.
+ *
+ * **Distinct from [DeviceDefaultMode]** ([BindingMode.DEVICE_DEFAULT]) which
+ * lets the hardware-native event pass through. Steam Input parity for the
+ * "None" mode dropdown option.
+ */
+object NoneMode : SourceMode {
+    override val mode: BindingMode = BindingMode.NONE
     override fun validInputs(): Set<String> = emptySet()
 }
 
@@ -191,8 +212,8 @@ object ButtonPadMode : SourceMode {
 }
 
 /**
- * 4-direction directional pad. Sub-inputs: `dpad_north`, `dpad_south`, `dpad_east`,
- * `dpad_west`, `click`. The four direction keys flow from physical
+ * 4-direction directional pad. Sub-inputs: `dpad_up`, `dpad_down`, `dpad_left`,
+ * `dpad_right`, `click`. The four direction keys flow from physical
  * `KEYCODE_DPAD_UP/DOWN/LEFT/RIGHT` via the accessibility service for the [DPAD]
  * source. When this mode is selected on a *joystick* source (LEFT_JOYSTICK /
  * RIGHT_JOYSTICK), [evaluate] quantizes the analog (x, y) into the same
@@ -204,7 +225,7 @@ object ButtonPadMode : SourceMode {
  *  - `dpad_layout` (`"4_way"` / `"8_way"`, default `"4_way"`) — quantization for
  *    analog evaluation. `4_way` picks the dominant axis (|x| vs |y|); only one
  *    direction at a time. `8_way` allows two adjacent directions simultaneously
- *    (a NE push emits `dpad_north` + `dpad_east`). Inert when the mode is
+ *    (a NE push emits `dpad_up` + `dpad_right`). Inert when the mode is
  *    attached to the digital DPAD source — physical `KEYCODE_DPAD_*` always
  *    produces a single direction per press.
  *  - `inner_deadzone` (0..1, default 0.20) — radial deadband for analog
@@ -222,22 +243,22 @@ object ButtonPadMode : SourceMode {
  * axis events only, some as both. The accessibility service path through
  * `onKeyEvent` is canonical for the digital DPAD source — it always fires
  * cleanly on devices that report key events. To avoid double-firing
- * `dpad_north` on controllers that report both, [evaluate] short-circuits
+ * `dpad_up` on controllers that report both, [evaluate] short-circuits
  * for [InputSource.DPAD] and lets the digital path own the emit. Revisit if
  * a target device ships HAT-only with no key events for the dpad.
  *
  * **8-way axial threshold.** A diagonal push (e.g. x=0.7, y=-0.7) trivially
- * passes inner_deadzone, so both `dpad_north` and `dpad_east` need to fire.
+ * passes inner_deadzone, so both `dpad_up` and `dpad_right` need to fire.
  * The per-axis floor is the inner_deadzone projected onto the diagonal —
  * `inner_deadzone * sin(45°) ≈ inner_deadzone * 0.707`. With the 0.20
- * default this is ≈0.141, so (0.7, -0.15) emits N+E but (0.7, -0.05) emits
- * only E. Matches typical Steam-Input feel for low-angle pushes.
+ * default this is ≈0.141, so (0.7, -0.15) emits Up+Right but (0.7, -0.05)
+ * emits only Right. Matches typical Steam-Input feel for low-angle pushes.
  */
 object DpadMode : SourceMode {
     override val mode: BindingMode = BindingMode.DPAD
     override fun validInputs(): Set<String> = INPUTS
     override fun defaultSettingsJson(): String = DpadSettings.DEFAULT_JSON
-    private val INPUTS = setOf("dpad_north", "dpad_south", "dpad_east", "dpad_west", "click")
+    private val INPUTS = setOf("dpad_up", "dpad_down", "dpad_left", "dpad_right", "click")
 
     override fun evaluate(
         reading: AnalogEvent,
@@ -251,46 +272,46 @@ object DpadMode : SourceMode {
         if (reading.source == InputSource.DPAD) return
 
         val settings = DpadSettings.parse(ctx.settingsJson)
-        val priorN = ctx.priorLatched["dpad_north"] == true
-        val priorS = ctx.priorLatched["dpad_south"] == true
-        val priorE = ctx.priorLatched["dpad_east"] == true
-        val priorW = ctx.priorLatched["dpad_west"] == true
+        val priorUp = ctx.priorLatched["dpad_up"] == true
+        val priorDown = ctx.priorLatched["dpad_down"] == true
+        val priorRight = ctx.priorLatched["dpad_right"] == true
+        val priorLeft = ctx.priorLatched["dpad_left"] == true
 
         val mag = sqrt(reading.x * reading.x + reading.y * reading.y).coerceIn(0f, 1f)
-        val anyPrior = priorN || priorS || priorE || priorW
+        val anyPrior = priorUp || priorDown || priorRight || priorLeft
         val releaseFloor = (settings.innerDeadzone - settings.outerDeadzone).coerceAtLeast(0f)
         val active = if (anyPrior) mag >= releaseFloor else mag >= settings.innerDeadzone
 
         // y > 0 is screen-down (matches AnalogEvent's documented convention) — so
-        // pushing the stick UP gives y < 0 and emits dpad_north. WASD-natural.
-        val wantN: Boolean
-        val wantS: Boolean
-        val wantE: Boolean
-        val wantW: Boolean
+        // pushing the stick UP gives y < 0 and emits dpad_up. WASD-natural.
+        val wantUp: Boolean
+        val wantDown: Boolean
+        val wantRight: Boolean
+        val wantLeft: Boolean
         if (!active) {
-            wantN = false; wantS = false; wantE = false; wantW = false
+            wantUp = false; wantDown = false; wantRight = false; wantLeft = false
         } else if (settings.dpadLayout == DpadSettings.LAYOUT_8_WAY) {
             val axial = settings.innerDeadzone * AXIAL_PROJECTION_45
-            wantN = reading.y < -axial
-            wantS = reading.y > axial
-            wantE = reading.x > axial
-            wantW = reading.x < -axial
+            wantUp = reading.y < -axial
+            wantDown = reading.y > axial
+            wantRight = reading.x > axial
+            wantLeft = reading.x < -axial
         } else {
             // 4_way: dominant-axis quantization. Ties (|x| == |y| exactly) fall to
             // the vertical branch — arbitrary but stable.
             if (abs(reading.x) > abs(reading.y)) {
-                wantN = false; wantS = false
-                wantE = reading.x > 0f; wantW = reading.x < 0f
+                wantUp = false; wantDown = false
+                wantRight = reading.x > 0f; wantLeft = reading.x < 0f
             } else {
-                wantN = reading.y < 0f; wantS = reading.y > 0f
-                wantE = false; wantW = false
+                wantUp = reading.y < 0f; wantDown = reading.y > 0f
+                wantRight = false; wantLeft = false
             }
         }
 
-        if (wantN != priorN) digitalEmit("dpad_north", wantN)
-        if (wantS != priorS) digitalEmit("dpad_south", wantS)
-        if (wantE != priorE) digitalEmit("dpad_east", wantE)
-        if (wantW != priorW) digitalEmit("dpad_west", wantW)
+        if (wantUp != priorUp) digitalEmit("dpad_up", wantUp)
+        if (wantDown != priorDown) digitalEmit("dpad_down", wantDown)
+        if (wantRight != priorRight) digitalEmit("dpad_right", wantRight)
+        if (wantLeft != priorLeft) digitalEmit("dpad_left", wantLeft)
     }
 
     /** sin(45°) — per-axis floor projection for 8-way diagonal emit. */
@@ -346,23 +367,23 @@ internal data class DpadSettings(
 
 /**
  * Analog-trigger source (LEFT_TRIGGER, RIGHT_TRIGGER). Two sub-inputs:
- *  - `click` — the hardware threshold sub-input. Fires via the accessibility
+ *  - `full_pull` — the hardware threshold sub-input. Fires via the accessibility
  *    service's `KEYCODE_BUTTON_L2` / `KEYCODE_BUTTON_R2` digital edge. Any
  *    activator type (FULL_PRESS, LONG_PRESS, DOUBLE_PRESS, RELEASE_PRESS,
- *    CHORDED_PRESS) is valid on this row. UI label: "L2/R2 Full Pull".
- *  - `soft_press` — the analog soft-pull sub-input. Fires via [evaluate] on
- *    motion events captured by the focused overlay when the analog magnitude
+ *    CHORDED_PRESS) is valid on this row. Steam-verbatim name; UI label "L2/R2 Full Pull".
+ *  - `soft_pull` — the analog soft-pull sub-input. Fires via [evaluate] on
+ *    analog readings from the Shizuku motion stream when the magnitude
  *    crosses `soft_threshold` (with `soft_hysteresis` on release). Any
  *    activator type is valid here too — most users pick FULL_PRESS so the
- *    soft pull fires their chosen command once per pull. UI label: "L2/R2 Soft Pull".
+ *    soft pull fires their chosen command once per pull. UI label "L2/R2 Soft Pull".
  *
- * **Why a separate sub-input and not a SOFT_PRESS activator type on `click`?**
+ * **Why a separate sub-input and not a SOFT_PRESS activator type on `full_pull`?**
  * Steam Input exposes BOTH a SOFT_PRESS activator and a Soft Pull trigger slot,
  * which is the same behavior expressed two ways. Mapo unifies on the sub-input
  * model — one place for the user to express "fire when the trigger is in the
  * soft range" — and retires SOFT_PRESS as a picker option (it stays in the
  * enum solely so VDF import can translate Steam's `SOFT_PRESS` activator into
- * a Mapo activator on the `"soft_press"` sub-input).
+ * a Mapo activator on the `"soft_pull"` sub-input).
  *
  * **Settings:**
  *  - `click_threshold` — Steam-default 0.95. Documented; inert on Android
@@ -379,10 +400,13 @@ object TriggerMode : SourceMode {
     override fun validInputs(): Set<String> = INPUTS
     override fun defaultSettingsJson(): String =
         """{"click_threshold":0.95,"soft_threshold":0.10,"soft_hysteresis":0.05}"""
-    private val INPUTS = setOf("click", SOFT_PRESS_SUB_INPUT)
+    private val INPUTS = setOf(FULL_PULL_SUB_INPUT, SOFT_PULL_SUB_INPUT)
 
-    /** Sub-input key for the analog soft-pull row. */
-    const val SOFT_PRESS_SUB_INPUT: String = "soft_press"
+    /** Sub-input key for the digital full-pull row. Steam-verbatim. */
+    const val FULL_PULL_SUB_INPUT: String = "full_pull"
+
+    /** Sub-input key for the analog soft-pull row. Steam-verbatim. */
+    const val SOFT_PULL_SUB_INPUT: String = "soft_pull"
 
     override fun evaluate(
         reading: AnalogEvent,
@@ -392,7 +416,7 @@ object TriggerMode : SourceMode {
     ) {
         val settings = TriggerSettings.parse(ctx.settingsJson)
         val magnitude = reading.x  // triggers are 0..1 on x; y is always 0
-        val priorLatched = ctx.priorLatched[SOFT_PRESS_SUB_INPUT] == true
+        val priorLatched = ctx.priorLatched[SOFT_PULL_SUB_INPUT] == true
         val nowLatched = if (priorLatched) {
             // Stay latched until magnitude drops below the lower hysteresis band.
             magnitude >= (settings.softThreshold - settings.softHysteresis)
@@ -401,7 +425,7 @@ object TriggerMode : SourceMode {
             magnitude >= settings.softThreshold
         }
         if (nowLatched != priorLatched) {
-            digitalEmit(SOFT_PRESS_SUB_INPUT, nowLatched)
+            digitalEmit(SOFT_PULL_SUB_INPUT, nowLatched)
         }
     }
 }
@@ -444,22 +468,30 @@ internal data class TriggerSettings(
 }
 
 /**
- * Stick-to-cursor analog mode optimized for menus and on-screen cursor work
- * (the "use the stick like a mouse" feel). Sub-input: `click` — passes the
- * stick-click through to the activator engine so the user can still bind
- * thumb-stick presses to clicks / actions.
+ * Stick-to-cursor analog mode. Steam's "Joystick Mouse" — joystick input,
+ * mouse cursor output. The user feels like they're driving a joystick; the
+ * game receives mouse motion. Sub-inputs: `click` (stick click), `outer_ring`
+ * (Outer Ring Command — fires at rim threshold). `touch` (capacitive) is
+ * Steam-canonical for this mode but Mapo's target hardware lacks
+ * capacitive sticks, so it's omitted from the local picker.
  *
- * **Settings — Steam defaults, tuned for cursor precision:**
- *  - `deadzone` (0..1, Steam default 0.10) — radial inner deadzone applied
+ * **Settings — Steam-shaped defaults, tuned for cursor precision:**
+ *  - `deadzone` (0..1, default 0.10) — radial inner deadzone applied
  *    in normalized stick units.
  *  - `sensitivity` (px/sec at full deflection, default 800) — velocity at
  *    the outer edge of stick travel. Cursor-friendly default; FPS camera
- *    work should pick [JoystickCameraMode] instead.
+ *    work can pick the "camera" preset which uses
+ *    [StickToMouseSettings.JOYSTICK_CAMERA_DEFAULTS] as its base.
  *  - `exponent` (response curve power, default 1.6) — `>1` makes near-center
  *    deflection slower (precision), `<1` makes it faster (snap). Steam
  *    Input's "Sensitivity Curve" maps roughly to this.
  *  - `invert_y` (bool, default false) — flips the y axis; FPS conventions
  *    vary by player.
+ *
+ * **Camera tuning preset.** Phase 6's `JoystickCameraMode` collapsed into this
+ * mode in Phase 7 — same primitive (velocity into [MouseEmitter]), just
+ * different default settings. Users who want camera feel pick the "camera"
+ * preset in the Cog menu (Phase 7 Brick F); the underlying math is the same.
  *
  * **What gets emitted.** Each [evaluate] call samples the stick's normalized
  * (x, y), applies radial deadzone + curve + sensitivity, and writes the
@@ -467,11 +499,11 @@ internal data class TriggerSettings(
  * source. The emitter's integration loop keeps the cursor moving while the
  * stick is held.
  */
-object MouseJoystickMode : SourceMode {
-    override val mode: BindingMode = BindingMode.MOUSE_JOYSTICK
+object JoystickMouseMode : SourceMode {
+    override val mode: BindingMode = BindingMode.JOYSTICK_MOUSE
     override fun validInputs(): Set<String> = INPUTS
     override fun defaultSettingsJson(): String = StickToMouseSettings.MOUSE_JOYSTICK_DEFAULT_JSON
-    private val INPUTS = setOf("click")
+    private val INPUTS = setOf("click", "outer_ring")
 
     override fun evaluate(
         reading: AnalogEvent,
@@ -486,44 +518,11 @@ object MouseJoystickMode : SourceMode {
 }
 
 /**
- * Stick-to-cursor analog mode optimized for camera control in shooters / 3D
- * games (the "use the stick like a mouselook" feel). Same primitive as
- * [MouseJoystickMode] — produces a velocity into [MouseEmitter] — but the
- * defaults skew aggressive: higher sensitivity, larger deadzone for stable
- * crosshair-at-rest, stronger curve so fine aim sits near center and snap
- * turns live at the rim.
- *
- * Sub-input: `click` — same as [MouseJoystickMode].
- *
- * **Settings — Steam defaults, tuned for camera control:**
- *  - `deadzone` 0.15
- *  - `sensitivity` 1400 px/sec
- *  - `exponent` 2.0
- *  - `invert_y` false
- */
-object JoystickCameraMode : SourceMode {
-    override val mode: BindingMode = BindingMode.JOYSTICK_CAMERA
-    override fun validInputs(): Set<String> = INPUTS
-    override fun defaultSettingsJson(): String = StickToMouseSettings.JOYSTICK_CAMERA_DEFAULT_JSON
-    private val INPUTS = setOf("click")
-
-    override fun evaluate(
-        reading: AnalogEvent,
-        ctx: ModeContext,
-        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
-        mouse: MouseEmitter,
-    ) {
-        val settings = StickToMouseSettings.parse(ctx.settingsJson, StickToMouseSettings.JOYSTICK_CAMERA_DEFAULTS)
-        val (vx, vy) = settings.toVelocity(reading.x, reading.y)
-        mouse.setStickVelocity(reading.source, vx, vy)
-    }
-}
-
-/**
- * Parsed settings + math shared by [MouseJoystickMode] and [JoystickCameraMode].
- * Tolerant of missing keys; falls back to the mode's defaults (passed in by
- * the caller because Mouse Joystick and Joystick Camera have different
- * defaults).
+ * Parsed settings + math for [JoystickMouseMode]. Tolerant of missing keys;
+ * falls back to the caller-supplied defaults. [MOUSE_JOYSTICK_DEFAULTS] is
+ * the cursor-tuned preset (Phase 7 Brick A default); [JOYSTICK_CAMERA_DEFAULTS]
+ * is the camera-tuned preset preserved from Phase 6's removed `JoystickCameraMode`.
+ * The Cog menu (Phase 7 Brick F) will let users pick between presets.
  *
  * **toVelocity math:**
  *  1. Magnitude `m = sqrt(x² + y²)`, clamped to [0, 1].
@@ -614,25 +613,33 @@ data class StubMode(override val mode: BindingMode) : SourceMode {
 }
 
 /**
- * Resolve the runtime [SourceMode] handler for a [BindingMode] enum value. Implemented
- * modes return their singleton handler; everything else falls through to [StubMode] —
- * which is what makes 6.1 a non-breaking foundation rather than a hard cutover.
+ * Resolve the runtime [SourceMode] handler for a [BindingMode] enum value.
+ * Implemented modes return their singleton handler; everything else falls
+ * through to [StubMode] — which keeps the compile path non-strict for modes
+ * whose runtime ships in later Phase 7 bricks (Mouse Region / Flick Stick /
+ * Gyro modes / Joystick Move) and out-of-scope modes (Scroll Wheel, Hotbar /
+ * Radial / Touch Menu).
  */
 fun BindingMode.handler(): SourceMode = when (this) {
-    BindingMode.UNBOUND -> UnboundMode
+    BindingMode.DEVICE_DEFAULT -> DeviceDefaultMode
+    BindingMode.NONE -> NoneMode
     BindingMode.SINGLE_BUTTON -> SingleButtonMode
     BindingMode.BUTTON_PAD -> ButtonPadMode
     BindingMode.DPAD -> DpadMode
     BindingMode.TRIGGER -> TriggerMode
-    BindingMode.MOUSE_JOYSTICK -> MouseJoystickMode
-    BindingMode.JOYSTICK_CAMERA -> JoystickCameraMode
+    BindingMode.JOYSTICK_MOUSE -> JoystickMouseMode
     BindingMode.JOYSTICK_MOVE,
-    BindingMode.ABSOLUTE_MOUSE,
+    BindingMode.FLICK_STICK,
+    BindingMode.MOUSE_REGION,
     BindingMode.SCROLL_WHEEL,
-    BindingMode.TWO_D_SCROLL,
     BindingMode.REFERENCE,
+    BindingMode.GYRO_TO_MOUSE,
+    BindingMode.GYRO_TO_JOYSTICK_CAMERA,
+    BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
+    BindingMode.DIRECTIONAL_SWIPE,
     BindingMode.RADIAL_MENU,
-    BindingMode.TOUCH_MENU -> StubMode(this)
+    BindingMode.TOUCH_MENU,
+    BindingMode.HOTBAR_MENU -> StubMode(this)
 }
 
 /**
@@ -679,41 +686,173 @@ val ANALOG_MODES_REQUIRING_MOTION_CAPTURE: Set<BindingMode> = setOf(
     BindingMode.TRIGGER,
     BindingMode.DPAD,
     BindingMode.JOYSTICK_MOVE,
-    BindingMode.JOYSTICK_CAMERA,
-    BindingMode.MOUSE_JOYSTICK,
-    BindingMode.ABSOLUTE_MOUSE,
+    BindingMode.JOYSTICK_MOUSE,
+    BindingMode.FLICK_STICK,
+    BindingMode.MOUSE_REGION,
     BindingMode.SCROLL_WHEEL,
-    BindingMode.TWO_D_SCROLL,
+    // Gyro modes use the SensorManager pipeline (Phase 7 Brick D), not Shizuku
+    // motion — they don't need the /dev/input reader and so are intentionally
+    // omitted from this set. The gating predicate for the gyro pipeline lives
+    // separately (see Phase 7 Brick D).
 )
 
 /** Convenience predicate over the analog-modes set; see [ANALOG_MODES_REQUIRING_MOTION_CAPTURE]. */
 fun BindingMode.requiresMotionCapture(): Boolean = this in ANALOG_MODES_REQUIRING_MOTION_CAPTURE
 
+/**
+ * Source-and-mode-aware sub-input vocabulary lookup. Sub-inputs vary by both
+ * the physical source and the selected mode — e.g. face-buttons-in-Directional-
+ * Pad mode binds A/B/X/Y, while joystick-in-Directional-Pad mode binds
+ * Up/Down/Left/Right. The mode-only [SourceMode.validInputs] is still defined
+ * on each handler for convenience / tests / defaults, but **the compile path
+ * and picker UI should query this function** for correctness.
+ *
+ * Sourced from [reference_steam_sub_inputs_per_mode.md]. Pairs not covered
+ * here fall through to the mode handler's default `validInputs()`.
+ *
+ * `touch` (capacitive-stick sub-input on Steam joystick modes) is intentionally
+ * omitted — Mapo's target hardware (AYN Thor / Odin 2 Mini / Anbernic / Retroid)
+ * lacks capacitive sticks. VDF import of a binding under `touch` lands as a
+ * stored-but-inert binding (no runtime fire on Mapo's devices).
+ */
+fun validInputsFor(source: InputSource, mode: BindingMode): Set<String> = when (source) {
+    InputSource.BUTTON_DIAMOND -> when (mode) {
+        BindingMode.BUTTON_PAD, BindingMode.DPAD -> FACE_BUTTONS
+        BindingMode.JOYSTICK_MOVE -> emptySet()
+        BindingMode.RADIAL_MENU -> emptySet()  // menu sub-inputs are touch_menu_button_<N>; deferred
+        else -> mode.handler().validInputs()
+    }
+    InputSource.DPAD -> when (mode) {
+        BindingMode.DPAD, BindingMode.BUTTON_PAD -> DPAD_DIRECTIONS
+        BindingMode.JOYSTICK_MOVE -> emptySet()
+        BindingMode.RADIAL_MENU, BindingMode.HOTBAR_MENU -> emptySet()
+        else -> mode.handler().validInputs()
+    }
+    InputSource.LEFT_TRIGGER, InputSource.RIGHT_TRIGGER -> when (mode) {
+        BindingMode.TRIGGER -> setOf(TriggerMode.FULL_PULL_SUB_INPUT, TriggerMode.SOFT_PULL_SUB_INPUT)
+        BindingMode.SINGLE_BUTTON -> setOf(TriggerMode.FULL_PULL_SUB_INPUT)
+        else -> mode.handler().validInputs()
+    }
+    InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK -> when (mode) {
+        BindingMode.JOYSTICK_MOVE,
+        BindingMode.JOYSTICK_MOUSE,
+        BindingMode.FLICK_STICK,
+        BindingMode.MOUSE_REGION -> JOYSTICK_CLICK_OUTER_RING
+        BindingMode.DPAD -> DPAD_DIRECTIONS + JOYSTICK_CLICK_OUTER_RING
+        BindingMode.SCROLL_WHEEL -> JOYSTICK_CLICK_OUTER_RING  // + scroll_clockwise/etc. when SCROLL_WHEEL runtime lands
+        BindingMode.RADIAL_MENU, BindingMode.TOUCH_MENU, BindingMode.HOTBAR_MENU -> emptySet()
+        else -> mode.handler().validInputs()
+    }
+    InputSource.LEFT_BUMPER, InputSource.RIGHT_BUMPER -> when (mode) {
+        BindingMode.SINGLE_BUTTON -> setOf("click")
+        else -> mode.handler().validInputs()
+    }
+    InputSource.GYRO -> when (mode) {
+        BindingMode.DPAD -> DPAD_DIRECTIONS
+        BindingMode.DIRECTIONAL_SWIPE -> setOf("dpad_up", "dpad_down")  // direction labels TBD; placeholder
+        BindingMode.GYRO_TO_MOUSE,
+        BindingMode.GYRO_TO_JOYSTICK_CAMERA,
+        BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
+        BindingMode.MOUSE_REGION -> emptySet()
+        BindingMode.RADIAL_MENU, BindingMode.TOUCH_MENU, BindingMode.HOTBAR_MENU -> emptySet()
+        else -> mode.handler().validInputs()
+    }
+    // SWITCH_* and TRACKPAD sources: fall through to the mode handler's default.
+    // Switches don't get a picker (catalog returns emptyList) so this branch
+    // rarely runs; trackpads are out of scope for Mapo's target hardware.
+    else -> mode.handler().validInputs()
+}
+
+private val FACE_BUTTONS = setOf("button_a", "button_b", "button_x", "button_y")
+private val DPAD_DIRECTIONS = setOf("dpad_up", "dpad_down", "dpad_left", "dpad_right")
+private val JOYSTICK_CLICK_OUTER_RING = setOf("click", "outer_ring")
+
+/**
+ * Source-aware compile-path acceptance check. Equivalent to
+ * `validInputsFor(source, mode).contains(inputKey)`. Replaces the old mode-only
+ * [SourceMode.accepts] for callers that have source context available.
+ */
+fun acceptsFor(source: InputSource, mode: BindingMode, inputKey: String): Boolean =
+    inputKey in validInputsFor(source, mode)
+
+/**
+ * Catalog of which [BindingMode]s the user can pick for each physical
+ * [InputSource] via the Remap Controls subheader mode dropdown.
+ *
+ * Authoritative list per `reference_steam_source_mode_dropdowns.md` — Mapo
+ * follows Steam's per-source dropdown verbatim, plus universal
+ * [BindingMode.DEVICE_DEFAULT] and [BindingMode.NONE] availability
+ * across every source that exposes a picker (deliberate Mapo divergence —
+ * Steam's "None" silences; Mapo's [Device Default] is pass-through to
+ * hardware-native, which Steam has no analog for).
+ *
+ * Empty list for sources without a behavioral dropdown (switches, trackpads
+ * on Mapo's target hardware) — the picker UI hides itself for empty lists.
+ *
+ * Some modes returned here have stub runtimes (FLICK_STICK / MOUSE_REGION /
+ * gyro modes / scroll / menus). Selecting one persists the mode + sub-input
+ * bindings; the activator engine routes through [StubMode] until the
+ * matching runtime lands in a later brick.
+ */
 object SourceModeCatalog {
     fun modesValidFor(source: InputSource): List<BindingMode> = when (source) {
-        InputSource.BUTTON_DIAMOND -> listOf(BindingMode.BUTTON_PAD)
-        InputSource.DPAD -> listOf(
-            BindingMode.UNBOUND,
+        InputSource.BUTTON_DIAMOND -> listOf(
+            BindingMode.DEVICE_DEFAULT,
+            BindingMode.NONE,
+            BindingMode.BUTTON_PAD,
             BindingMode.DPAD,
             BindingMode.JOYSTICK_MOVE,
-            BindingMode.MOUSE_JOYSTICK,
-            BindingMode.SCROLL_WHEEL,
+            BindingMode.RADIAL_MENU,
         )
-        InputSource.LEFT_BUMPER, InputSource.RIGHT_BUMPER -> listOf(BindingMode.SINGLE_BUTTON)
+        InputSource.DPAD -> listOf(
+            BindingMode.DEVICE_DEFAULT,
+            BindingMode.NONE,
+            BindingMode.JOYSTICK_MOVE,
+            BindingMode.DPAD,
+            BindingMode.BUTTON_PAD,
+            BindingMode.RADIAL_MENU,
+            BindingMode.HOTBAR_MENU,
+        )
+        InputSource.LEFT_BUMPER, InputSource.RIGHT_BUMPER -> listOf(
+            BindingMode.DEVICE_DEFAULT,
+            BindingMode.NONE,
+            BindingMode.SINGLE_BUTTON,
+        )
         InputSource.LEFT_TRIGGER, InputSource.RIGHT_TRIGGER -> listOf(
-            BindingMode.UNBOUND,
+            BindingMode.DEVICE_DEFAULT,
+            BindingMode.NONE,
             BindingMode.TRIGGER,
             BindingMode.SINGLE_BUTTON,
         )
         InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK -> listOf(
-            BindingMode.UNBOUND,
+            BindingMode.DEVICE_DEFAULT,
+            BindingMode.NONE,
+            BindingMode.JOYSTICK_MOUSE,
+            BindingMode.FLICK_STICK,
+            BindingMode.MOUSE_REGION,
             BindingMode.JOYSTICK_MOVE,
-            BindingMode.JOYSTICK_CAMERA,
-            BindingMode.MOUSE_JOYSTICK,
             BindingMode.DPAD,
             BindingMode.SCROLL_WHEEL,
-            BindingMode.ABSOLUTE_MOUSE,
+            BindingMode.RADIAL_MENU,
+            BindingMode.TOUCH_MENU,
+            BindingMode.HOTBAR_MENU,
         )
+        InputSource.GYRO -> listOf(
+            BindingMode.DEVICE_DEFAULT,
+            BindingMode.NONE,
+            BindingMode.GYRO_TO_MOUSE,
+            BindingMode.GYRO_TO_JOYSTICK_CAMERA,
+            BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
+            BindingMode.MOUSE_REGION,
+            BindingMode.DPAD,
+            BindingMode.DIRECTIONAL_SWIPE,
+            BindingMode.RADIAL_MENU,
+            BindingMode.TOUCH_MENU,
+            BindingMode.HOTBAR_MENU,
+        )
+        // Switches (Start/Select/Back paddles) and trackpads — no dropdown.
+        // Switches per Steam can't be mode-shifted; trackpads aren't on Mapo's
+        // target hardware. The picker UI hides itself for empty lists.
         else -> emptyList()
     }
 }

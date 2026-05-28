@@ -43,7 +43,7 @@ class SourceModeTest {
         assertTrue(ButtonPadMode.accepts("button_a"))
         assertTrue(ButtonPadMode.accepts("button_y"))
         assertFalse(ButtonPadMode.accepts("click"))
-        assertFalse(ButtonPadMode.accepts("dpad_north"))
+        assertFalse(ButtonPadMode.accepts("dpad_up"))
     }
 
     @Test
@@ -63,17 +63,17 @@ class SourceModeTest {
         // service; click is reserved for analog-stick-as-dpad use (inert until motion
         // capture lands).
         assertEquals(
-            setOf("dpad_north", "dpad_south", "dpad_east", "dpad_west", "click"),
+            setOf("dpad_up", "dpad_down", "dpad_right", "dpad_left", "click"),
             DpadMode.validInputs(),
         )
     }
 
     @Test
     fun dpad_acceptsItsKeys_rejectsOthers() {
-        assertTrue(DpadMode.accepts("dpad_north"))
-        assertTrue(DpadMode.accepts("dpad_south"))
-        assertTrue(DpadMode.accepts("dpad_east"))
-        assertTrue(DpadMode.accepts("dpad_west"))
+        assertTrue(DpadMode.accepts("dpad_up"))
+        assertTrue(DpadMode.accepts("dpad_down"))
+        assertTrue(DpadMode.accepts("dpad_right"))
+        assertTrue(DpadMode.accepts("dpad_left"))
         assertTrue(DpadMode.accepts("click"))
         assertFalse(DpadMode.accepts("button_a"))
         assertFalse(DpadMode.accepts("edge"))
@@ -109,21 +109,22 @@ class SourceModeTest {
     // ── Brick 6.4: Trigger mode ──────────────────────────────────────────────
 
     @Test
-    fun trigger_validInputs_areClickAndSoftPress() {
-        // Triggers carry two sub-inputs: "click" (hardware threshold) and
-        // "soft_press" (analog soft-pull, fired by TriggerMode.evaluate's
-        // hysteresis edge detection). Both are real bindable rows in the UI
-        // (L2/R2 Full Pull, L2/R2 Soft Pull).
-        assertEquals(setOf("click", "soft_press"), TriggerMode.validInputs())
+    fun trigger_validInputs_areFullPullAndSoftPull() {
+        // Phase 7 Brick A: sub-inputs renamed to Steam-verbatim. Triggers carry
+        // "full_pull" (hardware threshold) and "soft_pull" (analog soft-pull, via
+        // TriggerMode.evaluate's hysteresis edge detection). Both are bindable
+        // rows in the UI (L2/R2 Full Pull, L2/R2 Soft Pull).
+        assertEquals(setOf("full_pull", "soft_pull"), TriggerMode.validInputs())
     }
 
     @Test
-    fun trigger_acceptsClickAndSoftPress_rejectsOthers() {
-        assertTrue(TriggerMode.accepts("click"))
-        assertTrue(TriggerMode.accepts("soft_press"))
+    fun trigger_acceptsFullPullAndSoftPull_rejectsOthers() {
+        assertTrue(TriggerMode.accepts("full_pull"))
+        assertTrue(TriggerMode.accepts("soft_pull"))
+        assertFalse(TriggerMode.accepts("click"))  // "click" no longer valid on trigger source post-rename
         assertFalse(TriggerMode.accepts("edge"))
         assertFalse(TriggerMode.accepts("button_a"))
-        assertFalse(TriggerMode.accepts("dpad_north"))
+        assertFalse(TriggerMode.accepts("dpad_up"))
     }
 
     @Test
@@ -153,7 +154,7 @@ class SourceModeTest {
         // should not have their existing seeded data dropped by Brick 6.1's compile
         // validation. StubMode is the permissive escape hatch until 6.2+.
         val stub = StubMode(BindingMode.DPAD)
-        assertTrue(stub.accepts("dpad_north"))
+        assertTrue(stub.accepts("dpad_up"))
         assertTrue(stub.accepts("anything_goes"))
         assertTrue(stub.accepts(""))
         assertEquals(emptySet<String>(), stub.validInputs())
@@ -170,13 +171,13 @@ class SourceModeTest {
     @Test
     fun handlerRegistry_returnsStubForUnimplementedModes() {
         val implemented = setOf(
-            BindingMode.UNBOUND,
+            BindingMode.DEVICE_DEFAULT,
+            BindingMode.NONE,
             BindingMode.SINGLE_BUTTON,
             BindingMode.BUTTON_PAD,
             BindingMode.DPAD,
             BindingMode.TRIGGER,
-            BindingMode.MOUSE_JOYSTICK,
-            BindingMode.JOYSTICK_CAMERA,
+            BindingMode.JOYSTICK_MOUSE,
         )
         for (mode in BindingMode.values()) {
             if (mode in implemented) continue
@@ -197,23 +198,23 @@ class SourceModeTest {
         // sub-inputs registered under a binding group in this mode, so the
         // activator engine never sees a configured input and physical events
         // pass through.
-        assertEquals(emptySet<String>(), UnboundMode.validInputs())
-        assertFalse(UnboundMode.accepts("click"))
-        assertFalse(UnboundMode.accepts("dpad_north"))
-        assertFalse(UnboundMode.accepts("button_a"))
-        assertFalse(UnboundMode.accepts(""))
+        assertEquals(emptySet<String>(), DeviceDefaultMode.validInputs())
+        assertFalse(DeviceDefaultMode.accepts("click"))
+        assertFalse(DeviceDefaultMode.accepts("dpad_up"))
+        assertFalse(DeviceDefaultMode.accepts("button_a"))
+        assertFalse(DeviceDefaultMode.accepts(""))
     }
 
     @Test
     fun unbound_isNotInMotionCaptureSet() {
         // Critical contract — defaulting analog sources to UNBOUND only achieves
-        // the "no focused-overlay side effects on a fresh profile" goal if the
-        // gating predicate doesn't treat UNBOUND as analog.
-        assertFalse(BindingMode.UNBOUND.requiresMotionCapture())
+        // the "no Shizuku enumeration / no setup-friction on a fresh profile"
+        // goal if the gating predicate doesn't treat UNBOUND as analog.
+        assertFalse(BindingMode.DEVICE_DEFAULT.requiresMotionCapture())
     }
 
     @Test
-    fun handlerRegistry_returnsUnboundModeForUnbound() {
-        assertSame(UnboundMode, BindingMode.UNBOUND.handler())
+    fun handlerRegistry_returnsDeviceDefaultModeForUnbound() {
+        assertSame(DeviceDefaultMode, BindingMode.DEVICE_DEFAULT.handler())
     }
 }

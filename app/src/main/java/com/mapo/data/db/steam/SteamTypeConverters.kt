@@ -13,7 +13,21 @@ class SteamTypeConverters {
     @TypeConverter fun stringToControllerType(value: String): ControllerType = ControllerType.valueOf(value)
 
     @TypeConverter fun bindingModeToString(value: BindingMode): String = value.name
-    @TypeConverter fun stringToBindingMode(value: String): BindingMode = BindingMode.valueOf(value)
+
+    /**
+     * Read-side BindingMode with Phase-7-rename legacy migration. Old DB
+     * entries written under the pre-2026-05-27 names map to their successors;
+     * unknown legacy values fall back to [BindingMode.DEVICE_DEFAULT] so a
+     * truly broken row doesn't crash app startup.
+     */
+    @TypeConverter fun stringToBindingMode(value: String): BindingMode = when (value) {
+        "UNBOUND" -> BindingMode.DEVICE_DEFAULT
+        "MOUSE_JOYSTICK" -> BindingMode.JOYSTICK_MOUSE
+        "JOYSTICK_CAMERA" -> BindingMode.JOYSTICK_MOUSE // camera tuning becomes a settings preset
+        "ABSOLUTE_MOUSE" -> BindingMode.MOUSE_REGION
+        "TWO_D_SCROLL" -> BindingMode.SCROLL_WHEEL // closest equivalent; user re-configures if it matters
+        else -> runCatching { BindingMode.valueOf(value) }.getOrDefault(BindingMode.DEVICE_DEFAULT)
+    }
 
     @TypeConverter fun activatorTypeToString(value: ActivatorType): String = value.name
     @TypeConverter fun stringToActivatorType(value: String): ActivatorType = ActivatorType.valueOf(value)

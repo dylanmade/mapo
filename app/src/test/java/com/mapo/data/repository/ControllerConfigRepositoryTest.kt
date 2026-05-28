@@ -158,9 +158,9 @@ class ControllerConfigRepositoryTest {
         val cfg = subject.getActiveConfigOnce(1L)!!
         val dpad = cfg.activeActionSet!!.presetFor(InputSource.DPAD)!!.group
 
-        assertEquals(BindingMode.UNBOUND, dpad.group.mode)
+        assertEquals(BindingMode.DEVICE_DEFAULT, dpad.group.mode)
         assertEquals(
-            setOf("dpad_north", "dpad_south", "dpad_east", "dpad_west"),
+            setOf("dpad_up", "dpad_down", "dpad_right", "dpad_left"),
             dpad.inputs.map { it.input.inputKey }.toSet(),
         )
     }

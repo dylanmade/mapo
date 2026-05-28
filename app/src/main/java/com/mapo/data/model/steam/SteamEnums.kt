@@ -18,30 +18,108 @@ enum class ControllerType {
 /**
  * The mode a [BindingGroup] interprets its source in. Determines which sub-inputs
  * are valid and how analog/digital state translates into [GroupInput] events.
- * Phase 1 ships the schema; mode runtime behavior lands in Phase 6.
+ *
+ * **Naming convention.** Steam Input modes are named `<input> <output>` — left word
+ * = input feel, right word = output format. So `JOYSTICK_MOUSE` means a joystick
+ * input that outputs as mouse motion; `JOYSTICK_MOVE` means a joystick input that
+ * outputs as XInput axis (the game receives a stick); `MOUSE_REGION` is the
+ * trackpad-style absolute-region mapping. See [feedback_steam_mode_naming_convention.md].
+ *
+ * **DEVICE_DEFAULT vs NONE.** Two distinct no-output sentinels:
+ *  - [DEVICE_DEFAULT] — Mapo does NOT intercept; Android's hardware-native input
+ *    flows untouched to the foreground app. Mapo-specific concept.
+ *  - [NONE] — Mapo intercepts and silences. Direct Steam Input parity.
+ *
+ * See `feedback_none_vs_device_default_distinction.md`.
  */
 enum class BindingMode {
     /**
      * Mapo does not intercept this source — physical events pass through to the
-     * foreground app untouched, no activators fire, and the motion-capture
-     * overlay stays detached. The default for analog-capable sources (sticks,
-     * dpad, triggers) so a freshly-seeded profile imposes zero side effects
-     * until the user explicitly opts into a Mapo-managed mode.
+     * foreground app untouched, no activators fire. The default for
+     * analog-capable sources on freshly-seeded profiles so user-facing behavior
+     * starts at "Mapo does nothing" and the user opts in mode-by-mode.
+     *
+     * Mapo-specific. No Steam Input analog (Steam IS the controller driver, so
+     * "pass through to deeper driver" doesn't apply there).
      */
-    UNBOUND,
+    DEVICE_DEFAULT,
+
+    /**
+     * Mapo intercepts this source but emits nothing. Direct Steam Input parity
+     * for the "None" mode dropdown option — distinct from [DEVICE_DEFAULT]'s
+     * pass-through because here Mapo actively consumes the event to silence it.
+     */
+    NONE,
+
     SINGLE_BUTTON,
     DPAD,
     BUTTON_PAD,
-    JOYSTICK_MOVE,
-    JOYSTICK_CAMERA,
-    MOUSE_JOYSTICK,
-    ABSOLUTE_MOUSE,
     TRIGGER,
+
+    /**
+     * Stick input → XInput stick output. Steam's "Joystick Move" mode — the
+     * game receives a virtual analog stick. Mapo runtime ships in Phase 7
+     * Brick C via a `/dev/uinput` virtual XInput gamepad.
+     */
+    JOYSTICK_MOVE,
+
+    /**
+     * Stick input → mouse cursor output. Steam's "Joystick Mouse" mode — what
+     * Mapo previously (mis-)called `MOUSE_JOYSTICK`. The cursor-feel modes
+     * (formerly JOYSTICK_CAMERA) collapse into this single mode with a
+     * settings preset selecting the response curve.
+     */
+    JOYSTICK_MOUSE,
+
+    /**
+     * Gyro-augmented flick-aim mode for joystick sources. Stick deflection
+     * triggers a fast rotation; sustained deflection allows fine-tuning;
+     * gyro tracks during the snap for natural aim feel. Runtime ships in
+     * Phase 7 Brick E.
+     */
+    FLICK_STICK,
+
+    /**
+     * Stick deflection % maps to cursor position % of a screen region. Stick
+     * at full-up → cursor at top-center of region. Steam's "Mouse Region"
+     * mode — supersedes the previous Mapo-specific `ABSOLUTE_MOUSE` (which
+     * was a partial implementation of this same concept). Runtime ships in
+     * Phase 7 Brick C (joystick) + D (gyro feed).
+     */
+    MOUSE_REGION,
+
     SCROLL_WHEEL,
-    TWO_D_SCROLL,
     REFERENCE,
+
+    /**
+     * Gyro orientation → mouse motion. Phase 7 Brick D runtime.
+     */
+    GYRO_TO_MOUSE,
+
+    /**
+     * Gyro angular velocity → XInput stick output, camera-tuned. Phase 7 Brick D runtime.
+     */
+    GYRO_TO_JOYSTICK_CAMERA,
+
+    /**
+     * Gyro orientation → XInput stick deflection (semantics TBD). Phase 7 Brick D runtime.
+     */
+    GYRO_TO_JOYSTICK_DEFLECTION,
+
+    /**
+     * Gesture mode — gyro or trackpad swipe in a cardinal direction fires
+     * synthetic edges. Phase 7 stub; runtime ships post-Phase-8.
+     */
+    DIRECTIONAL_SWIPE,
+
     RADIAL_MENU,
     TOUCH_MENU,
+
+    /**
+     * Hotbar menu — Steam's third menu type alongside Radial and Touch. Phase 9
+     * data scaffold; runtime later.
+     */
+    HOTBAR_MENU,
 }
 
 /**
@@ -97,21 +175,31 @@ enum class InputSource {
     GYRO,
 }
 
+/**
+ * User-facing display name for this mode. Context-agnostic — sources with
+ * source-specific labels (e.g. trigger source showing `SINGLE_BUTTON` as
+ * `Trigger (Digital)`) should resolve at the picker layer, not here.
+ */
 fun BindingMode.displayName(): String = when (this) {
-    BindingMode.UNBOUND -> "[Device default]"
+    BindingMode.DEVICE_DEFAULT -> "[Device Default]"
+    BindingMode.NONE -> "None"
     BindingMode.SINGLE_BUTTON -> "Single Button"
     BindingMode.BUTTON_PAD -> "Button Pad"
-    BindingMode.DPAD -> "D-Pad"
-    BindingMode.JOYSTICK_MOVE -> "Joystick Move"
-    BindingMode.JOYSTICK_CAMERA -> "Joystick Camera"
-    BindingMode.MOUSE_JOYSTICK -> "Mouse Joystick"
-    BindingMode.ABSOLUTE_MOUSE -> "Absolute Mouse"
+    BindingMode.DPAD -> "Directional Pad"
     BindingMode.TRIGGER -> "Trigger"
+    BindingMode.JOYSTICK_MOVE -> "Joystick"
+    BindingMode.JOYSTICK_MOUSE -> "Joystick Mouse"
+    BindingMode.FLICK_STICK -> "Flick Stick"
+    BindingMode.MOUSE_REGION -> "Mouse Region"
     BindingMode.SCROLL_WHEEL -> "Scroll Wheel"
-    BindingMode.TWO_D_SCROLL -> "2D Scroll"
     BindingMode.REFERENCE -> "Reference"
+    BindingMode.GYRO_TO_MOUSE -> "Gyro to Mouse"
+    BindingMode.GYRO_TO_JOYSTICK_CAMERA -> "Gyro to Joystick Camera"
+    BindingMode.GYRO_TO_JOYSTICK_DEFLECTION -> "Gyro to Joystick Deflection"
+    BindingMode.DIRECTIONAL_SWIPE -> "Directional Swipe"
     BindingMode.RADIAL_MENU -> "Radial Menu"
     BindingMode.TOUCH_MENU -> "Touch Menu"
+    BindingMode.HOTBAR_MENU -> "Hotbar Menu"
 }
 
 fun InputSource.displayName(): String = when (this) {

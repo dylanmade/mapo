@@ -964,12 +964,12 @@ class ControllerConfigRepository @Inject constructor(
                 "face_buttons", BindingMode.BUTTON_PAD,
                 listOf("button_a", "button_b", "button_x", "button_y"),
             ),
-            // Analog-capable sources default to UNBOUND: Mapo does not intercept
-            // until the user explicitly opts into a Mapo-managed mode (which is
-            // also what gates the focused motion-capture overlay's side effects).
+            // Analog-capable sources default to DEVICE_DEFAULT: Mapo does not
+            // intercept until the user explicitly opts into a Mapo-managed mode
+            // (which is also what gates the Shizuku motion-capture pipeline).
             InputSource.DPAD to InputSourceSeed(
-                "dpad", BindingMode.UNBOUND,
-                listOf("dpad_north", "dpad_south", "dpad_east", "dpad_west"),
+                "dpad", BindingMode.DEVICE_DEFAULT,
+                listOf("dpad_up", "dpad_down", "dpad_left", "dpad_right"),
             ),
             InputSource.LEFT_BUMPER to InputSourceSeed(
                 "left_bumper", BindingMode.SINGLE_BUTTON, listOf("click"),
@@ -977,22 +977,22 @@ class ControllerConfigRepository @Inject constructor(
             InputSource.RIGHT_BUMPER to InputSourceSeed(
                 "right_bumper", BindingMode.SINGLE_BUTTON, listOf("click"),
             ),
-            // Triggers carry two sub-inputs: "click" (hardware threshold —
-            // KEYCODE_BUTTON_L2 / R2) and "soft_press" (analog soft-pull,
-            // fired via motion-event hysteresis in TriggerMode.evaluate).
-            // The mode defaults to UNBOUND on a fresh profile; switching to
-            // TRIGGER mode is what activates both rows.
+            // Triggers carry two sub-inputs: "full_pull" (hardware threshold —
+            // KEYCODE_BUTTON_L2 / R2) and "soft_pull" (analog soft-pull,
+            // fired via TriggerMode.evaluate's hysteresis on the Shizuku
+            // motion stream). The mode defaults to DEVICE_DEFAULT on a fresh
+            // profile; switching to TRIGGER mode is what activates both rows.
             InputSource.LEFT_TRIGGER to InputSourceSeed(
-                "left_trigger", BindingMode.UNBOUND, listOf("click", "soft_press"),
+                "left_trigger", BindingMode.DEVICE_DEFAULT, listOf("full_pull", "soft_pull"),
             ),
             InputSource.RIGHT_TRIGGER to InputSourceSeed(
-                "right_trigger", BindingMode.UNBOUND, listOf("click", "soft_press"),
+                "right_trigger", BindingMode.DEVICE_DEFAULT, listOf("full_pull", "soft_pull"),
             ),
             InputSource.LEFT_JOYSTICK to InputSourceSeed(
-                "left_joystick", BindingMode.UNBOUND, listOf("click"),
+                "left_joystick", BindingMode.DEVICE_DEFAULT, listOf("click", "outer_ring"),
             ),
             InputSource.RIGHT_JOYSTICK to InputSourceSeed(
-                "right_joystick", BindingMode.UNBOUND, listOf("click"),
+                "right_joystick", BindingMode.DEVICE_DEFAULT, listOf("click", "outer_ring"),
             ),
             InputSource.SWITCH_START to InputSourceSeed(
                 "switch_start", BindingMode.SINGLE_BUTTON, listOf("click"),

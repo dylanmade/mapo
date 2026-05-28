@@ -176,9 +176,25 @@ enum class InputSource {
 }
 
 /**
+ * Source-aware display name. Falls back to [displayName] when the (source, mode)
+ * pair doesn't have a context-specific label. Use this from the picker layer
+ * so triggers in `TRIGGER` mode read as "Trigger (Analog)" and triggers in
+ * `SINGLE_BUTTON` mode read as "Trigger (Digital)" — the same enum values
+ * have different colloquial meanings on different sources.
+ */
+fun BindingMode.displayNameFor(source: InputSource): String = when {
+    source == InputSource.LEFT_TRIGGER || source == InputSource.RIGHT_TRIGGER -> when (this) {
+        BindingMode.TRIGGER -> "Trigger (Analog)"
+        BindingMode.SINGLE_BUTTON -> "Trigger (Digital)"
+        else -> displayName()
+    }
+    else -> displayName()
+}
+
+/**
  * User-facing display name for this mode. Context-agnostic — sources with
  * source-specific labels (e.g. trigger source showing `SINGLE_BUTTON` as
- * `Trigger (Digital)`) should resolve at the picker layer, not here.
+ * `Trigger (Digital)`) should call [displayNameFor] instead.
  */
 fun BindingMode.displayName(): String = when (this) {
     BindingMode.DEVICE_DEFAULT -> "[Device Default]"

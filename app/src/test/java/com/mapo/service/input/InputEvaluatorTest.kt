@@ -1447,6 +1447,74 @@ class InputEvaluatorTest {
         )
     }
 
+    // ── Phase 7 Brick A: DEVICE_DEFAULT / NONE / all-UNBOUND runtime ─────────
+
+    @Test
+    fun handleDigital_returnsFalse_whenNoBinding_deviceDefaultPassThrough() {
+        // DEVICE_DEFAULT semantic: Mapo doesn't intercept; physical event passes
+        // through to the foreground app. Realized as the absence of any CompiledInput
+        // for the address + the source not being in noneModeSources.
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(1L, emptyMap())),
+        )
+        val consumed = subject.handleDigital(BUTTON_A, isDown = true)
+        assertFalse("DEVICE_DEFAULT address must NOT consume the event (pass-through)", consumed)
+        verify(exactly = 0) { emitter.emitPress(any()) }
+    }
+
+    @Test
+    fun handleDigital_returnsTrue_whenSourceInNoneMode_silenced() {
+        // NONE semantic: Mapo intercepts + silences. handleDigital consumes the
+        // event without dispatching any binding.
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(
+                actionSetId = 1L,
+                inputs = emptyMap(),
+                noneModeSources = setOf(InputSource.BUTTON_DIAMOND),
+            )),
+        )
+        val consumed = subject.handleDigital(BUTTON_A, isDown = true)
+        assertTrue("NONE-mode source must consume the event (silence)", consumed)
+        verify(exactly = 0) { emitter.emitPress(any()) }
+    }
+
+    @Test
+    fun handleDigital_returnsFalse_whenOnlyUnboundBinding_passthrough() {
+        // Phase 7 Brick A bug fix: a FULL_PRESS activator with only an UNBOUND
+        // binding (the seed-default shape) used to consume the event due to the
+        // `else if (activator.bindings.isNotEmpty())` fallback in onPress. Now
+        // that fallback excludes all-Unbound activators so face buttons in
+        // [Device Default] mode (with seeded UNBOUND placeholders) correctly
+        // pass through to hardware-native behavior.
+        compiledConfig.value = configWith(
+            BUTTON_A to activator(ActivatorType.FULL_PRESS, BindingOutput.Unbound),
+        )
+        // Default emitter mock returns true; override Unbound to return false
+        // (matches the real OutputEmitter behavior).
+        every { emitter.emitPress(BindingOutput.Unbound) } returns false
+        val consumed = subject.handleDigital(BUTTON_A, isDown = true)
+        assertFalse("All-UNBOUND activator must NOT consume the event", consumed)
+    }
+
+    @Test
+    fun handleDigital_pressAndRelease_bothPassThrough_whenOnlyUnboundBinding() {
+        // Companion to the DOWN-side test above: both edges must pass through.
+        // Symptom of the original Phase-7-Brick-A regression: DOWN passed
+        // through but UP got consumed, so the foreground app saw DOWN-without-UP
+        // and treated a tap as a long-press (gamepad-A on the home launcher
+        // fired the long-press menu instead of opening the app).
+        compiledConfig.value = configWith(
+            BUTTON_A to activator(ActivatorType.FULL_PRESS, BindingOutput.Unbound),
+        )
+        every { emitter.emitPress(BindingOutput.Unbound) } returns false
+        val pressConsumed = subject.handleDigital(BUTTON_A, isDown = true)
+        val releaseConsumed = subject.handleDigital(BUTTON_A, isDown = false)
+        assertFalse("DOWN must pass through for all-UNBOUND activator", pressConsumed)
+        assertFalse("UP must pass through for all-UNBOUND activator (else game sees long-press)", releaseConsumed)
+    }
+
     /**
      * Build a [CompiledConfig] with two action sets, both populated. [startingSetId]
      * picks which becomes the snapshot's starting set. Used by Brick 4.2 set-switching tests.

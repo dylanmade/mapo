@@ -59,6 +59,7 @@ import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.InputSource
 import com.mapo.data.model.steam.displayLabel
 import com.mapo.data.model.steam.displayName
+import com.mapo.data.model.steam.displayNameFor
 import androidx.compose.ui.res.stringResource
 import com.mapo.R
 import com.mapo.service.input.modes.SourceModeCatalog
@@ -798,6 +799,7 @@ private fun SubheaderRow(
                 Spacer(Modifier.height(4.dp))
                 val pickerEnabled = viewingLayer == null && validModes.size > 1
                 ModePicker(
+                    source = source,
                     currentMode = effectiveGroup.mode,
                     validModes = validModes,
                     enabled = pickerEnabled,
@@ -810,6 +812,7 @@ private fun SubheaderRow(
 
 @Composable
 private fun ModePicker(
+    source: InputSource,
     currentMode: BindingMode,
     validModes: List<BindingMode>,
     enabled: Boolean,
@@ -829,7 +832,10 @@ private fun ModePicker(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Mode: ${currentMode.displayName()}",
+                    // Phase 7 Brick A: source-aware label — same BindingMode reads
+                    // differently per source (e.g. SINGLE_BUTTON on a trigger source
+                    // is "Trigger (Digital)", on a bumper it's "Single Button").
+                    text = "Mode: ${currentMode.displayNameFor(source)}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -848,7 +854,7 @@ private fun ModePicker(
         ) {
             validModes.forEach { mode ->
                 DropdownMenuItem(
-                    text = { Text(mode.displayName()) },
+                    text = { Text(mode.displayNameFor(source)) },
                     onClick = {
                         expanded = false
                         if (mode != currentMode) onPick(mode)

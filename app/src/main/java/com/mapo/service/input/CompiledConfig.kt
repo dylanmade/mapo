@@ -60,6 +60,17 @@ data class CompiledActionSet(
     val actionSetId: Long,
     val inputs: Map<InputAddress, CompiledInput>,
     val layers: Map<Long, CompiledLayer> = emptyMap(),
+    /**
+     * Phase 7 Brick A: sources whose mode is [BindingMode.NONE] in this set — the
+     * "Mapo intercepts and silences" mode. Maintained separately from [inputs]
+     * because NONE-mode sources have no bindable sub-inputs (validInputsFor
+     * returns emptySet), so they'd otherwise be invisible to the runtime. The
+     * evaluator consults this set to consume-without-emit on a NONE source's
+     * events. [BindingMode.DEVICE_DEFAULT] (pass-through) is the absence of any
+     * entry in either [inputs] or this set — the evaluator's natural "no
+     * binding → return false" path handles it.
+     */
+    val noneModeSources: Set<InputSource> = emptySet(),
 )
 
 /**
@@ -303,8 +314,14 @@ private const val TAG_COMPILE = "CompiledConfig"
 fun ControllerConfig.toCompiled(): CompiledConfig {
     if (actionSets.isEmpty()) return CompiledConfig.EMPTY
 
-    fun compileInputs(presetEntries: List<com.mapo.data.model.steam.PresetEntry>): Map<InputAddress, CompiledInput> {
+    data class CompileResult(
+        val inputs: Map<InputAddress, CompiledInput>,
+        val noneSources: Set<InputSource>,
+    )
+
+    fun compileInputs(presetEntries: List<com.mapo.data.model.steam.PresetEntry>): CompileResult {
         val inputs = HashMap<InputAddress, CompiledInput>()
+        val noneSources = HashSet<InputSource>()
         for (preset in presetEntries) {
             if (preset.state != "active") continue
             // Validate sub-input keys against the source-aware Steam vocabulary.
@@ -316,6 +333,14 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
             // fallback so seeded data for unimplemented modes isn't silently
             // dropped before the corresponding brick ships.
             val mode = preset.group.group.mode
+            // NONE mode → intercept-and-silence at runtime. Record the source even
+            // though it has no bindable sub-inputs, so the evaluator can consume
+            // its events without firing anything. DEVICE_DEFAULT is the absence —
+            // no inputs entries + not in noneSources = pass-through.
+            if (mode == BindingMode.NONE) {
+                noneSources += preset.inputSource
+                continue
+            }
             val sourceMode = mode.handler()
             for (inputGraph in preset.group.inputs) {
                 val inputKey = inputGraph.input.inputKey
@@ -341,20 +366,26 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                 )
             }
         }
-        return inputs
+        return CompileResult(inputs, noneSources)
     }
 
     val compiledSets = HashMap<Long, CompiledActionSet>(actionSets.size)
     for (setGraph in actionSets) {
-        val inputs = compileInputs(setGraph.preset)
+        val baseCompiled = compileInputs(setGraph.preset)
         val compiledLayers = if (setGraph.layers.isEmpty()) emptyMap() else
             setGraph.layers.associate { layerGraph ->
+                val layerCompiled = compileInputs(layerGraph.preset)
                 layerGraph.layer.id to CompiledLayer(
                     layerId = layerGraph.layer.id,
-                    inputs = compileInputs(layerGraph.preset),
+                    inputs = layerCompiled.inputs,
                 )
             }
-        compiledSets[setGraph.actionSet.id] = CompiledActionSet(setGraph.actionSet.id, inputs, compiledLayers)
+        compiledSets[setGraph.actionSet.id] = CompiledActionSet(
+            actionSetId = setGraph.actionSet.id,
+            inputs = baseCompiled.inputs,
+            layers = compiledLayers,
+            noneModeSources = baseCompiled.noneSources,
+        )
     }
     val startingId = actionSets.first().actionSet.id
     return CompiledConfig(startingActionSetId = startingId, sets = compiledSets)

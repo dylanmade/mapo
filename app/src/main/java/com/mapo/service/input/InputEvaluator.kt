@@ -239,10 +239,25 @@ class InputEvaluator @Inject constructor(
 
     /**
      * Handle a digital press/release at [address]. Returns true if the event was consumed
-     * (at least one configured activator acted on it), false if there's no binding
-     * configured for the address and the physical event should pass through.
+     * (at least one configured activator acted on it, OR the source is in
+     * [BindingMode.NONE] mode), false if Mapo doesn't intercept this source / address
+     * and the physical event should pass through to the foreground app (Mapo's
+     * [BindingMode.DEVICE_DEFAULT] semantic).
+     *
+     * Phase 7 Brick A: NONE-mode sources consume-and-silence by returning true here
+     * before ever reaching [onPress] / [onRelease]. This is what makes NONE distinct
+     * from DEVICE_DEFAULT — both have no bindable sub-inputs, but DEVICE_DEFAULT
+     * falls through and NONE intercepts.
      */
     fun handleDigital(address: InputAddress, isDown: Boolean): Boolean {
+        val activeSet = resolveActiveSet()
+        if (activeSet != null && address.source in activeSet.noneModeSources) {
+            // NONE mode: Mapo intercepts and silences. No activators fire; we
+            // simply consume the event. UP edges follow the same path so the
+            // game never sees the press OR the release.
+            Log.d(TAG, "handleDigital: NONE-mode source ${address.source} — consuming + silencing")
+            return true
+        }
         return if (isDown) onPress(address) else onRelease(address)
     }
 
@@ -442,8 +457,17 @@ class InputEvaluator @Inject constructor(
                         }
                         consumed = true
                     } else {
+                        // firePressBindings returns true when a holdable binding was
+                        // emitted (KEY_PRESS / XINPUT_BUTTON). For fire-and-done outputs
+                        // (MOUSE_BUTTON / MOUSE_WHEEL) emitter.emitPress returns false
+                        // even though the activator effectively fired — fall through to
+                        // mark consumed if the activator has any *bindable* output.
+                        // Phase 7 Brick A: tightened the fallback to exclude all-Unbound
+                        // activators so face buttons in `[Device Default]` (with seeded
+                        // FULL_PRESS + UNBOUND placeholder bindings) correctly pass
+                        // through to hardware-native behavior.
                         if (firePressBindings(address, activator)) consumed = true
-                        else if (activator.bindings.isNotEmpty()) consumed = true
+                        else if (activator.bindings.any { it !is BindingOutput.Unbound }) consumed = true
                     }
                 }
                 ActivatorType.LONG_PRESS -> {
@@ -552,7 +576,16 @@ class InputEvaluator @Inject constructor(
 
         val records = held.remove(address)
         if (records == null) {
-            return compiledInput?.activators?.isNotEmpty() == true
+            // Phase 7 Brick A fix: an all-Unbound CompiledInput (the seed-default
+            // shape for face buttons in [Device Default] mode) must pass UP
+            // through to match its pass-through DOWN. Without this, the game
+            // sees DOWN-without-UP and interprets the tap as a long-press.
+            // Mirror the onPress fallback: consume only if at least one
+            // activator has a bindable (non-Unbound) output.
+            val hasRealOutput = compiledInput?.activators?.any { activator ->
+                activator.bindings.any { it !is BindingOutput.Unbound }
+            } == true
+            return hasRealOutput
         }
 
         for (entry in records) {

@@ -228,8 +228,21 @@ data class CompiledActivatorSettings(
      */
     val cycleBindings: Boolean = false,
     /**
-     * When true, a longer/double activator on the same input suppresses this one when it
-     * resolves. Only meaningful on `FULL_PRESS` and `RELEASE_PRESS`. Steam default: true.
+     * When true, a more-specific activator on the same input suppresses this one
+     * when it resolves. Per Steam: meaningful on `FULL_PRESS`, `RELEASE_PRESS`,
+     * and `CHORDED_PRESS`. Steam default: true.
+     *
+     * Specificity precedence (most → least specific): LONG_PRESS / DOUBLE_PRESS /
+     * CHORDED_PRESS > FULL_PRESS > RELEASE_PRESS. With this flag on:
+     *  - FULL_PRESS: yields to coexisting LONG/DOUBLE (deferred at DOWN) and to
+     *    CHORDED_PRESS (suppressed at DOWN when the chord's partner is held).
+     *  - RELEASE_PRESS: yields to LONG/DOUBLE/CHORD that fired during this press
+     *    cycle — its UP-side `emitTap` is suppressed.
+     *  - CHORDED_PRESS: yields to coexisting LONG_PRESS (deferred at DOWN, fires
+     *    retroactively on UP if partner still held). CHORD+DOUBLE coexistence
+     *    intentionally not handled (chord fires synchronously even when
+     *    interruptable=true) — DOUBLE's 190ms window would add an awkward chord
+     *    latency. Document as a known gap.
      */
     val interruptable: Boolean = true,
     /**

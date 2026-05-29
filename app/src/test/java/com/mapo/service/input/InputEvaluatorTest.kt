@@ -622,6 +622,164 @@ class InputEvaluatorTest {
     }
 
     @Test
+    fun releasePress_interruptable_suppressedByLongPress() = testScope.runTest {
+        // BUTTON_A has LONG_PRESS → ESCAPE and RELEASE_PRESS → SPACE. Interruptable=true
+        // on RELEASE_PRESS (default). User holds past LONG threshold → LONG fires →
+        // RELEASE_PRESS on UP is suppressed.
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.LONG_PRESS, listOf(ESCAPE),
+                    CompiledActivatorSettings(longPressTimeMs = 200L)),
+                CompiledActivator(2L, ActivatorType.RELEASE_PRESS, listOf(SPACE),
+                    CompiledActivatorSettings.DEFAULTS),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        advanceTimeBy(250L)
+        runCurrent()
+        subject.handleDigital(BUTTON_A, isDown = false)
+
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }    // LONG fired
+        verify(exactly = 0) { emitter.emitPress(SPACE) }     // RELEASE_PRESS suppressed
+    }
+
+    @Test
+    fun releasePress_interruptable_suppressedByChord() = testScope.runTest {
+        // RELEASE_PRESS interruptable=true; chord fires at DOWN → RELEASE_PRESS on UP suppressed.
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.CHORDED_PRESS, listOf(ESCAPE),
+                    CompiledActivatorSettings(
+                        chordPartnerSource = BUTTON_B.source,
+                        chordPartnerKey = BUTTON_B.inputKey,
+                    )),
+                CompiledActivator(2L, ActivatorType.RELEASE_PRESS, listOf(SPACE),
+                    CompiledActivatorSettings.DEFAULTS),
+            ),
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, ENTER),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }    // chord fired
+        verify(exactly = 0) { emitter.emitPress(SPACE) }     // RELEASE_PRESS suppressed
+    }
+
+    @Test
+    fun releasePress_nonInterruptable_firesEvenWithChord() = testScope.runTest {
+        // RELEASE_PRESS interruptable=false → fires on UP regardless of chord.
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.CHORDED_PRESS, listOf(ESCAPE),
+                    CompiledActivatorSettings(
+                        chordPartnerSource = BUTTON_B.source,
+                        chordPartnerKey = BUTTON_B.inputKey,
+                    )),
+                CompiledActivator(2L, ActivatorType.RELEASE_PRESS, listOf(SPACE),
+                    CompiledActivatorSettings.DEFAULTS.copy(interruptable = false)),
+            ),
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, ENTER),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+        verify(exactly = 1) { emitter.emitPress(SPACE) }     // RELEASE_PRESS fires anyway
+    }
+
+    @Test
+    fun chord_interruptable_deferredByLongPress_LONGFires_chordSuppressed() = testScope.runTest {
+        // CHORD interruptable=true coexists with LONG_PRESS. User holds past LONG threshold:
+        // LONG fires, chord stays suppressed.
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.CHORDED_PRESS, listOf(ESCAPE),
+                    CompiledActivatorSettings(
+                        chordPartnerSource = BUTTON_B.source,
+                        chordPartnerKey = BUTTON_B.inputKey,
+                        interruptable = true,
+                    )),
+                CompiledActivator(2L, ActivatorType.LONG_PRESS, listOf(SPACE),
+                    CompiledActivatorSettings(longPressTimeMs = 200L)),
+            ),
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, ENTER),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        advanceTimeBy(250L)
+        runCurrent()
+        subject.handleDigital(BUTTON_A, isDown = false)
+
+        verify(exactly = 1) { emitter.emitPress(SPACE) }     // LONG fired
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }    // chord suppressed
+    }
+
+    @Test
+    fun chord_interruptable_deferredByLongPress_UPBeforeLONG_chordFiresRetro() = testScope.runTest {
+        // CHORD interruptable=true coexists with LONG_PRESS. User releases before LONG
+        // threshold; chord fires retroactively because partner still held.
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.CHORDED_PRESS, listOf(ESCAPE),
+                    CompiledActivatorSettings(
+                        chordPartnerSource = BUTTON_B.source,
+                        chordPartnerKey = BUTTON_B.inputKey,
+                        interruptable = true,
+                    )),
+                CompiledActivator(2L, ActivatorType.LONG_PRESS, listOf(SPACE),
+                    CompiledActivatorSettings(longPressTimeMs = 200L)),
+            ),
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, ENTER),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        advanceTimeBy(100L)  // halfway to threshold
+        runCurrent()
+        subject.handleDigital(BUTTON_A, isDown = false)  // release early
+
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }    // chord retroactively fired
+        verify(exactly = 0) { emitter.emitPress(SPACE) }     // LONG did not fire
+    }
+
+    @Test
+    fun chord_interruptable_deferredByLongPress_partnerReleasedFirst_chordDropped() = testScope.runTest {
+        // CHORD deferred by LONG; partner released before chord button → chord dropped.
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(1L, ActivatorType.CHORDED_PRESS, listOf(ESCAPE),
+                    CompiledActivatorSettings(
+                        chordPartnerSource = BUTTON_B.source,
+                        chordPartnerKey = BUTTON_B.inputKey,
+                        interruptable = true,
+                    )),
+                CompiledActivator(2L, ActivatorType.LONG_PRESS, listOf(SPACE),
+                    CompiledActivatorSettings(longPressTimeMs = 500L)),
+            ),
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, ENTER),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_B, isDown = false)  // partner released first
+        subject.handleDigital(BUTTON_A, isDown = false)  // chord button released
+
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }    // chord dropped (partner gone)
+        verify(exactly = 0) { emitter.emitPress(SPACE) }     // LONG cancelled by UP
+    }
+
+    @Test
     fun chord_pressedBeforePartner_doesNotFire_evenIfPartnerLater() = testScope.runTest {
         // Order matters: chord must be pressed AFTER partner. Pressing chord first and
         // partner second does not retroactively fire the chord.

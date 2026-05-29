@@ -217,6 +217,27 @@ class InputEvaluator @Inject constructor(
     private val longPressDeferrals = HashMap<InputAddress, CompiledActivator>()
 
     /**
+     * Phase 7 follow-up: CHORDED_PRESS activators deferred by a coexisting LONG_PRESS on
+     * the same address (with chord's `interruptable=true`). Parallel to [longPressDeferrals]
+     * but for chords. On LONG fire: popped + discarded (chord suppressed by LONG). On UP
+     * before LONG threshold: popped + fired retroactively *iff* the chord's partner is
+     * still physically held. Chord+DOUBLE coexistence is left out of this path — the
+     * DOUBLE window's ~190ms latency on chord activation is awkward in practice; if
+     * chord coexists with DOUBLE, chord fires synchronously at DOWN as if interruptable
+     * were false. Document as a known gap if it ever matters.
+     */
+    private val pendingChords = HashMap<InputAddress, CompiledActivator>()
+
+    /**
+     * Phase 7 follow-up: addresses where a "more specific" activator (LONG_PRESS,
+     * DOUBLE_PRESS, or CHORDED_PRESS) fired during the current press cycle. Consulted
+     * by RELEASE_PRESS in onRelease: if its `interruptable=true` AND this set contains
+     * the address, RELEASE_PRESS is suppressed. Cleared per-address at the end of
+     * onRelease; [flushAllRuntime] clears the whole set on profile/set switch.
+     */
+    private val moreSpecificFiredFor = HashSet<InputAddress>()
+
+    /**
      * Brick 5: synthetic-edge latch state per (source, virtual sub-input).
      * Modes write here indirectly via [SourceMode.evaluate][com.mapo.service.input.modes.SourceMode.evaluate]'s
      * `digitalEmit` callback — when that callback fires `(subInput, true)` the
@@ -500,6 +521,7 @@ class InputEvaluator @Inject constructor(
             activeWindow.timerJob?.cancel()
             Log.d(TAG, "double-tap detected at $address — firing DOUBLE_PRESS")
             firePressBindings(address, activeWindow.doubleActivator)
+            moreSpecificFiredFor += address
             return true
         }
 
@@ -617,6 +639,12 @@ class InputEvaluator @Inject constructor(
                 }
                 ActivatorType.CHORDED_PRESS -> {
                     val partner = activator.settings.chordPartner
+                    // Phase 7 follow-up: chord's own interruptable=true defers it
+                    // when a coexisting LONG_PRESS would later fire on the same
+                    // input. The chord fires retroactively in onRelease if the
+                    // user releases before LONG threshold AND partner is still held.
+                    // DOUBLE+CHORD intentionally skipped (see [pendingChords] KDoc).
+                    val deferForLong = activator.settings.interruptable && longActivator != null
                     when {
                         partner == null -> {
                             Log.d(TAG, "chord at $address ignored: no partner configured")
@@ -625,6 +653,10 @@ class InputEvaluator @Inject constructor(
                             // Defensive — a chord with itself as the partner can never satisfy.
                             Log.d(TAG, "chord at $address ignored: partner equals chord address")
                         }
+                        partner in physicallyHeld && deferForLong -> {
+                            pendingChords[address] = activator
+                            Log.d(TAG, "chord deferred at $address: LONG_PRESS coexists + interruptable")
+                        }
                         partner in physicallyHeld -> {
                             if (firePressBindings(address, activator)) {
                                 activeChords += ChordLink(
@@ -632,6 +664,7 @@ class InputEvaluator @Inject constructor(
                                     partnerAddress = partner,
                                     activatorId = activator.activatorId,
                                 )
+                                moreSpecificFiredFor += address
                                 Log.d(TAG, "chord fired: $address with partner $partner")
                             }
                         }
@@ -659,6 +692,22 @@ class InputEvaluator @Inject constructor(
             Log.d(TAG, "UP before LONG threshold on $address; firing deferred FULL_PRESS as tap")
             emitTap(deferredRegular)
         }
+        // Phase 7 follow-up: same retroactive-fire path for a CHORDED_PRESS that was
+        // deferred at DOWN by a coexisting LONG_PRESS. Only fires if the chord's
+        // partner is still physically held — chord semantics require both held.
+        // Note: physicallyHeld.remove(address) ran at top of onRelease, so the
+        // partner check here sees the user's current state minus this address.
+        val deferredChord = pendingChords.remove(address)
+        if (deferredChord != null) {
+            val partner = deferredChord.settings.chordPartner
+            if (partner != null && partner in physicallyHeld) {
+                Log.d(TAG, "UP before LONG threshold on $address; firing deferred CHORDED_PRESS as tap")
+                emitTap(deferredChord)
+                moreSpecificFiredFor += address
+            } else {
+                Log.d(TAG, "deferred CHORDED_PRESS dropped on $address: partner $partner no longer held")
+            }
+        }
 
         // CHORDED_PRESS upkeep: if [address] is the partner for any active chord, that
         // chord's output must release now (the user let go of the partner first). If
@@ -682,15 +731,24 @@ class InputEvaluator @Inject constructor(
         doubleTapWindows[address]?.physicallyHeld = false
 
         val compiledInput = lookupActive(address)
+        // Phase 7 follow-up: snapshot whether a more-specific activator (LONG, DOUBLE,
+        // CHORD) fired during this press cycle. Consulted by RELEASE_PRESS below.
+        // Cleared at end of onRelease so the next cycle starts clean.
+        val moreSpecificFired = address in moreSpecificFiredFor
         compiledInput?.activators?.forEach { activator ->
             // Cancel any in-flight fire_start_delay timer — user released before it fired.
             if (activator.settings.fireStartDelayMs > 0) {
                 stateFor(activator.activatorId).startDelayJob?.cancel()
             }
             if (activator.type == ActivatorType.RELEASE_PRESS) {
-                emitTap(activator)
+                if (activator.settings.interruptable && moreSpecificFired) {
+                    Log.d(TAG, "RELEASE_PRESS suppressed at $address by a more-specific activator")
+                } else {
+                    emitTap(activator)
+                }
             }
         }
+        moreSpecificFiredFor -= address
 
         val records = held.remove(address)
         if (records == null) {
@@ -770,6 +828,12 @@ class InputEvaluator @Inject constructor(
             if (suppressed != null) {
                 Log.d(TAG, "LONG_PRESS firing; suppressing deferred FULL_PRESS on $address")
             }
+            // Phase 7 follow-up: same suppression for deferred CHORDED_PRESS.
+            val suppressedChord = pendingChords.remove(address)
+            if (suppressedChord != null) {
+                Log.d(TAG, "LONG_PRESS firing; suppressing deferred CHORDED_PRESS on $address")
+            }
+            moreSpecificFiredFor += address
             firePressBindings(address, activator)
             Log.d(TAG, "long-press fired for $address activator=${activator.activatorId}")
         }
@@ -1189,6 +1253,8 @@ class InputEvaluator @Inject constructor(
         }
         doubleTapWindows.clear()
         longPressDeferrals.clear()
+        pendingChords.clear()
+        moreSpecificFiredFor.clear()
         for ((_, st) in activatorState) {
             if (st.toggledOn) {
                 st.toggledBindings.forEach(emitter::emitRelease)

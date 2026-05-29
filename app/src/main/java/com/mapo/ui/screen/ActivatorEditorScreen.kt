@@ -264,25 +264,44 @@ private fun findActivatorContext(
     viewingActionSetId: Long? = null,
 ): ActivatorContext? {
     val activeSet = config?.resolveActionSet(viewingActionSetId) ?: return null
-    for (preset in activeSet.preset) {
-        for (input in preset.group.inputs) {
-            for (graph in input.activators) {
-                if (graph.activator.id == activatorId) {
-                    val settings = CompiledActivatorSettings.parse(graph.activator.settingsJson)
-                    val hasMouseBinding = graph.bindings.any {
-                        it.outputType == BindingOutputType.MOUSE_BUTTON ||
-                            it.outputType == BindingOutputType.MOUSE_WHEEL
-                    }
-                    return ActivatorContext(
-                        type = graph.activator.type,
-                        settings = settings,
-                        hasMouseBinding = hasMouseBinding,
-                    )
+
+    fun resolve(graph: com.mapo.data.model.steam.ActivatorGraph): ActivatorContext {
+        val settings = CompiledActivatorSettings.parse(graph.activator.settingsJson)
+        val hasMouseBinding = graph.bindings.any {
+            it.outputType == BindingOutputType.MOUSE_BUTTON ||
+                it.outputType == BindingOutputType.MOUSE_WHEEL
+        }
+        return ActivatorContext(
+            type = graph.activator.type,
+            settings = settings,
+            hasMouseBinding = hasMouseBinding,
+        )
+    }
+
+    fun scan(groups: Sequence<com.mapo.data.model.steam.BindingGroupGraph>): ActivatorContext? {
+        for (group in groups) {
+            for (input in group.inputs) {
+                for (graph in input.activators) {
+                    if (graph.activator.id == activatorId) return resolve(graph)
                 }
             }
         }
+        return null
     }
-    return null
+
+    // Search every binding-group bucket reachable from the active set:
+    //  1. Set's preset entries (base source bindings)
+    //  2. Set's mode-shift target groups (Brick B.6)
+    //  3. Every action layer's preset entries (overrides) and mode-shift target groups
+    val setPresetGroups = activeSet.preset.asSequence().map { it.group }
+    val setModeShiftGroups = activeSet.modeShifts.asSequence().map { it.group }
+    val layerPresetGroups = activeSet.layers.asSequence().flatMap { it.preset.asSequence().map { p -> p.group } }
+    val layerModeShiftGroups = activeSet.layers.asSequence().flatMap { it.modeShifts.asSequence().map { s -> s.group } }
+
+    return scan(setPresetGroups)
+        ?: scan(setModeShiftGroups)
+        ?: scan(layerPresetGroups)
+        ?: scan(layerModeShiftGroups)
 }
 
 @Composable

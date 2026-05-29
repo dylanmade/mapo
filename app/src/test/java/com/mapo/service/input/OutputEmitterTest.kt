@@ -84,16 +84,6 @@ class OutputEmitterTest {
         confirmVerified(dispatcher)
     }
 
-    @Test
-    fun pressModeShift_returnsFalse_callsNothing() {
-        val held = subject.emitPress(
-            BindingOutput.ModeShift(inputSource = InputSource.RIGHT_TRACKPAD, bindingGroupId = 42L),
-        )
-
-        assertFalse(held)
-        confirmVerified(dispatcher)
-    }
-
     // ── Release ───────────────────────────────────────────────────────────────
 
     @Test

@@ -601,6 +601,62 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    // ── Phase 7 Brick B.6: Source Mode Shifts ────────────────────────────────
+
+    /**
+     * Add a fresh mode shift to [ownerSource] on the action set [actionSetId].
+     * The shift starts with no trigger assigned — user picks via the shift's
+     * settings sheet. Returns the new mode shift id so the UI can scroll to
+     * its row.
+     */
+    fun addModeShiftToSet(actionSetId: Long, ownerSource: com.mapo.data.model.steam.InputSource) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            controllerConfigRepository.addModeShiftToSet(actionSetId, ownerSource)
+        }
+    }
+
+    /** Layer-owned variant of [addModeShiftToSet]. */
+    fun addModeShiftToLayer(actionLayerId: Long, ownerSource: com.mapo.data.model.steam.InputSource) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            controllerConfigRepository.addModeShiftToLayer(actionLayerId, ownerSource)
+        }
+    }
+
+    /** Remove [modeShiftId]; its target binding group cascade-deletes too. */
+    fun removeModeShift(modeShiftId: Long) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.removeModeShift(modeShiftId) }
+    }
+
+    /**
+     * Assign or clear the trigger input on [modeShiftId]. Both `triggerSource`
+     * and `triggerSubInput` must be non-null to assign; both null to clear.
+     */
+    fun setModeShiftTrigger(
+        modeShiftId: Long,
+        triggerSource: com.mapo.data.model.steam.InputSource?,
+        triggerSubInput: String?,
+    ) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            controllerConfigRepository.setModeShiftTrigger(modeShiftId, triggerSource, triggerSubInput)
+        }
+    }
+
+    /**
+     * Phase 7 Brick B.6 — eagerly create a sub-input row on a mode shift's
+     * target binding group before navigating to InputEditorScreen. Mirrors
+     * [materializeLayerOverride]'s pattern: layers / mode-shifts are empty
+     * until the user actually touches a sub-input. Suspend so callers can
+     * await before navigating.
+     */
+    suspend fun materializeModeShiftInput(modeShiftId: Long, groupInputKey: String): Long {
+        if (activeProfile.value == null) return 0L
+        return controllerConfigRepository.materializeModeShiftInput(modeShiftId, groupInputKey)
+    }
+
     /**
      * Append a new activator of [type] to the input identified by [groupInputId].
      * Used by the per-input editor screen's `[+ Add Activator]` action.

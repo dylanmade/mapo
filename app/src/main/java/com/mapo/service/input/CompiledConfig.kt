@@ -36,6 +36,15 @@ import org.json.JSONObject
 data class CompiledConfig(
     val startingActionSetId: Long,
     val sets: Map<Long, CompiledActionSet>,
+    /**
+     * Phase 7 Brick B.5: every binding_group in the materialized config compiled to
+     * a source-agnostic form keyed by group id. Mode-shift target groups resolve
+     * through this map at activation — each [CompiledModeShift] carries its
+     * `targetGroupId`, and the evaluator looks the group up here to get the
+     * pre-compiled mode + sub-input → activators it should layer over the
+     * target source while the trigger is held.
+     */
+    val compiledGroups: Map<Long, CompiledBindingGroup> = emptyMap(),
 ) {
     /**
      * Resolve an address within a specific action set. Returns null if either the set
@@ -50,6 +59,25 @@ data class CompiledConfig(
         val EMPTY = CompiledConfig(startingActionSetId = 0L, sets = emptyMap())
     }
 }
+
+/**
+ * Phase 7 Brick B.5 — source-agnostic compiled form of a binding_group. Used by
+ * mode-shift activation: when a [CompiledModeShift] activates, the evaluator
+ * looks up `compiledGroups[targetGroupId]` here and overlays its [mode] +
+ * [inputs] onto the target source for as long as the trigger is held.
+ *
+ * The compile step doesn't pre-validate sub-input keys against any particular
+ * source (this group might never be activated, or might be activated against
+ * multiple sources across its lifetime). Validation happens at activation
+ * time against the actual target source via [validInputsFor].
+ */
+data class CompiledBindingGroup(
+    val groupId: Long,
+    val mode: BindingMode,
+    val modeSettingsJson: String,
+    /** sub-input key → activators */
+    val inputs: Map<String, List<CompiledActivator>>,
+)
 
 /**
  * One action set's compiled lookup table. Each [InputAddress] in [inputs] resolves to
@@ -71,6 +99,15 @@ data class CompiledActionSet(
      * binding → return false" path handles it.
      */
     val noneModeSources: Set<InputSource> = emptySet(),
+    /**
+     * Phase 7 Brick B.5 — mode shifts owned by this action set. Each is a
+     * `(ownerSource, triggerAddress, targetGroupId)` triple. The runtime
+     * indexes [InputEvaluator] watches every digital press for a trigger
+     * match — on a hit, the shift is appended to the evaluator's active list
+     * for as long as the trigger is held. Set-owned shifts are always
+     * present while the action set is active.
+     */
+    val modeShifts: List<CompiledModeShift> = emptyList(),
 )
 
 /**
@@ -83,6 +120,30 @@ data class CompiledActionSet(
 data class CompiledLayer(
     val layerId: Long,
     val inputs: Map<InputAddress, CompiledInput>,
+    /**
+     * Phase 7 Brick B.5 — mode shifts owned by this layer. Only active while
+     * the layer is in the active stack; mirrors [CompiledActionSet.modeShifts]
+     * shape exactly.
+     */
+    val modeShifts: List<CompiledModeShift> = emptyList(),
+)
+
+/**
+ * Phase 7 Brick B.5 — pre-compiled mode shift definition. [ownerSource] is the
+ * source whose mode/bindings are overridden while the trigger is held;
+ * [triggerAddress] is the physical input whose DOWN appends this to the
+ * evaluator's active list and whose UP removes it; [targetGroupId] resolves
+ * via [CompiledConfig.compiledGroups] to the override's mode + sub-input
+ * bindings.
+ *
+ * Shifts without an assigned trigger (user added the row but hasn't picked a
+ * trigger yet) are skipped by the compile step — there's nothing to match
+ * against, so they can never activate.
+ */
+data class CompiledModeShift(
+    val ownerSource: InputSource,
+    val triggerAddress: InputAddress,
+    val targetGroupId: Long,
 )
 
 /**
@@ -369,6 +430,83 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
         return CompileResult(inputs, noneSources)
     }
 
+    // Phase 7 Brick B — pre-compile every BindingGroup in the config keyed by id, so
+    // mode-shift activation can look up target groups by their stable group id at
+    // runtime without re-walking the materialized graph. Walks every reachable group:
+    // (a) set preset groups, (b) layer-owned bindingGroups, (c) layer preset groups.
+    // The same group may appear in multiple buckets — `putIfAbsent` keeps the first.
+    fun compileBindingGroup(group: com.mapo.data.model.steam.BindingGroupGraph): CompiledBindingGroup {
+        val inputsBySubInput = HashMap<String, List<CompiledActivator>>()
+        for (inputGraph in group.inputs) {
+            val compiledActivators = inputGraph.activators.map { actGraph ->
+                CompiledActivator(
+                    activatorId = actGraph.activator.id,
+                    type = actGraph.activator.type,
+                    bindings = actGraph.bindings.map { BindingOutput.fromEntity(it.outputType, it.args) },
+                    settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson),
+                )
+            }
+            inputsBySubInput[inputGraph.input.inputKey] = compiledActivators
+        }
+        return CompiledBindingGroup(
+            groupId = group.group.id,
+            mode = group.group.mode,
+            modeSettingsJson = group.group.settingsJson,
+            inputs = inputsBySubInput,
+        )
+    }
+
+    val compiledGroups = HashMap<Long, CompiledBindingGroup>()
+    for (setGraph in actionSets) {
+        // Set preset groups
+        for (preset in setGraph.preset) {
+            compiledGroups.putIfAbsent(preset.group.group.id, compileBindingGroup(preset.group))
+        }
+        // Phase 7 Brick B.5 — set-owned mode-shift target groups. They have
+        // `BindingGroup.actionSetId = X` but no preset entry, so they wouldn't
+        // be reached by the preset walk above.
+        for (shift in setGraph.modeShifts) {
+            compiledGroups.putIfAbsent(shift.group.group.id, compileBindingGroup(shift.group))
+        }
+        for (layerGraph in setGraph.layers) {
+            // Layer-owned binding groups (not necessarily preset-bound) — also
+            // covers layer-owned mode-shift target groups, since those have
+            // `actionLayerId = Y` and are returned by getByActionLayers.
+            for (group in layerGraph.bindingGroups) {
+                compiledGroups.putIfAbsent(group.group.id, compileBindingGroup(group))
+            }
+            // Layer preset groups (overlap with bindingGroups in most cases, but
+            // putIfAbsent keeps the first deterministic)
+            for (preset in layerGraph.preset) {
+                compiledGroups.putIfAbsent(preset.group.group.id, compileBindingGroup(preset.group))
+            }
+            // Layer-owned mode-shift target groups (defensive — they'll
+            // typically already be in `bindingGroups` from the layer walk).
+            for (shift in layerGraph.modeShifts) {
+                compiledGroups.putIfAbsent(shift.group.group.id, compileBindingGroup(shift.group))
+            }
+        }
+    }
+
+    // Phase 7 Brick B.5 — compile mode-shift definitions. Walks the graph's
+    // SourceModeShiftGraph entries, drops any without a fully-assigned trigger
+    // (user added but hasn't picked the trigger yet), and turns each into a
+    // CompiledModeShift the runtime can match against incoming presses.
+    fun compileModeShifts(graphs: List<com.mapo.data.model.steam.SourceModeShiftGraph>): List<CompiledModeShift> {
+        if (graphs.isEmpty()) return emptyList()
+        val out = ArrayList<CompiledModeShift>(graphs.size)
+        for (g in graphs) {
+            val src = g.shift.triggerSource ?: continue
+            val key = g.shift.triggerSubInput ?: continue
+            out += CompiledModeShift(
+                ownerSource = g.shift.ownerSource,
+                triggerAddress = InputAddress(src, key),
+                targetGroupId = g.shift.bindingGroupId,
+            )
+        }
+        return out
+    }
+
     val compiledSets = HashMap<Long, CompiledActionSet>(actionSets.size)
     for (setGraph in actionSets) {
         val baseCompiled = compileInputs(setGraph.preset)
@@ -378,6 +516,7 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                 layerGraph.layer.id to CompiledLayer(
                     layerId = layerGraph.layer.id,
                     inputs = layerCompiled.inputs,
+                    modeShifts = compileModeShifts(layerGraph.modeShifts),
                 )
             }
         compiledSets[setGraph.actionSet.id] = CompiledActionSet(
@@ -385,8 +524,13 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
             inputs = baseCompiled.inputs,
             layers = compiledLayers,
             noneModeSources = baseCompiled.noneSources,
+            modeShifts = compileModeShifts(setGraph.modeShifts),
         )
     }
     val startingId = actionSets.first().actionSet.id
-    return CompiledConfig(startingActionSetId = startingId, sets = compiledSets)
+    return CompiledConfig(
+        startingActionSetId = startingId,
+        sets = compiledSets,
+        compiledGroups = compiledGroups,
+    )
 }

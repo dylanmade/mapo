@@ -80,6 +80,11 @@ fun InputEditorScreen(
     config: ControllerConfig?,
     viewingActionSetId: Long? = null,
     viewingLayerId: Long? = null,
+    /**
+     * Phase 7 Brick B.6: when non-null, the editor resolves the binding group
+     * via the named mode shift's target group instead of the source's preset.
+     */
+    modeShiftId: Long? = null,
     pickerResult: BindingOutput?,
     onConsumePickerResult: () -> Unit,
     onPickResult: (bindingId: Long, output: BindingOutput) -> Unit,
@@ -112,6 +117,7 @@ fun InputEditorScreen(
         inputKey = groupInputKey,
         setId = viewingActionSetId,
         layerId = viewingLayerId,
+        modeShiftId = modeShiftId,
     )
     val activators = groupInput?.activators.orEmpty().sortedWith(activatorRenderOrder)
 

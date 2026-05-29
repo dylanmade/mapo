@@ -33,9 +33,6 @@ sealed class BindingOutput {
     /** In-engine verb: CHANGE_PRESET, add_layer, remove_layer, etc. Implemented per phase. */
     data class ControllerAction(val verb: String, val args: List<String>) : BindingOutput()
 
-    /** While-held single-source override (Phase 5). Targets a specific binding group. */
-    data class ModeShift(val inputSource: InputSource, val bindingGroupId: Long) : BindingOutput()
-
     /**
      * Encode into a single string suitable for nav saved-state. Inverse of [decode].
      * Format: `"<outputType.name>|<args>"`. Empty args still keep the trailing `|`,
@@ -55,7 +52,6 @@ sealed class BindingOutput {
         is MouseWheel        -> BindingOutputType.MOUSE_WHEEL to direction
         is GameAction        -> BindingOutputType.GAME_ACTION to "$setName,$actionName"
         is ControllerAction  -> BindingOutputType.CONTROLLER_ACTION to (listOf(verb) + args).joinToString(",")
-        is ModeShift         -> BindingOutputType.MODE_SHIFT to "${inputSource.name},$bindingGroupId"
     }
 
     companion object {
@@ -87,14 +83,6 @@ sealed class BindingOutput {
                 val parts = args.split(",")
                 ControllerAction(parts.firstOrNull().orEmpty(), parts.drop(1))
             }
-            BindingOutputType.MODE_SHIFT -> {
-                val parts = args.split(",", limit = 2)
-                val source = parts.getOrNull(0)
-                    ?.let { runCatching { InputSource.valueOf(it) }.getOrNull() }
-                    ?: InputSource.BUTTON_DIAMOND
-                val groupId = parts.getOrNull(1)?.toLongOrNull() ?: -1L
-                ModeShift(source, groupId)
-            }
         }
 
         fun fromRemapTarget(target: RemapTarget): BindingOutput = when (target) {
@@ -124,7 +112,6 @@ fun BindingOutput.displayLabel(): String = when (this) {
             "${verb.layerVerbDisplayPrefix()}: Layer #${layerArgIdOrNull() ?: "?"}"
         else -> "Verb: $verb"
     }
-    is BindingOutput.ModeShift     -> "Mode shift: ${inputSource.name}"
 }
 
 /**
@@ -175,9 +162,9 @@ private fun String.layerVerbDisplayPrefix(): String = when (this) {
 
 /**
  * Bridge for the legacy [RemapTarget]-based picker. Steam-Input-only outputs
- * (GameAction / ControllerAction / ModeShift) have no picker UI yet and collapse
+ * (GameAction / ControllerAction) have no picker UI yet and collapse
  * to [RemapTarget.Unbound] — they'll get their own picker categories in
- * Phases 4 / 5 when the verbs become live.
+ * Phase 4 when the verbs become live.
  */
 fun BindingOutput.toRemapTarget(): RemapTarget = when (this) {
     BindingOutput.Unbound        -> RemapTarget.Unbound
@@ -186,6 +173,5 @@ fun BindingOutput.toRemapTarget(): RemapTarget = when (this) {
     is BindingOutput.MouseWheel  -> RemapTarget.Mouse(direction)
     is BindingOutput.XInputButton -> RemapTarget.Gamepad(button)
     is BindingOutput.GameAction,
-    is BindingOutput.ControllerAction,
-    is BindingOutput.ModeShift   -> RemapTarget.Unbound
+    is BindingOutput.ControllerAction -> RemapTarget.Unbound
 }

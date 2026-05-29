@@ -69,6 +69,7 @@ class ControllerConfigRepository @Inject constructor(
     private val bindingDao: BindingDao,
     private val presetBindingDao: PresetBindingDao,
     private val layerPresetBindingDao: com.mapo.data.db.steam.LayerPresetBindingDao,
+    private val sourceModeShiftDao: com.mapo.data.db.steam.SourceModeShiftDao,
 ) {
 
     private val configDirtyTick = MutableStateFlow(0L)
@@ -883,6 +884,153 @@ class ControllerConfigRepository @Inject constructor(
         configDirtyTick.value = configDirtyTick.value + 1
     }
 
+    // ── Phase 7 Brick B.5: Source Mode Shifts ────────────────────────────────
+
+    /**
+     * Add a new mode shift to [ownerSource] on the action set identified by
+     * [actionSetId]. Creates a fresh target [BindingGroup] in
+     * [BindingMode.DEVICE_DEFAULT] (configurable by the user via the UI) and
+     * the matching [com.mapo.data.model.steam.SourceModeShift] row with no
+     * trigger assigned yet (user assigns via the mode-shift settings UI).
+     * Returns the new mode shift's id so the UI can scroll to / open its row.
+     */
+    suspend fun addModeShiftToSet(actionSetId: Long, ownerSource: InputSource): Long {
+        val newGroupId = bindingGroupDao.insert(
+            BindingGroup(
+                actionSetId = actionSetId,
+                actionLayerId = null,
+                name = "mode_shift_${ownerSource.name.lowercase()}",
+                mode = BindingMode.DEVICE_DEFAULT,
+                settingsJson = "{}",
+            )
+        )
+        val order = sourceModeShiftDao.nextDisplayOrderForSet(actionSetId, ownerSource)
+        val id = sourceModeShiftDao.insert(
+            com.mapo.data.model.steam.SourceModeShift(
+                actionSetId = actionSetId,
+                actionLayerId = null,
+                ownerSource = ownerSource,
+                bindingGroupId = newGroupId,
+                displayOrder = order,
+            )
+        )
+        configDirtyTick.value = configDirtyTick.value + 1
+        return id
+    }
+
+    /**
+     * Add a new mode shift owned by an action layer (only active while that
+     * layer is in the stack). Same shape as [addModeShiftToSet].
+     */
+    suspend fun addModeShiftToLayer(actionLayerId: Long, ownerSource: InputSource): Long {
+        val newGroupId = bindingGroupDao.insert(
+            BindingGroup(
+                actionSetId = null,
+                actionLayerId = actionLayerId,
+                name = "mode_shift_${ownerSource.name.lowercase()}",
+                mode = BindingMode.DEVICE_DEFAULT,
+                settingsJson = "{}",
+            )
+        )
+        val order = sourceModeShiftDao.nextDisplayOrderForLayer(actionLayerId, ownerSource)
+        val id = sourceModeShiftDao.insert(
+            com.mapo.data.model.steam.SourceModeShift(
+                actionSetId = null,
+                actionLayerId = actionLayerId,
+                ownerSource = ownerSource,
+                bindingGroupId = newGroupId,
+                displayOrder = order,
+            )
+        )
+        configDirtyTick.value = configDirtyTick.value + 1
+        return id
+    }
+
+    /**
+     * Delete a mode shift and its target binding group (cascade-delete via the
+     * schema FK). The action set / layer is untouched.
+     */
+    suspend fun removeModeShift(modeShiftId: Long) {
+        val existing = sourceModeShiftDao.getById(modeShiftId) ?: return
+        // Schema declares ON DELETE CASCADE from binding_group → source_mode_shift;
+        // deleting the group cleans both rows. Doing it this way (vs deleting the
+        // mode-shift row directly) also frees the orphaned target group's child
+        // bindings, which is the user-expected outcome.
+        bindingGroupDao.deleteById(existing.bindingGroupId)
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
+     * Assign or clear the physical input that triggers [modeShiftId]. Pass a
+     * non-null `(source, subInput)` to assign; pass nulls to clear. The
+     * trigger is the input whose press activates the shift and whose release
+     * deactivates it.
+     */
+    suspend fun setModeShiftTrigger(
+        modeShiftId: Long,
+        triggerSource: InputSource?,
+        triggerSubInput: String?,
+    ) {
+        val existing = sourceModeShiftDao.getById(modeShiftId) ?: return
+        if (existing.triggerSource == triggerSource && existing.triggerSubInput == triggerSubInput) return
+        sourceModeShiftDao.update(
+            existing.copy(triggerSource = triggerSource, triggerSubInput = triggerSubInput)
+        )
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
+     * Phase 7 Brick B.6 — materialize a sub-input row on [modeShiftId]'s target
+     * binding group. Mode-shift target groups are created empty by
+     * [addModeShiftToSet]/[addModeShiftToLayer]; their per-sub-input rows are
+     * created on demand the first time the user taps one in the editor. Same
+     * pattern as [materializeLayerOverride] for layer overrides — keeps the
+     * shift's group small until the user actually configures bindings.
+     *
+     * Idempotent: returns the existing row if already materialized. Returns 0L
+     * if [modeShiftId] doesn't resolve (e.g. just deleted).
+     */
+    suspend fun materializeModeShiftInput(
+        modeShiftId: Long,
+        groupInputKey: String,
+    ): Long {
+        val shift = sourceModeShiftDao.getById(modeShiftId) ?: return 0L
+        val targetGroupId = shift.bindingGroupId
+
+        // Idempotency: if the sub-input already exists on the group, return it.
+        groupInputDao.getByGroups(listOf(targetGroupId))
+            .firstOrNull { it.inputKey == groupInputKey }
+            ?.let { return it.id }
+
+        val nextOrder = groupInputDao.getByGroups(listOf(targetGroupId))
+            .maxOfOrNull { it.orderIndex }?.plus(1) ?: 0
+        val newInputId = groupInputDao.insert(
+            GroupInput(
+                bindingGroupId = targetGroupId,
+                inputKey = groupInputKey,
+                orderIndex = nextOrder,
+            )
+        )
+        val activatorId = activatorDao.insert(
+            Activator(
+                groupInputId = newInputId,
+                type = ActivatorType.FULL_PRESS,
+                settingsJson = "{}",
+                orderIndex = 0,
+            )
+        )
+        bindingDao.insert(
+            Binding(
+                activatorId = activatorId,
+                outputType = BindingOutputType.UNBOUND,
+                args = "",
+                orderIndex = 0,
+            )
+        )
+        configDirtyTick.value = configDirtyTick.value + 1
+        return newInputId
+    }
+
     private suspend fun loadConfigSnapshot(controllerProfile: ControllerProfile): ControllerConfig {
         val sets = actionSetDao.getByControllerProfile(controllerProfile.id)
         if (sets.isEmpty()) return ControllerConfig(controllerProfile, emptyList())
@@ -917,6 +1065,15 @@ class ControllerConfigRepository @Inject constructor(
             bindingDao.getByActivators(activatorIds).groupBy { it.activatorId }
         } else emptyMap()
 
+        // Phase 7 Brick B.5 — mode shifts (per-source while-held overlays).
+        // One pass per owner (set vs. layer); they're queried separately because
+        // each row is either set- or layer-owned, never both.
+        val modeShiftsByActionSet = sourceModeShiftDao.getByActionSets(setIds)
+            .groupBy { it.actionSetId!! }
+        val modeShiftsByActionLayer = if (layerIds.isNotEmpty()) {
+            sourceModeShiftDao.getByActionLayers(layerIds).groupBy { it.actionLayerId!! }
+        } else emptyMap()
+
         fun buildGroup(group: BindingGroup): BindingGroupGraph {
             val inputs = (inputsByGroup[group.id] ?: emptyList()).map { input ->
                 val activators = (activatorsByInput[input.id] ?: emptyList()).map { activator ->
@@ -927,6 +1084,13 @@ class ControllerConfigRepository @Inject constructor(
             return BindingGroupGraph(group, inputs)
         }
 
+        // Resolve a SourceModeShift to its graph form. Drops rows whose target
+        // bindingGroup vanished (defensive against stale FKs in dev).
+        fun resolveModeShift(shift: com.mapo.data.model.steam.SourceModeShift): com.mapo.data.model.steam.SourceModeShiftGraph? {
+            val targetGroup = groupsById[shift.bindingGroupId] ?: return null
+            return com.mapo.data.model.steam.SourceModeShiftGraph(shift, buildGroup(targetGroup))
+        }
+
         val actionSetGraphs = sets.map { actionSet ->
             val layerGraphs = (layersByActionSet[actionSet.id] ?: emptyList()).map { layer ->
                 val groupsForLayer = (groupsByActionLayer[layer.id] ?: emptyList()).map(::buildGroup)
@@ -934,13 +1098,17 @@ class ControllerConfigRepository @Inject constructor(
                     val group = groupsById[lpb.bindingGroupId] ?: return@mapNotNull null
                     PresetEntry(lpb.inputSource, lpb.state, buildGroup(group))
                 }
-                ActionLayerGraph(layer, groupsForLayer, layerPresetEntries)
+                val layerModeShifts = (modeShiftsByActionLayer[layer.id] ?: emptyList())
+                    .mapNotNull(::resolveModeShift)
+                ActionLayerGraph(layer, groupsForLayer, layerPresetEntries, layerModeShifts)
             }
             val presetEntries = (presetsByActionSet[actionSet.id] ?: emptyList()).mapNotNull { pb ->
                 val group = groupsById[pb.bindingGroupId] ?: return@mapNotNull null
                 PresetEntry(pb.inputSource, pb.state, buildGroup(group))
             }
-            ActionSetGraph(actionSet, layerGraphs, presetEntries)
+            val setModeShifts = (modeShiftsByActionSet[actionSet.id] ?: emptyList())
+                .mapNotNull(::resolveModeShift)
+            ActionSetGraph(actionSet, layerGraphs, presetEntries, setModeShifts)
         }
 
         return ControllerConfig(controllerProfile, actionSetGraphs)

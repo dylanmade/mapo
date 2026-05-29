@@ -16,7 +16,6 @@ import androidx.room.PrimaryKey
  *  - MOUSE_WHEEL:      "SCROLL_UP" / "SCROLL_DOWN"
  *  - GAME_ACTION:      "<action_set_name>,<action_name>"
  *  - CONTROLLER_ACTION: "<verb>,<arg1>,<arg2>,..."   e.g. "CHANGE_PRESET,1,1"
- *  - MODE_SHIFT:       "<input_source>,<binding_group_id>"
  *  - UNBOUND:          "" (placeholder for a configured-but-empty slot)
  */
 @Entity(

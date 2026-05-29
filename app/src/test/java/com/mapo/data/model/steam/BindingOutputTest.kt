@@ -16,7 +16,6 @@ class BindingOutputTest {
             BindingOutput.MouseWheel("SCROLL_UP"),
             BindingOutput.GameAction("Gameplay", "Jump"),
             BindingOutput.ControllerAction("CHANGE_PRESET", listOf("1", "1")),
-            BindingOutput.ModeShift(InputSource.RIGHT_TRACKPAD, 42L),
         )
 
         for (original in cases) {
@@ -79,7 +78,6 @@ class BindingOutputTest {
             BindingOutput.MouseWheel("SCROLL_UP"),
             BindingOutput.GameAction("Gameplay", "Jump"),
             BindingOutput.ControllerAction("CHANGE_PRESET", listOf("42")),
-            BindingOutput.ModeShift(InputSource.RIGHT_TRACKPAD, 42L),
         )
 
         for (original in cases) {

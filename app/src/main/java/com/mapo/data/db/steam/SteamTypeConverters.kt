@@ -33,7 +33,18 @@ class SteamTypeConverters {
     @TypeConverter fun stringToActivatorType(value: String): ActivatorType = ActivatorType.valueOf(value)
 
     @TypeConverter fun bindingOutputTypeToString(value: BindingOutputType): String = value.name
-    @TypeConverter fun stringToBindingOutputType(value: String): BindingOutputType = BindingOutputType.valueOf(value)
+
+    /**
+     * Read-side BindingOutputType with defensive fallback. `MODE_SHIFT` was a
+     * short-lived Brick B output type (2026-05-27 → 2026-05-28); any survivor
+     * row from that window maps to [BindingOutputType.UNBOUND] so the
+     * activator's binding becomes inert rather than crashing app startup.
+     * Mode shifts are now configured on the source via `SourceModeShift`.
+     */
+    @TypeConverter fun stringToBindingOutputType(value: String): BindingOutputType = when (value) {
+        "MODE_SHIFT" -> BindingOutputType.UNBOUND
+        else -> runCatching { BindingOutputType.valueOf(value) }.getOrDefault(BindingOutputType.UNBOUND)
+    }
 
     @TypeConverter fun inputSourceToString(value: InputSource): String = value.name
     @TypeConverter fun stringToInputSource(value: String): InputSource = InputSource.valueOf(value)

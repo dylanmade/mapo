@@ -156,6 +156,37 @@ class InputEvaluator @Inject constructor(
     private val heldLayerByAddress = HashMap<InputAddress, Long>()
 
     /**
+     * Phase 7 Brick B.5 — active mode shifts. A single trigger press can activate
+     * multiple shifts (e.g. RB shifts both LJ and RJ to different modes), so this
+     * is a list, not a map keyed by trigger.
+     *
+     * Lifecycle: shifts whose `(triggerSource, triggerSubInput)` matches an
+     * incoming press are appended in [activateModeShiftsFor]; shifts whose
+     * trigger matches an incoming release are removed in [releaseModeShiftFor];
+     * [flushAllRuntime] clears the list on profile/set switch. Steam-faithful:
+     * mode shifts always release on UP, never sticky.
+     *
+     * Multi-shift on same target source: the most-recently-activated wins
+     * (mirrors action-layer last-write-wins). Iteration order is insertion
+     * order — newer entries appear later, so iteration writes the last match
+     * into `winner` for that source.
+     */
+    private val activeModeShifts = mutableListOf<ActiveModeShift>()
+
+    /**
+     * Phase 7 Brick B.5 — one entry in [activeModeShifts]. [targetSource] is the
+     * source being overridden; [targetGroupId] looks up into
+     * [CompiledConfig.compiledGroups] to materialize the override's mode +
+     * sub-input bindings. [triggerAddress] is the physical input whose UP will
+     * deactivate this shift.
+     */
+    private data class ActiveModeShift(
+        val triggerAddress: InputAddress,
+        val targetSource: InputSource,
+        val targetGroupId: Long,
+    )
+
+    /**
      * Currently-active action set id (Brick 4.2). 0L means "uninitialized — lazy-resolve
      * from `compiledConfig.startingActionSetId` on first event." A `CHANGE_PRESET`
      * controller_action verb mutates this; [flushAllRuntime] runs first so no held
@@ -222,12 +253,21 @@ class InputEvaluator @Inject constructor(
     }
 
     /**
-     * Lookup with layer-stack overlay (Brick 5.1). Walks [activeLayers] top-down (last
-     * entry = highest priority); first overlay that holds the address wins. Falls back
-     * to the base set's inputs when no layer in the stack overrides the address.
+     * Lookup with mode-shift + layer-stack precedence (Brick 5.1 layers + Phase 7
+     * Brick B mode shifts). Resolution order, highest priority first:
+     *  1. Active mode shifts on this address's source — most recent wins.
+     *  2. Action layer stack (top-down, last entry = highest priority).
+     *  3. Base set's inputs.
+     *
+     * Mode shifts outrank layers per Steam semantics: a mode shift is the
+     * momentary "while held this source becomes X" — it's more specific than
+     * any layer override and should override an active layer's binding for the
+     * same address.
      */
     private fun lookupActive(address: InputAddress): CompiledInput? {
         val set = resolveActiveSet() ?: return null
+        val modeShiftHit = resolveModeShiftInput(address)
+        if (modeShiftHit != null) return modeShiftHit
         if (activeLayers.isNotEmpty()) {
             for (i in activeLayers.indices.reversed()) {
                 val overlay = set.layers[activeLayers[i]]?.inputs?.get(address)
@@ -235,6 +275,31 @@ class InputEvaluator @Inject constructor(
             }
         }
         return set.inputs[address]
+    }
+
+    /**
+     * Phase 7 Brick B — materialize a [CompiledInput] from any active mode shift on
+     * [address]'s source. Returns null when no mode shift targets this source, or
+     * when the target group has no entry for [address.inputKey]. Multiple shifts
+     * on the same source: most recently activated wins (last entry in iteration).
+     */
+    private fun resolveModeShiftInput(address: InputAddress): CompiledInput? {
+        if (activeModeShifts.isEmpty()) return null
+        val cfg = dispatcher.compiledConfig.value
+        // Last-activated wins on collision; iterate insertion order, overwrite.
+        var winner: ActiveModeShift? = null
+        for (shift in activeModeShifts) {
+            if (shift.targetSource == address.source) winner = shift
+        }
+        val shift = winner ?: return null
+        val group = cfg.compiledGroups[shift.targetGroupId] ?: return null
+        val activators = group.inputs[address.inputKey] ?: return null
+        return CompiledInput(
+            groupInputId = 0L, // mode-shift overlay has no stable GroupInput id surface
+            activators = activators,
+            mode = group.mode,
+            modeSettingsJson = group.modeSettingsJson,
+        )
     }
 
     /**
@@ -354,12 +419,29 @@ class InputEvaluator @Inject constructor(
 
     /**
      * Resolve which mode + settings apply to [source] given the active set + layer
-     * stack. Walks layers top-down (highest priority first) looking for any
-     * compiled input on this source — if found, that layer's binding_group's mode
-     * + settings win. Falls back to the base set otherwise. Returns null when no
-     * binding_group covers the source (e.g. the source is UNBOUND or never seeded).
+     * stack + mode shifts. Precedence (highest first):
+     *  1. Mode-shift override targeting this source — most recent wins.
+     *  2. Action layer stack (top-down).
+     *  3. Base set.
+     *
+     * Returns null when no binding_group covers the source (e.g. the source is
+     * DEVICE_DEFAULT or never seeded).
      */
     private fun findSourceModeFor(set: CompiledActionSet, source: InputSource): SourceModeView? {
+        // 1) Mode-shift override
+        if (activeModeShifts.isNotEmpty()) {
+            val cfg = dispatcher.compiledConfig.value
+            var winner: ActiveModeShift? = null
+            for (shift in activeModeShifts) {
+                if (shift.targetSource == source) winner = shift
+            }
+            if (winner != null) {
+                cfg.compiledGroups[winner.targetGroupId]?.let { group ->
+                    return SourceModeView(group.mode, group.modeSettingsJson)
+                }
+            }
+        }
+        // 2) Action layer stack
         if (activeLayers.isNotEmpty()) {
             for (i in activeLayers.indices.reversed()) {
                 val layer = set.layers[activeLayers[i]] ?: continue
@@ -367,6 +449,7 @@ class InputEvaluator @Inject constructor(
                 if (match != null) return SourceModeView(match.mode, match.modeSettingsJson)
             }
         }
+        // 3) Base set
         val base = set.inputs.entries.firstOrNull { it.key.source == source }?.value
             ?: return null
         return SourceModeView(base.mode, base.modeSettingsJson)
@@ -402,6 +485,12 @@ class InputEvaluator @Inject constructor(
         // Record the physical state up-front so any CHORDED_PRESS activator triggered by
         // *this* event sees a consistent held set if it queries.
         physicallyHeld.add(address)
+
+        // Phase 7 Brick B.5: activate any mode shifts whose trigger == this address.
+        // Done BEFORE binding evaluation so the trigger's own bindings (if any) still
+        // fire normally — Steam-faithful additive semantics: a trigger button can
+        // both emit its bindings AND drive a mode shift simultaneously.
+        activateModeShiftsFor(address)
 
         // Second-tap path: an active DOUBLE_PRESS window on this address means this DOWN
         // is the second tap. Cancel the window, fire DOUBLE_PRESS (the deferred Regular is
@@ -557,6 +646,11 @@ class InputEvaluator @Inject constructor(
         // RELEASE_PRESS activator path so RELEASE_PRESS bindings already see the
         // underlying-set bindings restored (matches Steam: the layer goes away with the UP).
         releaseHeldLayer(address)
+
+        // Phase 7 Brick B: mode_shift triggered by this address releases here too,
+        // before the RELEASE_PRESS path — same reasoning as hold_layer (any release
+        // binding sees the mode-shift-off state).
+        releaseModeShiftFor(address)
 
         // If a DOUBLE_PRESS window is still active for this address, this UP belongs to the
         // first tap. Note the physical state — the window timer uses it later to decide
@@ -966,6 +1060,68 @@ class InputEvaluator @Inject constructor(
     }
 
     /**
+     * Phase 7 Brick B.5 — append every mode shift whose trigger matches [address]
+     * to [activeModeShifts]. Walks both the active set's shifts and every
+     * currently-active layer's shifts. Idempotent on duplicate DOWN — the
+     * caller's [onPress] doesn't suppress duplicates here because most paths
+     * are already protected by [forceReleaseAddress] when a stale held entry
+     * exists; the duplicate-shift scenario is rare (flaky controllers) and
+     * the worst case is two list entries that both release on the same UP.
+     */
+    private fun activateModeShiftsFor(address: InputAddress) {
+        val set = resolveActiveSet() ?: return
+        // Active set's set-owned shifts: always candidate.
+        for (def in set.modeShifts) {
+            if (def.triggerAddress == address) {
+                activeModeShifts += ActiveModeShift(
+                    triggerAddress = address,
+                    targetSource = def.ownerSource,
+                    targetGroupId = def.targetGroupId,
+                )
+                Log.d(TAG, "mode_shift activated: trigger=$address target=${def.ownerSource} group=${def.targetGroupId}")
+            }
+        }
+        // Layer-owned shifts: only candidate while the owning layer is in the
+        // active stack. If a layer is removed mid-press, any shift it activated
+        // stays in activeModeShifts until the trigger UP — Steam-faithful
+        // "while held" semantics, matches hold_layer behavior.
+        if (activeLayers.isNotEmpty()) {
+            for (layerId in activeLayers) {
+                val layer = set.layers[layerId] ?: continue
+                for (def in layer.modeShifts) {
+                    if (def.triggerAddress == address) {
+                        activeModeShifts += ActiveModeShift(
+                            triggerAddress = address,
+                            targetSource = def.ownerSource,
+                            targetGroupId = def.targetGroupId,
+                        )
+                        Log.d(TAG, "mode_shift activated (layer $layerId): trigger=$address target=${def.ownerSource} group=${def.targetGroupId}")
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Phase 7 Brick B.5 — release any mode shifts triggered by [address]'s DOWN. Called
+     * from [onRelease] before the held-binding release path; mode shifts have no
+     * binding-release side effects, just a runtime state cleanup. No-op if no
+     * mode shift is active for this trigger address. Multiple shifts can release
+     * simultaneously (e.g. one trigger that overlays two different sources).
+     */
+    private fun releaseModeShiftFor(address: InputAddress) {
+        if (activeModeShifts.isEmpty()) return
+        val it = activeModeShifts.iterator()
+        while (it.hasNext()) {
+            val shift = it.next()
+            if (shift.triggerAddress == address) {
+                Log.d(TAG, "mode_shift released: trigger=$address target=${shift.targetSource} group=${shift.targetGroupId}")
+                it.remove()
+            }
+        }
+    }
+
+    /**
      * Swap the runtime active set. Steam semantics: switching clears all transient
      * runtime state from the old set so a bound key currently held in set A doesn't
      * keep emitting in set B. [physicallyHeld] is preserved — it tracks physical
@@ -1028,6 +1184,10 @@ class InputEvaluator @Inject constructor(
             publishActiveLayers()
         }
         heldLayerByAddress.clear()
+        if (activeModeShifts.isNotEmpty()) {
+            Log.d(TAG, "flushAllRuntime: clearing ${activeModeShifts.size} active mode-shift(s)")
+            activeModeShifts.clear()
+        }
         flushAnalog()
     }
 

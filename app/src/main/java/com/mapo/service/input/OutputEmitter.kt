@@ -20,8 +20,8 @@ import javax.inject.Singleton
  *    gesture path. There's no "release" for an accessibility tap, so we return false to
  *    tell the evaluator not to bother tracking these in the held set.
  *  - **Unbound** — no-op, return false.
- *  - **GameAction / ControllerAction / ModeShift** — stub. Log the press and drop; the
- *    binding type exists in the schema but its runtime behavior lands in Phases 4 / 5.
+ *  - **GameAction / ControllerAction** — stub. Log the press and drop; the
+ *    binding type exists in the schema but its runtime behavior lands in Phase 4.
  *    Returning false keeps the evaluator from waiting on a release that never comes.
  *
  * Release semantics: only KeyPress / XInputButton have DOWN/UP edges, so [emitRelease]
@@ -69,10 +69,6 @@ class OutputEmitter @Inject constructor(
         }
         is BindingOutput.ControllerAction -> {
             Log.d(TAG, "press ControllerAction(${output.verb} ${output.args}) — Phase 4/5 stub, dropped")
-            false
-        }
-        is BindingOutput.ModeShift -> {
-            Log.d(TAG, "press ModeShift(${output.inputSource} → group ${output.bindingGroupId}) — Phase 5 stub, dropped")
             false
         }
     }

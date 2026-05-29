@@ -16,6 +16,7 @@ import com.mapo.data.db.steam.GameActionDao
 import com.mapo.data.db.steam.GroupInputDao
 import com.mapo.data.db.steam.LayerPresetBindingDao
 import com.mapo.data.db.steam.PresetBindingDao
+import com.mapo.data.db.steam.SourceModeShiftDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -77,4 +78,7 @@ object AppModule {
 
     @Provides @Singleton
     fun provideLayerPresetBindingDao(db: AppDatabase): LayerPresetBindingDao = db.layerPresetBindingDao()
+
+    @Provides @Singleton
+    fun provideSourceModeShiftDao(db: AppDatabase): SourceModeShiftDao = db.sourceModeShiftDao()
 }

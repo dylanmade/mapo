@@ -46,6 +46,32 @@ sealed class RemapPaneItem {
         override val key: String,
         val label: String,
     ) : RemapPaneItem()
+
+    /**
+     * Phase 7 Brick B.6: header row for a per-source mode shift section. Renders
+     * "{sourceLabel} (Mode Shift)" with the shift's mode picker, settings cog,
+     * and remove button. Resolved at render time from [InputSource]'s display
+     * name.
+     */
+    data class ModeShiftHeader(
+        override val key: String,
+        val modeShiftId: Long,
+        val ownerSource: InputSource,
+    ) : RemapPaneItem()
+
+    /**
+     * Phase 7 Brick B.6: bindable row within a mode shift's target group.
+     * Routes to InputEditorScreen with the [modeShiftId] nav arg so the
+     * editor resolves bindings through the shift's group, not the source's
+     * preset.
+     */
+    data class ModeShiftBindingRow(
+        override val key: String,
+        val modeShiftId: Long,
+        val label: String,
+        val ownerSource: InputSource,
+        val groupInputKey: String,
+    ) : RemapPaneItem()
 }
 
 object RemapSections {
@@ -65,15 +91,32 @@ object RemapSections {
         SectionedPaneItem(SECTION_GYRO, "Gyro", enabled = false),
     )
 
+    /**
+     * Phase 7 follow-up: sources whose visible sub-input rows depend on the
+     * currently-selected [com.mapo.data.model.steam.BindingMode]. The static
+     * [contentBySection] registry omits binding rows for these sources; the
+     * detail pane resolves the effective mode at render time and generates
+     * rows dynamically via [bindableSubInputsFor].
+     *
+     * Sources NOT in this set always render their static rows (bumpers,
+     * switch buttons — all permanently `SINGLE_BUTTON`).
+     */
+    val MODE_AWARE_SOURCES: Set<InputSource> = setOf(
+        InputSource.BUTTON_DIAMOND,
+        InputSource.DPAD,
+        InputSource.LEFT_TRIGGER,
+        InputSource.RIGHT_TRIGGER,
+        InputSource.LEFT_JOYSTICK,
+        InputSource.RIGHT_JOYSTICK,
+    )
+
     val contentBySection: Map<String, List<RemapPaneItem>> = mapOf(
         SECTION_BUTTONS to listOf(
+            // Face buttons: rows generated dynamically per current mode (BUTTON_PAD →
+            // A/B/X/Y; DPAD → A/B/X/Y mapped to directions; etc.).
             RemapPaneItem.Subheader("buttons.face.header", "Face Buttons", InputSource.BUTTON_DIAMOND),
-            RemapPaneItem.BindingRow("buttons.face.a", "A", InputSource.BUTTON_DIAMOND, "button_a"),
-            RemapPaneItem.BindingRow("buttons.face.b", "B", InputSource.BUTTON_DIAMOND, "button_b"),
-            RemapPaneItem.BindingRow("buttons.face.x", "X", InputSource.BUTTON_DIAMOND, "button_x"),
-            RemapPaneItem.BindingRow("buttons.face.y", "Y", InputSource.BUTTON_DIAMOND, "button_y"),
             // Bumpers + Menu Buttons span multiple sources, each individually
-            // SINGLE_BUTTON — no mode choice to surface here.
+            // SINGLE_BUTTON — no mode choice to surface here, so the rows stay static.
             RemapPaneItem.Subheader("buttons.bumpers.header", "Bumpers"),
             RemapPaneItem.BindingRow("buttons.bumpers.l1", "L1", InputSource.LEFT_BUMPER, "click"),
             RemapPaneItem.BindingRow("buttons.bumpers.r1", "R1", InputSource.RIGHT_BUMPER, "click"),
@@ -82,38 +125,175 @@ object RemapSections {
             RemapPaneItem.BindingRow("buttons.menu.select", "Select", InputSource.SWITCH_SELECT, "click"),
         ),
         SECTION_DPAD to listOf(
+            // Dpad source rows: dynamic per mode. DPAD/BUTTON_PAD modes surface the
+            // four directions; JOYSTICK_MOUSE / etc. surface their respective
+            // sub-input vocabularies.
             RemapPaneItem.Subheader("dpad.header", "Directional Pad Behavior", InputSource.DPAD),
-            RemapPaneItem.BindingRow("dpad.up", "D-Pad Up", InputSource.DPAD, "dpad_up"),
-            RemapPaneItem.BindingRow("dpad.down", "D-Pad Down", InputSource.DPAD, "dpad_down"),
-            RemapPaneItem.BindingRow("dpad.left", "D-Pad Left", InputSource.DPAD, "dpad_left"),
-            RemapPaneItem.BindingRow("dpad.right", "D-Pad Right", InputSource.DPAD, "dpad_right"),
         ),
         SECTION_TRIGGERS to listOf(
             RemapPaneItem.Subheader("triggers.left.header", "Left Trigger Behavior", InputSource.LEFT_TRIGGER),
-            RemapPaneItem.BindingRow("triggers.left.full", "L2 Full Pull", InputSource.LEFT_TRIGGER, "full_pull"),
-            // Soft Pull lights up when the trigger mode is set to TRIGGER (its
-            // validInputs include `soft_pull`); under the default DEVICE_DEFAULT
-            // mode the binding-row look-up returns null and the row reads as
-            // bindable-but-empty, mirroring how a Full Pull row reads when no
-            // activator is wired. Brick 5 follow-up unified the soft-press model:
-            // soft-pull behavior comes from any activator type bound here, not
-            // from a SOFT_PRESS activator type on the full_pull row.
-            RemapPaneItem.BindingRow("triggers.left.soft", "L2 Soft Pull", InputSource.LEFT_TRIGGER, "soft_pull"),
+            // Dynamic rows for LEFT_TRIGGER inject here. The Analog Output
+            // Trigger DisabledRow stays as a fixed-position placeholder after
+            // the dynamic rows — it documents a sub-input we don't yet expose.
             RemapPaneItem.DisabledRow("triggers.left.analog", "Analog Output Trigger"),
             RemapPaneItem.Subheader("triggers.right.header", "Right Trigger Behavior", InputSource.RIGHT_TRIGGER),
-            RemapPaneItem.BindingRow("triggers.right.full", "R2 Full Pull", InputSource.RIGHT_TRIGGER, "full_pull"),
-            RemapPaneItem.BindingRow("triggers.right.soft", "R2 Soft Pull", InputSource.RIGHT_TRIGGER, "soft_pull"),
             RemapPaneItem.DisabledRow("triggers.right.analog", "Analog Output Trigger"),
         ),
         SECTION_JOYSTICKS to listOf(
             RemapPaneItem.Subheader("joysticks.left.header", "Left Joystick Behavior", InputSource.LEFT_JOYSTICK),
-            RemapPaneItem.BindingRow("joysticks.left.click", "L3 (Stick Click)", InputSource.LEFT_JOYSTICK, "click"),
             RemapPaneItem.Subheader("joysticks.right.header", "Right Joystick Behavior", InputSource.RIGHT_JOYSTICK),
-            RemapPaneItem.BindingRow("joysticks.right.click", "R3 (Stick Click)", InputSource.RIGHT_JOYSTICK, "click"),
         ),
         // Gyro: rail entry is disabled. If the user lands on the section anyway,
         // the detail pane shows a placeholder rather than crashing on a missing key.
     )
 
     const val GYRO_PLACEHOLDER = "Gyro input arrives once analog motion capture lands. Coming soon."
+
+    /**
+     * Phase 7 Brick B.6: which sources can have a mode shift added in the
+     * editor UI. Maps to a source's Subheader; only subheaders whose
+     * [RemapPaneItem.Subheader.inputSource] is in this set show a
+     * "+ Add Mode Shift" button. Subheaders without a source (Bumpers,
+     * Menu Buttons) cover multiple sources at once and don't get the
+     * button — mode shifts are per-source. Triggers + switches are
+     * excluded per Steam parity (their physical role makes them awkward
+     * shift targets; users shift TO them by binding the trigger as the
+     * trigger of someone else's mode shift).
+     */
+    val MODE_SHIFT_OWNERS: Set<InputSource> = setOf(
+        InputSource.BUTTON_DIAMOND,
+        InputSource.DPAD,
+        InputSource.LEFT_JOYSTICK,
+        InputSource.RIGHT_JOYSTICK,
+    )
+
+    /**
+     * Phase 7 Brick B.6: catalog of physical sub-inputs the user can select as
+     * a mode-shift trigger. One entry per `(InputSource, sub_input)` digital
+     * edge available on Mapo's target hardware. The trigger picker UI groups
+     * these by [groupTitle].
+     */
+    data class TriggerInputOption(
+        val source: InputSource,
+        val subInput: String,
+        val label: String,
+        val groupTitle: String,
+    )
+
+    val TRIGGER_INPUT_CATALOG: List<TriggerInputOption> = listOf(
+        TriggerInputOption(InputSource.BUTTON_DIAMOND, "button_a", "A", "Face Buttons"),
+        TriggerInputOption(InputSource.BUTTON_DIAMOND, "button_b", "B", "Face Buttons"),
+        TriggerInputOption(InputSource.BUTTON_DIAMOND, "button_x", "X", "Face Buttons"),
+        TriggerInputOption(InputSource.BUTTON_DIAMOND, "button_y", "Y", "Face Buttons"),
+        TriggerInputOption(InputSource.LEFT_BUMPER, "click", "L1", "Bumpers"),
+        TriggerInputOption(InputSource.RIGHT_BUMPER, "click", "R1", "Bumpers"),
+        TriggerInputOption(InputSource.LEFT_TRIGGER, "full_pull", "L2 (Full Pull)", "Triggers"),
+        TriggerInputOption(InputSource.RIGHT_TRIGGER, "full_pull", "R2 (Full Pull)", "Triggers"),
+        TriggerInputOption(InputSource.DPAD, "dpad_up", "D-Pad Up", "D-Pad"),
+        TriggerInputOption(InputSource.DPAD, "dpad_down", "D-Pad Down", "D-Pad"),
+        TriggerInputOption(InputSource.DPAD, "dpad_left", "D-Pad Left", "D-Pad"),
+        TriggerInputOption(InputSource.DPAD, "dpad_right", "D-Pad Right", "D-Pad"),
+        TriggerInputOption(InputSource.LEFT_JOYSTICK, "click", "L3 (Stick Click)", "Joystick Clicks"),
+        TriggerInputOption(InputSource.RIGHT_JOYSTICK, "click", "R3 (Stick Click)", "Joystick Clicks"),
+        TriggerInputOption(InputSource.SWITCH_START, "click", "Start", "Menu Buttons"),
+        TriggerInputOption(InputSource.SWITCH_SELECT, "click", "Select", "Menu Buttons"),
+    )
+
+    /**
+     * Phase 7 Brick B.6 / mode-driven base rows: derived bindable sub-input list
+     * for a given source + mode. Used by:
+     *  - The base source rows (post follow-up) — dynamically rendered after each
+     *    [RemapPaneItem.Subheader] whose source is in [MODE_AWARE_SOURCES].
+     *  - Mode shift sections — same shape but rendered under a "(Mode Shift)"
+     *    heading instead of the source's primary subheader.
+     *
+     * Reads through `validInputsFor(source, mode)` so the result stays in sync
+     * with the runtime catalog. Labels are source-aware via [labelFor] —
+     * "Click" reads as "L3 (Stick Click)" on the left joystick, "L2 Full Pull"
+     * on the left trigger, etc.
+     *
+     * Empty-mode fallback: when `validInputsFor` returns empty (which happens
+     * for [BindingMode.DEVICE_DEFAULT] / [BindingMode.NONE] / stub modes),
+     * we render [canonicalSubInputsFor]'s rows instead so the user sees the
+     * source's "natural" sub-inputs and can pre-configure bindings before
+     * picking a runtime-active mode. The bindings still exist in the DB and
+     * activate as soon as the user picks a real mode.
+     */
+    fun bindableSubInputsFor(
+        source: InputSource,
+        mode: com.mapo.data.model.steam.BindingMode,
+    ): List<Pair<String, String>> {
+        val keys = com.mapo.service.input.modes.validInputsFor(source, mode)
+            .ifEmpty { canonicalSubInputsFor(source) }
+        return keys.map { key -> key to labelFor(source, key) }
+    }
+
+    /**
+     * Canonical sub-input set per mode-aware source — the rows the editor
+     * displays as a fallback when the current mode would otherwise produce
+     * an empty list ([BindingMode.DEVICE_DEFAULT] / [BindingMode.NONE] /
+     * stub modes). Matches the seed data in
+     * `ControllerConfigRepository.DEFAULT_INPUT_SOURCE_SEEDS` so a fresh
+     * install always shows a populated editor.
+     */
+    private fun canonicalSubInputsFor(source: InputSource): Set<String> = when (source) {
+        InputSource.BUTTON_DIAMOND -> setOf("button_a", "button_b", "button_x", "button_y")
+        InputSource.DPAD -> setOf("dpad_up", "dpad_down", "dpad_left", "dpad_right")
+        InputSource.LEFT_TRIGGER, InputSource.RIGHT_TRIGGER -> setOf("full_pull", "soft_pull")
+        InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK -> setOf("click", "outer_ring")
+        else -> emptySet()
+    }
+
+    /**
+     * Phase 7 follow-up: source-aware sub-input label. Lets a generic key like
+     * `"click"` render as "L3 (Stick Click)" on the left joystick and "Click"
+     * everywhere else, without exploding the registry into one-row-per-source-
+     * per-key. Falls back to [SUB_INPUT_LABELS] when no source-specific
+     * override exists; ultimately falls back to the raw key.
+     */
+    fun labelFor(source: InputSource, subInputKey: String): String {
+        when (source) {
+            InputSource.LEFT_JOYSTICK -> when (subInputKey) {
+                "click" -> return "L3 (Stick Click)"
+                "outer_ring" -> return "L3 Outer Ring"
+            }
+            InputSource.RIGHT_JOYSTICK -> when (subInputKey) {
+                "click" -> return "R3 (Stick Click)"
+                "outer_ring" -> return "R3 Outer Ring"
+            }
+            InputSource.LEFT_TRIGGER -> when (subInputKey) {
+                "full_pull" -> return "L2 Full Pull"
+                "soft_pull" -> return "L2 Soft Pull"
+                "click" -> return "L2 Click"
+            }
+            InputSource.RIGHT_TRIGGER -> when (subInputKey) {
+                "full_pull" -> return "R2 Full Pull"
+                "soft_pull" -> return "R2 Soft Pull"
+                "click" -> return "R2 Click"
+            }
+            InputSource.DPAD -> when (subInputKey) {
+                "dpad_up" -> return "D-Pad Up"
+                "dpad_down" -> return "D-Pad Down"
+                "dpad_left" -> return "D-Pad Left"
+                "dpad_right" -> return "D-Pad Right"
+            }
+            else -> {}
+        }
+        return SUB_INPUT_LABELS[subInputKey] ?: subInputKey
+    }
+
+    private val SUB_INPUT_LABELS: Map<String, String> = mapOf(
+        "button_a" to "A",
+        "button_b" to "B",
+        "button_x" to "X",
+        "button_y" to "Y",
+        "dpad_up" to "Up",
+        "dpad_down" to "Down",
+        "dpad_left" to "Left",
+        "dpad_right" to "Right",
+        "click" to "Click",
+        "full_pull" to "Full Pull",
+        "soft_pull" to "Soft Pull",
+        "outer_ring" to "Outer Ring",
+    )
 }

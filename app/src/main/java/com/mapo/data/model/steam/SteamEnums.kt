@@ -139,7 +139,12 @@ enum class ActivatorType {
 /**
  * Output category for a [Binding]. Args interpretation depends on this value.
  * Concrete output types (KEY_PRESS, MOUSE_*, XINPUT_BUTTON) are fully runtime-supported.
- * GAME_ACTION + CONTROLLER_ACTION + MODE_SHIFT are placeholders until later phases.
+ * GAME_ACTION + CONTROLLER_ACTION are placeholders until later phases.
+ *
+ * Mode shifting is intentionally NOT a binding output — it's a per-source overlay
+ * configured on the source itself (see `SourceModeShift` entity), Steam-parity.
+ * The trigger input is part of the mode-shift definition, not encoded on a
+ * button binding.
  */
 enum class BindingOutputType {
     UNBOUND,
@@ -149,7 +154,6 @@ enum class BindingOutputType {
     MOUSE_WHEEL,
     GAME_ACTION,
     CONTROLLER_ACTION,
-    MODE_SHIFT,
 }
 
 /**

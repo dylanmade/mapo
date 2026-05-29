@@ -11,6 +11,7 @@ import com.mapo.data.model.steam.GroupInput
 import com.mapo.data.model.steam.InputSource
 import com.mapo.data.model.steam.LayerPresetBinding
 import com.mapo.data.model.steam.PresetBinding
+import com.mapo.data.model.steam.SourceModeShift
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -267,5 +268,42 @@ class FakeLayerPresetBindingDao : LayerPresetBindingDao {
                 it.inputSource == inputSource &&
                 it.state == state
         }
+    }
+}
+
+class FakeSourceModeShiftDao : SourceModeShiftDao {
+    val rows = MutableStateFlow<List<SourceModeShift>>(emptyList())
+    private var nextId = 1L
+
+    override suspend fun getByActionSets(actionSetIds: List<Long>): List<SourceModeShift> =
+        rows.value.filter { it.actionSetId in actionSetIds }
+            .sortedWith(compareBy({ it.displayOrder }, { it.id }))
+
+    override suspend fun getByActionLayers(actionLayerIds: List<Long>): List<SourceModeShift> =
+        rows.value.filter { it.actionLayerId in actionLayerIds }
+            .sortedWith(compareBy({ it.displayOrder }, { it.id }))
+
+    override suspend fun getById(id: Long): SourceModeShift? = rows.value.firstOrNull { it.id == id }
+
+    override suspend fun nextDisplayOrderForSet(actionSetId: Long, source: InputSource): Int =
+        (rows.value.filter { it.actionSetId == actionSetId && it.ownerSource == source }
+            .maxOfOrNull { it.displayOrder } ?: -1) + 1
+
+    override suspend fun nextDisplayOrderForLayer(actionLayerId: Long, source: InputSource): Int =
+        (rows.value.filter { it.actionLayerId == actionLayerId && it.ownerSource == source }
+            .maxOfOrNull { it.displayOrder } ?: -1) + 1
+
+    override suspend fun insert(shift: SourceModeShift): Long {
+        val id = nextId++
+        rows.value = rows.value + shift.copy(id = id)
+        return id
+    }
+
+    override suspend fun update(shift: SourceModeShift) {
+        rows.value = rows.value.map { if (it.id == shift.id) shift else it }
+    }
+
+    override suspend fun deleteById(id: Long) {
+        rows.value = rows.value.filterNot { it.id == id }
     }
 }

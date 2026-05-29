@@ -558,6 +558,31 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onSetBindingGroupMode = { bindingGroupId, mode ->
                         viewModel.setBindingGroupMode(bindingGroupId, mode)
                     },
+                    onAddModeShift = { setId, layerId, ownerSource ->
+                        if (layerId != null) viewModel.addModeShiftToLayer(layerId, ownerSource)
+                        else if (setId != null) viewModel.addModeShiftToSet(setId, ownerSource)
+                    },
+                    onRemoveModeShift = viewModel::removeModeShift,
+                    onSetModeShiftTrigger = { modeShiftId, source, subInput ->
+                        viewModel.setModeShiftTrigger(modeShiftId, source, subInput)
+                    },
+                    onOpenModeShiftInputEditor = { modeShiftId, ownerSource, groupInputKey, label ->
+                        // B.6 follow-up: mode-shift target groups are created
+                        // empty; sub-input rows materialize on first tap (same
+                        // pattern as layer overrides). Suspend → navigate so
+                        // the editor opens against the real GroupInput.
+                        scope.launch {
+                            viewModel.materializeModeShiftInput(modeShiftId, groupInputKey)
+                            navController.navigate(
+                                MapoRoute.inputEditor(
+                                    inputSource = ownerSource.name,
+                                    groupInputKey = groupInputKey,
+                                    label = label,
+                                    modeShiftId = modeShiftId,
+                                )
+                            )
+                        }
+                    },
                     shizukuRequiredAcknowledged = shizukuRequiredAcked,
                     shizukuReady = shizukuReady,
                     shizukuState = shizukuState,
@@ -600,11 +625,17 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         type = NavType.StringType
                         defaultValue = ""
                     },
+                    navArgument(MapoRoute.ARG_MODE_SHIFT_ID) {
+                        type = NavType.LongType
+                        defaultValue = 0L
+                    },
                 ),
             ) { entry ->
                 val inputSourceName = entry.arguments?.getString(MapoRoute.ARG_INPUT_SOURCE) ?: return@composable
                 val groupInputKey = entry.arguments?.getString(MapoRoute.ARG_GROUP_INPUT_KEY) ?: return@composable
                 val label = entry.arguments?.getString(MapoRoute.ARG_INPUT_LABEL).orEmpty()
+                val modeShiftIdRaw = entry.arguments?.getLong(MapoRoute.ARG_MODE_SHIFT_ID) ?: 0L
+                val modeShiftId = if (modeShiftIdRaw > 0L) modeShiftIdRaw else null
                 val inputSource = runCatching {
                     com.mapo.data.model.steam.InputSource.valueOf(inputSourceName)
                 }.getOrNull() ?: return@composable
@@ -618,6 +649,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     config = activeControllerConfig,
                     viewingActionSetId = viewingActionSetId,
                     viewingLayerId = viewingLayerId,
+                    modeShiftId = modeShiftId,
                     pickerResult = pickerResult?.let { BindingOutput.decode(it) },
                     onConsumePickerResult = {
                         entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)

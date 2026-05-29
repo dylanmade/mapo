@@ -62,6 +62,15 @@ import com.mapo.data.model.steam.displayName
 import com.mapo.data.model.steam.displayNameFor
 import androidx.compose.ui.res.stringResource
 import com.mapo.R
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.graphics.Color
+import com.mapo.data.model.steam.SourceModeShiftGraph
 import com.mapo.service.input.modes.SourceModeCatalog
 import com.mapo.service.input.modes.requiresMotionCapture
 import com.mapo.ui.component.layout.SectionedListDetailPane
@@ -89,6 +98,10 @@ fun RemapControlsScreen(
     onDeleteLayer: (layerId: Long) -> Unit = {},
     onClearLayerOverride: (layerId: Long, inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit = { _, _, _ -> },
     onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit = { _, _ -> },
+    onAddModeShift: (actionSetId: Long?, actionLayerId: Long?, ownerSource: InputSource) -> Unit = { _, _, _ -> },
+    onRemoveModeShift: (modeShiftId: Long) -> Unit = {},
+    onSetModeShiftTrigger: (modeShiftId: Long, triggerSource: InputSource?, triggerSubInput: String?) -> Unit = { _, _, _ -> },
+    onOpenModeShiftInputEditor: (modeShiftId: Long, ownerSource: InputSource, groupInputKey: String, label: String) -> Unit = { _, _, _, _ -> },
     shizukuRequiredAcknowledged: Boolean = true,
     shizukuReady: Boolean = true,
     shizukuState: com.mapo.service.shizuku.ShizukuState = com.mapo.service.shizuku.ShizukuState.Granted,
@@ -206,6 +219,18 @@ fun RemapControlsScreen(
                     onClearLayerOverride(layerId, inputSource, groupInputKey)
                 },
                 onSetBindingGroupMode = gatedSetBindingGroupMode,
+                onAddModeShift = { ownerSource ->
+                    val layerId = viewingLayer?.layer?.id
+                    val setId = viewingSet?.actionSet?.id
+                    if (layerId != null) {
+                        onAddModeShift(null, layerId, ownerSource)
+                    } else if (setId != null) {
+                        onAddModeShift(setId, null, ownerSource)
+                    }
+                },
+                onRemoveModeShift = onRemoveModeShift,
+                onSetModeShiftTrigger = onSetModeShiftTrigger,
+                onOpenModeShiftInputEditor = onOpenModeShiftInputEditor,
             )
         }
     }
@@ -638,6 +663,10 @@ private fun RemapDetailPane(
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
     onClearOverride: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit,
     onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
+    onAddModeShift: (ownerSource: InputSource) -> Unit,
+    onRemoveModeShift: (modeShiftId: Long) -> Unit,
+    onSetModeShiftTrigger: (modeShiftId: Long, triggerSource: InputSource?, triggerSubInput: String?) -> Unit,
+    onOpenModeShiftInputEditor: (modeShiftId: Long, ownerSource: InputSource, groupInputKey: String, label: String) -> Unit,
 ) {
     val rawItems = RemapSections.contentBySection[sectionId]
 
@@ -647,14 +676,29 @@ private fun RemapDetailPane(
         return
     }
 
+    // Phase 7 follow-up: mode-aware sources (face buttons, dpad, joysticks,
+    // triggers) have their sub-input rows generated dynamically from the
+    // currently-resolved mode. Must run BEFORE the overrides filter so
+    // filterToOverrides sees the full mode-appropriate row set.
+    val dynamicallyExpandedItems = remember(rawItems, viewingSet, viewingLayer) {
+        expandWithDynamicBaseRows(rawItems, viewingSet, viewingLayer)
+    }
+
     // Brick 5.5.c: when "Only overrides" is on, drop binding rows without an override
     // — and any subheader whose children all dropped. Disabled rows always hide in
     // overrides-only (they can't be overridden anyway).
-    val items = remember(rawItems, onlyOverrides, viewingLayer) {
-        if (!onlyOverrides || viewingLayer == null) rawItems
-        else filterToOverrides(rawItems, viewingLayer)
+    val filteredItems = remember(dynamicallyExpandedItems, onlyOverrides, viewingLayer) {
+        if (!onlyOverrides || viewingLayer == null) dynamicallyExpandedItems
+        else filterToOverrides(dynamicallyExpandedItems, viewingLayer)
     }
     val isOverlayMode = viewingLayer != null
+
+    // Phase 7 Brick B.6: interleave mode-shift sections after each source's
+    // binding rows. Layer-view shows only layer-owned shifts; base view shows
+    // only set-owned shifts.
+    val items = remember(filteredItems, viewingSet, viewingLayer) {
+        expandWithModeShifts(filteredItems, viewingSet, viewingLayer)
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (isOverlayMode) {
@@ -686,6 +730,7 @@ private fun RemapDetailPane(
                         viewingSet = viewingSet,
                         viewingLayer = viewingLayer,
                         onSetBindingGroupMode = onSetBindingGroupMode,
+                        onAddModeShift = onAddModeShift,
                     )
                     is RemapPaneItem.BindingRow -> BindingRowItem(
                         item = item,
@@ -697,6 +742,22 @@ private fun RemapDetailPane(
                         onClearOverride = onClearOverride,
                     )
                     is RemapPaneItem.DisabledRow -> DisabledRowItem(item)
+                    is RemapPaneItem.ModeShiftHeader -> ModeShiftHeaderRow(
+                        item = item,
+                        viewingSet = viewingSet,
+                        viewingLayer = viewingLayer,
+                        onSetBindingGroupMode = onSetBindingGroupMode,
+                        onRemoveModeShift = onRemoveModeShift,
+                        onSetModeShiftTrigger = onSetModeShiftTrigger,
+                    )
+                    is RemapPaneItem.ModeShiftBindingRow -> ModeShiftBindingRowItem(
+                        item = item,
+                        viewingSet = viewingSet,
+                        viewingLayer = viewingLayer,
+                        config = config,
+                        modifier = focusModifier,
+                        onOpenEditor = onOpenModeShiftInputEditor,
+                    )
                 }
             }
         }
@@ -733,7 +794,119 @@ internal fun filterToOverrides(
                 }
             }
             is RemapPaneItem.DisabledRow -> Unit  // hidden in overrides-only
+            // Phase 7 Brick B.6: mode-shift items don't appear in the static
+            // input list — they're interleaved post-filter by expandWithModeShifts.
+            // Defensive no-op so the when stays exhaustive.
+            is RemapPaneItem.ModeShiftHeader,
+            is RemapPaneItem.ModeShiftBindingRow -> Unit
         }
+    }
+    return result
+}
+
+/**
+ * Phase 7 follow-up: render base source rows dynamically per the source's
+ * currently-resolved [com.mapo.data.model.steam.BindingMode]. Walks [items]
+ * and, after every [RemapPaneItem.Subheader] whose source is in
+ * [RemapSections.MODE_AWARE_SOURCES], inserts one [RemapPaneItem.BindingRow]
+ * per sub-input returned by `validInputsFor(source, effectiveMode)`.
+ *
+ * Effective mode is the layer's override (when in layer view + the layer has
+ * a preset for this source) else the base set's mode. Same precedence the
+ * SubheaderRow uses to pick which group's mode to drive the dropdown.
+ *
+ * Sources NOT in [RemapSections.MODE_AWARE_SOURCES] (bumpers, switches) keep
+ * their static rows from the registry — they're single-button-only.
+ */
+internal fun expandWithDynamicBaseRows(
+    items: List<RemapPaneItem>,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
+): List<RemapPaneItem> {
+    val out = mutableListOf<RemapPaneItem>()
+    for (item in items) {
+        out += item
+        if (item is RemapPaneItem.Subheader) {
+            val source = item.inputSource ?: continue
+            if (source !in RemapSections.MODE_AWARE_SOURCES) continue
+            // Effective mode resolution: layer override > base set > DEVICE_DEFAULT
+            // fallback (the seed default for unconfigured sources). The
+            // DEVICE_DEFAULT path still produces canonical rows via
+            // bindableSubInputsFor's empty-mode fallback so a fresh install
+            // or test config without a preset entry still renders rows.
+            val effectiveMode = viewingLayer?.presetFor(source)?.group?.group?.mode
+                ?: viewingSet?.presetFor(source)?.group?.group?.mode
+                ?: com.mapo.data.model.steam.BindingMode.DEVICE_DEFAULT
+            for ((subInputKey, label) in RemapSections.bindableSubInputsFor(source, effectiveMode)) {
+                out += RemapPaneItem.BindingRow(
+                    key = "${item.key}.dyn.$subInputKey",
+                    label = label,
+                    inputSource = source,
+                    groupInputKey = subInputKey,
+                )
+            }
+        }
+    }
+    return out
+}
+
+/**
+ * Phase 7 Brick B.6: walk [items] and inject mode-shift sections after each
+ * source's binding rows. The shift items come from [viewingLayer]'s
+ * `modeShifts` when in layer-view, or [viewingSet]'s when in base-view —
+ * mode shifts are scoped to the viewing context, not inherited across.
+ *
+ * Implementation: scan the input list left-to-right. A Subheader "opens" a
+ * source context. When the next Subheader arrives (or the list ends), flush
+ * the prior source's shifts into the result.
+ */
+internal fun expandWithModeShifts(
+    items: List<RemapPaneItem>,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
+): List<RemapPaneItem> {
+    val shifts = viewingLayer?.modeShifts ?: viewingSet?.modeShifts ?: return items
+    if (shifts.isEmpty()) return items
+
+    fun shiftsFor(source: InputSource): List<SourceModeShiftGraph> =
+        shifts.filter { it.shift.ownerSource == source }
+
+    fun materialize(shift: SourceModeShiftGraph): List<RemapPaneItem> {
+        val ownerSource = shift.shift.ownerSource
+        val baseKey = "ms.${shift.shift.id}"
+        val out = mutableListOf<RemapPaneItem>()
+        out += RemapPaneItem.ModeShiftHeader(
+            key = "$baseKey.header",
+            modeShiftId = shift.shift.id,
+            ownerSource = ownerSource,
+        )
+        for ((subInputKey, label) in RemapSections.bindableSubInputsFor(ownerSource, shift.group.group.mode)) {
+            out += RemapPaneItem.ModeShiftBindingRow(
+                key = "$baseKey.$subInputKey",
+                modeShiftId = shift.shift.id,
+                label = label,
+                ownerSource = ownerSource,
+                groupInputKey = subInputKey,
+            )
+        }
+        return out
+    }
+
+    val result = mutableListOf<RemapPaneItem>()
+    var currentSource: InputSource? = null
+    for (item in items) {
+        if (item is RemapPaneItem.Subheader) {
+            // Flush prior source's shifts before opening a new source context.
+            currentSource?.let { src ->
+                for (s in shiftsFor(src)) result += materialize(s)
+            }
+            currentSource = item.inputSource
+        }
+        result += item
+    }
+    // Flush trailing source's shifts at end-of-list.
+    currentSource?.let { src ->
+        for (s in shiftsFor(src)) result += materialize(s)
     }
     return result
 }
@@ -773,6 +946,7 @@ private fun SubheaderRow(
     viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
     viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
     onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
+    onAddModeShift: (ownerSource: InputSource) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -797,14 +971,29 @@ private fun SubheaderRow(
             val validModes = SourceModeCatalog.modesValidFor(source)
             if (effectiveGroup != null && validModes.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
+                // Mode picker + (optionally) "+ Mode Shift" button side by side.
                 val pickerEnabled = viewingLayer == null && validModes.size > 1
-                ModePicker(
-                    source = source,
-                    currentMode = effectiveGroup.mode,
-                    validModes = validModes,
-                    enabled = pickerEnabled,
-                    onPick = { mode -> onSetBindingGroupMode(effectiveGroup.id, mode) },
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ModePicker(
+                        source = source,
+                        currentMode = effectiveGroup.mode,
+                        validModes = validModes,
+                        enabled = pickerEnabled,
+                        onPick = { mode -> onSetBindingGroupMode(effectiveGroup.id, mode) },
+                    )
+                    if (source in RemapSections.MODE_SHIFT_OWNERS) {
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(onClick = { onAddModeShift(source) }) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("Mode Shift", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
             }
         }
     }
@@ -860,6 +1049,307 @@ private fun ModePicker(
                         if (mode != currentMode) onPick(mode)
                     },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Phase 7 Brick B.6: header row for a mode-shift section. Renders the source's
+ * display name with "(Mode Shift)" suffix, the shift's mode picker, a settings
+ * cog (opens [ModeShiftSettingsSheet]), and a remove button.
+ *
+ * Resolves the shift's [SourceModeShiftGraph] from the viewing context. If the
+ * shift can't be found (e.g. just deleted), the row renders nothing — its
+ * absence is the deletion signal to the user.
+ */
+@Composable
+private fun ModeShiftHeaderRow(
+    item: RemapPaneItem.ModeShiftHeader,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
+    onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
+    onRemoveModeShift: (modeShiftId: Long) -> Unit,
+    onSetModeShiftTrigger: (modeShiftId: Long, triggerSource: InputSource?, triggerSubInput: String?) -> Unit,
+) {
+    val shifts = viewingLayer?.modeShifts ?: viewingSet?.modeShifts ?: return
+    val shift = shifts.firstOrNull { it.shift.id == item.modeShiftId } ?: return
+    var showSettings by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "${item.ownerSource.displayName()} (Mode Shift)",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = { showSettings = true }) {
+                Icon(Icons.Default.Settings, contentDescription = "Mode shift settings")
+            }
+            IconButton(onClick = { onRemoveModeShift(item.modeShiftId) }) {
+                Icon(Icons.Default.Delete, contentDescription = "Remove mode shift")
+            }
+        }
+        // Trigger summary
+        val triggerLabel = remember(shift.shift.triggerSource, shift.shift.triggerSubInput) {
+            val src = shift.shift.triggerSource
+            val sub = shift.shift.triggerSubInput
+            if (src != null && sub != null) {
+                val match = RemapSections.TRIGGER_INPUT_CATALOG.firstOrNull {
+                    it.source == src && it.subInput == sub
+                }
+                match?.let { "Triggered by ${it.label}" } ?: "Triggered by ${src.displayName()} / $sub"
+            } else {
+                "Trigger unassigned — tap settings to pick"
+            }
+        }
+        Text(
+            text = triggerLabel,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (shift.shift.triggerSource == null) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(4.dp))
+        val validModes = SourceModeCatalog.modesValidFor(item.ownerSource)
+        if (validModes.isNotEmpty()) {
+            ModePicker(
+                source = item.ownerSource,
+                currentMode = shift.group.group.mode,
+                validModes = validModes,
+                enabled = validModes.size > 1,
+                onPick = { mode -> onSetBindingGroupMode(shift.group.group.id, mode) },
+            )
+        }
+    }
+
+    if (showSettings) {
+        ModeShiftSettingsSheet(
+            modeShiftId = item.modeShiftId,
+            currentTriggerSource = shift.shift.triggerSource,
+            currentTriggerSubInput = shift.shift.triggerSubInput,
+            onSetTrigger = onSetModeShiftTrigger,
+            onDismiss = { showSettings = false },
+        )
+    }
+}
+
+/**
+ * Phase 7 Brick B.6: bindable row within a mode shift's target group. Mirrors
+ * [BindingRowItem]'s layout exactly — same label + helper subtext + trailing
+ * binding label — so mode-shift rows read as siblings of base rows. The lookup
+ * walks the shift's target group instead of the source's preset.
+ *
+ * Tap routes through [onOpenEditor] with the [modeShiftId] so InputEditorScreen
+ * resolves the binding via the shift's group (see [findGroupInput] +
+ * `MapoRoute.inputEditor(..., modeShiftId=...)`).
+ *
+ * Pre-materialization: a fresh mode-shift target group has no GroupInput rows;
+ * the row renders as Unbound until the user taps it (which materializes via
+ * [com.mapo.data.repository.ControllerConfigRepository.materializeModeShiftInput]
+ * before navigation). After binding, the row updates to show the assigned
+ * output the next time the config is observed.
+ */
+@Composable
+private fun ModeShiftBindingRowItem(
+    item: RemapPaneItem.ModeShiftBindingRow,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
+    config: ControllerConfig?,
+    modifier: Modifier = Modifier,
+    onOpenEditor: (modeShiftId: Long, ownerSource: InputSource, groupInputKey: String, label: String) -> Unit,
+) {
+    // Resolve the shift's target group from whichever owner (set vs. layer)
+    // matches the viewing context. expandWithModeShifts only materializes
+    // shifts for the active context, so the lookup mirrors that.
+    val shifts = viewingLayer?.modeShifts ?: viewingSet?.modeShifts ?: emptyList()
+    val shift = shifts.firstOrNull { it.shift.id == item.modeShiftId }
+    val groupInput = shift?.group?.inputByKey(item.groupInputKey)
+    val activators = groupInput?.activators.orEmpty()
+    val primary = activators.firstOrNull { it.activator.type == com.mapo.data.model.steam.ActivatorType.FULL_PRESS }
+        ?: activators.firstOrNull()
+    val output = primary?.primaryOutput ?: BindingOutput.Unbound
+    val extraCount = (activators.size - 1).coerceAtLeast(0)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable {
+                onOpenEditor(item.modeShiftId, item.ownerSource, item.groupInputKey, item.label)
+            }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = item.ownerSource.displayName() + " (Mode Shift) · " + item.groupInputKey,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = output.displayLabel(config),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (output == BindingOutput.Unbound)
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.primary,
+            )
+            if (extraCount > 0) {
+                Text(
+                    text = "+$extraCount more",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+}
+
+/**
+ * Phase 7 Brick B.6: bottom sheet for mode-shift settings. First (and currently
+ * only) row is "Trigger input" — taps drill into the trigger picker. Designed
+ * as a sheet so it's modal and the user returns directly to the
+ * Remap Controls editor on dismiss.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModeShiftSettingsSheet(
+    modeShiftId: Long,
+    currentTriggerSource: InputSource?,
+    currentTriggerSubInput: String?,
+    onSetTrigger: (modeShiftId: Long, triggerSource: InputSource?, triggerSubInput: String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var pickingTrigger by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Text(
+                text = "Mode shift settings",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+            HorizontalDivider()
+            ListItem(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { pickingTrigger = true },
+                headlineContent = { Text("Trigger input", style = MaterialTheme.typography.bodyLarge) },
+                supportingContent = {
+                    val label = if (currentTriggerSource != null && currentTriggerSubInput != null) {
+                        val match = RemapSections.TRIGGER_INPUT_CATALOG.firstOrNull {
+                            it.source == currentTriggerSource && it.subInput == currentTriggerSubInput
+                        }
+                        match?.label ?: "${currentTriggerSource.displayName()} / $currentTriggerSubInput"
+                    } else "Not assigned"
+                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                },
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = null,
+                        modifier = Modifier.size(0.dp),  // hidden — disclosure conveys tap
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+            if (currentTriggerSource != null) {
+                HorizontalDivider()
+                ListItem(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSetTrigger(modeShiftId, null, null) },
+                    headlineContent = {
+                        Text(
+                            "Clear trigger",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+        }
+    }
+
+    if (pickingTrigger) {
+        TriggerInputPickerSheet(
+            currentSource = currentTriggerSource,
+            currentSubInput = currentTriggerSubInput,
+            onPick = { source, subInput ->
+                onSetTrigger(modeShiftId, source, subInput)
+                pickingTrigger = false
+            },
+            onDismiss = { pickingTrigger = false },
+        )
+    }
+}
+
+/**
+ * Phase 7 Brick B.6: trigger input picker — a flat list of physical digital
+ * sub-inputs from [RemapSections.TRIGGER_INPUT_CATALOG], grouped by category.
+ * Selecting a row commits via [onPick] and dismisses.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TriggerInputPickerSheet(
+    currentSource: InputSource?,
+    currentSubInput: String?,
+    onPick: (InputSource, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Pick trigger input",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
+                }
+            }
+            HorizontalDivider()
+            val grouped = RemapSections.TRIGGER_INPUT_CATALOG.groupBy { it.groupTitle }
+            for ((groupTitle, options) in grouped) {
+                Text(
+                    text = groupTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                for (opt in options) {
+                    val isSelected = opt.source == currentSource && opt.subInput == currentSubInput
+                    ListItem(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(opt.source, opt.subInput) },
+                        headlineContent = { Text(opt.label, style = MaterialTheme.typography.bodyLarge) },
+                        colors = ListItemDefaults.colors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                             else Color.Transparent,
+                        ),
+                    )
+                }
+                HorizontalDivider()
             }
         }
     }

@@ -15,6 +15,7 @@ import com.mapo.data.db.steam.FakeGameActionDao
 import com.mapo.data.db.steam.FakeGroupInputDao
 import com.mapo.data.db.steam.FakeLayerPresetBindingDao
 import com.mapo.data.db.steam.FakePresetBindingDao
+import com.mapo.data.db.steam.FakeSourceModeShiftDao
 import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.BindingOutput
@@ -45,6 +46,7 @@ class ControllerConfigRepositoryTest {
     private lateinit var bindingDao: FakeBindingDao
     private lateinit var presetBindingDao: FakePresetBindingDao
     private lateinit var layerPresetBindingDao: FakeLayerPresetBindingDao
+    private lateinit var sourceModeShiftDao: FakeSourceModeShiftDao
     private lateinit var subject: ControllerConfigRepository
 
     @Before
@@ -59,6 +61,7 @@ class ControllerConfigRepositoryTest {
         bindingDao = FakeBindingDao()
         presetBindingDao = FakePresetBindingDao()
         layerPresetBindingDao = FakeLayerPresetBindingDao()
+        sourceModeShiftDao = FakeSourceModeShiftDao()
         subject = ControllerConfigRepository(
             controllerProfileDao,
             actionSetDao,
@@ -70,6 +73,7 @@ class ControllerConfigRepositoryTest {
             bindingDao,
             presetBindingDao,
             layerPresetBindingDao,
+            sourceModeShiftDao,
         )
     }
 

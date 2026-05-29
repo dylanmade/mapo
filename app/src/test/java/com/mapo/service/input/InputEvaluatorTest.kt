@@ -1515,6 +1515,259 @@ class InputEvaluatorTest {
         assertFalse("UP must pass through for all-UNBOUND activator (else game sees long-press)", releaseConsumed)
     }
 
+    // ── Phase 7 Brick B.5: Mode Shifting runtime ──────────────────────────────
+
+    @Test
+    fun modeShift_pressTrigger_overlaysTargetGroupOnOwnerSource() {
+        // Set-owned mode shift: trigger RB activates a shift on LJ pointing at
+        // group 42. Before trigger, LJ-click fires the base ENTER. After, LJ-click
+        // fires the overlay's ESCAPE.
+        val rb = InputAddress(InputSource.RIGHT_BUMPER, "click")
+        val ljClick = InputAddress(InputSource.LEFT_JOYSTICK, "click")
+        compiledConfig.value = configWithModeShift(
+            baseInputs = mapOf(ljClick to activator(ActivatorType.FULL_PRESS, ENTER)),
+            setModeShifts = listOf(
+                CompiledModeShift(InputSource.LEFT_JOYSTICK, rb, targetGroupId = 42L),
+            ),
+            groups = mapOf(
+                42L to CompiledBindingGroup(
+                    groupId = 42L,
+                    mode = BindingMode.JOYSTICK_MOUSE,
+                    modeSettingsJson = "",
+                    inputs = mapOf("click" to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+                ),
+            ),
+        )
+
+        subject.handleDigital(ljClick, isDown = true)
+        subject.handleDigital(ljClick, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }
+
+        subject.handleDigital(rb, isDown = true)
+
+        subject.handleDigital(ljClick, isDown = true)
+        subject.handleDigital(ljClick, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+    }
+
+    @Test
+    fun modeShift_releaseTrigger_revertsToBaseBinding() {
+        val rb = InputAddress(InputSource.RIGHT_BUMPER, "click")
+        val ljClick = InputAddress(InputSource.LEFT_JOYSTICK, "click")
+        compiledConfig.value = configWithModeShift(
+            baseInputs = mapOf(ljClick to activator(ActivatorType.FULL_PRESS, ENTER)),
+            setModeShifts = listOf(
+                CompiledModeShift(InputSource.LEFT_JOYSTICK, rb, targetGroupId = 42L),
+            ),
+            groups = mapOf(
+                42L to CompiledBindingGroup(
+                    groupId = 42L,
+                    mode = BindingMode.JOYSTICK_MOUSE,
+                    modeSettingsJson = "",
+                    inputs = mapOf("click" to activator(ActivatorType.FULL_PRESS, ESCAPE)),
+                ),
+            ),
+        )
+
+        subject.handleDigital(rb, isDown = true)
+        subject.handleDigital(rb, isDown = false)
+
+        subject.handleDigital(ljClick, isDown = true)
+        subject.handleDigital(ljClick, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }
+    }
+
+    @Test
+    fun modeShift_triggerWithOwnBinding_alsoFiresOwnBinding_additive() {
+        // Steam-faithful: a trigger button that has its own normal binding AND
+        // drives a mode shift fires BOTH on press. The mode shift is additive,
+        // not a replacement.
+        val rb = InputAddress(InputSource.RIGHT_BUMPER, "click")
+        compiledConfig.value = configWithModeShift(
+            baseInputs = mapOf(rb to activator(ActivatorType.FULL_PRESS, SPACE)),
+            setModeShifts = listOf(
+                CompiledModeShift(InputSource.LEFT_JOYSTICK, rb, targetGroupId = 42L),
+            ),
+            groups = mapOf(42L to CompiledBindingGroup(42L, BindingMode.JOYSTICK_MOUSE, "", emptyMap())),
+        )
+
+        subject.handleDigital(rb, isDown = true)
+        subject.handleDigital(rb, isDown = false)
+
+        verify(exactly = 1) { emitter.emitPress(SPACE) }
+        verify(exactly = 1) { emitter.emitRelease(SPACE) }
+    }
+
+    @Test
+    fun modeShift_singleTriggerDrivingTwoOwnerSources_bothActivate() {
+        // RB shifts BOTH LJ and RJ simultaneously. Each LJ/RJ click fires its
+        // overlay binding while RB is held.
+        val rb = InputAddress(InputSource.RIGHT_BUMPER, "click")
+        val ljClick = InputAddress(InputSource.LEFT_JOYSTICK, "click")
+        val rjClick = InputAddress(InputSource.RIGHT_JOYSTICK, "click")
+        compiledConfig.value = configWithModeShift(
+            baseInputs = emptyMap(),
+            setModeShifts = listOf(
+                CompiledModeShift(InputSource.LEFT_JOYSTICK, rb, targetGroupId = 42L),
+                CompiledModeShift(InputSource.RIGHT_JOYSTICK, rb, targetGroupId = 43L),
+            ),
+            groups = mapOf(
+                42L to CompiledBindingGroup(42L, BindingMode.JOYSTICK_MOUSE, "",
+                    mapOf("click" to activator(ActivatorType.FULL_PRESS, ENTER))),
+                43L to CompiledBindingGroup(43L, BindingMode.JOYSTICK_MOUSE, "",
+                    mapOf("click" to activator(ActivatorType.FULL_PRESS, ESCAPE))),
+            ),
+        )
+
+        subject.handleDigital(rb, isDown = true)
+        subject.handleDigital(ljClick, isDown = true)
+        subject.handleDigital(rjClick, isDown = true)
+        subject.handleDigital(ljClick, isDown = false)
+        subject.handleDigital(rjClick, isDown = false)
+
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+    }
+
+    @Test
+    fun modeShift_unassignedTrigger_isInert() {
+        // A mode shift with a null trigger comes through the compile step
+        // already filtered out (CompiledConfig.toCompiled drops it), so the
+        // active set's modeShifts list is empty even though the graph had a
+        // row. Pressing any address never activates anything.
+        val ljClick = InputAddress(InputSource.LEFT_JOYSTICK, "click")
+        compiledConfig.value = configWithModeShift(
+            baseInputs = mapOf(ljClick to activator(ActivatorType.FULL_PRESS, ENTER)),
+            setModeShifts = emptyList(),  // compile filtered them out
+            groups = emptyMap(),
+        )
+
+        subject.handleDigital(ljClick, isDown = true)
+        subject.handleDigital(ljClick, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+    }
+
+    @Test
+    fun modeShift_layerOwned_onlyActiveWhileLayerInStack() {
+        // Layer 100 holds a mode shift; without the layer active, RB-press
+        // doesn't activate anything. With the layer active (via add_layer
+        // verb on BUTTON_A), it does.
+        val rb = InputAddress(InputSource.RIGHT_BUMPER, "click")
+        val ljClick = InputAddress(InputSource.LEFT_JOYSTICK, "click")
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(
+                1L to CompiledActionSet(
+                    actionSetId = 1L,
+                    inputs = mapOf(
+                        BUTTON_A to CompiledInput(0L, activator(ActivatorType.FULL_PRESS, addLayerVerb(100L)), BindingMode.SINGLE_BUTTON),
+                        ljClick to CompiledInput(0L, activator(ActivatorType.FULL_PRESS, ENTER), BindingMode.SINGLE_BUTTON),
+                    ),
+                    layers = mapOf(
+                        100L to CompiledLayer(
+                            layerId = 100L,
+                            inputs = emptyMap(),
+                            modeShifts = listOf(
+                                CompiledModeShift(InputSource.LEFT_JOYSTICK, rb, targetGroupId = 42L),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            compiledGroups = mapOf(
+                42L to CompiledBindingGroup(42L, BindingMode.JOYSTICK_MOUSE, "",
+                    mapOf("click" to activator(ActivatorType.FULL_PRESS, ESCAPE))),
+            ),
+        )
+
+        // Layer NOT active. RB press doesn't shift; LJ-click stays on base.
+        subject.handleDigital(rb, isDown = true)
+        subject.handleDigital(ljClick, isDown = true)
+        subject.handleDigital(ljClick, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ENTER) }
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }
+        subject.handleDigital(rb, isDown = false)
+
+        // Activate layer via BUTTON_A → add_layer(100). RB press now shifts.
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(rb, isDown = true)
+        subject.handleDigital(ljClick, isDown = true)
+        subject.handleDigital(ljClick, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+    }
+
+    @Test
+    fun modeShift_changePreset_clearsActiveShifts() {
+        // CHANGE_PRESET runs flushAllRuntime, which clears activeModeShifts.
+        // After the set switch, the trigger's UP no longer matters — the shift
+        // is already cleared.
+        val rb = InputAddress(InputSource.RIGHT_BUMPER, "click")
+        val ljClick = InputAddress(InputSource.LEFT_JOYSTICK, "click")
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(
+                1L to CompiledActionSet(
+                    actionSetId = 1L,
+                    inputs = mapOf(
+                        rb to CompiledInput(0L,
+                            activator(ActivatorType.FULL_PRESS, BindingOutput.ControllerAction("CHANGE_PRESET", listOf("2"))),
+                            BindingMode.SINGLE_BUTTON),
+                        ljClick to CompiledInput(0L, activator(ActivatorType.FULL_PRESS, ENTER), BindingMode.SINGLE_BUTTON),
+                    ),
+                    modeShifts = listOf(
+                        CompiledModeShift(InputSource.LEFT_JOYSTICK, rb, targetGroupId = 42L),
+                    ),
+                ),
+                2L to CompiledActionSet(
+                    actionSetId = 2L,
+                    inputs = mapOf(
+                        ljClick to CompiledInput(0L, activator(ActivatorType.FULL_PRESS, SPACE), BindingMode.SINGLE_BUTTON),
+                    ),
+                ),
+            ),
+            compiledGroups = mapOf(
+                42L to CompiledBindingGroup(42L, BindingMode.JOYSTICK_MOUSE, "",
+                    mapOf("click" to activator(ActivatorType.FULL_PRESS, ESCAPE))),
+            ),
+        )
+
+        // Press RB → activates mode shift AND fires CHANGE_PRESET → flush clears the shift.
+        subject.handleDigital(rb, isDown = true)
+        // Set is now 2. LJ-click fires set 2's SPACE, not the overlay's ESCAPE.
+        subject.handleDigital(ljClick, isDown = true)
+        subject.handleDigital(ljClick, isDown = false)
+        verify(exactly = 1) { emitter.emitPress(SPACE) }
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }
+    }
+
+    /**
+     * Phase 7 Brick B.5 test helper — build a single-set CompiledConfig with
+     * base inputs, mode-shift definitions on the set, and a compiledGroups
+     * table (one entry per target group referenced by the shifts).
+     */
+    private fun configWithModeShift(
+        baseInputs: Map<InputAddress, List<CompiledActivator>>,
+        setModeShifts: List<CompiledModeShift>,
+        groups: Map<Long, CompiledBindingGroup>,
+    ): CompiledConfig {
+        val inputs = baseInputs.mapValues { (_, activators) ->
+            CompiledInput(groupInputId = 0L, activators = activators, mode = BindingMode.SINGLE_BUTTON)
+        }
+        return CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(
+                actionSetId = 1L,
+                inputs = inputs,
+                modeShifts = setModeShifts,
+            )),
+            compiledGroups = groups,
+        )
+    }
+
+
     /**
      * Build a [CompiledConfig] with two action sets, both populated. [startingSetId]
      * picks which becomes the snapshot's starting set. Used by Brick 4.2 set-switching tests.

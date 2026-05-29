@@ -78,10 +78,23 @@ object MapoRoute {
     const val ARG_INPUT_SOURCE = "inputSource"
     const val ARG_GROUP_INPUT_KEY = "groupInputKey"
     const val ARG_INPUT_LABEL = "inputLabel"
+    /**
+     * Phase 7 Brick B.6: optional mode-shift id. When non-zero, the editor
+     * resolves the binding group through the shift's target group instead of
+     * the source's preset entry. `0` is the sentinel for "no mode shift —
+     * regular source binding path."
+     */
+    const val ARG_MODE_SHIFT_ID = "modeShiftId"
     const val INPUT_EDITOR =
-        "input_editor/{$ARG_INPUT_SOURCE}/{$ARG_GROUP_INPUT_KEY}?$ARG_INPUT_LABEL={$ARG_INPUT_LABEL}"
-    fun inputEditor(inputSource: String, groupInputKey: String, label: String): String =
-        "input_editor/${Uri.encode(inputSource)}/${Uri.encode(groupInputKey)}?$ARG_INPUT_LABEL=${Uri.encode(label)}"
+        "input_editor/{$ARG_INPUT_SOURCE}/{$ARG_GROUP_INPUT_KEY}?$ARG_INPUT_LABEL={$ARG_INPUT_LABEL}&$ARG_MODE_SHIFT_ID={$ARG_MODE_SHIFT_ID}"
+    fun inputEditor(
+        inputSource: String,
+        groupInputKey: String,
+        label: String,
+        modeShiftId: Long = 0L,
+    ): String =
+        "input_editor/${Uri.encode(inputSource)}/${Uri.encode(groupInputKey)}" +
+            "?$ARG_INPUT_LABEL=${Uri.encode(label)}&$ARG_MODE_SHIFT_ID=$modeShiftId"
 
     // ── Chord partner picker (full-screen, listen-for-press) ──────────────────────
     //

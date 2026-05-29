@@ -16,6 +16,7 @@ import com.mapo.data.db.steam.GameActionDao
 import com.mapo.data.db.steam.GroupInputDao
 import com.mapo.data.db.steam.LayerPresetBindingDao
 import com.mapo.data.db.steam.PresetBindingDao
+import com.mapo.data.db.steam.SourceModeShiftDao
 import com.mapo.data.db.steam.SteamTypeConverters
 import com.mapo.data.model.AppProfileBinding
 import com.mapo.data.model.KeyLayout
@@ -31,6 +32,7 @@ import com.mapo.data.model.steam.GameAction
 import com.mapo.data.model.steam.GroupInput
 import com.mapo.data.model.steam.LayerPresetBinding
 import com.mapo.data.model.steam.PresetBinding
+import com.mapo.data.model.steam.SourceModeShift
 
 @Database(
     entities = [
@@ -48,8 +50,9 @@ import com.mapo.data.model.steam.PresetBinding
         Binding::class,
         PresetBinding::class,
         LayerPresetBinding::class,
+        SourceModeShift::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 @TypeConverters(SteamTypeConverters::class)
@@ -70,6 +73,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bindingDao(): BindingDao
     abstract fun presetBindingDao(): PresetBindingDao
     abstract fun layerPresetBindingDao(): LayerPresetBindingDao
+    abstract fun sourceModeShiftDao(): SourceModeShiftDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

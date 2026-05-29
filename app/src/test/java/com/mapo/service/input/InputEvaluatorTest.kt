@@ -520,6 +520,108 @@ class InputEvaluatorTest {
     }
 
     @Test
+    fun chord_coexistsWithInterruptableRegular_partnerHeld_onlyChordFires() = testScope.runTest {
+        // User scenario: gamepad X bound with a FULL_PRESS → ESCAPE (interruptable=true,
+        // Steam default) AND a CHORDED_PRESS → SPACE (partner=BUTTON_B). With partner
+        // held first, pressing X should fire ONLY the chord — interruptable Regular
+        // is suppressed because the chord wins.
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(
+                    activatorId = 1L,
+                    type = ActivatorType.FULL_PRESS,
+                    bindings = listOf(ESCAPE),
+                    settings = CompiledActivatorSettings.DEFAULTS,  // interruptable=true
+                ),
+                CompiledActivator(
+                    activatorId = 2L,
+                    type = ActivatorType.CHORDED_PRESS,
+                    bindings = listOf(SPACE),
+                    settings = CompiledActivatorSettings(
+                        chordPartnerSource = BUTTON_B.source,
+                        chordPartnerKey = BUTTON_B.inputKey,
+                    ),
+                ),
+            ),
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, ENTER),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+        subject.handleDigital(BUTTON_B, isDown = false)
+
+        verify(exactly = 1) { emitter.emitPress(SPACE) }       // chord fired
+        verify(exactly = 0) { emitter.emitPress(ESCAPE) }      // Regular suppressed
+    }
+
+    @Test
+    fun chord_coexistsWithInterruptableRegular_partnerNotHeld_onlyRegularFires() = testScope.runTest {
+        // Same activator setup as above, but partner isn't held. Chord can't fire;
+        // Regular must fire normally (no spurious suppression).
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(
+                    activatorId = 1L,
+                    type = ActivatorType.FULL_PRESS,
+                    bindings = listOf(ESCAPE),
+                    settings = CompiledActivatorSettings.DEFAULTS,
+                ),
+                CompiledActivator(
+                    activatorId = 2L,
+                    type = ActivatorType.CHORDED_PRESS,
+                    bindings = listOf(SPACE),
+                    settings = CompiledActivatorSettings(
+                        chordPartnerSource = BUTTON_B.source,
+                        chordPartnerKey = BUTTON_B.inputKey,
+                    ),
+                ),
+            ),
+        )
+
+        subject.handleDigital(BUTTON_A, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = false)
+
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }      // Regular fired
+        verify(exactly = 0) { emitter.emitPress(SPACE) }       // Chord did not
+    }
+
+    @Test
+    fun chord_coexistsWithNonInterruptableRegular_partnerHeld_bothFire() = testScope.runTest {
+        // When Regular is NOT interruptable, the user has explicitly opted out of
+        // suppression — both activators fire side by side.
+        val BUTTON_B = InputAddress(InputSource.BUTTON_DIAMOND, "button_b")
+        compiledConfig.value = configWith(
+            BUTTON_A to listOf(
+                CompiledActivator(
+                    activatorId = 1L,
+                    type = ActivatorType.FULL_PRESS,
+                    bindings = listOf(ESCAPE),
+                    settings = CompiledActivatorSettings.DEFAULTS.copy(interruptable = false),
+                ),
+                CompiledActivator(
+                    activatorId = 2L,
+                    type = ActivatorType.CHORDED_PRESS,
+                    bindings = listOf(SPACE),
+                    settings = CompiledActivatorSettings(
+                        chordPartnerSource = BUTTON_B.source,
+                        chordPartnerKey = BUTTON_B.inputKey,
+                    ),
+                ),
+            ),
+            BUTTON_B to activator(ActivatorType.FULL_PRESS, ENTER),
+        )
+
+        subject.handleDigital(BUTTON_B, isDown = true)
+        subject.handleDigital(BUTTON_A, isDown = true)
+
+        verify(exactly = 1) { emitter.emitPress(ESCAPE) }
+        verify(exactly = 1) { emitter.emitPress(SPACE) }
+    }
+
+    @Test
     fun chord_pressedBeforePartner_doesNotFire_evenIfPartnerLater() = testScope.runTest {
         // Order matters: chord must be pressed AFTER partner. Pressing chord first and
         // partner second does not retroactively fire the chord.

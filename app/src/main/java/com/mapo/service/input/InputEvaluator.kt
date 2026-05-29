@@ -521,6 +521,15 @@ class InputEvaluator @Inject constructor(
         val doubleActivator = compiledInput.activators.firstOrNull { it.type == ActivatorType.DOUBLE_PRESS }
         val longActivator = compiledInput.activators.firstOrNull { it.type == ActivatorType.LONG_PRESS }
         val regularActivator = compiledInput.activators.firstOrNull { it.type == ActivatorType.FULL_PRESS }
+        val chordActivator = compiledInput.activators.firstOrNull { it.type == ActivatorType.CHORDED_PRESS }
+        // Chord fires synchronously at DOWN when its partner is already physically held
+        // — unlike LONG/DOUBLE which "might fire later," chord's success or failure is
+        // known the instant we arrive in onPress. We use this to decide chord-driven
+        // FULL_PRESS suppression below.
+        val chordWillFire = chordActivator != null && run {
+            val partner = chordActivator.settings.chordPartner
+            partner != null && partner != address && partner in physicallyHeld
+        }
         // 3.3: interruptable now configurable. Steam default is true. A Regular Press is
         // deferred whenever it's interruptable AND a longer-duration activator (LONG or
         // DOUBLE) coexists — the longer activator gets first claim and suppresses Regular
@@ -529,12 +538,27 @@ class InputEvaluator @Inject constructor(
         val deferRegular = regularActivator != null
             && regularActivator.settings.interruptable
             && (doubleActivator != null || longActivator != null)
+        // Phase 7 follow-up: chord is the most specific activator on the address.
+        // When it's about to fire AND Regular is interruptable, suppress Regular
+        // outright — chord-firing is instant, so this is *not* a deferral (no
+        // longPressDeferrals storage, no UP-side retroactive tap). Distinct from
+        // [deferRegular] because that path optionally re-fires on UP.
+        val suppressRegularForChord = regularActivator != null
+            && regularActivator.settings.interruptable
+            && chordWillFire
 
         var consumed = false
         for (activator in compiledInput.activators) {
             when (activator.type) {
                 ActivatorType.FULL_PRESS -> {
-                    if (deferRegular) {
+                    if (suppressRegularForChord) {
+                        // Chord wins; Regular is silenced entirely. No deferral storage
+                        // (we don't want a retroactive fire on UP), no emit. We still
+                        // mark consumed so the underlying input isn't forwarded to the
+                        // app — the chord activator already owns this event.
+                        Log.d(TAG, "FULL_PRESS suppressed by CHORDED_PRESS on $address")
+                        consumed = true
+                    } else if (deferRegular) {
                         // When DOUBLE exists, its window owns the deferral via DoubleTapWindow.
                         // When only LONG exists, longPressDeferrals owns it. (Triple
                         // coexistence — FULL+LONG+DOUBLE — routes through DOUBLE; the LONG

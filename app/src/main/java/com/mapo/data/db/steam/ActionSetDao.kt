@@ -20,6 +20,9 @@ interface ActionSetDao {
     @Query("SELECT * FROM action_set WHERE id = :id")
     suspend fun getById(id: Long): ActionSet?
 
+    @Query("SELECT * FROM action_set")
+    suspend fun getAll(): List<ActionSet>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(set: ActionSet): Long
 

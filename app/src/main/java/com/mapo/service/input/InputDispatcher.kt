@@ -40,6 +40,50 @@ interface InputSink {
     fun dispatchTargetAsClick(target: RemapTarget, sendAsGesture: Boolean = false)
     fun startMouseDrag()
     fun injectMouseMove(dx: Float, dy: Float)
+
+    /**
+     * Brick C.4: Mouse Region absolute-position path. Targets a fractional
+     * screen position (`0..1` on each axis, `(0.5, 0.5)` = center) and emits
+     * the relative delta from the current cursor position to reach it. Used
+     * by [com.mapo.service.input.modes.MouseRegionMode]; the velocity-based
+     * stick modes use [injectMouseMove] directly.
+     *
+     * **Limitation (documented 2026-05-30):** the REL-delta approach can't
+     * be re-anchored when an external source moves the cursor (Wine's
+     * touch-to-cursor translation in GameNative is the canonical case). A
+     * pin-then-move attempt via large negative REL events failed to pin
+     * Wine's cursor reliably — likely Wine applies a per-event acceleration
+     * curve that distorts our deltas. Result: cursor at game start sits at
+     * whatever the host put it (often the top-left corner in Wine), and
+     * the Mouse Region "bounds" can shift if touch moves the cursor.
+     *
+     * Kept for native-Android fallback, but no production caller routes
+     * through it as of 2026-05-30 — Mouse Region uses
+     * [dispatchAbsoluteTouch] instead.
+     */
+    fun injectMouseMoveAbsoluteFraction(xFrac: Float, yFrac: Float)
+
+    /**
+     * Brick C.4 (revised 2026-05-30): Mouse Region absolute-position path
+     * via `dispatchGesture` synthetic touch. Targets a fractional screen
+     * position; the gesture-segment chain (same machinery as the trackpad
+     * cursor path) keeps a continuous synthetic finger "down" at the
+     * target while Mouse Region is active, with no ACTION_UP between
+     * events (so emulators that translate touch to cursor don't see
+     * spurious clicks).
+     *
+     * **Trade-off vs. [injectMouseMoveAbsoluteFraction]:** dispatchGesture
+     * touches are natively absolute (no acceleration distortion, no
+     * delta-vs-position desync) and work cleanly in emulators that read
+     * touch as cursor (GameNative / RetroArch / DOSBox Pure). In native
+     * Android apps, dispatchGesture touches don't move the OS mouse cursor
+     * — Mouse Region in those contexts is inert. That's the intended
+     * scope: Mouse Region's use case is precision aim in PC games via
+     * emulator; the velocity modes (Joystick Mouse) cover native-Android
+     * cursor needs.
+     */
+    fun dispatchAbsoluteTouch(xFrac: Float, yFrac: Float)
+
     fun endMouseDrag()
 
     /**
@@ -159,6 +203,14 @@ class InputDispatcher @Inject constructor() {
 
     fun injectMouseMove(dx: Float, dy: Float) {
         sink?.injectMouseMove(dx, dy)
+    }
+
+    fun injectMouseMoveAbsoluteFraction(xFrac: Float, yFrac: Float) {
+        sink?.injectMouseMoveAbsoluteFraction(xFrac, yFrac)
+    }
+
+    fun dispatchAbsoluteTouch(xFrac: Float, yFrac: Float) {
+        sink?.dispatchAbsoluteTouch(xFrac, yFrac)
     }
 
     fun endMouseDrag() {

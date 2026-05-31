@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Build
 import android.util.Log
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
+import com.mapo.service.input.GyroLifecycleCoordinator
 import com.mapo.service.overlay.OverlayCoordinator
 import com.mapo.service.shizuku.ShizukuConnection
 import com.mapo.service.shizuku.ShizukuHealthNotification
@@ -41,17 +42,29 @@ class MapoApplication : Application() {
      */
     @Inject lateinit var shizukuHealthNotification: ShizukuHealthNotification
 
+    /**
+     * Brick D.2: gyro lifecycle coordinator. Watches compiled config + active
+     * set / layers and registers the gyro sensor listener only when a real
+     * gyro mode is configured for the active scope. Started from
+     * `onCreate` so the sensor stays unregistered (battery) when no profile
+     * uses gyro, and lights up the moment one does.
+     */
+    @Inject lateinit var gyroLifecycleCoordinator: GyroLifecycleCoordinator
+
     override fun onCreate() {
         super.onCreate()
+        Log.i("MapoApplication", "onCreate: enter")
         installUncaughtExceptionLogger()
         installHiddenApiExemptions()
         autoSwitcher.start()
         overlayCoordinator.start()
         shizukuHealthNotification.start()
+        gyroLifecycleCoordinator.start()
         // Touch the Shizuku singletons so Hilt actually constructs them.
         // Field access by itself is enough; `lateinit` injection has already
         // run by this point (Application is the Hilt root).
         Log.i("MapoApplication", "Shizuku connection state: ${shizukuConnection.state.value}")
+        Log.i("MapoApplication", "onCreate: exit")
     }
 
     /**

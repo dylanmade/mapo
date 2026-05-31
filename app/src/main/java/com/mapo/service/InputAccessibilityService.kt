@@ -24,6 +24,7 @@ import com.mapo.service.input.OverlayFocusKind
 import com.mapo.service.shizuku.ShizukuKeyInjector
 import com.mapo.service.shizuku.ShizukuMotionCoordinator
 import com.mapo.service.shizuku.ShizukuMouseInjector
+import com.mapo.service.shizuku.ShizukuStylusInjector
 import com.mapo.shizuku.LinuxInputConstants
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -37,6 +38,7 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @Inject lateinit var shizukuMotionCoordinator: ShizukuMotionCoordinator
     @Inject lateinit var shizukuKeyInjector: ShizukuKeyInjector
     @Inject lateinit var shizukuMouseInjector: ShizukuMouseInjector
+    @Inject lateinit var shizukuStylusInjector: ShizukuStylusInjector
 
     companion object {
         // Physical gamepad keycodes → DeviceButton enum
@@ -597,6 +599,44 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         if (!segmentActive && currentStroke != null) dispatchMoveSegment(willContinue = false)
     }
 
+    override fun injectMouseMoveAbsoluteFraction(xFrac: Float, yFrac: Float) {
+        val (w, h) = primaryDisplaySize()
+        // Full-display bounds — the uinput path doesn't need the gesture-
+        // margin clamp (the OS owns cursor bounds), and the user expects
+        // Mouse Region's extents to reach the actual screen edges. The
+        // dispatchGesture fallback path inside [injectMouseMove] still
+        // re-clamps to cursor margins on its own.
+        val targetX = (xFrac * w).coerceIn(0f, w - 1f)
+        val targetY = (yFrac * h).coerceIn(0f, h - 1f)
+        val dx = targetX - cursorX
+        val dy = targetY - cursorY
+        if (dx != 0f || dy != 0f) {
+            injectMouseMove(dx, dy)
+        }
+    }
+
+    override fun dispatchAbsoluteTouch(xFrac: Float, yFrac: Float) {
+        val (w, h) = primaryDisplaySize()
+        // Update our cursor bookkeeping first (used by the dispatchGesture
+        // fallback path's segEnd logic if we drop through).
+        cursorX = (xFrac * w).coerceIn(0f, w - 1f)
+        cursorY = (yFrac * h).coerceIn(0f, h - 1f)
+        // Stylus path: natively absolute on the kernel side; Wine /
+        // GameNative path may honor stylus tool-type as absolute pen
+        // positioning (vs. the relative model it uses for REL mouse + finger
+        // touch). Tried first; falls back on SELinux-blocked /dev/uinput.
+        if (shizukuStylusInjector.tryInject(xFrac, yFrac, w.toInt(), h.toInt())) {
+            return
+        }
+        // Fallback: dispatchGesture finger-touch chain. Known limitation —
+        // Wine treats touch as a relative touchpad, so cursor positioning
+        // is approximate at best. Full-screen extent (no gesture-margin
+        // clamp); fullscreen emulators in immersive mode suppress the
+        // system gestures (notification pull / back / home pill) that
+        // those margins would protect.
+        if (!segmentActive) dispatchMoveSegment(willContinue = true)
+    }
+
     override fun beginContinuousCursor() {
         refreshFocusedDisplay("beginContinuousCursor")
         // Cursor position persists across continuous-cursor sessions — never
@@ -817,15 +857,44 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         return builder.build()
     }
 
+    /**
+     * Cached default-display dimensions. Hot-path callers (`injectMouseMove`,
+     * `injectMouseMoveAbsoluteFraction`) invoke `primaryDisplaySize()` per
+     * integration step (~125 Hz with gyro / continuous-mouse modes). Without
+     * caching this means a DisplayManager system-service lookup + a fresh
+     * `DisplayMetrics` allocation + IPC every 8 ms — which under heavy load
+     * (verified 2026-05-31 in GameNative + L4D2) starves the system_server's
+     * input dispatcher and triggers downstream MotionEvent ANRs.
+     *
+     * Invalidate on orientation / display config changes via
+     * [invalidateDisplaySizeCache]. Mapo's target hardware is landscape-locked
+     * so the value is effectively constant for the session, but we wire the
+     * invalidation hook anyway for correctness.
+     */
+    @Volatile
+    private var cachedDisplaySize: Pair<Float, Float>? = null
+
     @Suppress("DEPRECATION")
     private fun primaryDisplaySize(): Pair<Float, Float> {
+        cachedDisplaySize?.let { return it }
         val dm = getSystemService(DISPLAY_SERVICE) as android.hardware.display.DisplayManager
         val display = dm.getDisplay(android.view.Display.DEFAULT_DISPLAY)
             ?: return Pair(1080f, 1920f).also { Log.w(TAG, "primaryDisplaySize: no default display") }
         val metrics = android.util.DisplayMetrics()
         display.getRealMetrics(metrics)
-        Log.d(TAG, "primaryDisplaySize: displayId=${display.displayId} size=${metrics.widthPixels}x${metrics.heightPixels}")
-        return Pair(metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat())
+        val result = Pair(metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat())
+        cachedDisplaySize = result
+        Log.d(TAG, "primaryDisplaySize: displayId=${display.displayId} size=${metrics.widthPixels}x${metrics.heightPixels} (cached)")
+        return result
+    }
+
+    private fun invalidateDisplaySizeCache() {
+        cachedDisplaySize = null
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        invalidateDisplaySizeCache()
     }
 
     // ── Low-level injection ───────────────────────────────────────────────────

@@ -156,6 +156,20 @@ data class InputAddress(
 )
 
 /**
+ * Sentinel sub-input key used to expose a source-level mode in
+ * [CompiledActionSet.inputs] for sources that have no bindable sub-inputs
+ * (today: just [InputSource.GYRO] — gyro modes emit continuous output, not
+ * synthetic edges). Compile path adds an `InputAddress(source, this)` entry
+ * with the configured mode + settings so [findSourceModeFor] and gating
+ * predicates (e.g. [GyroLifecycleCoordinator]) can detect the mode without a
+ * separate per-source lookup table. Empty string is safe — real physical-key
+ * dispatch always carries a non-empty inputKey like `"click"` / `"button_a"`
+ * / `"dpad_up"`, so the sentinel can't collide with onKeyEvent's address
+ * builder.
+ */
+const val SOURCE_MODE_SENTINEL_KEY: String = ""
+
+/**
  * All activators wired to one [InputAddress], plus the [BindingMode] this address's
  * binding group was configured under. The mode determines how the evaluator interprets
  * the source's events — digital modes route directly via [onKeyEvent]; analog modes
@@ -416,6 +430,7 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                 continue
             }
             val sourceMode = mode.handler()
+            var addedAnyForSource = false
             for (inputGraph in preset.group.inputs) {
                 val inputKey = inputGraph.input.inputKey
                 if (sourceMode !is StubMode && !acceptsFor(preset.inputSource, mode, inputKey)) {
@@ -435,6 +450,24 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                 inputs[address] = CompiledInput(
                     groupInputId = inputGraph.input.id,
                     activators = compiledActivators,
+                    mode = preset.group.group.mode,
+                    modeSettingsJson = preset.group.group.settingsJson,
+                )
+                addedAnyForSource = true
+            }
+            // Source-mode sentinel for sources with no bindable sub-inputs (today:
+            // just GYRO — gyro modes emit continuous output, not edges). Without
+            // this, [findSourceModeFor] in the evaluator and
+            // [GyroLifecycleCoordinator]'s predicate would both miss the
+            // configured mode because they iterate `inputs` by source. The
+            // sentinel uses [SOURCE_MODE_SENTINEL_KEY] as its sub-input key so it
+            // can't collide with real physical-key dispatch (real inputKeys are
+            // never blank). Skip for DEVICE_DEFAULT — that's the "Mapo doesn't
+            // intercept" case; no entry needed.
+            if (!addedAnyForSource && mode != BindingMode.DEVICE_DEFAULT) {
+                inputs[InputAddress(preset.inputSource, SOURCE_MODE_SENTINEL_KEY)] = CompiledInput(
+                    groupInputId = 0L,
+                    activators = emptyList(),
                     mode = preset.group.group.mode,
                     modeSettingsJson = preset.group.group.settingsJson,
                 )

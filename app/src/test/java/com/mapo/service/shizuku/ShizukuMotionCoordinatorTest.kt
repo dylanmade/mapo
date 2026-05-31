@@ -153,11 +153,13 @@ class ShizukuMotionCoordinatorTest {
         val prior = ShizukuMotionCoordinator.PredicateBreakdown(
             remapEnabled = true,
             analogModeConfigured = true,
+            anyShizukuModeConfigured = true,
             shizukuReady = true,
         )
         val current = ShizukuMotionCoordinator.PredicateBreakdown(
             remapEnabled = true,
             analogModeConfigured = true,
+            anyShizukuModeConfigured = true,
             shizukuReady = false,
         )
         assertTrue(coordinator.shouldShowDegradedToast(prior, current))
@@ -169,11 +171,13 @@ class ShizukuMotionCoordinatorTest {
         val prior = ShizukuMotionCoordinator.PredicateBreakdown(
             remapEnabled = true,
             analogModeConfigured = true,
+            anyShizukuModeConfigured = true,
             shizukuReady = true,
         )
         val current = ShizukuMotionCoordinator.PredicateBreakdown(
             remapEnabled = false,
             analogModeConfigured = true,
+            anyShizukuModeConfigured = true,
             shizukuReady = true,
         )
         assertFalse(coordinator.shouldShowDegradedToast(prior, current))
@@ -184,6 +188,7 @@ class ShizukuMotionCoordinatorTest {
         val current = ShizukuMotionCoordinator.PredicateBreakdown(
             remapEnabled = true,
             analogModeConfigured = true,
+            anyShizukuModeConfigured = true,
             shizukuReady = false,
         )
         assertFalse(coordinator.shouldShowDegradedToast(prior = null, current = current))
@@ -195,11 +200,13 @@ class ShizukuMotionCoordinatorTest {
         val prior = ShizukuMotionCoordinator.PredicateBreakdown(
             remapEnabled = true,
             analogModeConfigured = false,
+            anyShizukuModeConfigured = false,
             shizukuReady = true,
         )
         val current = ShizukuMotionCoordinator.PredicateBreakdown(
             remapEnabled = true,
             analogModeConfigured = false,
+            anyShizukuModeConfigured = false,
             shizukuReady = false,
         )
         assertFalse(coordinator.shouldShowDegradedToast(prior, current))
@@ -207,13 +214,58 @@ class ShizukuMotionCoordinatorTest {
 
     @Test
     fun predicate_shouldEnable_isTrueOnlyWhenAllThreeAxesHold() {
-        val all = ShizukuMotionCoordinator.PredicateBreakdown(true, true, true)
+        // shouldEnable conjoins remapEnabled + analogModeConfigured + shizukuReady.
+        // anyShizukuModeConfigured is independent of shouldEnable (it drives the
+        // UI warning surfaces, not the inject gate), so its value is held at
+        // analogModeConfigured here for fixture readability — gyro-specific
+        // truth tests live separately.
+        val all = ShizukuMotionCoordinator.PredicateBreakdown(
+            remapEnabled = true, analogModeConfigured = true,
+            anyShizukuModeConfigured = true, shizukuReady = true,
+        )
         assertEquals(true, all.shouldEnable)
         listOf(
-            ShizukuMotionCoordinator.PredicateBreakdown(false, true, true),
-            ShizukuMotionCoordinator.PredicateBreakdown(true, false, true),
-            ShizukuMotionCoordinator.PredicateBreakdown(true, true, false),
+            ShizukuMotionCoordinator.PredicateBreakdown(
+                remapEnabled = false, analogModeConfigured = true,
+                anyShizukuModeConfigured = true, shizukuReady = true,
+            ),
+            ShizukuMotionCoordinator.PredicateBreakdown(
+                remapEnabled = true, analogModeConfigured = false,
+                anyShizukuModeConfigured = false, shizukuReady = true,
+            ),
+            ShizukuMotionCoordinator.PredicateBreakdown(
+                remapEnabled = true, analogModeConfigured = true,
+                anyShizukuModeConfigured = true, shizukuReady = false,
+            ),
         ).forEach { assertFalse(it.shouldEnable) }
+    }
+
+    @Test
+    fun anyShizukuModeConfigured_isSupersetOfAnalogModeConfigured_inGyroOnlyScope() {
+        // Gyro-to-mouse mode alone shouldn't flip analogModeConfigured (no
+        // /dev/input motion capture needed), but should flip
+        // anyShizukuModeConfigured (uinput mouse output needs Shizuku).
+        val cfg = configWithSourceMode(InputSource.GYRO, BindingMode.GYRO_TO_MOUSE)
+        val breakdown = coordinator.evaluatePredicate(
+            compiled = cfg,
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = false,
+        )
+        assertFalse(breakdown.analogModeConfigured)
+        assertTrue(breakdown.anyShizukuModeConfigured)
+    }
+
+    private fun configWithSourceMode(source: InputSource, mode: BindingMode): CompiledConfig {
+        val address = InputAddress(source, "")
+        val input = CompiledInput(groupInputId = 1L, activators = emptyList(), mode = mode)
+        return CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(
+                1L to CompiledActionSet(actionSetId = 1L, inputs = mapOf(address to input)),
+            ),
+        )
     }
 
     // ── Fixtures ─────────────────────────────────────────────────────────────

@@ -268,6 +268,50 @@ class MapoInputUserService : IMapoInputService.Stub() {
         }
     }
 
+    override fun setGamepadAxes(
+        lx: Int, ly: Int,
+        rx: Int, ry: Int,
+        lt: Int, rt: Int,
+        hatX: Int, hatY: Int,
+    ): Boolean {
+        if (!UinputGamepad.isReady && !UinputGamepad.open()) return false
+        return try {
+            UinputGamepad.writeAxes(lx, ly, rx, ry, lt, rt, hatX, hatY)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "setGamepadAxes failed", t)
+            false
+        }
+    }
+
+    override fun setGamepadButton(btnCode: Int, pressed: Boolean): Boolean {
+        if (!UinputGamepad.isReady && !UinputGamepad.open()) return false
+        return try {
+            UinputGamepad.writeButton(btnCode, pressed)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "setGamepadButton failed btnCode=0x${btnCode.toString(16)} pressed=$pressed", t)
+            false
+        }
+    }
+
+    override fun injectStylusAbsolute(x: Int, y: Int, displayW: Int, displayH: Int): Boolean {
+        // Lazy-open the virtual stylus with the live display dimensions.
+        // The kernel locks absmin/absmax at create time so a display-rotation
+        // / resolution change would need a recreate — [UinputStylus.open]
+        // detects the dimension delta and recreates internally.
+        if (!UinputStylus.open(displayW, displayH)) return false
+        return try {
+            val clampedX = x.coerceIn(0, displayW - 1)
+            val clampedY = y.coerceIn(0, displayH - 1)
+            UinputStylus.moveAbsolute(clampedX, clampedY)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "injectStylusAbsolute failed x=$x y=$y", t)
+            false
+        }
+    }
+
     override fun setEnumerationEnabled(on: Boolean) {
         Log.i(TAG, "setEnumerationEnabled($on)")
         enumerationEnabled = on
@@ -294,6 +338,8 @@ class MapoInputUserService : IMapoInputService.Stub() {
         stopThreads()
         closeAllDevices()
         UinputMouse.close()
+        UinputGamepad.close()
+        UinputStylus.close()
         System.exit(0)
     }
 
@@ -333,6 +379,18 @@ class MapoInputUserService : IMapoInputService.Stub() {
     private fun tryOpenDevice(path: String) {
         val deviceId = parseDeviceId(path) ?: return
         if (devices.containsKey(deviceId)) return
+        // Brick C feedback-loop fix: filter out Mapo's own virtual uinput devices
+        // before opening. The kernel reflects every write we make to /dev/uinput
+        // back through /dev/input/eventN, so without this filter the reader →
+        // evaluator → gamepad writer → reader cycle would saturate the system
+        // (verified 2026-05-28 on AYN Thor: console fans pegged, home launcher
+        // unresponsive within seconds). Done via the sysfs name lookup so we
+        // don't have to round-trip the kernel ioctl on every device-add.
+        val deviceName = LinuxInputDeviceInfo.readDeviceName(path)
+        if (deviceName != null && deviceName.startsWith(MAPO_VIRTUAL_DEVICE_PREFIX)) {
+            Log.i(TAG, "skipping $path: own virtual device \"$deviceName\"")
+            return
+        }
         val fd = try {
             Os.open(path, OsConstants.O_RDONLY or OsConstants.O_NONBLOCK, 0)
         } catch (e: ErrnoException) {
@@ -354,7 +412,7 @@ class MapoInputUserService : IMapoInputService.Stub() {
         )
         devices[deviceId] = entry
         devicesDirty.set(true)
-        Log.i(TAG, "opened $path (id=$deviceId, sniffing…)")
+        Log.i(TAG, "opened $path (id=$deviceId, name=\"${deviceName ?: "?"}\", sniffing…)")
         broadcastDeviceAdded(deviceId, path)
     }
 
@@ -464,8 +522,11 @@ class MapoInputUserService : IMapoInputService.Stub() {
     private fun handleEvent(entry: DeviceEntry, type: Int, code: Int, value: Int) {
         when (type) {
             LinuxInputConstants.EV_ABS -> handleAbsEvent(entry, code, value)
-            // Brick C ignores EV_KEY and EV_SYN; existing AccessibilityService
-            // captures KEY events (gamepad buttons) without Shizuku.
+            LinuxInputConstants.EV_SYN -> if (code == LinuxInputConstants.SYN_REPORT) {
+                flushDirtySources(entry)
+            }
+            // Brick C ignores EV_KEY; existing AccessibilityService captures
+            // KEY events (gamepad buttons) without Shizuku.
             else -> { /* no-op */ }
         }
     }
@@ -496,16 +557,37 @@ class MapoInputUserService : IMapoInputService.Stub() {
         // axis[1] stays at 0.
         val axes = entry.sourceAxes.getOrPut(mapping.sourceId) { floatArrayOf(0f, 0f) }
         axes[mapping.axisIndex] = normalized
+        // Mark source dirty; broadcast deferred to flushDirtySources on
+        // SYN_REPORT so a stick's per-axis EV_ABS_X + EV_ABS_Y burst is
+        // coalesced into a single RawAnalogEvent.
+        entry.dirtySources += mapping.sourceId
+    }
+
+    /**
+     * Emit a [RawAnalogEvent] per source updated since the last SYN_REPORT.
+     * Called from [handleEvent] on EV_SYN / SYN_REPORT — the kernel's signal
+     * that the current event group is complete and the (x, y) state is now
+     * consistent.
+     *
+     * Defensive: also called on the periodic poll wake-up if the device is
+     * idle long enough that a SYN never arrives (rare, but cheap to handle).
+     */
+    private fun flushDirtySources(entry: DeviceEntry) {
+        if (entry.dirtySources.isEmpty()) return
         val nowNs = SystemClock.elapsedRealtimeNanos()
         lastEventNs = nowNs
-        broadcastAnalogEvent(
-            RawAnalogEvent(
-                sourceOrdinal = mapping.sourceId,
-                x = axes[0],
-                y = axes[1],
-                timestampNs = nowNs,
+        for (sourceId in entry.dirtySources) {
+            val axes = entry.sourceAxes[sourceId] ?: continue
+            broadcastAnalogEvent(
+                RawAnalogEvent(
+                    sourceOrdinal = sourceId,
+                    x = axes[0],
+                    y = axes[1],
+                    timestampNs = nowNs,
+                )
             )
-        )
+        }
+        entry.dirtySources.clear()
     }
 
     // ── Watcher thread ───────────────────────────────────────────────────────
@@ -631,6 +713,20 @@ class MapoInputUserService : IMapoInputService.Stub() {
 
         /** Combined axis state per source so an ABS_X event can emit (x, lastY). */
         val sourceAxes: MutableMap<Int, FloatArray> = HashMap()
+
+        /**
+         * Sources whose axes were updated since the last EV_SYN. Real input
+         * drivers emit batched per-axis events (EV_ABS_X, EV_ABS_Y, ...)
+         * followed by a single SYN_REPORT to mark "this position is now
+         * complete." We coalesce: on each EV_ABS, mark the source dirty +
+         * update its cached axes; on SYN_REPORT, broadcast one RawAnalogEvent
+         * per dirty source. Without this batching, a 2-axis stick movement
+         * arrives at consumers as TWO RawAnalogEvents (one per axis), which
+         * the InputEvaluator + downstream double-counts (verified
+         * 2026-05-28: home launcher's stick navigation moved two cells per
+         * stick tilt in Joystick Move mode).
+         */
+        val dirtySources: MutableSet<Int> = HashSet()
     }
 
     /**
@@ -718,5 +814,13 @@ class MapoInputUserService : IMapoInputService.Stub() {
          *  udev / kernel time to set permissions. Some devices have an EACCES
          *  window between the inode appearing and shell becoming able to read. */
         private const val DEVICE_OPEN_DELAY_MS: Long = 100L
+
+        /**
+         * Brick C: Mapo's own virtual uinput devices ([UinputMouse] /
+         * [UinputGamepad]) have EVIOCGNAME values starting with this string —
+         * [tryOpenDevice] filters them out so the kernel's echo of our own
+         * writes doesn't feed back into the reader.
+         */
+        private const val MAPO_VIRTUAL_DEVICE_PREFIX = "Mapo Virtual"
     }
 }

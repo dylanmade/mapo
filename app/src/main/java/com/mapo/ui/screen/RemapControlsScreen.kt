@@ -72,7 +72,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.graphics.Color
 import com.mapo.data.model.steam.SourceModeShiftGraph
 import com.mapo.service.input.modes.SourceModeCatalog
-import com.mapo.service.input.modes.requiresMotionCapture
+import com.mapo.service.input.modes.requiresShizuku
 import com.mapo.ui.component.layout.SectionedListDetailPane
 import com.mapo.ui.screen.remap.RemapPaneItem
 import com.mapo.ui.screen.remap.RemapSections
@@ -122,7 +122,7 @@ fun RemapControlsScreen(
     var pendingAnalogPick by remember { mutableStateOf<Pair<Long, BindingMode>?>(null) }
 
     val gatedSetBindingGroupMode: (Long, BindingMode) -> Unit = { bindingGroupId, mode ->
-        if (mode.requiresMotionCapture() && !shizukuReady && !shizukuRequiredAcknowledged) {
+        if (mode.requiresShizuku() && !shizukuReady && !shizukuRequiredAcknowledged) {
             pendingAnalogPick = bindingGroupId to mode
         } else {
             onSetBindingGroupMode(bindingGroupId, mode)
@@ -157,9 +157,9 @@ fun RemapControlsScreen(
     // (so the first-time dialog won't re-fire) and then Shizuku flipped away
     // from Granted, leaving those bindings silently inert.
     val hasAnalogModeInConfig = config?.actionSets?.any { set ->
-        set.preset.any { it.group.group.mode.requiresMotionCapture() } ||
+        set.preset.any { it.group.group.mode.requiresShizuku() } ||
             set.layers.any { layer ->
-                layer.bindingGroups.any { it.group.mode.requiresMotionCapture() }
+                layer.bindingGroups.any { it.group.mode.requiresShizuku() }
             }
     } == true
 
@@ -671,8 +671,8 @@ private fun RemapDetailPane(
     val rawItems = RemapSections.contentBySection[sectionId]
 
     if (rawItems == null) {
-        // Gyro and any future un-implemented sections route here.
-        DetailPlaceholder(RemapSections.GYRO_PLACEHOLDER)
+        // Defensive: any future un-implemented section routes here.
+        DetailPlaceholder(RemapSections.UNIMPLEMENTED_SECTION_PLACEHOLDER)
         return
     }
 

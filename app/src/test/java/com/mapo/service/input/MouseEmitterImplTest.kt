@@ -119,4 +119,84 @@ class MouseEmitterImplTest {
         testScope.runCurrent()
         verify(atLeast = 1) { dispatcher.injectMouseMove(any(), any()) }
     }
+
+    // ── Mouse Region absolute-touch path (Brick C.4 revised 2026-05-30) ─────
+    //
+    // Replaces the prior REL-delta pin-then-move attempt that Wine in
+    // GameNative didn't honor cleanly. Emitter routes absolute targets
+    // through dispatcher.dispatchAbsoluteTouch (gesture-segment chain on
+    // the service side); phase tracking drives snap-to-center on entry
+    // into AT_CENTER.
+
+    @Test
+    fun setStickAbsoluteTarget_forwardsToDispatchAbsoluteTouch() {
+        subject.setStickAbsoluteTarget(InputSource.LEFT_JOYSTICK, 0.75f, 0.5f)
+        verify(exactly = 1) { dispatcher.dispatchAbsoluteTouch(0.75f, 0.5f) }
+        verify(atLeast = 1) { dispatcher.beginContinuousCursor() }
+    }
+
+    @Test
+    fun multipleSetCallsDuringDeflection_forwardEach_oneSessionBegin() {
+        subject.setStickAbsoluteTarget(InputSource.LEFT_JOYSTICK, 0.75f, 0.5f)
+        subject.setStickAbsoluteTarget(InputSource.LEFT_JOYSTICK, 0.80f, 0.5f)
+        subject.setStickAbsoluteTarget(InputSource.LEFT_JOYSTICK, 0.85f, 0.5f)
+        verify(exactly = 3) { dispatcher.dispatchAbsoluteTouch(any(), any()) }
+        verify(exactly = 1) { dispatcher.beginContinuousCursor() }
+    }
+
+    @Test
+    fun firstEverClearEvent_snapsToScreenCenter() {
+        // UNTOUCHED → AT_CENTER. When Mouse Region first activates, the
+        // stick is typically at rest → mode fires clearStickAbsoluteTarget.
+        // We snap the cursor to (0.5, 0.5) so it doesn't sit at whatever
+        // stale position Wine had it at.
+        subject.clearStickAbsoluteTarget(InputSource.LEFT_JOYSTICK)
+        verify(exactly = 1) { dispatcher.dispatchAbsoluteTouch(0.5f, 0.5f) }
+        verify(atLeast = 1) { dispatcher.beginContinuousCursor() }
+    }
+
+    @Test
+    fun subsequentClearEvents_atRest_areNoOps() {
+        // The mode fires clearStickAbsoluteTarget every analog event while
+        // the stick is in deadzone (~250 Hz). Only the first transition
+        // into AT_CENTER snaps; subsequent rest events must be quiet.
+        subject.clearStickAbsoluteTarget(InputSource.LEFT_JOYSTICK)  // UNTOUCHED → AT_CENTER, snap
+        subject.clearStickAbsoluteTarget(InputSource.LEFT_JOYSTICK)  // AT_CENTER → AT_CENTER, no-op
+        subject.clearStickAbsoluteTarget(InputSource.LEFT_JOYSTICK)  // same
+        verify(exactly = 1) { dispatcher.dispatchAbsoluteTouch(0.5f, 0.5f) }
+    }
+
+    @Test
+    fun clearAfterDeflection_snapsBackToCenter() {
+        subject.setStickAbsoluteTarget(InputSource.LEFT_JOYSTICK, 0.9f, 0.5f)
+        subject.clearStickAbsoluteTarget(InputSource.LEFT_JOYSTICK)
+        verify(exactly = 1) { dispatcher.dispatchAbsoluteTouch(0.9f, 0.5f) }
+        verify(exactly = 1) { dispatcher.dispatchAbsoluteTouch(0.5f, 0.5f) }
+    }
+
+    @Test
+    fun clearDoesNotEndSession_keepsFingerDownAtCenter() {
+        // Session stays alive across stick release so Wine doesn't see an
+        // ACTION_UP (which it could interpret as a click). Session ends
+        // only on clearAllVelocities (profile / action-set switch).
+        subject.setStickAbsoluteTarget(InputSource.LEFT_JOYSTICK, 0.9f, 0.5f)
+        subject.clearStickAbsoluteTarget(InputSource.LEFT_JOYSTICK)
+        verify(exactly = 0) { dispatcher.endContinuousCursor() }
+    }
+
+    @Test
+    fun clearAllVelocities_endsSession() {
+        subject.setStickAbsoluteTarget(InputSource.LEFT_JOYSTICK, 0.9f, 0.5f)
+        subject.clearAllVelocities()
+        verify(atLeast = 1) { dispatcher.endContinuousCursor() }
+    }
+
+    @Test
+    fun reEnteringDeflection_afterCenterSnap_doesNotSnapAgain() {
+        // Center snap → deflection → no extra snap-to-center call in between.
+        subject.clearStickAbsoluteTarget(InputSource.LEFT_JOYSTICK)  // snap to center
+        subject.setStickAbsoluteTarget(InputSource.LEFT_JOYSTICK, 0.9f, 0.5f)
+        verify(exactly = 1) { dispatcher.dispatchAbsoluteTouch(0.5f, 0.5f) }
+        verify(exactly = 1) { dispatcher.dispatchAbsoluteTouch(0.9f, 0.5f) }
+    }
 }

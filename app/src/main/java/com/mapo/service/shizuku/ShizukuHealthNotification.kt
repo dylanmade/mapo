@@ -66,7 +66,7 @@ class ShizukuHealthNotification @Inject constructor(
         collectionJob = applicationScope.launch {
             try {
                 combine(
-                    coordinator.analogModeWanted,
+                    coordinator.anyShizukuModeWanted,
                     shizukuConnection.isReadyFlow,
                 ) { wanted, ready -> shouldShow(wanted = wanted, shizukuReady = ready) }
                     .distinctUntilChanged()

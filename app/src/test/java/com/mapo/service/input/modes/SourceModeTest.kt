@@ -178,6 +178,9 @@ class SourceModeTest {
             BindingMode.DPAD,
             BindingMode.TRIGGER,
             BindingMode.JOYSTICK_MOUSE,
+            BindingMode.JOYSTICK_MOVE,  // Brick C runtime — virtual XInput gamepad
+            BindingMode.MOUSE_REGION,   // Brick C.4 runtime — joystick → absolute cursor in region
+            BindingMode.GYRO_TO_MOUSE,  // Brick D.3 runtime — gyro → cursor velocity
         )
         for (mode in BindingMode.values()) {
             if (mode in implemented) continue

@@ -81,4 +81,55 @@ interface IMapoInputService {
      * Routed to REL_WHEEL / REL_HWHEEL on the virtual uinput device.
      */
     boolean injectMouseScroll(int dx, int dy) = 8;
+
+    /**
+     * **Brick C — virtual XInput gamepad.** Push the gamepad's full analog
+     * state in a single transaction. Caller maintains the cached state
+     * (e.g. via ShizukuGamepadInjector) and pushes the merged result
+     * whenever any contributing source changes its contribution.
+     *
+     * Value ranges:
+     *  - `lx`, `ly`, `rx`, `ry`: signed int16 (-32768..32767). Left + right sticks.
+     *  - `lt`, `rt`: unsigned 0..255. Left + right triggers.
+     *  - `hatX`, `hatY`: -1, 0, 1. D-pad hat.
+     *
+     * Returns true iff the virtual gamepad device is open and the write
+     * succeeded. Lazy-opens the gamepad on first call; subsequent failures
+     * (e.g. SELinux-blocked uinput on a vendor ROM) return false — caller
+     * surfaces an in-app degradation banner.
+     */
+    boolean setGamepadAxes(
+        int lx, int ly,
+        int rx, int ry,
+        int lt, int rt,
+        int hatX, int hatY) = 9;
+
+    /**
+     * **Brick C — virtual XInput gamepad button.** Press or release a single
+     * gamepad button. `btnCode` is the standard linux/input.h `BTN_*` constant
+     * (the supported set is mirrored in `UinputGamepad.Buttons`).
+     *
+     * Returns true iff the inject was dispatched. False on SELinux-blocked
+     * uinput / device-not-open.
+     */
+    boolean setGamepadButton(int btnCode, boolean pressed) = 10;
+
+    /**
+     * **Brick C.4 follow-up — Mouse Region via virtual stylus.** Position the
+     * cursor at absolute pixel coordinates via a virtual stylus uinput device
+     * (BTN_TOOL_PEN + ABS_X/Y). The device's `absmin/absmax` is set to the
+     * display dimensions on lazy-open, so x/y are screen pixels in
+     * `[0, displayW-1] × [0, displayH-1]`.
+     *
+     * **Why stylus tool-type:** Wine treats stylus events as absolute pen
+     * positioning, distinct from the relative-touchpad model it applies to
+     * finger touch / REL mouse. This was the third architectural option for
+     * making Mouse Region actually absolute on Wine; the REL and
+     * dispatchGesture paths failed device-test on AYN Thor in GameNative.
+     *
+     * Returns true iff the device is open and the write succeeded. False on
+     * SELinux-blocked `/dev/uinput` — caller falls back to the
+     * dispatchGesture absolute-touch path (with its known limitations).
+     */
+    boolean injectStylusAbsolute(int x, int y, int displayW, int displayH) = 11;
 }

@@ -101,12 +101,21 @@ sealed interface SourceMode {
  *
  * [activeLayerIds] is included so future modes can resolve overlay settings
  * (Brick 6+); Brick 5 doesn't read it.
+ *
+ * [gamepad] is the virtual XInput gamepad sink for analog modes that output as
+ * XInput axes (Joystick Move, Mouse Region's gamepad-driven NONE-mode silence).
+ * Lives on the context rather than as a separate evaluate() parameter to
+ * keep the SourceMode interface signature stable (every mode override would
+ * otherwise need to thread the param); modes that don't care about the
+ * gamepad just ignore the field. Defaults to NOOP so test fixtures don't
+ * have to wire one.
  */
 data class ModeContext(
     val source: InputSource,
     val settingsJson: String,
     val priorLatched: Map<String, Boolean>,
     val activeLayerIds: List<Long>,
+    val gamepad: GamepadEmitter = GamepadEmitter.NOOP,
 )
 
 /**
@@ -136,6 +145,29 @@ interface MouseEmitter {
     fun setStickVelocity(source: InputSource, vxPxPerSec: Float, vyPxPerSec: Float)
 
     /**
+     * Mouse Region (Brick C.4) absolute-position path. `xFrac` / `yFrac` are
+     * fractional screen coordinates in `[0..1]`, where `(0.5, 0.5)` is screen
+     * center. The emitter pushes one delta-to-target inject to the dispatcher
+     * — no integration loop, because absolute targeting wants the cursor to
+     * stay put when the stick is held still (which is what happens when the
+     * kernel goes silent at constant deflection — the desired Mouse Region
+     * behavior, unlike velocity modes).
+     *
+     * Multi-source coexistence: last-call-wins per-source. If LJ and RJ are
+     * both in Mouse Region simultaneously, whichever source emits most
+     * recently wins. A pathological config Mapo doesn't try to deconflict.
+     */
+    fun setStickAbsoluteTarget(source: InputSource, xFrac: Float, yFrac: Float)
+
+    /**
+     * Clear this source's absolute-target slot (called when the stick returns
+     * to the radial deadzone). The cursor stays at its current position; we
+     * just stop pushing absolute targets for this source until the user
+     * deflects again. Pair with [setStickAbsoluteTarget].
+     */
+    fun clearStickAbsoluteTarget(source: InputSource)
+
+    /**
      * Clear all per-source velocity contributions. Called from
      * `InputEvaluator.flushAnalog` on profile / action-set switch so a
      * deflected stick doesn't leak motion across set boundaries.
@@ -146,7 +178,58 @@ interface MouseEmitter {
         /** No-op sink for digital modes and for tests. */
         val NOOP: MouseEmitter = object : MouseEmitter {
             override fun setStickVelocity(source: InputSource, vxPxPerSec: Float, vyPxPerSec: Float) {}
+            override fun setStickAbsoluteTarget(source: InputSource, xFrac: Float, yFrac: Float) {}
+            override fun clearStickAbsoluteTarget(source: InputSource) {}
             override fun clearAllVelocities() {}
+        }
+    }
+}
+
+/**
+ * **Brick C** — continuous-output sink for analog modes that emit as virtual
+ * XInput gamepad state instead of mouse motion (Joystick Move) or synthetic
+ * digital edges (Dpad). The production implementation
+ * ([com.mapo.service.shizuku.ShizukuGamepadInjector]) maintains a cached
+ * full-gamepad-state snapshot and pushes it to the `:shizuku-service` UID-2000
+ * UserService over AIDL each time a contributing source updates its slice.
+ *
+ * Modes call into this from [SourceMode.evaluate] (accessed via
+ * [ModeContext.gamepad]) — typically once per AnalogEvent, passing the
+ * source's normalized contribution.
+ *
+ * Stick conventions:
+ *  - x in -1.0..+1.0, +x = stick pushed right
+ *  - y in -1.0..+1.0, +y = stick pushed *down* (matches AnalogEvent's convention).
+ *    Mode handlers that need "game-up = positive" (e.g. for an FPS movement stick)
+ *    apply their own inversion before calling.
+ */
+interface GamepadEmitter {
+    fun setLeftStick(x: Float, y: Float)
+    fun setRightStick(x: Float, y: Float)
+    /** Trigger value 0.0..1.0; clamped + mapped to 0..255 by the implementation. */
+    fun setLeftTrigger(v: Float)
+    fun setRightTrigger(v: Float)
+    /** Dpad hat axis — pass -1, 0, or 1 per axis. */
+    fun setDpadHat(x: Int, y: Int)
+    /**
+     * Reset a source's contribution to zero. Called from [InputEvaluator.flushAnalog]
+     * + when a source transitions out of a gamepad-emitting mode so a residual
+     * deflection doesn't leak.
+     */
+    fun clearSource(source: InputSource)
+    /** Press or release a gamepad button. `btnCode` is a `UinputGamepad.Buttons.*` int. */
+    fun setButton(btnCode: Int, pressed: Boolean)
+
+    companion object {
+        /** No-op sink for digital modes and for tests. */
+        val NOOP: GamepadEmitter = object : GamepadEmitter {
+            override fun setLeftStick(x: Float, y: Float) {}
+            override fun setRightStick(x: Float, y: Float) {}
+            override fun setLeftTrigger(v: Float) {}
+            override fun setRightTrigger(v: Float) {}
+            override fun setDpadHat(x: Int, y: Int) {}
+            override fun clearSource(source: InputSource) {}
+            override fun setButton(btnCode: Int, pressed: Boolean) {}
         }
     }
 }
@@ -518,6 +601,388 @@ object JoystickMouseMode : SourceMode {
 }
 
 /**
+ * **Brick C — Joystick Move.** Stick deflection → XInput analog axis output via
+ * the virtual gamepad uinput device. Game-facing behavior: the stick reads as a
+ * real Xbox-controller left/right stick — same path a USB Xbox controller takes
+ * through the kernel.
+ *
+ * Source → axis mapping (per Android gamepad convention):
+ *  - `LEFT_JOYSTICK`  → ABS_X / ABS_Y    (game-side "left stick")
+ *  - `RIGHT_JOYSTICK` → ABS_Z / ABS_RZ   (game-side "right stick")
+ *  - Other sources    → no-op
+ *
+ * Coordinate convention: input `(x, y)` is normalized -1..+1 with `+y = down`
+ * (per [AnalogEvent]'s contract, matching the kernel reading direction). XInput's
+ * native convention is also `+y = down` for the raw axis values, so we pass
+ * through unmodified. Games that interpret "up" as positive (e.g. for a movement
+ * stick) handle that themselves at their input layer — Mapo just reports the
+ * physical stick direction.
+ *
+ * Sub-inputs ("click", "outer_ring") are unchanged from [JoystickMouseMode] and
+ * stay on the digital-edge path; the stick's analog motion goes through the
+ * gamepad emitter instead of the mouse emitter.
+ */
+object JoystickMoveMode : SourceMode {
+    override val mode: BindingMode = BindingMode.JOYSTICK_MOVE
+    override fun validInputs(): Set<String> = INPUTS
+    override fun defaultSettingsJson(): String = StickToAxisSettings.DEFAULT_JSON
+    private val INPUTS = setOf("click", "outer_ring")
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        val settings = StickToAxisSettings.parse(ctx.settingsJson)
+        val (ax, ay) = settings.toAxis(reading.x, reading.y)
+        when (reading.source) {
+            InputSource.LEFT_JOYSTICK -> ctx.gamepad.setLeftStick(ax, ay)
+            InputSource.RIGHT_JOYSTICK -> ctx.gamepad.setRightStick(ax, ay)
+            else -> Unit  // Joystick Move on non-stick sources is a no-op
+        }
+    }
+}
+
+/**
+ * **Brick C.4 — Mouse Region.** Stick deflection → absolute cursor position
+ * within a configured screen rectangle. Steam-faithful absolute-positioning
+ * mode: center-stick = no movement (cursor stays put), full-right = cursor at
+ * right edge of region, full-up = cursor at top edge, etc. Inside the radial
+ * deadzone we issue no inject at all — the cursor remains wherever it was,
+ * which is the desired behavior for "I want to keep aiming where I was" UX
+ * (Steam's Mouse Region target use case: aiming in roguelikes / strategy
+ * games where the cursor needs to live within a screen sub-region).
+ *
+ * **Coordinate convention.** Region is defined in fractional screen
+ * coordinates so the same settings JSON travels across devices with different
+ * display sizes. Center = (0.5, 0.5); a 50%-of-screen region is half_width =
+ * half_height = 0.25 (extends 0.25 in each direction from the center). The
+ * [InputAccessibilityService.injectMouseMoveAbsoluteFraction] step does the
+ * pixel conversion + delta computation against the live cursor position.
+ *
+ * **Why no integration loop** (unlike [JoystickMouseMode]). Mouse Region is
+ * absolute-positioned: when the kernel goes silent at constant stick
+ * deflection, the cursor should *stay* at the corresponding region position,
+ * not keep moving. So one inject per AnalogEvent is exactly right — no
+ * periodic re-application needed. Constant-stick = no events = cursor parked
+ * at the right spot. Stick moves again = next event repositions.
+ *
+ * **Multi-source.** LJ and RJ can each independently drive Mouse Region.
+ * Last-source-wins per event ordering, which is a non-pathological config
+ * Steam doesn't try to deconflict either.
+ *
+ * **Source filter.** Only joystick sources are mapped here. Mouse Region on a
+ * gyro source ships with the gyro pipeline (task #254, post-Brick-C); this
+ * mode is a no-op on `InputSource.GYRO` until then.
+ */
+object MouseRegionMode : SourceMode {
+    override val mode: BindingMode = BindingMode.MOUSE_REGION
+    override fun validInputs(): Set<String> = INPUTS
+    override fun defaultSettingsJson(): String = MouseRegionSettings.DEFAULT_JSON
+    private val INPUTS = setOf("click", "outer_ring")
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        // Only joystick sources for now. Gyro path ships with task #254.
+        when (reading.source) {
+            InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK -> Unit
+            else -> return
+        }
+        val settings = MouseRegionSettings.parse(ctx.settingsJson)
+        val magnitude = sqrt(reading.x * reading.x + reading.y * reading.y)
+        if (magnitude < settings.deadzone) {
+            mouse.clearStickAbsoluteTarget(reading.source)
+            return
+        }
+        val (xFrac, yFrac) = settings.toTargetFraction(reading.x, reading.y)
+        mouse.setStickAbsoluteTarget(reading.source, xFrac, yFrac)
+    }
+}
+
+/**
+ * Parsed settings for [MouseRegionMode]. Tolerant of missing keys; defaults
+ * to a center-of-screen 50%×50% region with a 10% radial deadzone.
+ *
+ *  - `deadzone` — radial threshold below which no inject fires. Default 0.10
+ *    (looser than the dpad-mode 0.20 because spurious cursor twitches are
+ *    less jarring than spurious direction edges).
+ *  - `region_center_x` / `region_center_y` — fractional screen coords for
+ *    the region's center. Default `(0.5, 0.5)`.
+ *  - `region_half_width` / `region_half_height` — fractional extents from
+ *    center. Default `0.25` each → a 50%-of-screen square at screen center.
+ *  - `invert_y` — flips y; preserved across the deadzone rescale (direction
+ *    is taken from raw `(x, y)`).
+ */
+internal data class MouseRegionSettings(
+    val deadzone: Float,
+    val regionCenterX: Float,
+    val regionCenterY: Float,
+    val regionHalfWidth: Float,
+    val regionHalfHeight: Float,
+    val invertY: Boolean,
+) {
+    /**
+     * Map a stick deflection in `(-1..+1, -1..+1)` to a fractional screen
+     * position. Clamped to `[0, 1]` so out-of-range region settings can't
+     * teleport the cursor off-screen.
+     */
+    fun toTargetFraction(x: Float, y: Float): Pair<Float, Float> {
+        val sy = if (invertY) -y else y
+        val xFrac = (regionCenterX + x * regionHalfWidth).coerceIn(0f, 1f)
+        val yFrac = (regionCenterY + sy * regionHalfHeight).coerceIn(0f, 1f)
+        return xFrac to yFrac
+    }
+
+    companion object {
+        const val DEFAULT_DEADZONE = 0.10f
+        const val DEFAULT_REGION_CENTER_X = 0.5f
+        const val DEFAULT_REGION_CENTER_Y = 0.5f
+        // Full-screen region by default — full stick deflection reaches the
+        // screen edges. Users who want a smaller region (precision aim in a
+        // sub-rectangle) configure smaller half-widths via the Cog menu
+        // (Brick F). The pre-2026-05-29 default was 0.25 (50% of screen),
+        // which surprised users by not reaching the edges; bumped per
+        // device-test feedback.
+        const val DEFAULT_REGION_HALF_WIDTH = 0.5f
+        const val DEFAULT_REGION_HALF_HEIGHT = 0.5f
+
+        val DEFAULTS = MouseRegionSettings(
+            deadzone = DEFAULT_DEADZONE,
+            regionCenterX = DEFAULT_REGION_CENTER_X,
+            regionCenterY = DEFAULT_REGION_CENTER_Y,
+            regionHalfWidth = DEFAULT_REGION_HALF_WIDTH,
+            regionHalfHeight = DEFAULT_REGION_HALF_HEIGHT,
+            invertY = false,
+        )
+        val DEFAULT_JSON = """{"deadzone":$DEFAULT_DEADZONE,"region_center_x":$DEFAULT_REGION_CENTER_X,"region_center_y":$DEFAULT_REGION_CENTER_Y,"region_half_width":$DEFAULT_REGION_HALF_WIDTH,"region_half_height":$DEFAULT_REGION_HALF_HEIGHT,"invert_y":false}"""
+
+        fun parse(json: String): MouseRegionSettings {
+            if (json.isBlank()) return DEFAULTS
+            return try {
+                val obj = JSONObject(json)
+                MouseRegionSettings(
+                    deadzone = obj.optDouble("deadzone", DEFAULT_DEADZONE.toDouble()).toFloat()
+                        .coerceIn(0f, 0.95f),
+                    regionCenterX = obj.optDouble("region_center_x", DEFAULT_REGION_CENTER_X.toDouble()).toFloat()
+                        .coerceIn(0f, 1f),
+                    regionCenterY = obj.optDouble("region_center_y", DEFAULT_REGION_CENTER_Y.toDouble()).toFloat()
+                        .coerceIn(0f, 1f),
+                    regionHalfWidth = obj.optDouble("region_half_width", DEFAULT_REGION_HALF_WIDTH.toDouble()).toFloat()
+                        .coerceIn(0f, 0.5f),
+                    regionHalfHeight = obj.optDouble("region_half_height", DEFAULT_REGION_HALF_HEIGHT.toDouble()).toFloat()
+                        .coerceIn(0f, 0.5f),
+                    invertY = obj.optBoolean("invert_y", false),
+                )
+            } catch (_: JSONException) {
+                DEFAULTS
+            }
+        }
+    }
+}
+
+/**
+ * **Brick D.3 — Gyro → Mouse.** Device rotation rate (rad/sec) → cursor velocity
+ * (px/sec) via [MouseEmitter]. Steam's "Gyro to Mouse": yaw rate drives the
+ * cursor on screen-X, pitch rate drives screen-Y. Roll (z) is dropped at the
+ * evaluator entry point ([InputEvaluator.handleGyroReading]).
+ *
+ * **Input contract.** [InputEvaluator.handleGyroReading] packs the gyro into
+ * an [AnalogEvent] with `source = GYRO`, `x = yaw rad/sec`, `y = pitch rad/sec`.
+ * Values are raw angular velocity (not normalized -1..+1 like sticks); this
+ * mode reads them as physical rad/sec.
+ *
+ * **Why velocity, not displacement.** The [MouseEmitter] integration loop is
+ * the same machinery [JoystickMouseMode] uses — it re-applies the latest
+ * velocity each ~8ms step. For gyro, sensor events arrive at ~50-200 Hz
+ * (`SENSOR_DELAY_GAME`), faster than the loop's 8ms cadence, so each event
+ * refreshes the velocity before the next step fires. The time-integrated
+ * cursor motion equals `∫(yaw_rate × sensitivity) dt = rotation_angle × sensitivity`
+ * — which is the physically-correct "pixels per radian of rotation" mapping.
+ *
+ * **Stops cleanly.** When the user holds the device still, the sensor keeps
+ * emitting events near zero. The deadzone filter forces `(vx, vy) = (0, 0)`
+ * below threshold, so the [MouseEmitter] slot zeroes out and the integration
+ * loop exits — no creeping cursor from sensor noise.
+ *
+ * **Source filter.** Skips events that aren't `InputSource.GYRO` (defensive —
+ * this mode is gyro-source-only in the picker, but a future config edit could
+ * route a stick into it via the catalog and we don't want a stick's normalized
+ * `(x, y)` interpreted as rad/sec — would result in absurd cursor velocity).
+ *
+ * Sub-inputs: none. Gyro modes are typically chord-gated via activator layers
+ * (a bumper toggles the layer that swaps the gyro source from DEVICE_DEFAULT
+ * to GYRO_TO_MOUSE). A future "click" / "gyro_button" sub-input could land
+ * here if Mapo grows a built-in gyro-button concept, but Steam doesn't expose
+ * one on this mode either.
+ */
+object GyroToMouseMode : SourceMode {
+    override val mode: BindingMode = BindingMode.GYRO_TO_MOUSE
+    override fun validInputs(): Set<String> = emptySet()
+    override fun defaultSettingsJson(): String = GyroToMouseSettings.DEFAULT_JSON
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        if (reading.source != InputSource.GYRO) return
+        val settings = GyroToMouseSettings.parse(ctx.settingsJson)
+        val (vx, vy) = settings.toVelocity(reading.x, reading.y)
+        mouse.setStickVelocity(reading.source, vx, vy)
+    }
+}
+
+/**
+ * Parsed settings + math for [GyroToMouseMode]. Tolerant of missing keys;
+ * falls back to [DEFAULTS]. Steam's gyro UI exposes per-axis sensitivity and
+ * a single threshold (deadzone) — Mapo mirrors that shape.
+ *
+ * **toVelocity math:**
+ *  1. Per-axis deadzone gate — `|rate| < deadzone` → that axis contributes 0.
+ *     Per-axis (not radial) because a hand-still device emits independent
+ *     low-magnitude noise on each axis; a radial threshold would let
+ *     `(yaw=0.04, pitch=0.04)` slip through (magnitude ≈ 0.057 > 0.05)
+ *     producing creeping cursor motion. Per-axis nukes both independently.
+ *  2. Multiply by per-axis sensitivity → px/sec.
+ *  3. Apply `invert_x` / `invert_y` sign flips.
+ *
+ * **Sensitivity units.** `sensitivity_x` is `px/sec output` per `rad/sec input`,
+ * equivalent to `px per rad of rotation` over any sustained motion. The
+ * 400 default means a slow 0.5 rad/sec yaw produces 200 px/sec cursor motion;
+ * a 1-radian rotation (~57°) sweeps 400 pixels at any speed.
+ *
+ * **Defaults are starting points.** Real-world tuning needs on-device feel
+ * (different MEMS gyros have different noise floors / scale factors). The
+ * Cog menu — Phase 7 Brick F — will surface per-axis sliders. Users on
+ * landscape handhelds typically want symmetric x/y at first; FPS users
+ * separately tune yaw > pitch later.
+ */
+internal data class GyroToMouseSettings(
+    val sensitivityX: Float,
+    val sensitivityY: Float,
+    val deadzone: Float,
+    val invertX: Boolean,
+    val invertY: Boolean,
+) {
+    /**
+     * Convert (yaw, pitch) in rad/sec to (vx, vy) in px/sec.
+     * @param yawRadPerSec rotation rate around the device's Y axis (turn left/right)
+     * @param pitchRadPerSec rotation rate around the device's X axis (tip up/down)
+     */
+    fun toVelocity(yawRadPerSec: Float, pitchRadPerSec: Float): Pair<Float, Float> {
+        val yaw = if (abs(yawRadPerSec) < deadzone) 0f else yawRadPerSec
+        val pitch = if (abs(pitchRadPerSec) < deadzone) 0f else pitchRadPerSec
+        val vx = yaw * sensitivityX * if (invertX) -1f else 1f
+        val vy = pitch * sensitivityY * if (invertY) -1f else 1f
+        return vx to vy
+    }
+
+    companion object {
+        const val DEFAULT_SENSITIVITY_X = 400f
+        const val DEFAULT_SENSITIVITY_Y = 400f
+        // 0.05 rad/sec ≈ 2.9°/sec. Above typical MEMS gyro noise floor while
+        // still catching deliberate slow motion. Steam Input's analog "gyro
+        // threshold" defaults are in a similar ballpark.
+        const val DEFAULT_DEADZONE = 0.05f
+
+        val DEFAULTS = GyroToMouseSettings(
+            sensitivityX = DEFAULT_SENSITIVITY_X,
+            sensitivityY = DEFAULT_SENSITIVITY_Y,
+            deadzone = DEFAULT_DEADZONE,
+            invertX = false,
+            invertY = false,
+        )
+        val DEFAULT_JSON =
+            """{"sensitivity_x":$DEFAULT_SENSITIVITY_X,"sensitivity_y":$DEFAULT_SENSITIVITY_Y,"deadzone":$DEFAULT_DEADZONE,"invert_x":false,"invert_y":false}"""
+
+        fun parse(json: String): GyroToMouseSettings {
+            if (json.isBlank()) return DEFAULTS
+            return try {
+                val obj = JSONObject(json)
+                GyroToMouseSettings(
+                    sensitivityX = obj.optDouble("sensitivity_x", DEFAULT_SENSITIVITY_X.toDouble()).toFloat()
+                        .coerceAtLeast(0f),
+                    sensitivityY = obj.optDouble("sensitivity_y", DEFAULT_SENSITIVITY_Y.toDouble()).toFloat()
+                        .coerceAtLeast(0f),
+                    // 5 rad/sec ≈ 286°/sec — past any deliberate hand motion;
+                    // clamp protects against pathological JSON.
+                    deadzone = obj.optDouble("deadzone", DEFAULT_DEADZONE.toDouble()).toFloat()
+                        .coerceIn(0f, 5f),
+                    invertX = obj.optBoolean("invert_x", false),
+                    invertY = obj.optBoolean("invert_y", false),
+                )
+            } catch (_: JSONException) {
+                DEFAULTS
+            }
+        }
+    }
+}
+
+/**
+ * Parsed settings for [JoystickMoveMode]. Applies a radial deadzone + optional
+ * response curve and outputs a normalized `(ax, ay)` in -1..+1. The
+ * [GamepadEmitter] handles the final int16 mapping (-32768..+32767).
+ *
+ * Tolerant of missing keys; defaults match a stock Xbox-controller feel.
+ */
+internal data class StickToAxisSettings(
+    val deadzone: Float,
+    val exponent: Float,
+    val invertY: Boolean,
+) {
+    /** Returns (ax, ay) normalized to -1..+1, with deadzone + curve applied. */
+    fun toAxis(x: Float, y: Float): Pair<Float, Float> {
+        val magnitude = sqrt(x * x + y * y).coerceIn(0f, 1f)
+        if (magnitude <= deadzone) return 0f to 0f
+        val rescaled = ((magnitude - deadzone) / (1f - deadzone)).coerceIn(0f, 1f)
+        val shaped = rescaled.toDouble().pow(exponent.toDouble()).toFloat()
+        val ux = x / magnitude
+        val uy = y / magnitude
+        val ax = ux * shaped
+        val ay = uy * shaped * if (invertY) -1f else 1f
+        return ax to ay
+    }
+
+    companion object {
+        const val DEFAULT_DEADZONE = 0.10f
+        // Linear (1.0) by default — XInput games typically apply their own curves
+        // and expect the raw axis to be linear-ish. Set higher to attenuate near
+        // center, lower for amplified small movements.
+        const val DEFAULT_EXPONENT = 1.0f
+
+        val DEFAULTS = StickToAxisSettings(
+            deadzone = DEFAULT_DEADZONE,
+            exponent = DEFAULT_EXPONENT,
+            invertY = false,
+        )
+        val DEFAULT_JSON =
+            """{"deadzone":$DEFAULT_DEADZONE,"exponent":$DEFAULT_EXPONENT,"invert_y":false}"""
+
+        fun parse(json: String): StickToAxisSettings {
+            if (json.isBlank()) return DEFAULTS
+            return try {
+                val obj = JSONObject(json)
+                StickToAxisSettings(
+                    deadzone = obj.optDouble("deadzone", DEFAULT_DEADZONE.toDouble()).toFloat()
+                        .coerceIn(0f, 0.95f),
+                    exponent = obj.optDouble("exponent", DEFAULT_EXPONENT.toDouble()).toFloat()
+                        .coerceIn(0.1f, 10f),
+                    invertY = obj.optBoolean("invert_y", false),
+                )
+            } catch (_: JSONException) {
+                DEFAULTS
+            }
+        }
+    }
+}
+
+/**
  * Parsed settings + math for [JoystickMouseMode]. Tolerant of missing keys;
  * falls back to the caller-supplied defaults. [MOUSE_JOYSTICK_DEFAULTS] is
  * the cursor-tuned preset (Phase 7 Brick A default); [JOYSTICK_CAMERA_DEFAULTS]
@@ -628,12 +1093,12 @@ fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.DPAD -> DpadMode
     BindingMode.TRIGGER -> TriggerMode
     BindingMode.JOYSTICK_MOUSE -> JoystickMouseMode
-    BindingMode.JOYSTICK_MOVE,
+    BindingMode.JOYSTICK_MOVE -> JoystickMoveMode
+    BindingMode.MOUSE_REGION -> MouseRegionMode
+    BindingMode.GYRO_TO_MOUSE -> GyroToMouseMode
     BindingMode.FLICK_STICK,
-    BindingMode.MOUSE_REGION,
     BindingMode.SCROLL_WHEEL,
     BindingMode.REFERENCE,
-    BindingMode.GYRO_TO_MOUSE,
     BindingMode.GYRO_TO_JOYSTICK_CAMERA,
     BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
     BindingMode.DIRECTIONAL_SWIPE,
@@ -698,6 +1163,38 @@ val ANALOG_MODES_REQUIRING_MOTION_CAPTURE: Set<BindingMode> = setOf(
 
 /** Convenience predicate over the analog-modes set; see [ANALOG_MODES_REQUIRING_MOTION_CAPTURE]. */
 fun BindingMode.requiresMotionCapture(): Boolean = this in ANALOG_MODES_REQUIRING_MOTION_CAPTURE
+
+/**
+ * Modes that need Shizuku to function correctly, for *any* reason —
+ * superset of [ANALOG_MODES_REQUIRING_MOTION_CAPTURE]. Used by the UI to
+ * decide whether to surface the Shizuku-required dialog / inline banner /
+ * persistent health notification when this mode is selected.
+ *
+ * **Why a superset.** Gyro modes don't need motion capture (sensor data
+ * comes from Android's `SensorManager`, not `/dev/input`), but the
+ * gyro→mouse and gyro→joystick modes still need Shizuku for clean *output*:
+ *  - Mouse output without Shizuku falls back to
+ *    [android.accessibilityservice.AccessibilityService.dispatchGesture],
+ *    which is synthetic touch — apps like GameNative (Wine) interpret a
+ *    sustained drag as click-held-while-moving rather than as cursor motion.
+ *  - Gamepad axis output (JOYSTICK_MOVE, GYRO_TO_JOYSTICK_*) needs the
+ *    `/dev/uinput` virtual gamepad which is shell-uid-only.
+ *
+ * So even when the mode itself reads from SensorManager (gyro), Shizuku is
+ * still the right gate for "warn the user before letting them pick this and
+ * be surprised by the degraded experience."
+ */
+val MODES_REQUIRING_SHIZUKU: Set<BindingMode> = ANALOG_MODES_REQUIRING_MOTION_CAPTURE + setOf(
+    BindingMode.GYRO_TO_MOUSE,                // uinput mouse for clean cursor (else dispatchGesture click-drag)
+    BindingMode.GYRO_TO_JOYSTICK_CAMERA,      // uinput gamepad axes
+    BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,  // uinput gamepad axes
+    // DIRECTIONAL_SWIPE outputs synthetic digital edges via the normal key
+    // inject path — works without Shizuku via reflection. Intentionally
+    // omitted.
+)
+
+/** Convenience predicate over [MODES_REQUIRING_SHIZUKU]. */
+fun BindingMode.requiresShizuku(): Boolean = this in MODES_REQUIRING_SHIZUKU
 
 /**
  * Source-and-mode-aware sub-input vocabulary lookup. Sub-inputs vary by both
@@ -829,7 +1326,16 @@ object SourceModeCatalog {
             BindingMode.NONE,
             BindingMode.JOYSTICK_MOUSE,
             BindingMode.FLICK_STICK,
-            BindingMode.MOUSE_REGION,
+            // MOUSE_REGION intentionally hidden 2026-05-30: device-test on
+            // AYN Thor showed no reliable absolute-positioning path. REL
+            // mouse + dispatchGesture finger touch are both relative on
+            // Wine's side, and the virtual stylus device that does work at
+            // the Android level is filtered out by GameNative before it
+            // reaches Wine. The runtime + uinput-stylus infrastructure
+            // stay in place (handler() still resolves MouseRegionMode) so
+            // VDF imports can read in a Mouse Region binding without
+            // dropping it on the floor — but the picker doesn't expose it.
+            // See [project_unsupported_vdf_features.md].
             BindingMode.JOYSTICK_MOVE,
             BindingMode.DPAD,
             BindingMode.SCROLL_WHEEL,
@@ -843,7 +1349,7 @@ object SourceModeCatalog {
             BindingMode.GYRO_TO_MOUSE,
             BindingMode.GYRO_TO_JOYSTICK_CAMERA,
             BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
-            BindingMode.MOUSE_REGION,
+            // MOUSE_REGION hidden for the same reason as the joystick rows.
             BindingMode.DPAD,
             BindingMode.DIRECTIONAL_SWIPE,
             BindingMode.RADIAL_MENU,

@@ -132,6 +132,7 @@ class ControllerConfigRepositoryTest {
             InputSource.RIGHT_JOYSTICK,
             InputSource.SWITCH_START,
             InputSource.SWITCH_SELECT,
+            InputSource.GYRO,
         )
         val seededSources = presetBindingDao.rows.value.map { it.inputSource }.toSet()
         assertEquals(expectedSources, seededSources)

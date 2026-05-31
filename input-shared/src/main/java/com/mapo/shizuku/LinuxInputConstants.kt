@@ -30,6 +30,11 @@ object LinuxInputConstants {
     const val EV_MSC: Int = 0x04
     const val EV_SW: Int = 0x05
 
+    // ── EV_SYN codes ─────────────────────────────────────────────────────────
+    /** Marker that the current event group (preceding EV_ABS/EV_KEY/etc.)
+     *  is complete and ready to dispatch. Used to coalesce per-axis bursts. */
+    const val SYN_REPORT: Int = 0x00
+
     // ── EV_ABS axis codes we care about for gamepads ─────────────────────────
     const val ABS_X: Int = 0x00
     const val ABS_Y: Int = 0x01

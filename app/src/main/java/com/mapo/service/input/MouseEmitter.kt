@@ -58,6 +58,31 @@ class MouseEmitterImpl @Inject constructor(
     }
 
     private val velocities = EnumMap<InputSource, Velocity>(InputSource::class.java)
+
+    /**
+     * Per-source Mouse Region phase (Brick C.4 — dispatchGesture revision
+     * 2026-05-30).
+     *
+     *  - [AbsSourcePhase.UNTOUCHED] — never produced a Mouse Region event
+     *    in the current profile. First event snaps the cursor to screen
+     *    center, so the cursor doesn't sit at whatever stale position the
+     *    host (e.g. Wine in GameNative) last put it.
+     *  - [AbsSourcePhase.AT_CENTER] — stick is at rest; cursor is
+     *    presumed at screen center. Subsequent rest events are no-ops.
+     *  - [AbsSourcePhase.DEFLECTED] — stick is past deadzone; the cursor
+     *    is being driven by absolute-touch updates.
+     *
+     * Snap-to-center fires on any transition into [AbsSourcePhase.AT_CENTER]
+     * (UNTOUCHED → AT_CENTER on first activation; DEFLECTED → AT_CENTER on
+     * stick release). The deflected path just dispatches the target as
+     * absolute touch each event — the gesture-segment chain on the service
+     * side keeps the synthetic finger "down" so Wine sees continuous
+     * tracking with no spurious clicks.
+     *
+     * Cleared on profile / action-set switch via [clearAllVelocities].
+     */
+    private enum class AbsSourcePhase { UNTOUCHED, AT_CENTER, DEFLECTED }
+    private val absSourcePhases = EnumMap<InputSource, AbsSourcePhase>(InputSource::class.java)
     private val lock = Any()
 
     @Volatile
@@ -89,11 +114,67 @@ class MouseEmitterImpl @Inject constructor(
         ensureIntegrationRunning()
     }
 
+    override fun setStickAbsoluteTarget(source: InputSource, xFrac: Float, yFrac: Float) {
+        val needBeginSession: Boolean
+        synchronized(lock) {
+            needBeginSession = !anyDeflectedLocked() && !continuousActive
+            absSourcePhases[source] = AbsSourcePhase.DEFLECTED
+        }
+        if (needBeginSession) {
+            dispatcher.beginContinuousCursor()
+            continuousActive = true
+        }
+        dispatcher.dispatchAbsoluteTouch(xFrac, yFrac)
+    }
+
+    override fun clearStickAbsoluteTarget(source: InputSource) {
+        val needSnap: Boolean
+        val needBeginSession: Boolean
+        val shouldEndSession: Boolean
+        synchronized(lock) {
+            val priorPhase = absSourcePhases[source] ?: AbsSourcePhase.UNTOUCHED
+            needSnap = priorPhase != AbsSourcePhase.AT_CENTER
+            absSourcePhases[source] = AbsSourcePhase.AT_CENTER
+            needBeginSession = needSnap && !continuousActive
+            // Don't end the session on snap-back — the synthetic finger
+            // stays "down" at center so Wine doesn't see ACTION_UP (which
+            // could register as a click). Session ends on
+            // [clearAllVelocities] (profile / action-set switch).
+            shouldEndSession = false
+        }
+        if (needBeginSession) {
+            dispatcher.beginContinuousCursor()
+            continuousActive = true
+        }
+        if (needSnap) {
+            // Snap fires on:
+            //  - UNTOUCHED → AT_CENTER: first ever Mouse Region event when
+            //    the stick is at rest. Cursor jumps from wherever the host
+            //    put it (often top-left in Wine) to screen center.
+            //  - DEFLECTED → AT_CENTER: stick release. Cursor slides from
+            //    last deflected target back to center via the gesture
+            //    segment chain.
+            dispatcher.dispatchAbsoluteTouch(0.5f, 0.5f)
+        }
+        if (shouldEndSession) {
+            dispatcher.endContinuousCursor()
+            continuousActive = false
+        }
+    }
+
+    /** Caller must hold [lock]. */
+    private fun anyDeflectedLocked(): Boolean =
+        absSourcePhases.values.any { it == AbsSourcePhase.DEFLECTED }
+
     override fun clearAllVelocities() {
         synchronized(lock) {
             velocities.clear()
+            absSourcePhases.clear()
         }
-        // The running loop notices the empty map on its next step and exits.
+        if (continuousActive && integrationJob?.isActive != true) {
+            dispatcher.endContinuousCursor()
+            continuousActive = false
+        }
     }
 
     private fun ensureIntegrationRunning() {

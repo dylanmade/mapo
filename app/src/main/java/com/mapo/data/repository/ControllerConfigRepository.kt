@@ -125,50 +125,105 @@ class ControllerConfigRepository @Inject constructor(
      */
     private suspend fun seedDefaultSetContents(actionSetId: Long) {
         for ((inputSource, spec) in DEFAULT_INPUT_SOURCE_SEEDS) {
-            val groupId = bindingGroupDao.insert(
-                BindingGroup(
-                    actionSetId = actionSetId,
-                    actionLayerId = null,
-                    name = spec.groupName,
-                    mode = spec.mode,
-                    settingsJson = "{}",
-                )
+            seedSingleInputSource(actionSetId, inputSource, spec)
+        }
+    }
+
+    /**
+     * Insert a [BindingGroup] (+ child GroupInputs / Activators / Bindings) and
+     * the matching `active`-state [PresetBinding] for [inputSource] under
+     * [actionSetId]. Extracted from [seedDefaultSetContents] so
+     * [ensureSeededInputSources] can call it for missing seeds without
+     * re-creating already-present groups.
+     */
+    private suspend fun seedSingleInputSource(
+        actionSetId: Long,
+        inputSource: InputSource,
+        spec: InputSourceSeed,
+    ) {
+        val groupId = bindingGroupDao.insert(
+            BindingGroup(
+                actionSetId = actionSetId,
+                actionLayerId = null,
+                name = spec.groupName,
+                mode = spec.mode,
+                settingsJson = "{}",
             )
+        )
 
-            for ((idx, inputKey) in spec.inputKeys.withIndex()) {
-                val groupInputId = groupInputDao.insert(
-                    GroupInput(
-                        bindingGroupId = groupId,
-                        inputKey = inputKey,
-                        orderIndex = idx,
-                    )
-                )
-                val activatorId = activatorDao.insert(
-                    Activator(
-                        groupInputId = groupInputId,
-                        type = ActivatorType.FULL_PRESS,
-                        settingsJson = "{}",
-                        orderIndex = 0,
-                    )
-                )
-                bindingDao.insert(
-                    Binding(
-                        activatorId = activatorId,
-                        outputType = BindingOutputType.UNBOUND,
-                        args = "",
-                        orderIndex = 0,
-                    )
-                )
-            }
-
-            presetBindingDao.insert(
-                PresetBinding(
-                    actionSetId = actionSetId,
-                    inputSource = inputSource,
-                    state = "active",
+        for ((idx, inputKey) in spec.inputKeys.withIndex()) {
+            val groupInputId = groupInputDao.insert(
+                GroupInput(
                     bindingGroupId = groupId,
+                    inputKey = inputKey,
+                    orderIndex = idx,
                 )
             )
+            val activatorId = activatorDao.insert(
+                Activator(
+                    groupInputId = groupInputId,
+                    type = ActivatorType.FULL_PRESS,
+                    settingsJson = "{}",
+                    orderIndex = 0,
+                )
+            )
+            bindingDao.insert(
+                Binding(
+                    activatorId = activatorId,
+                    outputType = BindingOutputType.UNBOUND,
+                    args = "",
+                    orderIndex = 0,
+                )
+            )
+        }
+
+        presetBindingDao.insert(
+            PresetBinding(
+                actionSetId = actionSetId,
+                inputSource = inputSource,
+                state = "active",
+                bindingGroupId = groupId,
+            )
+        )
+    }
+
+    /**
+     * Back-fill any [DEFAULT_INPUT_SOURCE_SEEDS] entry that's missing from
+     * each existing action set. Idempotent — runs on every app start and is a
+     * no-op once every set has been retrofitted. Generic for the next time we
+     * add an input source to the seed table (gyro was the first such addition
+     * after D.3 enabled the runtime), so we don't repeatedly rediscover the
+     * "user's pre-existing profile shows no picker for the new source"
+     * problem.
+     *
+     * Compares each action set's `active`-state PresetBindings to the seed
+     * table's keys and seeds the missing ones. Existing rows are untouched.
+     */
+    suspend fun ensureSeededInputSources() {
+        val sets = actionSetDao.getAll()
+        if (sets.isEmpty()) return
+        val setIds = sets.map { it.id }
+        val activePresetsBySetId = presetBindingDao.getByActionSets(setIds)
+            .filter { it.state == "active" }
+            .groupBy { it.actionSetId }
+        var retrofittedAny = false
+        for (set in sets) {
+            val present = activePresetsBySetId[set.id]?.map { it.inputSource }?.toSet().orEmpty()
+            val missing = DEFAULT_INPUT_SOURCE_SEEDS.keys - present
+            if (missing.isEmpty()) continue
+            android.util.Log.i(
+                "ControllerConfigRepo",
+                "ensureSeededInputSources: set ${set.id} missing $missing — retrofitting",
+            )
+            for (inputSource in missing) {
+                val spec = DEFAULT_INPUT_SOURCE_SEEDS.getValue(inputSource)
+                seedSingleInputSource(set.id, inputSource, spec)
+            }
+            retrofittedAny = true
+        }
+        if (retrofittedAny) {
+            // Bump the dirty tick so any live config subscriber refreshes.
+            configDirtyTick.value = configDirtyTick.value + 1
         }
     }
 
@@ -605,6 +660,13 @@ class ControllerConfigRepository @Inject constructor(
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observeActiveConfig(profileId: Long): Flow<ControllerConfig?> = flow {
         ensureSeeded(profileId)
+        // Retrofit any DEFAULT_INPUT_SOURCE_SEEDS entries that were added to the
+        // table after this profile's action sets were first seeded (e.g. GYRO,
+        // added 2026-05-31 after D.3 lit up the gyro runtime). Idempotent —
+        // no-op once every set has every seed. Runs before the first emission
+        // so the consumer's compiled config sees the retrofitted groups on the
+        // very first frame.
+        ensureSeededInputSources()
         emitAll(
             combine(
                 controllerProfileDao.observeByProfile(profileId)
@@ -1122,10 +1184,17 @@ class ControllerConfigRepository @Inject constructor(
 
     companion object {
         /**
-         * Default seed table for Generic Android. Trackpads, back paddles, and gyro are
-         * intentionally excluded — they're in the schema for VDF import compatibility
-         * but the AYN Thor (and most Android pads) don't expose them, so we'd be
-         * seeding configurable-but-never-fireable groups.
+         * Default seed table for Generic Android. Trackpads and back paddles are
+         * intentionally excluded — they're in the schema for VDF import
+         * compatibility but the AYN Thor (and most Android pads) don't expose
+         * them, so we'd be seeding configurable-but-never-fireable groups.
+         *
+         * Gyro is included as of D.3: most target handhelds (Thor, Odin 2 Mini,
+         * Retroid) ship with a real gyro, and the runtime needs a BindingGroup
+         * on the GYRO source for the picker to surface its mode dropdown.
+         * Devices that lack a gyro will see the row but the
+         * [com.mapo.service.input.GyroLifecycleCoordinator] short-circuits at
+         * the hardware-presence check, so the group is inert there.
          */
         private val DEFAULT_INPUT_SOURCE_SEEDS: Map<InputSource, InputSourceSeed> = linkedMapOf(
             InputSource.BUTTON_DIAMOND to InputSourceSeed(
@@ -1167,6 +1236,12 @@ class ControllerConfigRepository @Inject constructor(
             ),
             InputSource.SWITCH_SELECT to InputSourceSeed(
                 "switch_select", BindingMode.SINGLE_BUTTON, listOf("click"),
+            ),
+            // Gyro: no sub-inputs (gyro modes emit continuous output, not
+            // bindable directional rows). Picker on the subheader is what the
+            // user interacts with; settings live in the Cog menu.
+            InputSource.GYRO to InputSourceSeed(
+                "gyro", BindingMode.DEVICE_DEFAULT, emptyList(),
             ),
         )
     }

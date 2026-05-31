@@ -82,13 +82,13 @@ object RemapSections {
     const val SECTION_JOYSTICKS = "joysticks"
     const val SECTION_GYRO = "gyro"
 
-    /** Rail entries in display order. Gyro is disabled — visible, but skipped by focus. */
+    /** Rail entries in display order. */
     val rail: List<SectionedPaneItem> = listOf(
         SectionedPaneItem(SECTION_BUTTONS, "Buttons"),
         SectionedPaneItem(SECTION_DPAD, "D-Pad"),
         SectionedPaneItem(SECTION_TRIGGERS, "Triggers"),
         SectionedPaneItem(SECTION_JOYSTICKS, "Joysticks"),
-        SectionedPaneItem(SECTION_GYRO, "Gyro", enabled = false),
+        SectionedPaneItem(SECTION_GYRO, "Gyro"),
     )
 
     /**
@@ -108,6 +108,7 @@ object RemapSections {
         InputSource.RIGHT_TRIGGER,
         InputSource.LEFT_JOYSTICK,
         InputSource.RIGHT_JOYSTICK,
+        InputSource.GYRO,
     )
 
     val contentBySection: Map<String, List<RemapPaneItem>> = mapOf(
@@ -143,11 +144,21 @@ object RemapSections {
             RemapPaneItem.Subheader("joysticks.left.header", "Left Joystick Behavior", InputSource.LEFT_JOYSTICK),
             RemapPaneItem.Subheader("joysticks.right.header", "Right Joystick Behavior", InputSource.RIGHT_JOYSTICK),
         ),
-        // Gyro: rail entry is disabled. If the user lands on the section anyway,
-        // the detail pane shows a placeholder rather than crashing on a missing key.
+        SECTION_GYRO to listOf(
+            // Gyro source has no static sub-input rows — gyro modes (Gyro to Mouse,
+            // Gyro to Joystick Camera, etc.) emit continuous output, not bindable
+            // sub-inputs. The subheader carries the mode picker; everything else
+            // (sensitivity / deadzone / invert) lives in the Cog menu.
+            RemapPaneItem.Subheader("gyro.header", "Gyro Behavior", InputSource.GYRO),
+        ),
     )
 
-    const val GYRO_PLACEHOLDER = "Gyro input arrives once analog motion capture lands. Coming soon."
+    /**
+     * Fallback shown when the detail pane is asked for an unknown sectionId — a
+     * defensive default. Today every rail entry has a populated content map, but
+     * future un-implemented sections route here rather than crashing.
+     */
+    const val UNIMPLEMENTED_SECTION_PLACEHOLDER = "This section isn't available yet."
 
     /**
      * Phase 7 Brick B.6: which sources can have a mode shift added in the

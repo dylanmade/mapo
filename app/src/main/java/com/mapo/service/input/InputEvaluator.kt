@@ -62,6 +62,7 @@ class InputEvaluator @Inject constructor(
     private val dispatcher: InputDispatcher,
     private val emitter: OutputEmitter,
     private val mouseEmitter: MouseEmitterImpl,
+    private val gamepadEmitter: com.mapo.service.shizuku.ShizukuGamepadInjector,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
 
@@ -406,6 +407,56 @@ class InputEvaluator @Inject constructor(
     }
 
     /**
+     * **Brick D.2** — gyro entry point. Parallel to [handleAnalogReadings];
+     * driven by [com.mapo.service.input.GyroSensorStream] collecting
+     * `SensorEvent`s from Android's `SensorManager`. Wraps a [GyroEvent] in
+     * an [AnalogEvent] with `source = GYRO`, then dispatches through the
+     * standard mode-resolution path.
+     *
+     * **Axis packing convention (Thor-calibrated landscape-natural).** Gyro
+     * events carry rotation rate around three device-fixed axes; gyro modes
+     * shipping in D.3+ only use two. The mapping was empirically verified on
+     * AYN Thor (2026-05-31):
+     *  - `AnalogEvent.x` ← `+GyroEvent.xRadPerSec` — rolling the device
+     *    (one side dipping) drives cursor horizontal motion.
+     *  - `AnalogEvent.y` ← `−GyroEvent.yRadPerSec` — pitching the device
+     *    (top edge toward/away) drives cursor vertical motion. Sign
+     *    inverted so pitching the device's top edge AWAY moves the cursor
+     *    UP (matches natural "aim where you're pointing" feel).
+     *  - `zRadPerSec` is dropped. Add a parallel entry point if a future
+     *    mode needs it.
+     *
+     * **Why not Android's "X = pitch, Y = yaw"?** That convention applies to
+     * portrait-natural devices. Mapo's targets (AYN Thor / Odin 2 Mini /
+     * Anbernic / Retroid) are landscape-natural handhelds — the sensor's X
+     * axis runs along the device's long horizontal edge in landscape, so
+     * rotation around X reads as roll, not pitch. The pre-2026-05-31 code
+     * assumed portrait convention and felt 90°-off on every Mapo target.
+     *
+     * Per-mode `invert_x` / `invert_y` settings handle user-preference sign
+     * flips on top of this base mapping. Generic-Android calibration support
+     * (e.g. devices with non-standard sensor frames) is deferred until a
+     * device-spread test reveals one.
+     *
+     * **Values are rad/s, not [-1, 1].** Stick `AnalogEvent` readings are
+     * normalized; gyro readings are raw angular velocity. Mode handlers
+     * branch on `reading.source` and interpret accordingly — same idiom
+     * `DpadMode` already uses to differentiate stick vs. dpad sources.
+     */
+    fun handleGyroReading(reading: GyroEvent) {
+        val analog = AnalogEvent(
+            source = InputSource.GYRO,
+            x = reading.xRadPerSec,
+            y = -reading.yRadPerSec,
+            timestampMs = reading.timestampNs / 1_000_000L,
+        )
+        if (Log.isLoggable(TAG_MOTION, Log.VERBOSE)) {
+            Log.v(TAG_MOTION, "handleGyroReading GYRO(${"%.3f".format(analog.x)},${"%.3f".format(analog.y)})")
+        }
+        dispatchReadings(listOf(analog))
+    }
+
+    /**
      * Shared dispatch loop for both motion entry points. Walks each reading,
      * resolves its source's mode (with the active layer stack overlaid), and
      * lets the mode emit synthetic edges / continuous output. The mode handler
@@ -426,6 +477,7 @@ class InputEvaluator @Inject constructor(
                 settingsJson = resolved.settingsJson,
                 priorLatched = priors,
                 activeLayerIds = activeLayers.toList(),
+                gamepad = gamepadEmitter,
             )
             handler.evaluate(
                 reading,
@@ -1301,6 +1353,11 @@ class InputEvaluator @Inject constructor(
         // re-fire bindings (release path), whereas the velocity flush is a
         // pure clear with no downstream emit.
         mouseEmitter.clearAllVelocities()
+        // Brick C: zero every gamepad-emitting source so a deflected stick or
+        // pulled trigger doesn't leak into the next set/profile. Clearing one
+        // source at a time keeps the cached state correct without resetting
+        // sources owned by a still-active mode.
+        for (source in GAMEPAD_EMITTING_SOURCES) gamepadEmitter.clearSource(source)
         if (analogLatched.isEmpty()) return
         Log.d(TAG, "flushAnalog: releasing ${analogLatched.size} latched synthetic edge(s)")
         // Snapshot before mutation — dispatchSyntheticEdge writes back into
@@ -1351,5 +1408,14 @@ class InputEvaluator @Inject constructor(
         private const val TAG = "InputEvaluator"
         /** Distinct from [TAG] so motion logs can be filtered independently (`-s InputEvaluator.Motion`). */
         private const val TAG_MOTION = "InputEvaluator.Motion"
+
+        /** Sources that can contribute to the virtual XInput gamepad — used by flushAnalog. */
+        private val GAMEPAD_EMITTING_SOURCES = listOf(
+            InputSource.LEFT_JOYSTICK,
+            InputSource.RIGHT_JOYSTICK,
+            InputSource.LEFT_TRIGGER,
+            InputSource.RIGHT_TRIGGER,
+            InputSource.DPAD,
+        )
     }
 }

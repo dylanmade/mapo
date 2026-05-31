@@ -55,6 +55,8 @@ class FakeActionSetDao : ActionSetDao {
 
     override suspend fun getById(id: Long): ActionSet? = rows.value.firstOrNull { it.id == id }
 
+    override suspend fun getAll(): List<ActionSet> = rows.value
+
     override suspend fun insert(set: ActionSet): Long {
         val id = nextId++
         rows.value = rows.value + set.copy(id = id)

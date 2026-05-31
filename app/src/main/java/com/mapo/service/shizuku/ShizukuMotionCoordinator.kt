@@ -12,6 +12,7 @@ import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.InputEvaluator
 import com.mapo.service.input.modes.requiresMotionCapture
+import com.mapo.service.input.modes.requiresShizuku
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -117,6 +118,19 @@ class ShizukuMotionCoordinator @Inject constructor(
      */
     val analogModeWanted: StateFlow<Boolean> = _analogModeWanted.asStateFlow()
 
+    private val _anyShizukuModeWanted = MutableStateFlow(false)
+    /**
+     * Broader companion to [analogModeWanted]: true when remap is enabled AND
+     * any binding_group in the active scope uses a mode that needs Shizuku
+     * for *any* reason (motion capture **or** uinput output). Includes the
+     * gyro→mouse / gyro→joystick modes that [analogModeWanted] excludes —
+     * those don't need /dev/input motion capture, but they do need Shizuku
+     * for the uinput mouse / gamepad path. The health notification reads
+     * from this so users with only gyro modes configured still get warned
+     * when Shizuku isn't granted.
+     */
+    val anyShizukuModeWanted: StateFlow<Boolean> = _anyShizukuModeWanted.asStateFlow()
+
     /**
      * Begin observing the gating predicate. Idempotent — re-starting an
      * already-running coordinator is a no-op. Safe to call from any thread.
@@ -185,6 +199,7 @@ class ShizukuMotionCoordinator @Inject constructor(
         tryToggleEnumeration(false)
         _shizukuModeActive.value = false
         _analogModeWanted.value = false
+        _anyShizukuModeWanted.value = false
         lastBreakdown = null
         Log.i(TAG, "stop: subscriptions cancelled, enumeration paused")
     }
@@ -201,6 +216,7 @@ class ShizukuMotionCoordinator @Inject constructor(
         tryToggleEnumeration(breakdown.shouldEnable)
         _shizukuModeActive.value = breakdown.shouldEnable
         _analogModeWanted.value = breakdown.remapEnabled && breakdown.analogModeConfigured
+        _anyShizukuModeWanted.value = breakdown.remapEnabled && breakdown.anyShizukuModeConfigured
     }
 
     /**
@@ -264,34 +280,41 @@ class ShizukuMotionCoordinator @Inject constructor(
         shizukuReady: Boolean,
     ): PredicateBreakdown = PredicateBreakdown(
         remapEnabled = remapEnabled,
-        analogModeConfigured = hasAnalogModeInScope(compiled, activeSetId, activeLayers),
+        analogModeConfigured = hasModeInScope(compiled, activeSetId, activeLayers) { it.requiresMotionCapture() },
+        anyShizukuModeConfigured = hasModeInScope(compiled, activeSetId, activeLayers) { it.requiresShizuku() },
         shizukuReady = shizukuReady,
     )
 
-    private fun hasAnalogModeInScope(
+    private inline fun hasModeInScope(
         compiled: CompiledConfig,
         activeSetId: Long,
         activeLayers: List<Long>,
+        crossinline predicate: (com.mapo.data.model.steam.BindingMode) -> Boolean,
     ): Boolean {
         // Resolve the set the same way `InputEvaluator.resolveActiveSet` does:
         // activeSetId of 0L means "lazy-uninit — use compiled.startingActionSetId."
         val resolvedSetId = if (activeSetId == 0L) compiled.startingActionSetId else activeSetId
         val set = compiled.sets[resolvedSetId] ?: return false
-        if (set.inputs.values.any { it.mode.requiresMotionCapture() }) return true
+        if (set.inputs.values.any { predicate(it.mode) }) return true
         for (layerId in activeLayers) {
             val layer = set.layers[layerId] ?: continue
-            if (layer.inputs.values.any { it.mode.requiresMotionCapture() }) return true
+            if (layer.inputs.values.any { predicate(it.mode) }) return true
         }
         return false
     }
 
     /**
-     * Three-axis predicate result. `shouldEnable` is `remapEnabled &&
-     * analogModeConfigured && shizukuReady` — all three required.
+     * Predicate result. `shouldEnable` is `remapEnabled &&
+     * analogModeConfigured && shizukuReady` — three required for the
+     * motion-capture / inject gate. [anyShizukuModeConfigured] is a strict
+     * superset of [analogModeConfigured] (adds gyro→mouse / gyro→gamepad
+     * modes that need Shizuku for output but not for input) and drives the
+     * UI warning surfaces (dialog / banner / health notification).
      */
     internal data class PredicateBreakdown(
         val remapEnabled: Boolean,
         val analogModeConfigured: Boolean,
+        val anyShizukuModeConfigured: Boolean,
         val shizukuReady: Boolean,
     ) {
         val shouldEnable: Boolean

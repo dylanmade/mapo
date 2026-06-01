@@ -181,6 +181,9 @@ class SourceModeTest {
             BindingMode.JOYSTICK_MOVE,  // Brick C runtime — virtual XInput gamepad
             BindingMode.MOUSE_REGION,   // Brick C.4 runtime — joystick → absolute cursor in region
             BindingMode.GYRO_TO_MOUSE,  // Brick D.3 runtime — gyro → cursor velocity
+            BindingMode.GYRO_TO_JOYSTICK_CAMERA,  // Brick D.4 runtime — gyro → right-stick deflection
+            BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,  // Brick D.4 runtime — gyro → left-stick deflection
+            BindingMode.DIRECTIONAL_SWIPE,  // Brick D.5 runtime — gyro rate flicks → directional sub-input edges
         )
         for (mode in BindingMode.values()) {
             if (mode in implemented) continue

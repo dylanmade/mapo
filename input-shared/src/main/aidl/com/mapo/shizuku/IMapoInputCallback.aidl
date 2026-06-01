@@ -16,4 +16,19 @@ interface IMapoInputCallback {
     oneway void onDeviceAdded(int deviceId, String name, int capsBitmap) = 2;
     oneway void onDeviceRemoved(int deviceId) = 3;
     oneway void onServiceHealth(in ShizukuServiceHealth health) = 4;
+    /**
+     * Raw key event from a grabbed `/dev/input/event*` device. While EVIOCGRAB
+     * is held the OS InputReader no longer dispatches these as Android
+     * KeyEvents, so :app needs to receive them directly so its activator
+     * engine + DEVICE_DEFAULT-passthrough logic can still run.
+     *
+     *  - `linuxKeyCode`: the raw `BTN_*` / `KEY_*` constant from
+     *    `linux/input-event-codes.h` (e.g. `BTN_A = 0x130`).
+     *  - `pressed`: true = press, false = release.
+     *  - `timestampNs`: monotonic sensor / kernel timestamp.
+     *
+     * Fires once per state change (press / release), NOT continuously while
+     * a button is held.
+     */
+    oneway void onRawKeyEvent(int linuxKeyCode, boolean pressed, long timestampNs) = 5;
 }

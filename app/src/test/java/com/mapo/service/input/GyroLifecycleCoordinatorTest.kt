@@ -26,6 +26,7 @@ import org.junit.Test
 class GyroLifecycleCoordinatorTest {
 
     private val testScope: TestScope = TestScope(UnconfinedTestDispatcher())
+    private lateinit var context: android.content.Context
     private lateinit var inputDispatcher: InputDispatcher
     private lateinit var inputEvaluator: InputEvaluator
     private lateinit var gyroSensorStream: GyroSensorStream
@@ -34,6 +35,10 @@ class GyroLifecycleCoordinatorTest {
 
     @Before
     fun setUp() {
+        // Mock context — only used for the screen-state receiver + PowerManager
+        // probe. `relaxed` returns null for getSystemService(POWER_SERVICE),
+        // which the coordinator's seed handler treats as default-screen-on.
+        context = mockk(relaxed = true)
         inputDispatcher = mockk(relaxed = true)
         inputEvaluator = mockk(relaxed = true)
         gyroSensorStream = mockk(relaxed = true) {
@@ -42,6 +47,7 @@ class GyroLifecycleCoordinatorTest {
         }
         mouseEmitter = mockk(relaxed = true)
         subject = GyroLifecycleCoordinator(
+            context,
             inputDispatcher,
             inputEvaluator,
             gyroSensorStream,

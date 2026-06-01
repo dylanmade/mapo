@@ -105,6 +105,22 @@ class MapoInputUserService : IMapoInputService.Stub() {
      */
     @Volatile
     private var enumerationEnabled: Boolean = true
+
+    /**
+     * Whether `EVIOCGRAB` should be held on every classified-gamepad
+     * `/dev/input/event*` device. Driven by `GyroLifecycleCoordinator`'s
+     * "gyro→stick mode in scope" predicate (Brick D follow-up). When true,
+     * the OS InputReader stops getting events from the physical controller
+     * — Mapo's virtual gamepad becomes the sole path that reaches the game.
+     *
+     * Toggled via [setGrabPhysicalControllers]. Independent of
+     * [enumerationEnabled] — the reader threads can run without grab held
+     * (the normal Mapo-managed-but-no-stick-mode case), but grab can only
+     * be active when the reader is running too (since classification depends
+     * on the reader observing events).
+     */
+    private val grabPhysicalControllers = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private var readerThread: Thread? = null
     private var watcherThread: Thread? = null
 
@@ -319,6 +335,51 @@ class MapoInputUserService : IMapoInputService.Stub() {
     }
 
     /**
+     * EVIOCGRAB toggle for every classified-gamepad `/dev/input/event*` device
+     * the service has open. New devices that classify as Gamepad while
+     * `grabPhysicalControllers` is true will get grabbed at classification
+     * time too.
+     *
+     * Touchscreens + unknowns are deliberately skipped — touchscreen input
+     * must keep flowing to the OS for system gestures + Mapo's own overlay,
+     * and unclassified devices haven't earned a grab yet (waiting for the
+     * sniff window's first axis event to upgrade them).
+     */
+    override fun setGrabPhysicalControllers(grabbed: Boolean) {
+        Log.i(TAG, "setGrabPhysicalControllers($grabbed)")
+        grabPhysicalControllers.set(grabbed)
+        // Apply to every currently-open classified gamepad. Devices that
+        // are still Unknown will be grabbed at classification time (see
+        // handleAbsEvent's first-axis-upgrades-classification branch).
+        for (entry in devices.values) {
+            if (entry.classification == DeviceClass.Gamepad) {
+                applyGrabState(entry, grabbed)
+            }
+        }
+    }
+
+    /**
+     * Take or release EVIOCGRAB on a single device. Tracks per-entry grab
+     * state so we don't double-grab or double-release (no kernel state but
+     * keeps the log noise sane). Idempotent.
+     */
+    private fun applyGrabState(entry: DeviceEntry, shouldGrab: Boolean) {
+        if (entry.grabbed == shouldGrab) return
+        val rawFd = fdInt(entry.fd)
+        if (rawFd < 0) {
+            Log.w(TAG, "grab(${entry.path}): cannot extract raw fd; skipping")
+            return
+        }
+        val ok = EvdevGrab.setGrabbed(rawFd, shouldGrab)
+        if (ok) {
+            entry.grabbed = shouldGrab
+            Log.i(TAG, "grab(${entry.path}): ${if (shouldGrab) "acquired" else "released"} (fd=$rawFd)")
+        } else {
+            Log.w(TAG, "grab(${entry.path}, $shouldGrab) failed at the kernel ioctl level")
+        }
+    }
+
+    /**
      * Apply the effective run-gate: threads run iff (callback registered AND
      * [enumerationEnabled]). Idempotent; starts/stops only on transition.
      */
@@ -525,8 +586,21 @@ class MapoInputUserService : IMapoInputService.Stub() {
             LinuxInputConstants.EV_SYN -> if (code == LinuxInputConstants.SYN_REPORT) {
                 flushDirtySources(entry)
             }
-            // Brick C ignores EV_KEY; existing AccessibilityService captures
-            // KEY events (gamepad buttons) without Shizuku.
+            // EV_KEY — physical button press / release. Forwarded to :app via
+            // `onRawKeyEvent` callback ONLY when the device is currently
+            // grabbed; otherwise the OS still dispatches the events as
+            // Android KeyEvents and :app's AccessibilityService handles them
+            // through the normal onKeyEvent path. Forwarding both ways would
+            // double-fire bindings (rumored in Brick C verification but never
+            // a problem because EV_KEY was ignored entirely — until now).
+            //
+            // `value` semantics per linux/input.h: 0 = release, 1 = press,
+            // 2 = autorepeat (we collapse autorepeats to "still pressed"
+            // and rely on the activator engine for hold detection, so we
+            // skip them).
+            LinuxInputConstants.EV_KEY -> if (entry.grabbed && value != 2) {
+                broadcastRawKey(code, pressed = value != 0)
+            }
             else -> { /* no-op */ }
         }
     }
@@ -547,6 +621,12 @@ class MapoInputUserService : IMapoInputService.Stub() {
         if (entry.classification == DeviceClass.Unknown) {
             entry.classification = DeviceClass.Gamepad
             Log.i(TAG, "device ${entry.path} classified as gamepad (first axis: code=0x${code.toString(16)})")
+            // Apply current grab state to the just-classified gamepad —
+            // covers the case where setGrabPhysicalControllers(true) was
+            // called before this device finished sniffing.
+            if (grabPhysicalControllers.get()) {
+                applyGrabState(entry, true)
+            }
         }
         if (entry.classification != DeviceClass.Gamepad) return
         // Self-calibrating min/max — Brick C doesn't have EVIOCGABS access without JNI.
@@ -696,6 +776,21 @@ class MapoInputUserService : IMapoInputService.Stub() {
         }
     }
 
+    private fun broadcastRawKey(linuxKeyCode: Int, pressed: Boolean) {
+        val nowNs = SystemClock.elapsedRealtimeNanos()
+        val n = callbacks.beginBroadcast()
+        try {
+            for (i in 0 until n) {
+                try {
+                    callbacks.getBroadcastItem(i).onRawKeyEvent(linuxKeyCode, pressed, nowNs)
+                } catch (_: RemoteException) {
+                }
+            }
+        } finally {
+            callbacks.finishBroadcast()
+        }
+    }
+
     // ── Inner types ──────────────────────────────────────────────────────────
 
     private enum class DeviceClass { Unknown, Gamepad, Touchscreen }
@@ -707,6 +802,13 @@ class MapoInputUserService : IMapoInputService.Stub() {
         val openedAtNs: Long,
     ) {
         @Volatile var classification: DeviceClass = DeviceClass.Unknown
+
+        /**
+         * Whether this device currently has EVIOCGRAB held. Updated by
+         * [applyGrabState] under the service's existing single-writer
+         * invariant (only the reader / classification path mutates this).
+         */
+        @Volatile var grabbed: Boolean = false
 
         /** Per-axis min/max learning (no EVIOCGABS in Brick C). */
         val calibrations: MutableMap<Int, AxisCalibration> = HashMap()
@@ -787,11 +889,38 @@ class MapoInputUserService : IMapoInputService.Stub() {
     private fun installHiddenApiExemptions() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
         try {
-            HiddenApiBypass.addHiddenApiExemptions("Landroid/view/InputEvent;")
-            Log.i(TAG, "HiddenApiBypass exemption installed for InputEvent")
+            // `Landroid/view/InputEvent;` covers stampDisplayId for cross-display
+            // injects. `Ljava/io/FileDescriptor;` covers reading the integer
+            // descriptor out of FileDescriptor for the EVIOCGRAB ioctl —
+            // android.system.Os.open returns FileDescriptor, but the kernel
+            // ioctl takes a raw int fd, and FileDescriptor's `descriptor`
+            // field is hidden API since Android 9.
+            HiddenApiBypass.addHiddenApiExemptions(
+                "Landroid/view/InputEvent;",
+                "Ljava/io/FileDescriptor;",
+            )
+            Log.i(TAG, "HiddenApiBypass exemptions installed (InputEvent, FileDescriptor)")
         } catch (t: Throwable) {
             Log.w(TAG, "HiddenApiBypass install failed", t)
         }
+    }
+
+    /**
+     * Read the underlying integer file descriptor out of a [FileDescriptor]
+     * object. Needed for `ioctl(fd, EVIOCGRAB, ...)` in [EvdevGrab] since the
+     * kernel call takes a raw fd, not a Java object.
+     *
+     * Uses reflection on the private `descriptor` field. Gated by the
+     * HiddenApiBypass exemption installed at service init. Returns -1 on
+     * failure (so callers can bail without throwing).
+     */
+    private fun fdInt(fd: FileDescriptor): Int = try {
+        val field = FileDescriptor::class.java.getDeclaredField("descriptor")
+        field.isAccessible = true
+        field.getInt(fd)
+    } catch (t: Throwable) {
+        Log.w(TAG, "fdInt reflection failed", t)
+        -1
     }
 
     companion object {

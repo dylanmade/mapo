@@ -12,12 +12,25 @@
 // with SOURCE_JOYSTICK semantics, and per the focused-overlay tabling work, the
 // only viable path on unrooted Android 13 is a real kernel-level gamepad device.
 //
-// Axis convention follows Android's reading of standard Linux gamepad codes
-// (verified on AYN Thor per reference_thor_axis_convention.md):
-//   Left stick:    ABS_X / ABS_Y      (-32768..32767, int16-style)
-//   Right stick:   ABS_Z / ABS_RZ     (-32768..32767)
-//   Triggers:      ABS_BRAKE / ABS_GAS (0..255 unsigned)
-//   D-pad:         ABS_HAT0X / ABS_HAT0Y (-1, 0, 1)
+// Axis convention follows the Linux xpad driver's layout for Xbox 360 wired
+// controllers (vendor 0x045E / product 0x028E). This is what Android's
+// InputReader expects for events emitted by a device with this vendor/product
+// pair — it's distinct from Thor's *physical* controller, which reports its
+// own axes per Android-handheld convention (see reference_thor_axis_convention.md).
+//
+//   Left stick:    ABS_X / ABS_Y     (-32768..32767, signed int16)
+//   Right stick:   ABS_RX / ABS_RY   (-32768..32767, signed int16)
+//   Left trigger:  ABS_Z             (0..255 unsigned, xpad LT convention)
+//   Right trigger: ABS_RZ            (0..255 unsigned, xpad RT convention)
+//   D-pad hat:     ABS_HAT0X / ABS_HAT0Y (-1, 0, 1)
+//
+// **Why this matters (bug fix 2026-05-31).** A prior layout used ABS_Z/ABS_RZ
+// for the right stick (Android-handheld convention) and ABS_BRAKE/ABS_GAS for
+// triggers. With the Xbox 360 vendor/product ID, Android's xpad-derived
+// mapping treats ABS_Z = LT and ABS_RZ = RT — so writing right-stick deflection
+// to ABS_Z/RZ caused KEYCODE_BUTTON_L2/R2 to fire on every stick movement (Thor
+// has a ~2% trigger click threshold). Fixed by aligning to the layout Android's
+// xpad mapping expects for our declared identity.
 //
 // Device identity is Microsoft + Xbox 360 wired (0x045E / 0x028E) so games that
 // gate "is this really a controller" on the vendor/product ID accept it. The
@@ -82,10 +95,10 @@ Java_com_mapo_shizuku_service_UinputGamepad_nativeOpen(JNIEnv *env, jclass clazz
     if (set_bit_g(fd, UI_SET_EVBIT, EV_ABS, "EV_ABS") < 0) goto fail;
     if (set_bit_g(fd, UI_SET_ABSBIT, ABS_X, "ABS_X") < 0) goto fail;
     if (set_bit_g(fd, UI_SET_ABSBIT, ABS_Y, "ABS_Y") < 0) goto fail;
+    if (set_bit_g(fd, UI_SET_ABSBIT, ABS_RX, "ABS_RX") < 0) goto fail;
+    if (set_bit_g(fd, UI_SET_ABSBIT, ABS_RY, "ABS_RY") < 0) goto fail;
     if (set_bit_g(fd, UI_SET_ABSBIT, ABS_Z, "ABS_Z") < 0) goto fail;
     if (set_bit_g(fd, UI_SET_ABSBIT, ABS_RZ, "ABS_RZ") < 0) goto fail;
-    if (set_bit_g(fd, UI_SET_ABSBIT, ABS_BRAKE, "ABS_BRAKE") < 0) goto fail;
-    if (set_bit_g(fd, UI_SET_ABSBIT, ABS_GAS, "ABS_GAS") < 0) goto fail;
     if (set_bit_g(fd, UI_SET_ABSBIT, ABS_HAT0X, "ABS_HAT0X") < 0) goto fail;
     if (set_bit_g(fd, UI_SET_ABSBIT, ABS_HAT0Y, "ABS_HAT0Y") < 0) goto fail;
 
@@ -107,14 +120,14 @@ Java_com_mapo_shizuku_service_UinputGamepad_nativeOpen(JNIEnv *env, jclass clazz
     uidev.absfuzz[ABS_X] = 16;     uidev.absflat[ABS_X] = 128;
     uidev.absmin[ABS_Y] = -32768;  uidev.absmax[ABS_Y] = 32767;
     uidev.absfuzz[ABS_Y] = 16;     uidev.absflat[ABS_Y] = 128;
-    uidev.absmin[ABS_Z] = -32768;  uidev.absmax[ABS_Z] = 32767;
-    uidev.absfuzz[ABS_Z] = 16;     uidev.absflat[ABS_Z] = 128;
-    uidev.absmin[ABS_RZ] = -32768; uidev.absmax[ABS_RZ] = 32767;
-    uidev.absfuzz[ABS_RZ] = 16;    uidev.absflat[ABS_RZ] = 128;
+    uidev.absmin[ABS_RX] = -32768; uidev.absmax[ABS_RX] = 32767;
+    uidev.absfuzz[ABS_RX] = 16;    uidev.absflat[ABS_RX] = 128;
+    uidev.absmin[ABS_RY] = -32768; uidev.absmax[ABS_RY] = 32767;
+    uidev.absfuzz[ABS_RY] = 16;    uidev.absflat[ABS_RY] = 128;
 
-    // Triggers: 0..255 unsigned.
-    uidev.absmin[ABS_BRAKE] = 0;   uidev.absmax[ABS_BRAKE] = 255;
-    uidev.absmin[ABS_GAS] = 0;     uidev.absmax[ABS_GAS] = 255;
+    // Triggers: ABS_Z = LT, ABS_RZ = RT (xpad convention). 0..255 unsigned.
+    uidev.absmin[ABS_Z] = 0;       uidev.absmax[ABS_Z] = 255;
+    uidev.absmin[ABS_RZ] = 0;      uidev.absmax[ABS_RZ] = 255;
 
     // D-pad hat: -1 / 0 / 1.
     uidev.absmin[ABS_HAT0X] = -1;  uidev.absmax[ABS_HAT0X] = 1;
@@ -159,10 +172,10 @@ Java_com_mapo_shizuku_service_UinputGamepad_nativeWriteAxes(
 
     ev[0].type = EV_ABS; ev[0].code = ABS_X;       ev[0].value = lx;
     ev[1].type = EV_ABS; ev[1].code = ABS_Y;       ev[1].value = ly;
-    ev[2].type = EV_ABS; ev[2].code = ABS_Z;       ev[2].value = rx;
-    ev[3].type = EV_ABS; ev[3].code = ABS_RZ;      ev[3].value = ry;
-    ev[4].type = EV_ABS; ev[4].code = ABS_BRAKE;   ev[4].value = lt;
-    ev[5].type = EV_ABS; ev[5].code = ABS_GAS;     ev[5].value = rt;
+    ev[2].type = EV_ABS; ev[2].code = ABS_RX;      ev[2].value = rx;
+    ev[3].type = EV_ABS; ev[3].code = ABS_RY;      ev[3].value = ry;
+    ev[4].type = EV_ABS; ev[4].code = ABS_Z;       ev[4].value = lt;
+    ev[5].type = EV_ABS; ev[5].code = ABS_RZ;      ev[5].value = rt;
     ev[6].type = EV_ABS; ev[6].code = ABS_HAT0X;   ev[6].value = hatX;
     ev[7].type = EV_ABS; ev[7].code = ABS_HAT0Y;   ev[7].value = hatY;
     ev[8].type = EV_SYN; ev[8].code = SYN_REPORT;  ev[8].value = 0;

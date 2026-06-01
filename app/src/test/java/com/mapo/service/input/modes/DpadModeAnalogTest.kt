@@ -266,5 +266,108 @@ class DpadModeAnalogTest {
         assertEquals(0.20f, parsed.innerDeadzone, 1e-4f)
         assertEquals(0.05f, parsed.outerDeadzone, 1e-4f)
         assertEquals("4_way", parsed.dpadLayout)
+        assertEquals(5.0f, parsed.tiltSensitivity, 1e-4f)
+    }
+
+    // ── GYRO source (angle-integrated, tilt-and-hold semantics) ─────────────
+
+    @org.junit.Before
+    fun resetDpadGyroState() {
+        // DpadMode's gyro integrator is a singleton — each test starts from
+        // a clean slate so the prior test's accumulated tilt doesn't bleed.
+        DpadMode.resetState()
+    }
+
+    private fun gyroCtx(
+        priorN: Boolean = false,
+        priorS: Boolean = false,
+        priorE: Boolean = false,
+        priorW: Boolean = false,
+        settingsJson: String = DpadMode.defaultSettingsJson(),
+    ) = ModeContext(
+        source = InputSource.GYRO,
+        settingsJson = settingsJson,
+        priorLatched = mapOf(
+            "dpad_up" to priorN,
+            "dpad_down" to priorS,
+            "dpad_right" to priorE,
+            "dpad_left" to priorW,
+        ),
+        activeLayerIds = emptyList(),
+    )
+
+    private fun gyroReading(rollRate: Float, pitchRate: Float, timestampMs: Long) =
+        AnalogEvent(InputSource.GYRO, rollRate, pitchRate, timestampMs)
+
+    @Test
+    fun gyro_firstEvent_seedsTimestampWithoutEmit() {
+        // First event after reset seeds the integrator baseline and emits no
+        // direction — accumulated angle is 0 until the next event provides a
+        // dt to integrate over.
+        DpadMode.evaluate(gyroReading(2.0f, 0f, 1_000L), gyroCtx(), emit, MouseEmitter.NOOP)
+        assertTrue("Expected no emission on first gyro event, got $emits", emits.isEmpty())
+        val (angleX, angleY) = DpadMode.integratedGyroAngleFor(InputSource.GYRO)!!
+        assertEquals(0f, angleX, EPSILON)
+        assertEquals(0f, angleY, EPSILON)
+    }
+
+    @Test
+    fun gyro_sustainedRoll_emitsHeldDpadRight() {
+        // Roll right 1 rad/sec for 100 ms after the seed → 0.1 rad. Scaled by
+        // tilt_sensitivity 5.0 → effX = 0.5. Magnitude clears the 0.20 inner
+        // deadzone, dominant axis = X (Y is 0) → emit dpad_right DOWN.
+        val ctx = gyroCtx()
+        DpadMode.evaluate(gyroReading(1.0f, 0f, 0L), ctx, emit, MouseEmitter.NOOP) // seed
+        DpadMode.evaluate(gyroReading(1.0f, 0f, 100L), ctx, emit, MouseEmitter.NOOP) // 0.1 rad → 0.5 mag
+        assertEquals(listOf("dpad_right" to true), emits)
+    }
+
+    @Test
+    fun gyro_smallTilt_belowDeadzone_emitsNothing() {
+        // 0.1 rad/sec roll for 100 ms → 0.01 rad → effX = 0.05. Below 0.20
+        // inner deadzone. No direction emit.
+        val ctx = gyroCtx()
+        DpadMode.evaluate(gyroReading(0.1f, 0f, 0L), ctx, emit, MouseEmitter.NOOP) // seed
+        DpadMode.evaluate(gyroReading(0.1f, 0f, 100L), ctx, emit, MouseEmitter.NOOP)
+        assertTrue("Expected no emission for small accumulated tilt, got $emits", emits.isEmpty())
+    }
+
+    @Test
+    fun gyro_pitchForward_emitsDpadUp() {
+        // y > 0 is screen-down. Negative pitch (forward tilt) integrates to
+        // negative effY → emits dpad_up. Mirrors the WASD-natural sign
+        // convention used by the joystick path.
+        val ctx = gyroCtx()
+        DpadMode.evaluate(gyroReading(0f, -1.0f, 0L), ctx, emit, MouseEmitter.NOOP) // seed
+        DpadMode.evaluate(gyroReading(0f, -1.0f, 100L), ctx, emit, MouseEmitter.NOOP)
+        assertEquals(listOf("dpad_up" to true), emits)
+    }
+
+    @Test
+    fun gyro_resetState_clearsAccumulatedAngle() {
+        val ctx = gyroCtx()
+        DpadMode.evaluate(gyroReading(1.0f, 0f, 0L), ctx, emit, MouseEmitter.NOOP)
+        DpadMode.evaluate(gyroReading(1.0f, 0f, 100L), ctx, emit, MouseEmitter.NOOP)
+        assertTrue("expected integrated state after sustained tilt",
+            DpadMode.integratedGyroAngleFor(InputSource.GYRO) != null)
+        DpadMode.resetState()
+        assertTrue("expected null state after reset",
+            DpadMode.integratedGyroAngleFor(InputSource.GYRO) == null)
+    }
+
+    @Test
+    fun gyro_dtJump_isClamped() {
+        // Long gap (10 sec) without sensor events — dt should clamp to 0.1 sec
+        // so the first post-resume event doesn't dump multi-second integration.
+        // 1 rad/sec × 0.1 sec = 0.1 rad → 0.5 mag → fires dpad_right.
+        val ctx = gyroCtx()
+        DpadMode.evaluate(gyroReading(1.0f, 0f, 0L), ctx, emit, MouseEmitter.NOOP) // seed
+        DpadMode.evaluate(gyroReading(1.0f, 0f, 10_000L), ctx, emit, MouseEmitter.NOOP)
+        // Should be exactly one east emit, not a runaway saturation cascade.
+        assertEquals(listOf("dpad_right" to true), emits)
+    }
+
+    companion object {
+        private const val EPSILON = 1e-4f
     }
 }

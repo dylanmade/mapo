@@ -26,6 +26,34 @@ data class AnalogEvent(
     val x: Float,
     val y: Float,
     val timestampMs: Long,
+    /**
+     * Third axis component, defaulted to 0 and only meaningful for
+     * [InputSource.GYRO] readings. The gyro sensor reports angular velocity
+     * on three axes (roll, pitch, yaw); 2D-stick callers only need x/y and
+     * leave `z` at its default. Directional Swipe is the one mode (so far)
+     * that needs the yaw component to fire left/right edges from
+     * twisting-the-device-around-the-vertical-axis motion. Everything else
+     * ignores it.
+     *
+     * Defaulted to keep the existing 4-arg positional constructor compatible
+     * across the codebase + tests; named-argument call sites can override it.
+     */
+    val z: Float = 0f,
+    /**
+     * Absolute device orientation (radians) at the moment of this reading,
+     * sourced from the rotation-vector sensor. Only populated for
+     * [InputSource.GYRO]; everywhere else defaults to 0.
+     *
+     * Tilt-based modes (Gyro to Joystick Deflection) subtract a captured
+     * reference orientation from these to compute "tilt from rest" and map
+     * the result to stick deflection. Rate-based gyro modes (Mouse / Camera)
+     * ignore these and read `x` / `y` (rate) instead.
+     *
+     * Defaulted to keep tests using the 4-arg positional constructor working
+     * across the codebase.
+     */
+    val tiltRollRad: Float = 0f,
+    val tiltPitchRad: Float = 0f,
 ) {
     /**
      * Zero-out values whose magnitude is below [deadzone]. For sticks, both axes are

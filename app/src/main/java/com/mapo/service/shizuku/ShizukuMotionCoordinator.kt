@@ -214,6 +214,13 @@ class ShizukuMotionCoordinator @Inject constructor(
         }
 
         tryToggleEnumeration(breakdown.shouldEnable)
+        // Narrow trigger (Brick D follow-up 2026-06-01): grab the physical
+        // controller only while a gyro→stick mode is in scope. Outside that
+        // window, leave the OS-level dispatch alone so DEVICE_DEFAULT
+        // physical inputs keep flowing natively.
+        val grab = breakdown.shouldEnable && breakdown.gyroStickModeConfigured
+        tryToggleGrab(grab)
+        inputEvaluator.setPhysicalPassthroughEnabled(grab)
         _shizukuModeActive.value = breakdown.shouldEnable
         _analogModeWanted.value = breakdown.remapEnabled && breakdown.analogModeConfigured
         _anyShizukuModeWanted.value = breakdown.remapEnabled && breakdown.anyShizukuModeConfigured
@@ -268,6 +275,21 @@ class ShizukuMotionCoordinator @Inject constructor(
     }
 
     /**
+     * Push the EVIOCGRAB state to the UserService. Same revocation-race
+     * tolerance as [tryToggleEnumeration]. Idempotent at the service side —
+     * the service tracks per-device grab state so repeat calls with the same
+     * value are no-ops.
+     */
+    private fun tryToggleGrab(on: Boolean) {
+        val service = shizukuConnection.service.value ?: return
+        try {
+            service.setGrabPhysicalControllers(on)
+        } catch (t: Throwable) {
+            Log.w(TAG, "setGrabPhysicalControllers($on) threw", t)
+        }
+    }
+
+    /**
      * Pure breakdown evaluator. Returns the three clauses individually so the
      * degraded-mode transition detector can read each axis independently.
      * `shouldEnable` is just their conjunction.
@@ -282,6 +304,10 @@ class ShizukuMotionCoordinator @Inject constructor(
         remapEnabled = remapEnabled,
         analogModeConfigured = hasModeInScope(compiled, activeSetId, activeLayers) { it.requiresMotionCapture() },
         anyShizukuModeConfigured = hasModeInScope(compiled, activeSetId, activeLayers) { it.requiresShizuku() },
+        gyroStickModeConfigured = hasModeInScope(compiled, activeSetId, activeLayers) {
+            it == com.mapo.data.model.steam.BindingMode.GYRO_TO_JOYSTICK_CAMERA ||
+                it == com.mapo.data.model.steam.BindingMode.GYRO_TO_JOYSTICK_DEFLECTION
+        },
         shizukuReady = shizukuReady,
     )
 
@@ -315,6 +341,12 @@ class ShizukuMotionCoordinator @Inject constructor(
         val remapEnabled: Boolean,
         val analogModeConfigured: Boolean,
         val anyShizukuModeConfigured: Boolean,
+        /**
+         * True iff the active scope has any gyro→stick mode
+         * (Camera or Deflection). Narrow predicate that gates EVIOCGRAB
+         * activation — see [applyDecision].
+         */
+        val gyroStickModeConfigured: Boolean = false,
         val shizukuReady: Boolean,
     ) {
         val shouldEnable: Boolean

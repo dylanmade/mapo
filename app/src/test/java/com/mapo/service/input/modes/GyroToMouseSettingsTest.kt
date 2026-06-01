@@ -69,9 +69,12 @@ class GyroToMouseSettingsTest {
         // zeroed. Documents the boundary so a future "<=" change is a
         // deliberate choice. Practically, the gyro never lands exactly on
         // the threshold value at runtime — this just pins the contract.
+        // Note: built-in axis negation (Mapo sign correction on AYN Thor —
+        // see [GyroToMouseSettings.toVelocity] KDoc) means the resulting
+        // velocity is `-deadzone * sensitivity`, not `+`.
         val (vx, _) = defaults.toVelocity(GyroToMouseSettings.DEFAULT_DEADZONE, 0f)
         assertEquals(
-            GyroToMouseSettings.DEFAULT_DEADZONE * GyroToMouseSettings.DEFAULT_SENSITIVITY_X,
+            -GyroToMouseSettings.DEFAULT_DEADZONE * GyroToMouseSettings.DEFAULT_SENSITIVITY_X,
             vx,
             EPSILON,
         )
@@ -81,9 +84,9 @@ class GyroToMouseSettingsTest {
 
     @Test
     fun sensitivity_linearOnYaw() {
-        // 1 rad/sec yaw × 400 px/rad → 400 px/sec.
+        // 1 rad/sec yaw × 400 px/rad × built-in -1 sign correction → -400 px/sec.
         val (vx, vy) = defaults.toVelocity(1.0f, 0f)
-        assertEquals(GyroToMouseSettings.DEFAULT_SENSITIVITY_X, vx, EPSILON)
+        assertEquals(-GyroToMouseSettings.DEFAULT_SENSITIVITY_X, vx, EPSILON)
         assertEquals(0f, vy, EPSILON)
     }
 
@@ -91,12 +94,14 @@ class GyroToMouseSettingsTest {
     fun sensitivity_linearOnPitch() {
         val (vx, vy) = defaults.toVelocity(0f, 1.0f)
         assertEquals(0f, vx, EPSILON)
-        assertEquals(GyroToMouseSettings.DEFAULT_SENSITIVITY_Y, vy, EPSILON)
+        assertEquals(-GyroToMouseSettings.DEFAULT_SENSITIVITY_Y, vy, EPSILON)
     }
 
     @Test
     fun sensitivity_scalesLinearlyWithRate() {
-        // Doubling rad/sec doubles px/sec (linear, no curve).
+        // Doubling rad/sec doubles px/sec magnitude (linear, no curve). Sign
+        // is preserved by the linearity check — both samples share the same
+        // built-in -1 axis correction.
         val low = defaults.toVelocity(0.5f, 0f).first
         val high = defaults.toVelocity(1.0f, 0f).first
         assertEquals(2f * low, high, EPSILON)
@@ -111,17 +116,22 @@ class GyroToMouseSettingsTest {
             invertX = false,
             invertY = false,
         )
+        // Built-in -1 sign correction on both axes — see toVelocity KDoc.
         val (vx, vy) = asymmetric.toVelocity(1.0f, 1.0f)
-        assertEquals(800f, vx, EPSILON)
-        assertEquals(200f, vy, EPSILON)
+        assertEquals(-800f, vx, EPSILON)
+        assertEquals(-200f, vy, EPSILON)
     }
 
     // ── Sign / inversion ─────────────────────────────────────────────────────
 
     @Test
-    fun negativeYaw_producesNegativeVx() {
+    fun negativeYaw_producesPositiveVx() {
+        // Built-in -1 axis correction inverts the natural rate sign. A
+        // negative gyro yaw rate (rolling left in the Thor's convention)
+        // produces a positive cursor delta → moves cursor right, matching
+        // player intent. Was `_producesNegativeVx` before the sign fix.
         val (vx, _) = defaults.toVelocity(-1.0f, 0f)
-        assertTrue("expected negative vx for negative yaw, got $vx", vx < 0f)
+        assertTrue("expected positive vx for negative yaw, got $vx", vx > 0f)
     }
 
     @Test

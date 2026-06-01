@@ -79,6 +79,21 @@ class ShizukuMotionStream @Inject constructor(
         override fun onServiceHealth(health: ShizukuServiceHealth?) {
             Log.d(TAG, "service health: $health")
         }
+
+        override fun onRawKeyEvent(linuxKeyCode: Int, pressed: Boolean, timestampNs: Long) {
+            // Fires only while the UserService has EVIOCGRAB held on the
+            // device — see `MapoInputUserService.handleEvent`'s EV_KEY branch.
+            // We forward straight to the evaluator's raw-key path so the
+            // existing activator engine + DEVICE_DEFAULT passthrough logic
+            // handles the routing decision. No SharedFlow buffering — the
+            // event cadence is low (button taps, not stick reads), so a
+            // direct dispatch keeps latency minimal and the surface small.
+            try {
+                inputEvaluator.handleRawKeyReading(linuxKeyCode, pressed, timestampNs)
+            } catch (t: Throwable) {
+                Log.w(TAG, "handleRawKeyReading threw key=0x${linuxKeyCode.toString(16)} pressed=$pressed", t)
+            }
+        }
     }
 
     init {

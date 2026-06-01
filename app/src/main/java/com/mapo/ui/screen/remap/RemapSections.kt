@@ -176,6 +176,12 @@ object RemapSections {
         InputSource.DPAD,
         InputSource.LEFT_JOYSTICK,
         InputSource.RIGHT_JOYSTICK,
+        // GYRO 2026-05-31: Steam Deck's gyro picker exposes "Create a Mode
+        // Shift" as a dropdown option. Mapo splits that affordance out as
+        // the "+ Add Mode Shift" button on the source row (per
+        // `project_mode_shift_per_source_architecture.md`), so the gyro row
+        // gets the button alongside the mode picker.
+        InputSource.GYRO,
     )
 
     /**

@@ -252,6 +252,28 @@ class InputEvaluator @Inject constructor(
      */
     private val analogLatched = HashMap<InputAddress, Boolean>()
 
+    /**
+     * True iff the Shizuku UserService currently holds `EVIOCGRAB` on the
+     * physical controller. When set, DEVICE_DEFAULT analog readings AND
+     * raw key events route through the virtual gamepad as a passthrough
+     * (the OS can't dispatch the original events while grabbed, so Mapo
+     * has to re-emit them). Toggled by [setPhysicalPassthroughEnabled];
+     * driven from [com.mapo.service.shizuku.ShizukuMotionCoordinator]'s
+     * decision loop.
+     */
+    private val physicalPassthroughEnabled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Coordinator hook for the EVIOCGRAB pipeline. See
+     * [physicalPassthroughEnabled].
+     */
+    fun setPhysicalPassthroughEnabled(enabled: Boolean) {
+        val changed = physicalPassthroughEnabled.compareAndSet(!enabled, enabled)
+        if (changed) {
+            Log.i(TAG, "physical passthrough ${if (enabled) "ENABLED" else "DISABLED"}")
+        }
+    }
+
     private fun stateFor(id: Long): ActivatorRuntimeState =
         activatorState.getOrPut(id) { ActivatorRuntimeState() }
 
@@ -443,12 +465,70 @@ class InputEvaluator @Inject constructor(
      * branch on `reading.source` and interpret accordingly — same idiom
      * `DpadMode` already uses to differentiate stick vs. dpad sources.
      */
+    /**
+     * Raw digital key event from the Shizuku UserService's `/dev/input`
+     * EV_KEY pipeline. Fires only while the UserService has EVIOCGRAB held
+     * on the physical controller, so the OS InputReader is no longer
+     * dispatching these as Android KeyEvents through the accessibility
+     * service's [com.mapo.service.InputAccessibilityService.onKeyEvent].
+     *
+     * Routing:
+     *  - If [physicalPassthroughEnabled] is on AND the source's mode is
+     *    `DEVICE_DEFAULT` (Mapo doesn't intercept), write the key
+     *    verbatim to the virtual gamepad's matching button. Game sees a
+     *    normal button press on the virtual XInput controller.
+     *  - Otherwise: dispatch through [handleDigital], the same path
+     *    `onKeyEvent` uses. Mode handler + activator engine + binding
+     *    emit fire normally.
+     */
+    fun handleRawKeyReading(linuxKeyCode: Int, pressed: Boolean, @Suppress("UNUSED_PARAMETER") timestampNs: Long) {
+        val address = LINUX_KEY_TO_ADDRESS[linuxKeyCode]
+        if (address == null) {
+            if (Log.isLoggable(TAG, Log.VERBOSE)) {
+                Log.v(TAG, "handleRawKeyReading: ignoring unmapped linuxKeyCode=0x${linuxKeyCode.toString(16)}")
+            }
+            return
+        }
+        // Resolve mode at this address to decide passthrough vs. engine.
+        // Same lookup the analog path uses — keeps the two paths aligned
+        // on mode-shift / layer-override precedence.
+        val set = resolveActiveSet()
+        val resolved = set?.let { findSourceModeFor(it, address.source) }
+        val isDeviceDefault = resolved?.mode == com.mapo.data.model.steam.BindingMode.DEVICE_DEFAULT
+        if (physicalPassthroughEnabled.get() && (isDeviceDefault || resolved == null)) {
+            val btn = LINUX_KEY_TO_GAMEPAD_BUTTON[linuxKeyCode]
+            if (btn != null) {
+                gamepadEmitter.setButton(btn, pressed)
+                if (Log.isLoggable(TAG, Log.VERBOSE)) {
+                    Log.v(TAG, "rawKey passthrough: linuxKey=0x${linuxKeyCode.toString(16)} → btn=0x${btn.toString(16)} pressed=$pressed")
+                }
+            }
+            return
+        }
+        // Engine path: same as a real onKeyEvent dispatch would do.
+        handleDigital(address, pressed)
+    }
+
     fun handleGyroReading(reading: GyroEvent) {
         val analog = AnalogEvent(
             source = InputSource.GYRO,
             x = reading.xRadPerSec,
             y = -reading.yRadPerSec,
             timestampMs = reading.timestampNs / 1_000_000L,
+            // Yaw — only used by Directional Swipe today. Other gyro modes
+            // (Mouse / Camera / Deflection / Dpad-on-gyro) interpret roll
+            // (x) + pitch (y) and ignore z. Sign left raw on the empirical
+            // expectation that positive z = CCW around the screen-normal
+            // axis = top-edge-rotates-left = "left swipe" intent. Will flip
+            // if device testing shows otherwise.
+            z = reading.zRadPerSec,
+            // Absolute orientation for tilt-based modes (Joystick Deflection).
+            // Sourced from a parallel TYPE_GAME_ROTATION_VECTOR subscription
+            // and cached on GyroSensorStream; populated on every gyro event
+            // even when the rotation-vector cadence is slightly behind. Modes
+            // that don't need orientation simply leave these unread.
+            tiltRollRad = reading.rollRad,
+            tiltPitchRad = reading.pitchRad,
         )
         if (Log.isLoggable(TAG_MOTION, Log.VERBOSE)) {
             Log.v(TAG_MOTION, "handleGyroReading GYRO(${"%.3f".format(analog.x)},${"%.3f".format(analog.y)})")
@@ -467,6 +547,21 @@ class InputEvaluator @Inject constructor(
         val set = resolveActiveSet() ?: return
         for (reading in readings) {
             val resolved = findSourceModeFor(set, reading.source) ?: continue
+            // Physical passthrough — when Mapo has EVIOCGRAB held on the
+            // physical controller (Brick D EVIOCGRAB follow-up), the OS
+            // can't dispatch the controller's events natively. To preserve
+            // DEVICE_DEFAULT behavior, route the analog reading directly to
+            // the virtual gamepad as a verbatim passthrough.
+            //
+            // Skipped when not grabbed because in normal operation the OS
+            // already handles DEVICE_DEFAULT pass-through; double-writing
+            // to the virtual gamepad would just compete with the OS.
+            if (physicalPassthroughEnabled.get() &&
+                resolved.mode == com.mapo.data.model.steam.BindingMode.DEVICE_DEFAULT
+            ) {
+                passthroughAnalogToGamepad(reading)
+                continue
+            }
             val handler = resolved.mode.handler()
             // Priors slice — only this source's virtual sub-input latch state.
             val priors = analogLatched.entries
@@ -488,6 +583,38 @@ class InputEvaluator @Inject constructor(
                 mouse = mouseEmitter,
             )
         }
+    }
+
+    /**
+     * Write [reading] verbatim to the virtual gamepad's axis matching the
+     * reading's source. Called from [dispatchReadings] when the OS-level
+     * controller dispatch has been suppressed via EVIOCGRAB but the user
+     * has the source in DEVICE_DEFAULT (Mapo doesn't intercept). Keeps
+     * those axes flowing to the game even while the physical controller
+     * is grabbed.
+     *
+     * Dpad triggers and joysticks use the analog hat / int16 stick axes;
+     * triggers use the 0..1 single-axis convention.
+     */
+    private fun passthroughAnalogToGamepad(reading: AnalogEvent) {
+        when (reading.source) {
+            InputSource.LEFT_JOYSTICK -> gamepadEmitter.setLeftStick(reading.source, reading.x, reading.y)
+            InputSource.RIGHT_JOYSTICK -> gamepadEmitter.setRightStick(reading.source, reading.x, reading.y)
+            InputSource.LEFT_TRIGGER -> gamepadEmitter.setLeftTrigger(reading.source, reading.x)
+            InputSource.RIGHT_TRIGGER -> gamepadEmitter.setRightTrigger(reading.source, reading.x)
+            InputSource.DPAD -> gamepadEmitter.setDpadHat(
+                reading.source,
+                reading.x.roundedInt(),
+                reading.y.roundedInt(),
+            )
+            else -> Unit
+        }
+    }
+
+    private fun Float.roundedInt(): Int = when {
+        this > 0.5f -> 1
+        this < -0.5f -> -1
+        else -> 0
     }
 
     /**
@@ -1358,6 +1485,14 @@ class InputEvaluator @Inject constructor(
         // source at a time keeps the cached state correct without resetting
         // sources owned by a still-active mode.
         for (source in GAMEPAD_EMITTING_SOURCES) gamepadEmitter.clearSource(source)
+        // DpadMode's gyro path is angle-integrated (tilt-and-hold = held
+        // dpad direction); reset its per-source state so accumulated tilt
+        // doesn't leak across set/profile boundaries.
+        com.mapo.service.input.modes.DpadMode.resetState()
+        // GyroToJoystickDeflectionMode is tilt-based and caches a
+        // per-source reference orientation. Reset so the next event
+        // recalibrates against the user's new natural holding angle.
+        com.mapo.service.input.modes.GyroToJoystickDeflectionMode.resetState()
         if (analogLatched.isEmpty()) return
         Log.d(TAG, "flushAnalog: releasing ${analogLatched.size} latched synthetic edge(s)")
         // Snapshot before mutation — dispatchSyntheticEdge writes back into
@@ -1409,6 +1544,67 @@ class InputEvaluator @Inject constructor(
         /** Distinct from [TAG] so motion logs can be filtered independently (`-s InputEvaluator.Motion`). */
         private const val TAG_MOTION = "InputEvaluator.Motion"
 
+        /**
+         * Linux EV_KEY → (InputSource, sub_input) mapping for the raw-key
+         * pipeline that fires when EVIOCGRAB is held on the physical
+         * controller. Codes are from `linux/input-event-codes.h`; matches
+         * what Android's InputReader would otherwise dispatch as
+         * KeyEvents via the accessibility service.
+         *
+         * Notes:
+         *  - BTN_C (0x132) and BTN_Z (0x135) deliberately omitted — Mapo's
+         *    button source vocabulary doesn't expose them.
+         *  - BTN_MODE (0x13c, Xbox/PS guide) has no Mapo InputSource yet;
+         *    listed in [LINUX_KEY_TO_GAMEPAD_BUTTON] for passthrough but
+         *    not here so the engine path can't bind to it.
+         *  - BTN_TL2 / BTN_TR2 map to LEFT/RIGHT_TRIGGER's `full_pull`
+         *    sub-input — the digital trigger click is the same edge the
+         *    analog Trigger mode's `full_pull` activator fires on.
+         */
+        private val LINUX_KEY_TO_ADDRESS: Map<Int, InputAddress> = mapOf(
+            0x130 to InputAddress(InputSource.BUTTON_DIAMOND, "button_a"),
+            0x131 to InputAddress(InputSource.BUTTON_DIAMOND, "button_b"),
+            0x133 to InputAddress(InputSource.BUTTON_DIAMOND, "button_x"),
+            0x134 to InputAddress(InputSource.BUTTON_DIAMOND, "button_y"),
+            0x136 to InputAddress(InputSource.LEFT_BUMPER, "click"),
+            0x137 to InputAddress(InputSource.RIGHT_BUMPER, "click"),
+            0x138 to InputAddress(InputSource.LEFT_TRIGGER, "full_pull"),
+            0x139 to InputAddress(InputSource.RIGHT_TRIGGER, "full_pull"),
+            0x13a to InputAddress(InputSource.SWITCH_SELECT, "click"),
+            0x13b to InputAddress(InputSource.SWITCH_START, "click"),
+            0x13d to InputAddress(InputSource.LEFT_JOYSTICK, "click"),
+            0x13e to InputAddress(InputSource.RIGHT_JOYSTICK, "click"),
+            0x220 to InputAddress(InputSource.DPAD, "dpad_up"),
+            0x221 to InputAddress(InputSource.DPAD, "dpad_down"),
+            0x222 to InputAddress(InputSource.DPAD, "dpad_left"),
+            0x223 to InputAddress(InputSource.DPAD, "dpad_right"),
+        )
+
+        /**
+         * Linux EV_KEY → virtual-gamepad BTN_* code for the DEVICE_DEFAULT
+         * passthrough path. Most codes are identity (Linux's BTN_* values
+         * are exactly what uinput expects), but the table is explicit so
+         * future divergences (or selective subsets) are obvious.
+         */
+        private val LINUX_KEY_TO_GAMEPAD_BUTTON: Map<Int, Int> = mapOf(
+            0x130 to 0x130,  // BTN_A
+            0x131 to 0x131,  // BTN_B
+            0x133 to 0x133,  // BTN_X
+            0x134 to 0x134,  // BTN_Y
+            0x136 to 0x136,  // BTN_TL (LB)
+            0x137 to 0x137,  // BTN_TR (RB)
+            0x138 to 0x138,  // BTN_TL2 (LT digital)
+            0x139 to 0x139,  // BTN_TR2 (RT digital)
+            0x13a to 0x13a,  // BTN_SELECT
+            0x13b to 0x13b,  // BTN_START
+            0x13c to 0x13c,  // BTN_MODE (Xbox guide)
+            0x13d to 0x13d,  // BTN_THUMBL (L3)
+            0x13e to 0x13e,  // BTN_THUMBR (R3)
+            // DPAD codes (0x220-0x223) deliberately omitted — dpad goes
+            // through the HAT axis, not BTN_*. The analog passthrough path
+            // already handles ABS_HAT0X/Y for the dpad.
+        )
+
         /** Sources that can contribute to the virtual XInput gamepad — used by flushAnalog. */
         private val GAMEPAD_EMITTING_SOURCES = listOf(
             InputSource.LEFT_JOYSTICK,
@@ -1416,6 +1612,14 @@ class InputEvaluator @Inject constructor(
             InputSource.LEFT_TRIGGER,
             InputSource.RIGHT_TRIGGER,
             InputSource.DPAD,
+            // GYRO contributes to left or right stick via the gyro→stick
+            // modes (Camera / Deflection). Without inclusion here, a
+            // deflected stick from a prior gyro session persists in the
+            // virtual gamepad after profile/set switch (or any other
+            // flushAnalog trigger) until something else writes to that
+            // stick, which never happens if the new config has gyro back
+            // on DEVICE_DEFAULT / NONE.
+            InputSource.GYRO,
         )
     }
 }

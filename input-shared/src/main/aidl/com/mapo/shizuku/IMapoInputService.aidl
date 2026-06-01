@@ -132,4 +132,23 @@ interface IMapoInputService {
      * dispatchGesture absolute-touch path (with its known limitations).
      */
     boolean injectStylusAbsolute(int x, int y, int displayW, int displayH) = 11;
+
+    /**
+     * Take or release `EVIOCGRAB` exclusive access on every classified
+     * gamepad `/dev/input/event*` device the service has open. While
+     * grabbed, the OS InputReader stops dispatching events from those
+     * devices — :app must handle every event (analog + digital) via the
+     * raw event callbacks for the controller to keep working.
+     *
+     * Driven by `GyroLifecycleCoordinator`'s "gyro→stick mode in scope"
+     * predicate (Brick D follow-up 2026-06-01): grab fires when a gyro
+     * Camera / Deflection mode is active so the physical sticks don't
+     * race with Mapo's virtual gamepad. Released when no such mode is
+     * configured.
+     *
+     * Touchscreens + unclassified devices are deliberately NOT grabbed —
+     * screen touch must keep working for system UI gestures and Mapo's
+     * own overlay clicks.
+     */
+    void setGrabPhysicalControllers(boolean grabbed) = 12;
 }

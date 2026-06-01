@@ -29,4 +29,22 @@ data class GyroEvent(
     val yRadPerSec: Float,
     val zRadPerSec: Float,
     val timestampNs: Long,
+    /**
+     * Cached device orientation at the moment of this gyro reading, sampled
+     * from a parallel `TYPE_GAME_ROTATION_VECTOR` subscription managed by
+     * [GyroSensorStream]. Both in radians. Default to 0 so callers that
+     * don't need orientation (rate-based modes) can ignore them, and so the
+     * older 4-arg constructor stays compatible.
+     *
+     * Rate-based modes (Gyro to Mouse / Gyro to Joystick Camera) read
+     * `xRadPerSec` / `yRadPerSec`. Tilt-based modes (Gyro to Joystick
+     * Deflection) read `rollRad` / `pitchRad` and subtract a captured
+     * reference orientation to compute tilt-from-rest.
+     *
+     * On devices without a rotation-vector sensor the fields stay at 0,
+     * making tilt-based modes effectively inert (acceptable degradation;
+     * the picker UI can surface this once Brick D.6 lands).
+     */
+    val rollRad: Float = 0f,
+    val pitchRad: Float = 0f,
 )

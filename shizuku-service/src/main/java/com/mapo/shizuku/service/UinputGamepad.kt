@@ -15,12 +15,17 @@ import android.util.Log
  * device *name* is "Mapo Virtual Gamepad" — identifiable in `/proc/bus/input/devices`
  * and `getevent -l` for debugging.
  *
- * **Axis layout** (verified against Android convention per
- * `reference_thor_axis_convention.md`):
- *  - Left stick:  ABS_X / ABS_Y     (-32768..32767)
- *  - Right stick: ABS_Z / ABS_RZ    (-32768..32767)
- *  - Triggers:    ABS_BRAKE / ABS_GAS (0..255)
+ * **Axis layout** (xpad / Xbox 360 wired controller convention, matching the
+ * vendor/product pair we declare — see uinput_gamepad.c for the rationale):
+ *  - Left stick:  ABS_X / ABS_Y     (-32768..32767, signed int16)
+ *  - Right stick: ABS_RX / ABS_RY   (-32768..32767, signed int16)
+ *  - Left trigger:  ABS_Z           (0..255 unsigned)
+ *  - Right trigger: ABS_RZ          (0..255 unsigned)
  *  - D-pad hat:   ABS_HAT0X / ABS_HAT0Y (-1, 0, 1)
+ *
+ * NOTE: this is the *emit* convention for our virtual Xbox 360 identity, not
+ * the *read* convention for the AYN Thor's physical controller (which reports
+ * its right stick on ABS_Z/ABS_RZ — see `reference_thor_axis_convention.md`).
  *
  * **Lifecycle**: lazy-open on first `writeAxes()` call (via the caller's
  * `open()` invocation); explicit `close()` from the service's `destroy()` hook.

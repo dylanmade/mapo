@@ -69,8 +69,9 @@ class GyroToMouseModeTest {
         assertEquals(1, mouse.velocityCalls.size)
         val (source, vx, vy) = mouse.velocityCalls.single()
         assertEquals(InputSource.GYRO, source)
-        assertEquals(GyroToMouseSettings.DEFAULT_SENSITIVITY_X, vx, EPSILON)
-        assertEquals(0.5f * GyroToMouseSettings.DEFAULT_SENSITIVITY_Y, vy, EPSILON)
+        // Built-in -1 sign correction on both axes — see toVelocity KDoc.
+        assertEquals(-GyroToMouseSettings.DEFAULT_SENSITIVITY_X, vx, EPSILON)
+        assertEquals(-0.5f * GyroToMouseSettings.DEFAULT_SENSITIVITY_Y, vy, EPSILON)
     }
 
     @Test
@@ -118,16 +119,20 @@ class GyroToMouseModeTest {
         val ctx = ctx("""{"sensitivity_x":1000,"sensitivity_y":250,"deadzone":0.05}""")
         GyroToMouseMode.evaluate(gyroReading(1.0f, 1.0f), ctx, digitalEmit, mouse)
         val (_, vx, vy) = mouse.velocityCalls.single()
-        assertEquals(1000f, vx, EPSILON)
-        assertEquals(250f, vy, EPSILON)
+        // Built-in -1 sign correction on both axes — see toVelocity KDoc.
+        assertEquals(-1000f, vx, EPSILON)
+        assertEquals(-250f, vy, EPSILON)
     }
 
     @Test
     fun invertY_flipsPitchSign() {
+        // With the built-in correction, invert_y=true flips the *corrected*
+        // sign — so default-orientation pitch produces vy < 0 (corrected),
+        // and invert_y=true produces vy > 0.
         val ctx = ctx("""{"invert_y":true}""")
         GyroToMouseMode.evaluate(gyroReading(0f, 1.0f), ctx, digitalEmit, mouse)
         val (_, _, vy) = mouse.velocityCalls.single()
-        assertTrue("expected negative vy when invert_y=true, got $vy", vy < 0f)
+        assertTrue("expected positive vy when invert_y=true (cancels built-in -1), got $vy", vy > 0f)
     }
 
     // ── Contract: digital + absolute paths are untouched ────────────────────

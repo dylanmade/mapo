@@ -203,18 +203,47 @@ interface MouseEmitter {
  *    Mode handlers that need "game-up = positive" (e.g. for an FPS movement stick)
  *    apply their own inversion before calling.
  */
+/**
+ * Per-source virtual-gamepad façade. **All set methods are source-keyed**
+ * so multiple sources (e.g. a physical stick + gyro-driven Camera) can
+ * contribute to the same virtual axis at the same time; the implementation
+ * sums per-source contributions and clamps the result before pushing
+ * through to the kernel uinput device.
+ *
+ * Example: with `LEFT_JOYSTICK` in JoystickMove mode and `GYRO` in
+ * Joystick Deflection mode both writing the left stick, both contributions
+ * are added together — the physical stick and gyro tilt move the character
+ * cooperatively rather than overwriting each other.
+ *
+ * Add semantics:
+ *  - **Sticks**: per-source `(x, y)` summed; each axis clamped to `[-1, +1]`.
+ *  - **Triggers**: per-source values summed; clamped to `[0, +1]`.
+ *  - **Hat**: per-source `(x, y)` integer contributions summed; each axis
+ *    clamped to `{-1, 0, +1}`.
+ *
+ * Stick conventions:
+ *  - x in -1.0..+1.0, +x = stick pushed right
+ *  - y in -1.0..+1.0, +y = stick pushed *down* (matches AnalogEvent's convention).
+ *    Mode handlers that need "game-up = positive" (e.g. for an FPS movement stick)
+ *    apply their own inversion before calling.
+ *
+ * **Button** state is not per-source — buttons are owned by the physical
+ * source they map to and never have multi-source overlap, so the simpler
+ * direct-write API stays.
+ */
 interface GamepadEmitter {
-    fun setLeftStick(x: Float, y: Float)
-    fun setRightStick(x: Float, y: Float)
+    fun setLeftStick(source: InputSource, x: Float, y: Float)
+    fun setRightStick(source: InputSource, x: Float, y: Float)
     /** Trigger value 0.0..1.0; clamped + mapped to 0..255 by the implementation. */
-    fun setLeftTrigger(v: Float)
-    fun setRightTrigger(v: Float)
+    fun setLeftTrigger(source: InputSource, v: Float)
+    fun setRightTrigger(source: InputSource, v: Float)
     /** Dpad hat axis — pass -1, 0, or 1 per axis. */
-    fun setDpadHat(x: Int, y: Int)
+    fun setDpadHat(source: InputSource, x: Int, y: Int)
     /**
-     * Reset a source's contribution to zero. Called from [InputEvaluator.flushAnalog]
-     * + when a source transitions out of a gamepad-emitting mode so a residual
-     * deflection doesn't leak.
+     * Reset a source's contribution to zero across every axis the source
+     * could be driving. Called from [InputEvaluator.flushAnalog] + when a
+     * source transitions out of a gamepad-emitting mode so its residual
+     * contribution doesn't leak into the summed output.
      */
     fun clearSource(source: InputSource)
     /** Press or release a gamepad button. `btnCode` is a `UinputGamepad.Buttons.*` int. */
@@ -223,11 +252,11 @@ interface GamepadEmitter {
     companion object {
         /** No-op sink for digital modes and for tests. */
         val NOOP: GamepadEmitter = object : GamepadEmitter {
-            override fun setLeftStick(x: Float, y: Float) {}
-            override fun setRightStick(x: Float, y: Float) {}
-            override fun setLeftTrigger(v: Float) {}
-            override fun setRightTrigger(v: Float) {}
-            override fun setDpadHat(x: Int, y: Int) {}
+            override fun setLeftStick(source: InputSource, x: Float, y: Float) {}
+            override fun setRightStick(source: InputSource, x: Float, y: Float) {}
+            override fun setLeftTrigger(source: InputSource, v: Float) {}
+            override fun setRightTrigger(source: InputSource, v: Float) {}
+            override fun setDpadHat(source: InputSource, x: Int, y: Int) {}
             override fun clearSource(source: InputSource) {}
             override fun setButton(btnCode: Int, pressed: Boolean) {}
         }
@@ -343,6 +372,30 @@ object DpadMode : SourceMode {
     override fun defaultSettingsJson(): String = DpadSettings.DEFAULT_JSON
     private val INPUTS = setOf("dpad_up", "dpad_down", "dpad_left", "dpad_right", "click")
 
+    // Per-source integrated tilt angle (radians) + last-seen timestamp (ms),
+    // used for GYRO source only. Joystick sources pass instantaneous
+    // deflection values through and don't touch this map. Same shape and
+    // reset discipline as [GyroToJoystickDeflectionMode.integratedAngle]
+    // — see that KDoc for the drift / orientation-vector-as-future-fix
+    // rationale.
+    //
+    // Layout: floatArrayOf(angleX, angleY, lastTimestampMs)
+    private val gyroIntegratedAngle = mutableMapOf<InputSource, FloatArray>()
+
+    /**
+     * Public reset hook called from [InputEvaluator.flushAnalog] at profile
+     * / action-set boundaries so accumulated gyro tilt doesn't leak across
+     * configurations. Joystick paths are stateless and unaffected.
+     */
+    fun resetState() {
+        gyroIntegratedAngle.clear()
+    }
+
+    /** Test seam — current integrated gyro tilt for the given source. */
+    @androidx.annotation.VisibleForTesting
+    internal fun integratedGyroAngleFor(source: InputSource): Pair<Float, Float>? =
+        gyroIntegratedAngle[source]?.let { it[0] to it[1] }
+
     override fun evaluate(
         reading: AnalogEvent,
         ctx: ModeContext,
@@ -355,12 +408,26 @@ object DpadMode : SourceMode {
         if (reading.source == InputSource.DPAD) return
 
         val settings = DpadSettings.parse(ctx.settingsJson)
+        // Map (reading.x, reading.y) into the stick-deflection space [-1, +1]
+        // that the rest of the math assumes:
+        //  - Joystick sources: passthrough — readings are already normalized.
+        //  - GYRO source: integrate rate to angle (rad), then scale by
+        //    tilt_sensitivity so e.g. 0.2 rad of tilt (~11.5°) saturates.
+        //    Same primitive as [GyroToJoystickDeflectionMode] so tilt-and-
+        //    hold-as-dpad has the same lean-to-walk feel.
+        val (effX, effY) = if (reading.source == InputSource.GYRO) {
+            val (angleX, angleY) = accumulateGyro(reading)
+            val s = settings.tiltSensitivity
+            (angleX * s).coerceIn(-1f, 1f) to (angleY * s).coerceIn(-1f, 1f)
+        } else {
+            reading.x to reading.y
+        }
         val priorUp = ctx.priorLatched["dpad_up"] == true
         val priorDown = ctx.priorLatched["dpad_down"] == true
         val priorRight = ctx.priorLatched["dpad_right"] == true
         val priorLeft = ctx.priorLatched["dpad_left"] == true
 
-        val mag = sqrt(reading.x * reading.x + reading.y * reading.y).coerceIn(0f, 1f)
+        val mag = sqrt(effX * effX + effY * effY).coerceIn(0f, 1f)
         val anyPrior = priorUp || priorDown || priorRight || priorLeft
         val releaseFloor = (settings.innerDeadzone - settings.outerDeadzone).coerceAtLeast(0f)
         val active = if (anyPrior) mag >= releaseFloor else mag >= settings.innerDeadzone
@@ -375,18 +442,18 @@ object DpadMode : SourceMode {
             wantUp = false; wantDown = false; wantRight = false; wantLeft = false
         } else if (settings.dpadLayout == DpadSettings.LAYOUT_8_WAY) {
             val axial = settings.innerDeadzone * AXIAL_PROJECTION_45
-            wantUp = reading.y < -axial
-            wantDown = reading.y > axial
-            wantRight = reading.x > axial
-            wantLeft = reading.x < -axial
+            wantUp = effY < -axial
+            wantDown = effY > axial
+            wantRight = effX > axial
+            wantLeft = effX < -axial
         } else {
             // 4_way: dominant-axis quantization. Ties (|x| == |y| exactly) fall to
             // the vertical branch — arbitrary but stable.
-            if (abs(reading.x) > abs(reading.y)) {
+            if (abs(effX) > abs(effY)) {
                 wantUp = false; wantDown = false
-                wantRight = reading.x > 0f; wantLeft = reading.x < 0f
+                wantRight = effX > 0f; wantLeft = effX < 0f
             } else {
-                wantUp = reading.y < 0f; wantDown = reading.y > 0f
+                wantUp = effY < 0f; wantDown = effY > 0f
                 wantRight = false; wantLeft = false
             }
         }
@@ -397,8 +464,39 @@ object DpadMode : SourceMode {
         if (wantLeft != priorLeft) digitalEmit("dpad_left", wantLeft)
     }
 
+    private fun accumulateGyro(reading: AnalogEvent): Pair<Float, Float> {
+        val source = reading.source
+        val state = gyroIntegratedAngle[source]
+        if (state == null) {
+            // First event after reset — seed the timestamp and return zero so
+            // we don't dump a multi-second integral from the difference
+            // between epoch 0 and the sensor's monotonic clock.
+            gyroIntegratedAngle[source] = floatArrayOf(0f, 0f, reading.timestampMs.toFloat())
+            return 0f to 0f
+        }
+        val dt = ((reading.timestampMs.toFloat() - state[2]) / 1000f).coerceIn(0f, MAX_GYRO_DT_SEC)
+        // Anti-drift per-axis deadzone — same rationale as
+        // [GyroToJoystickDeflectionMode.accumulate]. Pre-integration noise
+        // gate keeps accumulated tilt from drifting into a phantom
+        // direction emit when the device is stationary.
+        val effX = if (abs(reading.x) < GYRO_ANTI_DRIFT_DEADZONE) 0f else reading.x
+        val effY = if (abs(reading.y) < GYRO_ANTI_DRIFT_DEADZONE) 0f else reading.y
+        state[0] += effX * dt
+        state[1] += effY * dt
+        state[2] = reading.timestampMs.toFloat()
+        return state[0] to state[1]
+    }
+
     /** sin(45°) — per-axis floor projection for 8-way diagonal emit. */
     private const val AXIAL_PROJECTION_45 = 0.7071068f
+
+    // Pause-resume guard for the gyro integrator — see
+    // [GyroToJoystickDeflectionMode.MAX_DT_SEC] for the same rationale.
+    private const val MAX_GYRO_DT_SEC = 0.1f
+
+    // Per-axis noise gate for gyro source — see
+    // [GyroToJoystickDeflectionMode.ANTI_DRIFT_DEADZONE].
+    private const val GYRO_ANTI_DRIFT_DEADZONE = 0.05f
 }
 
 /**
@@ -411,6 +509,7 @@ internal data class DpadSettings(
     val innerDeadzone: Float,
     val outerDeadzone: Float,
     val dpadLayout: String,
+    val tiltSensitivity: Float,
 ) {
     companion object {
         const val DEFAULT_INNER_DEADZONE = 0.20f
@@ -418,9 +517,16 @@ internal data class DpadSettings(
         const val LAYOUT_4_WAY = "4_way"
         const val LAYOUT_8_WAY = "8_way"
         const val DEFAULT_LAYOUT = LAYOUT_4_WAY
+        // GYRO-only: scales integrated tilt angle (radians) into stick-
+        // deflection-equivalent units before the deadzone check. 5.0 means
+        // ~0.2 rad (≈11.5°) of tilt clamps to full direction-active range.
+        // Same value as [GyroToStickSettings.DEFAULT_DEFLECTION_SENSITIVITY]
+        // so dpad-on-gyro and deflection feel symmetric. Ignored for
+        // joystick sources.
+        const val DEFAULT_TILT_SENSITIVITY = 5.0f
 
         val DEFAULT_JSON =
-            """{"inner_deadzone":$DEFAULT_INNER_DEADZONE,"outer_deadzone":$DEFAULT_OUTER_DEADZONE,"dpad_layout":"$DEFAULT_LAYOUT"}"""
+            """{"inner_deadzone":$DEFAULT_INNER_DEADZONE,"outer_deadzone":$DEFAULT_OUTER_DEADZONE,"dpad_layout":"$DEFAULT_LAYOUT","tilt_sensitivity":$DEFAULT_TILT_SENSITIVITY}"""
 
         fun parse(json: String): DpadSettings {
             if (json.isBlank()) return defaults()
@@ -434,6 +540,8 @@ internal data class DpadSettings(
                     outerDeadzone = obj.optDouble("outer_deadzone", DEFAULT_OUTER_DEADZONE.toDouble())
                         .toFloat().coerceIn(0f, 0.95f),
                     dpadLayout = layout,
+                    tiltSensitivity = obj.optDouble("tilt_sensitivity", DEFAULT_TILT_SENSITIVITY.toDouble())
+                        .toFloat().coerceAtLeast(0f),
                 )
             } catch (_: JSONException) {
                 defaults()
@@ -444,6 +552,7 @@ internal data class DpadSettings(
             innerDeadzone = DEFAULT_INNER_DEADZONE,
             outerDeadzone = DEFAULT_OUTER_DEADZONE,
             dpadLayout = DEFAULT_LAYOUT,
+            tiltSensitivity = DEFAULT_TILT_SENSITIVITY,
         )
     }
 }
@@ -637,8 +746,8 @@ object JoystickMoveMode : SourceMode {
         val settings = StickToAxisSettings.parse(ctx.settingsJson)
         val (ax, ay) = settings.toAxis(reading.x, reading.y)
         when (reading.source) {
-            InputSource.LEFT_JOYSTICK -> ctx.gamepad.setLeftStick(ax, ay)
-            InputSource.RIGHT_JOYSTICK -> ctx.gamepad.setRightStick(ax, ay)
+            InputSource.LEFT_JOYSTICK -> ctx.gamepad.setLeftStick(reading.source, ax, ay)
+            InputSource.RIGHT_JOYSTICK -> ctx.gamepad.setRightStick(reading.source, ax, ay)
             else -> Unit  // Joystick Move on non-stick sources is a no-op
         }
     }
@@ -878,8 +987,17 @@ internal data class GyroToMouseSettings(
     fun toVelocity(yawRadPerSec: Float, pitchRadPerSec: Float): Pair<Float, Float> {
         val yaw = if (abs(yawRadPerSec) < deadzone) 0f else yawRadPerSec
         val pitch = if (abs(pitchRadPerSec) < deadzone) 0f else pitchRadPerSec
-        val vx = yaw * sensitivityX * if (invertX) -1f else 1f
-        val vy = pitch * sensitivityY * if (invertY) -1f else 1f
+        // Built-in -1 sign correction on both axes. Verified empirically on
+        // AYN Thor 2026-05-31: with raw passthrough, rolling the device right
+        // sent the cursor left and pitching forward sent the cursor down —
+        // both opposite of player intent. The fix lives here (mode-local)
+        // rather than in `handleGyroReading` so the sibling stick modes
+        // (Gyro to Joystick Camera / Deflection), whose game-side stick→
+        // camera processing already lands on the correct screen direction,
+        // are unaffected. `invert_x` / `invert_y` continue to layer on top
+        // as user-preference toggles.
+        val vx = -yaw * sensitivityX * if (invertX) -1f else 1f
+        val vy = -pitch * sensitivityY * if (invertY) -1f else 1f
         return vx to vy
     }
 
@@ -919,6 +1037,382 @@ internal data class GyroToMouseSettings(
                 )
             } catch (_: JSONException) {
                 DEFAULTS
+            }
+        }
+    }
+}
+
+/**
+ * **Brick D.4 — Gyro → Joystick Camera.** Device angular velocity (rad/sec)
+ * → virtual right-stick deflection [-1, +1] via the gamepad uinput device.
+ * The game reads it as a real Xbox-controller right stick driven by the
+ * user tilting the handheld. Canonical "gyro as aim" pattern Steam Deck
+ * users prefer over Gyro-to-Mouse for FPS games — the game's stick→camera
+ * curve applies its own acceleration / sensitivity, so motion feels native
+ * to the title rather than imposed by Mapo.
+ *
+ * **Why right stick.** FPS / TPS conventions across native gamepad games:
+ * right stick = look/camera, left stick = movement. Sending camera input
+ * via the right stick lets Wine / GameNative read it as the same axis the
+ * game already maps to look.
+ *
+ * **Rate-based (not angle-integrated).** Like Gyro-to-Mouse: instantaneous
+ * angular velocity → instantaneous stick deflection. When the user stops
+ * rotating, rate → 0, stick centers, camera stops. This matches Steam
+ * Input's "Gyro to Joystick Camera" behavior — the alternative
+ * (angle-integrated) is what [GyroToJoystickDeflectionMode] tunes for, but
+ * for camera the rate model is the right pick.
+ *
+ * **Source filter.** Skips events whose `source != GYRO` (defensive — the
+ * picker catalog restricts this mode to the gyro source, but a config edit
+ * could route a stick reading here). A stick's normalized [-1, +1]
+ * interpreted as rad/sec would produce ~negligible deflection through the
+ * sensitivity multiplier; the source filter just makes the no-op
+ * explicit.
+ */
+object GyroToJoystickCameraMode : SourceMode {
+    override val mode: BindingMode = BindingMode.GYRO_TO_JOYSTICK_CAMERA
+    override fun validInputs(): Set<String> = emptySet()
+    override fun defaultSettingsJson(): String = GyroToStickSettings.CAMERA_DEFAULT_JSON
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        if (reading.source != InputSource.GYRO) return
+        val settings = GyroToStickSettings.parse(ctx.settingsJson, GyroToStickSettings.CAMERA_DEFAULTS)
+        val (rawAx, rawAy) = settings.toAxis(reading.x, reading.y)
+        // Built-in -1 sign correction on both axes — same pattern + reason as
+        // [GyroToMouseSettings.toVelocity] (2026-05-31 user-verified on AYN
+        // Thor: raw passthrough aimed the right stick opposite of player
+        // intent on both axes). The fix lives here (mode-local) rather than
+        // in the shared [GyroToStickSettings.toAxis] so Deflection's
+        // tilt-as-movement direction stays untouched.
+        // `invert_x` / `invert_y` settings continue to layer on top as
+        // user-preference toggles applied inside toAxis().
+        ctx.gamepad.setRightStick(reading.source, -rawAx, -rawAy)
+    }
+}
+
+/**
+ * **Brick D.4 (refined 2026-06-01) — Gyro → Joystick Deflection.** Device
+ * orientation → virtual *left*-stick deflection. The mode treats the device
+ * itself like a physical analog stick: tilt the device slightly = stick
+ * deflects slightly; tilt significantly = stick deflects fully.
+ *
+ * **Tilt-based, not rate-based.** Reads absolute device orientation
+ * (`reading.tiltRollRad` / `reading.tiltPitchRad`, sourced from
+ * `TYPE_GAME_ROTATION_VECTOR` via [GyroSensorStream]) and subtracts a
+ * captured reference. Tilt-from-reference angle → stick deflection
+ * magnitude. Holding the device tilted at 30° gives a sustained stick
+ * deflection, unlike rate-based modes where holding still = no input.
+ * Critically also doesn't accumulate noise (the rotation-vector sensor is
+ * already gyro+accel fused and drift-free), so a stationary device
+ * produces a stationary stick.
+ *
+ * **Auto-calibration.** Reference orientation captured on the first event
+ * after [resetState] — i.e. at gyro-pipeline activation. The user's
+ * natural holding angle becomes "neutral." Reset across profile / set
+ * boundaries via [InputEvaluator.flushAnalog].
+ *
+ * **Per-axis sensitivity** lives in [GyroToStickSettings] (reused from the
+ * earlier rate-based version). With the default of 5.0, ~12° of tilt
+ * (~0.2 rad) saturates the stick — small lean = full walking speed.
+ *
+ * **Companion to Camera, but different primitive.** Camera stays rate-based
+ * because FPS aim feels right as "rotate-to-look-around"; Deflection is
+ * tilt-based because movement feels right as "lean-to-walk." Both still
+ * route through the per-source gamepad cache so physical sticks can
+ * contribute alongside gyro additively.
+ *
+ * Same defensive source filter as the camera variant — see the KDoc on
+ * [GyroToJoystickCameraMode].
+ */
+object GyroToJoystickDeflectionMode : SourceMode {
+    override val mode: BindingMode = BindingMode.GYRO_TO_JOYSTICK_DEFLECTION
+    override fun validInputs(): Set<String> = emptySet()
+    override fun defaultSettingsJson(): String = GyroToStickSettings.DEFLECTION_DEFAULT_JSON
+
+    // Per-source reference orientation (roll, pitch) in radians, captured
+    // on the first event after [resetState]. Subsequent events compute
+    // delta from this reference to derive tilt-from-rest. The gyro
+    // coroutine is the only reader/writer — no synchronization needed.
+    //
+    // Layout: floatArrayOf(refRoll, refPitch)
+    private val referenceOrientation = mutableMapOf<InputSource, FloatArray>()
+
+    /**
+     * Test seam + public reset hook. Called from
+     * [InputEvaluator.flushAnalog] at profile / action-set boundaries so
+     * the next event re-captures a fresh reference.
+     */
+    fun resetState() {
+        referenceOrientation.clear()
+    }
+
+    /** Test seam — the captured reference for the given source. */
+    @androidx.annotation.VisibleForTesting
+    internal fun referenceFor(source: InputSource): Pair<Float, Float>? =
+        referenceOrientation[source]?.let { it[0] to it[1] }
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        if (reading.source != InputSource.GYRO) return
+        val settings = GyroToStickSettings.parse(ctx.settingsJson, GyroToStickSettings.DEFLECTION_DEFAULTS)
+        val ref = referenceOrientation[reading.source]
+        if (ref == null) {
+            // First event since reset — capture the user's natural holding
+            // angle as neutral. Emit a zero-stick contribution so the cache
+            // has the GYRO slot at (0, 0) until the user actually tilts.
+            referenceOrientation[reading.source] = floatArrayOf(reading.tiltRollRad, reading.tiltPitchRad)
+            ctx.gamepad.setLeftStick(reading.source, 0f, 0f)
+            return
+        }
+        val deltaRoll = reading.tiltRollRad - ref[0]
+        val deltaPitch = reading.tiltPitchRad - ref[1]
+        // Feed the delta to the shared toAxis math. Units shift from
+        // "deflection per rad/sec" (rate) to "deflection per rad of tilt"
+        // (angle); the new DEFLECTION_DEFAULTS sensitivity (5.0) targets
+        // ~12° of tilt for saturation.
+        val (ax, ay) = settings.toAxis(deltaRoll, deltaPitch)
+        ctx.gamepad.setLeftStick(reading.source, ax, ay)
+    }
+}
+
+/**
+ * **Brick D.5 — Gyro → Directional Swipe.** Rate-based one-shot gesture
+ * mode that emits a directional sub-input edge when the device is rotated
+ * past a per-axis threshold. Steam Deck's modern replacement for legacy
+ * gyro Flick Stick.
+ *
+ * **Behavior** (verified against Steam Deck 2026-05-31):
+ *  - Rotating the device forward / back (pitch) fires `dpad_up` / `dpad_down`.
+ *  - Yawing the device left / right (rotation around the vertical axis,
+ *    like turning a steering wheel) fires `dpad_left` / `dpad_right`.
+ *  - Each sub-input fires DOWN when the corresponding rate exceeds
+ *    `rate_threshold`; releases UP when the rate drops below
+ *    `release_floor`. Typical use: brief flick → quick down+up pair → the
+ *    downstream activator engine sees it as a Regular Press (tap).
+ *  - Hysteresis (threshold ≫ release_floor) prevents direction flutter
+ *    during the deceleration phase of a flick.
+ *
+ * **Why rate-based, not angle-integrated.** The user's description was
+ * specifically "triggered when the user gyros the device" — the rotation
+ * gesture itself fires the command. Holding the device tilted doesn't
+ * keep firing; that's [GyroToJoystickDeflectionMode]'s lane. Per-axis
+ * thresholding without angle integration matches the test feel.
+ *
+ * **Axis mapping.**
+ *  - `reading.y` is pitch rate (sign-corrected by [InputEvaluator.handleGyroReading]
+ *    so pitching forward gives y < 0).
+ *  - `reading.z` is yaw rate (rotation around screen-normal axis).
+ *
+ * **Source filter** identical to the other gyro modes. Non-GYRO sources
+ * could in principle host this mode (joystick-flick gestures), but Steam
+ * exposes Directional Swipe only on the gyro source, so we mirror that.
+ *
+ * **Stateless** — no per-source integrator state. The previous-emit state
+ * lives in [ModeContext.priorLatched], same idiom as [DpadMode].
+ */
+object DirectionalSwipeMode : SourceMode {
+    override val mode: BindingMode = BindingMode.DIRECTIONAL_SWIPE
+    override fun validInputs(): Set<String> = INPUTS
+    override fun defaultSettingsJson(): String = DirectionalSwipeSettings.DEFAULT_JSON
+    private val INPUTS = setOf("dpad_up", "dpad_down", "dpad_left", "dpad_right")
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        if (reading.source != InputSource.GYRO) return
+        val settings = DirectionalSwipeSettings.parse(ctx.settingsJson)
+
+        val priorUp = ctx.priorLatched["dpad_up"] == true
+        val priorDown = ctx.priorLatched["dpad_down"] == true
+        val priorLeft = ctx.priorLatched["dpad_left"] == true
+        val priorRight = ctx.priorLatched["dpad_right"] == true
+
+        val pitch = reading.y  // sign-corrected: forward pitch → y < 0
+        val yaw = reading.z
+
+        // Per-direction hysteresis: latch ON at threshold, release at floor.
+        // Up / down ride the pitch axis; left / right ride the yaw axis.
+        // Negative y = pitch forward = up; positive y = pitch back = down.
+        // Positive z = CCW around screen-normal = yaw left; negative z = yaw right.
+        val wantUp = if (priorUp) pitch < -settings.releaseFloor else pitch < -settings.rateThreshold
+        val wantDown = if (priorDown) pitch > settings.releaseFloor else pitch > settings.rateThreshold
+        val wantLeft = if (priorLeft) yaw > settings.releaseFloor else yaw > settings.rateThreshold
+        val wantRight = if (priorRight) yaw < -settings.releaseFloor else yaw < -settings.rateThreshold
+
+        if (wantUp != priorUp) digitalEmit("dpad_up", wantUp)
+        if (wantDown != priorDown) digitalEmit("dpad_down", wantDown)
+        if (wantLeft != priorLeft) digitalEmit("dpad_left", wantLeft)
+        if (wantRight != priorRight) digitalEmit("dpad_right", wantRight)
+    }
+}
+
+/**
+ * Parsed [DirectionalSwipeMode] settings. Tolerant of missing keys; falls
+ * back to defaults so a binding_group seeded with `{}` keeps working.
+ *
+ * Defaults target deliberate flicks. Typical hand rotation rates:
+ *  - Idle / drift: 0.01–0.1 rad/sec.
+ *  - Slow tilt: 0.1–0.5 rad/sec.
+ *  - Deliberate flick: 2–5 rad/sec.
+ *
+ * `rate_threshold = 2.0` cleanly distinguishes flicks from tilts.
+ * `release_floor = 0.5` provides hysteresis so the deceleration phase of
+ * a flick doesn't re-fire the opposite direction. Both are user-tunable
+ * in the Cog menu (Phase 7 Brick F).
+ */
+internal data class DirectionalSwipeSettings(
+    val rateThreshold: Float,
+    val releaseFloor: Float,
+) {
+    companion object {
+        const val DEFAULT_RATE_THRESHOLD = 2.0f
+        const val DEFAULT_RELEASE_FLOOR = 0.5f
+
+        val DEFAULTS = DirectionalSwipeSettings(
+            rateThreshold = DEFAULT_RATE_THRESHOLD,
+            releaseFloor = DEFAULT_RELEASE_FLOOR,
+        )
+        val DEFAULT_JSON =
+            """{"rate_threshold":$DEFAULT_RATE_THRESHOLD,"release_floor":$DEFAULT_RELEASE_FLOOR}"""
+
+        fun parse(json: String): DirectionalSwipeSettings {
+            if (json.isBlank()) return DEFAULTS
+            return try {
+                val obj = JSONObject(json)
+                val threshold = obj.optDouble("rate_threshold", DEFAULT_RATE_THRESHOLD.toDouble())
+                    .toFloat().coerceAtLeast(0f)
+                val floor = obj.optDouble("release_floor", DEFAULT_RELEASE_FLOOR.toDouble())
+                    .toFloat().coerceAtLeast(0f)
+                // Clamp floor below threshold — if a user typo'd them
+                // equal/reversed, fall back to a small hysteresis margin
+                // rather than producing a no-release latch.
+                val safeFloor = if (floor >= threshold) (threshold * 0.25f) else floor
+                DirectionalSwipeSettings(
+                    rateThreshold = threshold,
+                    releaseFloor = safeFloor,
+                )
+            } catch (_: JSONException) {
+                DEFAULTS
+            }
+        }
+    }
+}
+
+/**
+ * Parsed settings + math for the gyro→stick modes
+ * ([GyroToJoystickCameraMode], [GyroToJoystickDeflectionMode]). Sibling
+ * of [StickToMouseSettings]: same "caller-supplied defaults" pattern so
+ * the two modes can share the parser while shipping different tuning
+ * presets.
+ *
+ * **toAxis math:**
+ *  1. Per-axis deadzone — `|rate| < deadzone` → 0 on that axis. Same
+ *     rationale as [GyroToMouseSettings]: a still hand emits independent
+ *     low-magnitude noise on each axis; per-axis nukes both
+ *     independently. A radial threshold would let (0.04, 0.04) slip
+ *     through.
+ *  2. Multiply by per-axis sensitivity → raw deflection in stick units.
+ *  3. Apply `invert_x` / `invert_y` sign flips.
+ *  4. Clamp to [-1, +1] — virtual stick deflection saturates at the rim;
+ *     beyond-saturation rotation has no further effect, matching Steam.
+ *
+ * **Units of sensitivity:** stick-deflection units per rad/sec of gyro
+ * rate. With camera default 0.8, a sustained 1 rad/sec rotation
+ * (~57°/sec) produces 0.8 deflection — strong but not saturated. With
+ * deflection default 0.4, same rotation produces 0.4 deflection —
+ * moderate. Users tune for feel via the Cog menu (Phase 7 Brick F).
+ *
+ * **No response curve** (`exponent`) like [StickToMouseSettings] has:
+ * gyro→stick is linear by Steam convention, matching the linear
+ * [GyroToMouseSettings] choice. Add a curve setting later if needed.
+ */
+internal data class GyroToStickSettings(
+    val sensitivityX: Float,
+    val sensitivityY: Float,
+    val deadzone: Float,
+    val invertX: Boolean,
+    val invertY: Boolean,
+) {
+    /**
+     * Convert (roll_rate, pitch_rate) in rad/sec to (ax, ay) normalized
+     * stick deflection in [-1, +1]. See class KDoc for the math steps.
+     */
+    fun toAxis(rollRadPerSec: Float, pitchRadPerSec: Float): Pair<Float, Float> {
+        val roll = if (abs(rollRadPerSec) < deadzone) 0f else rollRadPerSec
+        val pitch = if (abs(pitchRadPerSec) < deadzone) 0f else pitchRadPerSec
+        val ax = (roll * sensitivityX * if (invertX) -1f else 1f).coerceIn(-1f, 1f)
+        val ay = (pitch * sensitivityY * if (invertY) -1f else 1f).coerceIn(-1f, 1f)
+        return ax to ay
+    }
+
+    companion object {
+        // Camera defaults — high sensitivity for FPS aim feel. 1 rad/sec
+        // gyro → 0.8 deflection (strong but not saturated); saturates
+        // around 1.25 rad/sec (~72°/sec, a moderately fast turn).
+        // Camera is rate-based; sensitivity units are "deflection per
+        // rad/sec".
+        const val DEFAULT_CAMERA_SENSITIVITY = 0.8f
+        // Deflection defaults — tilt-based (2026-06-01), so sensitivity
+        // units are "deflection per radian of tilt-from-rest", NOT
+        // "deflection per rad/sec of rate". Higher numeric value at the
+        // same feel because typical tilt angles are fractions of a radian.
+        // 5.0 → ~12° of tilt (0.2 rad) saturates the stick — small lean =
+        // full walking speed. Tune in the Cog menu (Phase 7 Brick F).
+        const val DEFAULT_DEFLECTION_SENSITIVITY = 5.0f
+        // 0.05 rad/sec ≈ 2.9°/sec. Same noise-floor threshold as
+        // [GyroToMouseSettings]; both modes consume the same gyro stream.
+        const val DEFAULT_DEADZONE = 0.05f
+
+        val CAMERA_DEFAULTS = GyroToStickSettings(
+            sensitivityX = DEFAULT_CAMERA_SENSITIVITY,
+            sensitivityY = DEFAULT_CAMERA_SENSITIVITY,
+            deadzone = DEFAULT_DEADZONE,
+            invertX = false,
+            invertY = false,
+        )
+        val DEFLECTION_DEFAULTS = GyroToStickSettings(
+            sensitivityX = DEFAULT_DEFLECTION_SENSITIVITY,
+            sensitivityY = DEFAULT_DEFLECTION_SENSITIVITY,
+            deadzone = DEFAULT_DEADZONE,
+            invertX = false,
+            invertY = false,
+        )
+        val CAMERA_DEFAULT_JSON =
+            """{"sensitivity_x":$DEFAULT_CAMERA_SENSITIVITY,"sensitivity_y":$DEFAULT_CAMERA_SENSITIVITY,"deadzone":$DEFAULT_DEADZONE,"invert_x":false,"invert_y":false}"""
+        val DEFLECTION_DEFAULT_JSON =
+            """{"sensitivity_x":$DEFAULT_DEFLECTION_SENSITIVITY,"sensitivity_y":$DEFAULT_DEFLECTION_SENSITIVITY,"deadzone":$DEFAULT_DEADZONE,"invert_x":false,"invert_y":false}"""
+
+        fun parse(json: String, defaults: GyroToStickSettings): GyroToStickSettings {
+            if (json.isBlank()) return defaults
+            return try {
+                val obj = JSONObject(json)
+                GyroToStickSettings(
+                    sensitivityX = obj.optDouble("sensitivity_x", defaults.sensitivityX.toDouble()).toFloat()
+                        .coerceAtLeast(0f),
+                    sensitivityY = obj.optDouble("sensitivity_y", defaults.sensitivityY.toDouble()).toFloat()
+                        .coerceAtLeast(0f),
+                    // Same 5 rad/sec ceiling as [GyroToMouseSettings] — past any
+                    // deliberate hand motion; clamp protects against pathological JSON.
+                    deadzone = obj.optDouble("deadzone", defaults.deadzone.toDouble()).toFloat()
+                        .coerceIn(0f, 5f),
+                    invertX = obj.optBoolean("invert_x", defaults.invertX),
+                    invertY = obj.optBoolean("invert_y", defaults.invertY),
+                )
+            } catch (_: JSONException) {
+                defaults
             }
         }
     }
@@ -1096,12 +1590,12 @@ fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.JOYSTICK_MOVE -> JoystickMoveMode
     BindingMode.MOUSE_REGION -> MouseRegionMode
     BindingMode.GYRO_TO_MOUSE -> GyroToMouseMode
+    BindingMode.GYRO_TO_JOYSTICK_CAMERA -> GyroToJoystickCameraMode
+    BindingMode.GYRO_TO_JOYSTICK_DEFLECTION -> GyroToJoystickDeflectionMode
+    BindingMode.DIRECTIONAL_SWIPE -> DirectionalSwipeMode
     BindingMode.FLICK_STICK,
     BindingMode.SCROLL_WHEEL,
     BindingMode.REFERENCE,
-    BindingMode.GYRO_TO_JOYSTICK_CAMERA,
-    BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
-    BindingMode.DIRECTIONAL_SWIPE,
     BindingMode.RADIAL_MENU,
     BindingMode.TOUCH_MENU,
     BindingMode.HOTBAR_MENU -> StubMode(this)
@@ -1246,7 +1740,7 @@ fun validInputsFor(source: InputSource, mode: BindingMode): Set<String> = when (
     }
     InputSource.GYRO -> when (mode) {
         BindingMode.DPAD -> DPAD_DIRECTIONS
-        BindingMode.DIRECTIONAL_SWIPE -> setOf("dpad_up", "dpad_down")  // direction labels TBD; placeholder
+        BindingMode.DIRECTIONAL_SWIPE -> DPAD_DIRECTIONS
         BindingMode.GYRO_TO_MOUSE,
         BindingMode.GYRO_TO_JOYSTICK_CAMERA,
         BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,

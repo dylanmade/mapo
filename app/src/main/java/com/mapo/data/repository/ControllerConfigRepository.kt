@@ -867,7 +867,87 @@ class ControllerConfigRepository @Inject constructor(
         val existing = bindingGroupDao.getById(bindingGroupId) ?: return
         if (existing.mode == mode) return
         bindingGroupDao.update(existing.copy(mode = mode))
+        // 2026-05-31 — auto-seed any sub-inputs the new mode needs that the
+        // group doesn't already carry. Without this, the dynamic-row UI
+        // renders sub-inputs (from validInputsFor) that have no backing
+        // GroupInput record, and BindingRow's `ready` gate disables tap.
+        // Most visible failure: GYRO source switched to DPAD or
+        // DIRECTIONAL_SWIPE — GYRO's seed has no sub-inputs at all, so
+        // every dpad direction row would otherwise be inert.
+        //
+        // Scoped to set-owned (base) groups; layer-owned overlays keep the
+        // existing materialize-on-tap pattern (creating sub-inputs eagerly
+        // on a layer would turn every layer into a full mode replacement
+        // rather than the targeted overlay Steam treats them as).
+        if (existing.actionSetId != null) {
+            val source = findInputSourceForSetBindingGroup(bindingGroupId)
+            if (source != null) {
+                ensureSubInputsForMode(bindingGroupId, source, mode)
+            }
+        }
         configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
+     * Find the [InputSource] that owns [bindingGroupId] when it's a
+     * set-owned (base) group. Walks the active `preset_binding` rows whose
+     * bindingGroupId matches. Returns null if the group isn't preset-linked
+     * (shouldn't happen for normally-seeded groups but is defensive).
+     */
+    private suspend fun findInputSourceForSetBindingGroup(bindingGroupId: Long): InputSource? {
+        val group = bindingGroupDao.getById(bindingGroupId) ?: return null
+        val actionSetId = group.actionSetId ?: return null
+        val presets = presetBindingDao.getByActionSets(listOf(actionSetId))
+        return presets.firstOrNull { it.bindingGroupId == bindingGroupId && it.state == "active" }
+            ?.inputSource
+    }
+
+    /**
+     * Create any missing [GroupInput] rows under [bindingGroupId] for each
+     * sub-input that the (source, mode) pair surfaces. Each new GroupInput
+     * gets a default FULL_PRESS Activator + Unbound Binding so the row is
+     * immediately editable from the binding picker. Sub-inputs that already
+     * exist on the group are untouched.
+     */
+    private suspend fun ensureSubInputsForMode(
+        bindingGroupId: Long,
+        source: InputSource,
+        mode: BindingMode,
+    ) {
+        val wanted = com.mapo.service.input.modes.validInputsFor(source, mode)
+        if (wanted.isEmpty()) return
+        val existing = groupInputDao.getByGroups(listOf(bindingGroupId))
+            .map { it.inputKey }
+            .toSet()
+        val missing = wanted - existing
+        if (missing.isEmpty()) return
+        val nextOrderStart = groupInputDao.getByGroups(listOf(bindingGroupId))
+            .maxOfOrNull { it.orderIndex }?.plus(1) ?: 0
+        for ((idx, inputKey) in missing.withIndex()) {
+            val newInputId = groupInputDao.insert(
+                GroupInput(
+                    bindingGroupId = bindingGroupId,
+                    inputKey = inputKey,
+                    orderIndex = nextOrderStart + idx,
+                )
+            )
+            val activatorId = activatorDao.insert(
+                Activator(
+                    groupInputId = newInputId,
+                    type = ActivatorType.FULL_PRESS,
+                    settingsJson = "{}",
+                    orderIndex = 0,
+                )
+            )
+            bindingDao.insert(
+                Binding(
+                    activatorId = activatorId,
+                    outputType = BindingOutputType.UNBOUND,
+                    args = "",
+                    orderIndex = 0,
+                )
+            )
+        }
     }
 
     /**

@@ -17,6 +17,9 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.asin
+import kotlin.math.atan2
+import kotlin.math.sqrt
 
 /**
  * **Brick D.1** — gyroscope sensor reader. Wraps Android's
@@ -53,8 +56,33 @@ class GyroSensorStream @Inject constructor(
 
     private val gyroSensor: Sensor? = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
+    /**
+     * Companion orientation sensor for tilt-based gyro modes (Gyro to Joystick
+     * Deflection). `TYPE_GAME_ROTATION_VECTOR` is gyro+accel fused — no
+     * compass, so no indoor magnetometer flakiness — and drift-free. On
+     * devices without it, we fall back to `TYPE_ROTATION_VECTOR` (which adds
+     * the compass) so absolute "yaw" is at least available. On devices with
+     * neither, tilt fields stay at 0 and tilt-based modes degrade to a
+     * permanently-neutral stick (acceptable inertness; the picker should
+     * eventually warn the user).
+     */
+    private val rotationSensor: Sensor? =
+        sensorManager?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+            ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+
     /** True iff the device has a gyroscope sensor at all. */
     val hasGyro: Boolean = gyroSensor != null
+
+    /** True iff the device has an orientation sensor for tilt-based modes. */
+    val hasOrientation: Boolean = rotationSensor != null
+
+    // Cached device orientation in radians, updated on every rotation-vector
+    // event. The gyro reader stamps these onto each [GyroEvent] so tilt-based
+    // modes don't need their own sensor subscription. Volatile because the
+    // sensor callback runs on a hardware thread and the gyro callback (writer
+    // → reader from this perspective) may run on a different one.
+    @Volatile private var cachedRollRad: Float = 0f
+    @Volatile private var cachedPitchRad: Float = 0f
 
     private val _events = MutableSharedFlow<GyroEvent>(
         replay = 0,
@@ -118,6 +146,18 @@ class GyroSensorStream @Inject constructor(
             Log.w(TAG, "registerListener returned false — gyro disabled")
             return false
         }
+        // Register the rotation-vector companion alongside the gyro. Not
+        // fatal if it fails — gyro events still fire with rollRad/pitchRad
+        // stuck at their last cached value (initially 0), so rate-based
+        // modes are unaffected and tilt-based modes just stay neutral.
+        rotationSensor?.let { rot ->
+            val rotOk = mgr.registerListener(this, rot, samplingPeriodHint)
+            if (rotOk) {
+                Log.i(TAG, "rotation-vector listener registered (sensor=${rot.name})")
+            } else {
+                Log.w(TAG, "rotation-vector registerListener returned false — tilt modes inert")
+            }
+        } ?: Log.i(TAG, "no rotation-vector sensor — tilt modes will be inert")
         running.set(true)
         Log.i(TAG, "gyro listener registered (sensor=${sensor.name}, delay=$samplingPeriodHint)")
         return true
@@ -127,6 +167,9 @@ class GyroSensorStream @Inject constructor(
     @Synchronized
     fun stop() {
         if (!running.compareAndSet(true, false)) return
+        // SensorManager.unregisterListener(this) covers all sensors this
+        // listener is registered for — drops both gyro + rotation-vector
+        // with one call.
         sensorManager?.unregisterListener(this)
         Log.i(TAG, "gyro listener unregistered")
     }
@@ -134,7 +177,16 @@ class GyroSensorStream @Inject constructor(
     // ── SensorEventListener ─────────────────────────────────────────────────
 
     override fun onSensorChanged(event: SensorEvent?) {
-        if (event == null || event.sensor.type != Sensor.TYPE_GYROSCOPE) return
+        if (event == null) return
+        when (event.sensor.type) {
+            Sensor.TYPE_GYROSCOPE -> handleGyroEvent(event)
+            Sensor.TYPE_GAME_ROTATION_VECTOR,
+            Sensor.TYPE_ROTATION_VECTOR -> updateOrientationCache(event)
+            else -> Unit
+        }
+    }
+
+    private fun handleGyroEvent(event: SensorEvent) {
         val v = event.values
         if (v.size < 3) return
         // tryEmit because SensorEventListener callbacks run on a hardware
@@ -145,6 +197,8 @@ class GyroSensorStream @Inject constructor(
                 yRadPerSec = v[1],
                 zRadPerSec = v[2],
                 timestampNs = event.timestamp,
+                rollRad = cachedRollRad,
+                pitchRad = cachedPitchRad,
             )
         )
         if (!emitted && BuildLogVerbose) {
@@ -152,6 +206,35 @@ class GyroSensorStream @Inject constructor(
             // here so we'd catch a backpressure regression in testing.
             Log.v(TAG, "tryEmit dropped (buffer full / no collector)")
         }
+    }
+
+    /**
+     * Convert the rotation-vector sensor's quaternion → roll + pitch in
+     * radians using the standard Tait-Bryan ZYX intrinsic formula. Roll is
+     * rotation around the device's X axis, pitch around its Y axis.
+     *
+     * The fourth value (w) is optional in some Android versions of the
+     * sensor's value array — `event.values[3]` may not be present. We
+     * reconstruct it from the unit-quaternion constraint when missing.
+     *
+     * Yaw is computable too but not cached because no current mode needs it
+     * — tilt-based Deflection only uses roll + pitch ("tilt to lean").
+     */
+    private fun updateOrientationCache(event: SensorEvent) {
+        val v = event.values
+        if (v.size < 3) return
+        val qx = v[0]
+        val qy = v[1]
+        val qz = v[2]
+        val qw = if (v.size >= 4) {
+            v[3]
+        } else {
+            val sq = 1f - qx * qx - qy * qy - qz * qz
+            if (sq < 0f) 0f else sqrt(sq)
+        }
+        cachedRollRad = atan2(2f * (qw * qx + qy * qz), 1f - 2f * (qx * qx + qy * qy))
+        // asin's input must be clamped — float noise can push it past ±1.
+        cachedPitchRad = asin((2f * (qw * qy - qz * qx)).coerceIn(-1f, 1f))
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {

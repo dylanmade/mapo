@@ -10,23 +10,32 @@ import kotlin.math.roundToInt
 /**
  * **Brick C — virtual XInput gamepad facade.**
  *
- * Maintains a cached snapshot of the virtual gamepad's full analog state
- * (two sticks + two triggers + dpad hat) and exposes per-source mutators
- * that re-push the merged state through the Shizuku UserService whenever
- * any contributing source changes its contribution.
+ * Maintains a **per-source** contribution table for each of the virtual
+ * gamepad's analog axes. On every mutator the entire merged state is
+ * re-summed and pushed through the Shizuku UserService — physical and
+ * mode-driven contributions to the same axis combine additively rather
+ * than overwriting each other.
  *
- * Why centralized state lives here: the virtual gamepad is a *single*
- * kernel device with all axes; per-source modes update only one slice of
- * it (LJ touches leftX/leftY, LT touches leftTrigger, etc.). Without a
- * cache, each per-source write would have to know every other source's
- * current value to push the full axis set. The cache solves that — each
- * source mutator updates its own slot, then we re-serialize the full
- * state to the service.
+ * Example: a physical `RIGHT_JOYSTICK` in JoystickMove mode and a `GYRO`
+ * source in Joystick Camera mode both write the right stick. With
+ * per-source storage they sum — the player can aim with the physical
+ * stick AND nudge the camera with gyro at the same time. The pre-refactor
+ * single-slot cache stomped one with the other (last-write-wins) which
+ * felt like the inputs were fighting each other.
+ *
+ * Sum behavior:
+ *  - Sticks: per-source (x, y) floats summed; clamped to [-1, +1] per axis
+ *    BEFORE int16 mapping.
+ *  - Triggers: per-source floats summed; clamped to [0, +1] before
+ *    mapping to 0..255.
+ *  - Hat: per-source signed integer contributions summed; each axis
+ *    clamped to {-1, 0, +1}.
+ *  - Buttons: NOT per-source (a single button is owned by a single source).
+ *    Direct passthrough.
  *
  * Thread safety: mutators are called from `InputEvaluator.dispatchReadings`
- * (binder thread + main scope coroutines). All state reads/writes go
- * through `synchronized(lock)` because the per-axis ints in a Kotlin
- * data class aren't atomic.
+ * (binder thread + main scope coroutines). All cache reads/writes go
+ * through `synchronized(lock)`.
  *
  * **Coordinate convention** (verified against `reference_thor_axis_convention.md`):
  *  - Sticks: input range -1.0..+1.0 (per `AnalogEvent`'s contract);
@@ -41,91 +50,89 @@ class ShizukuGamepadInjector @Inject constructor(
 
     private val lock = Any()
 
-    /** Cached state pushed to the UserService each time any slice updates. */
-    private data class GamepadState(
-        var leftX: Int = 0, var leftY: Int = 0,
-        var rightX: Int = 0, var rightY: Int = 0,
-        var leftTrigger: Int = 0, var rightTrigger: Int = 0,
-        var hatX: Int = 0, var hatY: Int = 0,
-    )
+    // Per-source contribution tables. Each map's key is the contributing
+    // [InputSource]; value is the source's most recent (x, y) or scalar.
+    // push() walks each map, sums the contributions, clamps, and writes
+    // the merged value through the UserService.
+    //
+    // Stored as primitive arrays / Floats so cached contributions don't
+    // allocate per event. The arrays are mutated in place under lock; an
+    // entry being absent from a map means "this source isn't contributing
+    // anything to this axis right now" (zero contribution; doesn't appear
+    // in the sum).
+    private val leftStickBySource = mutableMapOf<InputSource, FloatArray>()
+    private val rightStickBySource = mutableMapOf<InputSource, FloatArray>()
+    private val leftTriggerBySource = mutableMapOf<InputSource, Float>()
+    private val rightTriggerBySource = mutableMapOf<InputSource, Float>()
+    private val hatBySource = mutableMapOf<InputSource, IntArray>()
 
-    private val state = GamepadState()
+    override fun setLeftStick(source: InputSource, x: Float, y: Float) {
+        synchronized(lock) {
+            val slot = leftStickBySource.getOrPut(source) { FloatArray(2) }
+            slot[0] = x; slot[1] = y
+        }
+        if (Log.isLoggable(TAG_AXES, Log.VERBOSE)) {
+            Log.v(TAG_AXES, "setLeftStick src=$source x=${"%.3f".format(x)} y=${"%.3f".format(y)}")
+        }
+        push()
+    }
+
+    override fun setRightStick(source: InputSource, x: Float, y: Float) {
+        synchronized(lock) {
+            val slot = rightStickBySource.getOrPut(source) { FloatArray(2) }
+            slot[0] = x; slot[1] = y
+        }
+        if (Log.isLoggable(TAG_AXES, Log.VERBOSE)) {
+            Log.v(TAG_AXES, "setRightStick src=$source x=${"%.3f".format(x)} y=${"%.3f".format(y)}")
+        }
+        push()
+    }
+
+    /** Trigger value in 0.0..1.0 — per-source summed and clamped to 0..1 before push. */
+    override fun setLeftTrigger(source: InputSource, v: Float) {
+        synchronized(lock) { leftTriggerBySource[source] = v }
+        if (Log.isLoggable(TAG_AXES, Log.VERBOSE)) {
+            Log.v(TAG_AXES, "setLeftTrigger src=$source v=${"%.3f".format(v)}")
+        }
+        push()
+    }
+
+    override fun setRightTrigger(source: InputSource, v: Float) {
+        synchronized(lock) { rightTriggerBySource[source] = v }
+        if (Log.isLoggable(TAG_AXES, Log.VERBOSE)) {
+            Log.v(TAG_AXES, "setRightTrigger src=$source v=${"%.3f".format(v)}")
+        }
+        push()
+    }
+
+    /** Dpad hat — pass -1, 0, or 1 per axis; per-source summed and clamped. */
+    override fun setDpadHat(source: InputSource, x: Int, y: Int) {
+        synchronized(lock) {
+            val slot = hatBySource.getOrPut(source) { IntArray(2) }
+            slot[0] = x.coerceIn(-1, 1); slot[1] = y.coerceIn(-1, 1)
+        }
+        if (Log.isLoggable(TAG_AXES, Log.VERBOSE)) {
+            Log.v(TAG_AXES, "setDpadHat src=$source x=$x y=$y")
+        }
+        push()
+    }
 
     /**
-     * Set the left stick's contribution. `(x, y)` are normalized -1.0..+1.0
-     * with `+y = down`. Pushed to the UserService along with the rest of
-     * the cached gamepad state. No-op when Shizuku isn't ready (caller
-     * should expect this and surface degradation upstream if needed).
-     */
-    override fun setLeftStick(x: Float, y: Float) {
-        synchronized(lock) {
-            state.leftX = floatToInt16(x)
-            state.leftY = floatToInt16(y)
-        }
-        push()
-    }
-
-    override fun setRightStick(x: Float, y: Float) {
-        synchronized(lock) {
-            state.rightX = floatToInt16(x)
-            state.rightY = floatToInt16(y)
-        }
-        push()
-    }
-
-    /** Trigger value in 0.0..1.0 mapped to 0..255. */
-    override fun setLeftTrigger(v: Float) {
-        synchronized(lock) { state.leftTrigger = floatToTrigger(v) }
-        push()
-    }
-
-    override fun setRightTrigger(v: Float) {
-        synchronized(lock) { state.rightTrigger = floatToTrigger(v) }
-        push()
-    }
-
-    /** Dpad hat — pass -1, 0, or 1 per axis. */
-    override fun setDpadHat(x: Int, y: Int) {
-        synchronized(lock) {
-            state.hatX = x.coerceIn(-1, 1)
-            state.hatY = y.coerceIn(-1, 1)
-        }
-        push()
-    }
-
-    /**
-     * Reset a source's contribution to zero. Called when an analog source
-     * transitions out of a gamepad-emitting mode (e.g. user picks Joystick
-     * Mouse on the LJ — the LJ's leftX/leftY slot must zero out so a
-     * residual deflection doesn't leak into the virtual gamepad).
+     * Remove [source]'s contribution from every axis it could be driving.
+     * Sources are pre-classified by what they typically drive
+     * (LEFT_JOYSTICK → leftStick, GYRO → either stick depending on mode,
+     * etc.); doing the full sweep is cheap (a handful of map removals) and
+     * correct regardless of which axes the source was actively contributing
+     * to.
      */
     override fun clearSource(source: InputSource) {
         var changed = false
         synchronized(lock) {
-            when (source) {
-                InputSource.LEFT_JOYSTICK -> {
-                    if (state.leftX != 0 || state.leftY != 0) {
-                        state.leftX = 0; state.leftY = 0; changed = true
-                    }
-                }
-                InputSource.RIGHT_JOYSTICK -> {
-                    if (state.rightX != 0 || state.rightY != 0) {
-                        state.rightX = 0; state.rightY = 0; changed = true
-                    }
-                }
-                InputSource.LEFT_TRIGGER -> {
-                    if (state.leftTrigger != 0) { state.leftTrigger = 0; changed = true }
-                }
-                InputSource.RIGHT_TRIGGER -> {
-                    if (state.rightTrigger != 0) { state.rightTrigger = 0; changed = true }
-                }
-                InputSource.DPAD -> {
-                    if (state.hatX != 0 || state.hatY != 0) {
-                        state.hatX = 0; state.hatY = 0; changed = true
-                    }
-                }
-                else -> Unit
-            }
+            if (leftStickBySource.remove(source) != null) changed = true
+            if (rightStickBySource.remove(source) != null) changed = true
+            if (leftTriggerBySource.remove(source) != null) changed = true
+            if (rightTriggerBySource.remove(source) != null) changed = true
+            if (hatBySource.remove(source) != null) changed = true
         }
         if (changed) push()
     }
@@ -144,26 +151,66 @@ class ShizukuGamepadInjector @Inject constructor(
     private fun push() {
         if (!shizukuConnection.isReadyFlow.value) return
         val service = shizukuConnection.service.value ?: return
-        val snapshot = synchronized(lock) { state.copy() }
+
+        // Snapshot + sum under lock so per-source updates from concurrent
+        // mutators don't tear the merged result.
+        val merged = synchronized(lock) {
+            var lx = 0f; var ly = 0f
+            for (v in leftStickBySource.values) { lx += v[0]; ly += v[1] }
+            var rx = 0f; var ry = 0f
+            for (v in rightStickBySource.values) { rx += v[0]; ry += v[1] }
+            var lt = 0f
+            for (v in leftTriggerBySource.values) lt += v
+            var rt = 0f
+            for (v in rightTriggerBySource.values) rt += v
+            var hx = 0; var hy = 0
+            for (v in hatBySource.values) { hx += v[0]; hy += v[1] }
+            MergedAxes(
+                leftX = floatToInt16(lx),
+                leftY = floatToInt16(ly),
+                rightX = floatToInt16(rx),
+                rightY = floatToInt16(ry),
+                leftTrigger = floatToTrigger(lt),
+                rightTrigger = floatToTrigger(rt),
+                hatX = hx.coerceIn(-1, 1),
+                hatY = hy.coerceIn(-1, 1),
+            )
+        }
         try {
             service.setGamepadAxes(
-                snapshot.leftX, snapshot.leftY,
-                snapshot.rightX, snapshot.rightY,
-                snapshot.leftTrigger, snapshot.rightTrigger,
-                snapshot.hatX, snapshot.hatY,
+                merged.leftX, merged.leftY,
+                merged.rightX, merged.rightY,
+                merged.leftTrigger, merged.rightTrigger,
+                merged.hatX, merged.hatY,
             )
         } catch (t: Throwable) {
             Log.w(TAG, "setGamepadAxes threw", t)
         }
     }
 
-    /** Map -1.0..+1.0 to -32768..+32767 with rounding. */
+    /** Snapshot of the summed-and-clamped axis values pushed to the kernel. */
+    private data class MergedAxes(
+        val leftX: Int, val leftY: Int,
+        val rightX: Int, val rightY: Int,
+        val leftTrigger: Int, val rightTrigger: Int,
+        val hatX: Int, val hatY: Int,
+    )
+
+    /** Map -1.0..+1.0 to -32768..+32767 with rounding. Clamps before mapping. */
     private fun floatToInt16(v: Float): Int =
         (v.coerceIn(-1f, 1f) * 32767f).roundToInt().coerceIn(-32768, 32767)
 
-    /** Map 0.0..1.0 to 0..255 with rounding. */
+    /** Map 0.0..1.0 to 0..255 with rounding. Clamps before mapping. */
     private fun floatToTrigger(v: Float): Int =
         (v.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
 
-    companion object { private const val TAG = "ShizukuGamepadInjector" }
+    companion object {
+        private const val TAG = "ShizukuGamepadInjector"
+        // Distinct tag for per-event verbose axis logging so it can be
+        // filtered independently from the bind/error stream. Matches the
+        // "Motion" tag-suffix pattern used by [InputEvaluator] for the
+        // same reason. Enable with:
+        //   adb shell setprop log.tag.ShizukuGamepadInjector.Axes VERBOSE
+        private const val TAG_AXES = "ShizukuGamepadInjector.Axes"
+    }
 }

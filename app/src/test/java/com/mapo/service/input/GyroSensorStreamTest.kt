@@ -45,6 +45,14 @@ class GyroSensorStreamTest {
         }
         inputEvaluator = mockk(relaxed = true)
         every { context.getSystemService(Context.SENSOR_SERVICE) } returns sensorManager
+        // Default: no rotation-vector sensor — these tests focus on gyro
+        // lifecycle. Tests that exercise the tilt-companion path stub these
+        // to non-null Sensors explicitly. Without these defaults the
+        // `relaxed = true` mock would return a stub Sensor for both, and
+        // `start()`'s second `registerListener` (for rotation) would
+        // double the "register count" the lifecycle assertions check.
+        every { sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR) } returns null
+        every { sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) } returns null
     }
 
     @After

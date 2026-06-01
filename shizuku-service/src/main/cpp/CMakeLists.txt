@@ -18,7 +18,15 @@ project("mapo_uinput")
 #                         taking advantage of Wine treating stylus tool-type
 #                         as absolute (vs. the relative model it uses for
 #                         finger touch + REL mouse). Brick C.4 follow-up.
-add_library(mapo_uinput SHARED uinput.c uinput_gamepad.c uinput_stylus.c)
+#  - evdev.c            — ioctl ops on /dev/input/event* devices (READ side,
+#                         not uinput WRITE side). Currently just EVIOCGRAB
+#                         for taking exclusive access to physical
+#                         controllers so the OS InputReader stops
+#                         dispatching their events to games while Mapo
+#                         routes them through its virtual gamepad
+#                         (resolves the dual-controller race when gyro
+#                         stick modes are active).
+add_library(mapo_uinput SHARED uinput.c uinput_gamepad.c uinput_stylus.c evdev.c)
 
 find_library(log-lib log)
 target_link_libraries(mapo_uinput ${log-lib})

@@ -99,7 +99,7 @@ sealed class BindingOutput {
 
 /** One-line display label for a binding output, suitable for trailing row text. */
 fun BindingOutput.displayLabel(): String = when (this) {
-    BindingOutput.Unbound          -> "— Unbound —"
+    BindingOutput.Unbound          -> "(Device default)"
     is BindingOutput.KeyPress      -> "KB: $keyCode"
     is BindingOutput.XInputButton  -> "GP: $button"
     is BindingOutput.MouseButton   -> "MS: $button"

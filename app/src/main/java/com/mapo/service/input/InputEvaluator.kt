@@ -274,6 +274,63 @@ class InputEvaluator @Inject constructor(
         }
     }
 
+    /**
+     * Snapshot of the active mode per gamepad-emitting source, used to detect
+     * mode changes across compile-config emissions. When a source's mode
+     * changes (e.g. user switches Gyro from Joystick Deflection to Mouse),
+     * that source's contribution to the virtual gamepad — and any
+     * stateful-mode bookkeeping (Deflection's reference orientation,
+     * DpadMode's gyro integrator) — has to be cleared so the new mode
+     * starts clean. Without this, a stick deflection from the prior mode
+     * persists in the gamepad cache and the character keeps moving in the
+     * direction the user had been tilting before switching away.
+     */
+    private val priorModeBySource = mutableMapOf<InputSource, com.mapo.data.model.steam.BindingMode?>()
+
+    init {
+        // Watch compiled config for per-source mode changes. Resets stale
+        // gamepad/mode state on the GAMEPAD_EMITTING_SOURCES axis whenever
+        // any of them flips. Active-set / layer / mode-shift changes all
+        // funnel through compiledConfig too, so layer overrides + mode
+        // shifts get this same cleanup automatically.
+        scope.launch {
+            try {
+                dispatcher.compiledConfig.collect { compiled ->
+                    handleConfigChange(compiled)
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "compiledConfig watcher crashed", t)
+            }
+        }
+    }
+
+    /**
+     * Compare each gamepad-emitting source's current mode against the prior
+     * snapshot. For sources whose mode changed, clear that source's
+     * contribution to the virtual gamepad and reset any per-mode state
+     * (Deflection's captured reference, DpadMode's gyro integrator).
+     * MouseEmitter velocities are scoped per-source via the same key, so
+     * we also zero those.
+     */
+    private fun handleConfigChange(compiled: CompiledConfig) {
+        val startingSetId = compiled.startingActionSetId
+        val set = compiled.sets[startingSetId] ?: return
+        for (source in GAMEPAD_EMITTING_SOURCES) {
+            val current = set.inputs.entries.firstOrNull { it.key.source == source }?.value?.mode
+            val prior = priorModeBySource[source]
+            if (priorModeBySource.containsKey(source) && prior != current) {
+                Log.i(TAG, "mode change on $source: $prior → $current — clearing stale gamepad/mouse state")
+                gamepadEmitter.clearSource(source)
+                mouseEmitter.setStickVelocity(source, 0f, 0f)
+                if (source == InputSource.GYRO) {
+                    com.mapo.service.input.modes.GyroToJoystickDeflectionMode.resetState()
+                    com.mapo.service.input.modes.DpadMode.resetState()
+                }
+            }
+            priorModeBySource[source] = current
+        }
+    }
+
     private fun stateFor(id: Long): ActivatorRuntimeState =
         activatorState.getOrPut(id) { ActivatorRuntimeState() }
 
@@ -546,22 +603,33 @@ class InputEvaluator @Inject constructor(
     private fun dispatchReadings(readings: List<AnalogEvent>) {
         val set = resolveActiveSet() ?: return
         for (reading in readings) {
-            val resolved = findSourceModeFor(set, reading.source) ?: continue
+            val resolved = findSourceModeFor(set, reading.source)
             // Physical passthrough — when Mapo has EVIOCGRAB held on the
             // physical controller (Brick D EVIOCGRAB follow-up), the OS
             // can't dispatch the controller's events natively. To preserve
             // DEVICE_DEFAULT behavior, route the analog reading directly to
             // the virtual gamepad as a verbatim passthrough.
             //
+            // `resolved == null` is treated as DEVICE_DEFAULT here too:
+            // the compile path deliberately omits DEVICE_DEFAULT sources
+            // from the inputs map (per CompiledConfig.compileInputs: "no
+            // entry needed for the 'Mapo doesn't intercept' case"), so a
+            // null resolve IS the DEVICE_DEFAULT signal for analog sources.
+            // Without this branch, triggers — which default to
+            // DEVICE_DEFAULT and are therefore absent from the inputs
+            // map — would have their analog axis values dropped on the
+            // floor under grab, leaving the game with no trigger input.
+            //
             // Skipped when not grabbed because in normal operation the OS
             // already handles DEVICE_DEFAULT pass-through; double-writing
             // to the virtual gamepad would just compete with the OS.
             if (physicalPassthroughEnabled.get() &&
-                resolved.mode == com.mapo.data.model.steam.BindingMode.DEVICE_DEFAULT
+                (resolved == null || resolved.mode == com.mapo.data.model.steam.BindingMode.DEVICE_DEFAULT)
             ) {
                 passthroughAnalogToGamepad(reading)
                 continue
             }
+            if (resolved == null) continue
             val handler = resolved.mode.handler()
             // Priors slice — only this source's virtual sub-input latch state.
             val priors = analogLatched.entries

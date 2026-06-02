@@ -36,7 +36,7 @@ sealed class RemapTarget {
 }
 
 fun RemapTarget.displayLabel(): String = when (this) {
-    is RemapTarget.Unbound  -> "[Device default]"
+    is RemapTarget.Unbound  -> "(Device default)"
     is RemapTarget.Gamepad  -> "GP: $button"
     is RemapTarget.Keyboard -> "KB: $code"
     is RemapTarget.Mouse    -> "MS: $code"

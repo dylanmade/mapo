@@ -201,7 +201,7 @@ fun BindingMode.displayNameFor(source: InputSource): String = when {
  * `Trigger (Digital)`) should call [displayNameFor] instead.
  */
 fun BindingMode.displayName(): String = when (this) {
-    BindingMode.DEVICE_DEFAULT -> "[Device Default]"
+    BindingMode.DEVICE_DEFAULT -> "(Device default)"
     BindingMode.NONE -> "None"
     BindingMode.SINGLE_BUTTON -> "Single Button"
     BindingMode.BUTTON_PAD -> "Button Pad"

@@ -181,8 +181,12 @@ class GyroToJoystickModesTest {
     @Test
     fun deflection_tiltFromReference_drivesLeftStickProportionally() {
         // Reference captured at (roll=0.5, pitch=-0.3). User tilts by +0.1
-        // roll and +0.2 pitch → delta (0.1, 0.2). With sensitivity 5.0:
-        // ax = 0.1 × 5.0 = 0.5; ay = 0.2 × 5.0 = 1.0 (clamped).
+        // roll and +0.2 pitch (relative to ref). With sensitivity 5.0:
+        // ax = 0.1 × 5.0 = 0.5
+        // The pitch axis has a built-in -1 sign correction (user-verified
+        // on AYN Thor 2026-06-01: raw pitch passthrough drove the stick
+        // BACKWARD on forward tilt). With the correction:
+        // ay = -(0.2) × 5.0 = -1.0 (clamped from -1.0 already)
         val ctx = ctx(GyroToJoystickDeflectionMode.defaultSettingsJson())
         GyroToJoystickDeflectionMode.evaluate(
             tiltReading(rollRad = 0.5f, pitchRad = -0.3f), ctx, digitalEmit, mouse,
@@ -192,7 +196,7 @@ class GyroToJoystickModesTest {
         )
         val (_, ax, ay) = gamepad.leftStickCalls.last()
         assertEquals(0.5f, ax, EPSILON)
-        assertEquals(1.0f, ay, EPSILON)
+        assertEquals(-1.0f, ay, EPSILON)
     }
 
     @Test
@@ -216,6 +220,9 @@ class GyroToJoystickModesTest {
     fun deflection_largeTilt_clampsToUnitDeflection() {
         // Tilt 0.5 rad (~29°) past reference. With sensitivity 5.0 → 2.5
         // pre-clamp → clamped to 1.0. Saturates above ~12° of tilt.
+        // Pitch axis is sign-corrected (forward tilt = forward move), so
+        // a pitch reading of -0.5 vs reference of 0 → corrected delta is
+        // +0.5 → ay clamps to +1.0 (not -1.0).
         val ctx = ctx(GyroToJoystickDeflectionMode.defaultSettingsJson())
         GyroToJoystickDeflectionMode.evaluate(
             tiltReading(rollRad = 0f, pitchRad = 0f), ctx, digitalEmit, mouse,
@@ -225,7 +232,7 @@ class GyroToJoystickModesTest {
         )
         val (_, ax, ay) = gamepad.leftStickCalls.last()
         assertEquals(1.0f, ax, EPSILON)
-        assertEquals(-1.0f, ay, EPSILON)
+        assertEquals(1.0f, ay, EPSILON)
     }
 
     @Test

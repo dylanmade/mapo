@@ -1175,7 +1175,14 @@ object GyroToJoystickDeflectionMode : SourceMode {
             return
         }
         val deltaRoll = reading.tiltRollRad - ref[0]
-        val deltaPitch = reading.tiltPitchRad - ref[1]
+        // Built-in -1 sign correction on the pitch axis. User-verified on
+        // AYN Thor 2026-06-01: tilting the device forward (top edge dips
+        // toward player) drove the left stick BACKWARD — opposite of
+        // player intent. Inverting the delta lines it up: forward tilt →
+        // forward move. The roll axis was empirically correct without a
+        // flip. `invert_y` on the settings continues to layer on top as a
+        // user-preference toggle inside `toAxis`.
+        val deltaPitch = ref[1] - reading.tiltPitchRad
         // Feed the delta to the shared toAxis math. Units shift from
         // "deflection per rad/sec" (rate) to "deflection per rad of tilt"
         // (angle); the new DEFLECTION_DEFAULTS sensitivity (5.0) targets
@@ -1738,6 +1745,15 @@ fun validInputsFor(source: InputSource, mode: BindingMode): Set<String> = when (
         BindingMode.SINGLE_BUTTON -> setOf("click")
         else -> mode.handler().validInputs()
     }
+    // Switches (Start / Select / back paddles) gained dropdowns 2026-06-01.
+    // SINGLE_BUTTON surfaces a bindable "click" sub-input; DEVICE_DEFAULT /
+    // NONE / any other mode get nothing (the source passes through or is
+    // silenced at the source-mode level, not per sub-input).
+    InputSource.SWITCH_START, InputSource.SWITCH_SELECT,
+    InputSource.SWITCH_BACK_LEFT, InputSource.SWITCH_BACK_RIGHT -> when (mode) {
+        BindingMode.SINGLE_BUTTON -> setOf("click")
+        else -> mode.handler().validInputs()
+    }
     InputSource.GYRO -> when (mode) {
         BindingMode.DPAD -> DPAD_DIRECTIONS
         BindingMode.DIRECTIONAL_SWIPE -> DPAD_DIRECTIONS
@@ -1850,9 +1866,20 @@ object SourceModeCatalog {
             BindingMode.TOUCH_MENU,
             BindingMode.HOTBAR_MENU,
         )
-        // Switches (Start/Select/Back paddles) and trackpads — no dropdown.
-        // Switches per Steam can't be mode-shifted; trackpads aren't on Mapo's
-        // target hardware. The picker UI hides itself for empty lists.
+        // Switches gained a dropdown 2026-06-01 — Steam-parity divergence,
+        // because Mapo's EVIOCGRAB pipeline needs DEVICE_DEFAULT as an
+        // explicit user choice (Steam doesn't grab the controller, so its
+        // switches get OS pass-through for free). Same 3-option shape as
+        // bumpers. Back paddles included for the same reason even though
+        // the seed table doesn't ship them yet.
+        InputSource.SWITCH_START, InputSource.SWITCH_SELECT,
+        InputSource.SWITCH_BACK_LEFT, InputSource.SWITCH_BACK_RIGHT -> listOf(
+            BindingMode.DEVICE_DEFAULT,
+            BindingMode.NONE,
+            BindingMode.SINGLE_BUTTON,
+        )
+        // Trackpads aren't on Mapo's target hardware. The picker UI hides
+        // itself for empty lists.
         else -> emptyList()
     }
 }

@@ -109,6 +109,16 @@ object RemapSections {
         InputSource.LEFT_JOYSTICK,
         InputSource.RIGHT_JOYSTICK,
         InputSource.GYRO,
+        // 2026-06-01 — bumpers + switches gained per-source mode dropdowns
+        // (DEVICE_DEFAULT / NONE / SINGLE_BUTTON) so users can opt into
+        // remap mode after the seed default flipped to DEVICE_DEFAULT.
+        // Each source now has its own subheader so the dropdown anchors
+        // correctly (a combined "Bumpers" header has no inputSource and
+        // can't drive a per-source picker).
+        InputSource.LEFT_BUMPER,
+        InputSource.RIGHT_BUMPER,
+        InputSource.SWITCH_START,
+        InputSource.SWITCH_SELECT,
     )
 
     val contentBySection: Map<String, List<RemapPaneItem>> = mapOf(
@@ -116,14 +126,17 @@ object RemapSections {
             // Face buttons: rows generated dynamically per current mode (BUTTON_PAD →
             // A/B/X/Y; DPAD → A/B/X/Y mapped to directions; etc.).
             RemapPaneItem.Subheader("buttons.face.header", "Face Buttons", InputSource.BUTTON_DIAMOND),
-            // Bumpers + Menu Buttons span multiple sources, each individually
-            // SINGLE_BUTTON — no mode choice to surface here, so the rows stay static.
-            RemapPaneItem.Subheader("buttons.bumpers.header", "Bumpers"),
-            RemapPaneItem.BindingRow("buttons.bumpers.l1", "L1", InputSource.LEFT_BUMPER, "click"),
-            RemapPaneItem.BindingRow("buttons.bumpers.r1", "R1", InputSource.RIGHT_BUMPER, "click"),
-            RemapPaneItem.Subheader("buttons.menu.header", "Menu Buttons"),
-            RemapPaneItem.BindingRow("buttons.menu.start", "Start", InputSource.SWITCH_START, "click"),
-            RemapPaneItem.BindingRow("buttons.menu.select", "Select", InputSource.SWITCH_SELECT, "click"),
+            // Bumpers + switches each get their own subheader anchored to the
+            // specific InputSource so the mode dropdown can surface DEVICE_DEFAULT
+            // / NONE / SINGLE_BUTTON (added 2026-06-01). Sub-input rows ("click")
+            // generate dynamically via expandWithDynamicBaseRows the same way
+            // every other mode-aware source does — the row only appears under
+            // SINGLE_BUTTON mode; DEVICE_DEFAULT hides it (the source is passing
+            // through to the OS / virtual gamepad and there's nothing to bind).
+            RemapPaneItem.Subheader("buttons.bumper.left.header", "Left Bumper (L1)", InputSource.LEFT_BUMPER),
+            RemapPaneItem.Subheader("buttons.bumper.right.header", "Right Bumper (R1)", InputSource.RIGHT_BUMPER),
+            RemapPaneItem.Subheader("buttons.menu.start.header", "Start", InputSource.SWITCH_START),
+            RemapPaneItem.Subheader("buttons.menu.select.header", "Select", InputSource.SWITCH_SELECT),
         ),
         SECTION_DPAD to listOf(
             // Dpad source rows: dynamic per mode. DPAD/BUTTON_PAD modes surface the

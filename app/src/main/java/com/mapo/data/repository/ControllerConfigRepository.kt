@@ -221,10 +221,54 @@ class ControllerConfigRepository @Inject constructor(
             }
             retrofittedAny = true
         }
-        if (retrofittedAny) {
+        val flippedAny = migrateBumperSwitchToDeviceDefault()
+        if (retrofittedAny || flippedAny) {
             // Bump the dirty tick so any live config subscriber refreshes.
             configDirtyTick.value = configDirtyTick.value + 1
         }
+    }
+
+    /**
+     * 2026-06-01 destructive migration — flip every bumper / switch
+     * binding_group in `SINGLE_BUTTON` mode to `DEVICE_DEFAULT`. The seed
+     * defaults moved from SINGLE_BUTTON+UNBOUND-click to DEVICE_DEFAULT,
+     * and pre-release users who hit the old seed shouldn't be left with
+     * silent bumpers/Start/Select under EVIOCGRAB.
+     *
+     * **Destructive note:** if a user had bound the click sub-input to
+     * something useful (e.g., L1 → ENTER remap), this migration drops
+     * back to DEVICE_DEFAULT and the binding becomes inert until they
+     * switch the source back to SINGLE_BUTTON in the picker. Sanctioned
+     * by the user under pre-release tolerance + the explicit "feel free
+     * to destructively transition" instruction.
+     *
+     * Idempotent — re-runs are no-ops because there's nothing left in
+     * SINGLE_BUTTON mode after the first sweep.
+     */
+    private suspend fun migrateBumperSwitchToDeviceDefault(): Boolean {
+        val targetSources = setOf(
+            InputSource.LEFT_BUMPER,
+            InputSource.RIGHT_BUMPER,
+            InputSource.SWITCH_START,
+            InputSource.SWITCH_SELECT,
+        )
+        val sets = actionSetDao.getAll()
+        if (sets.isEmpty()) return false
+        val presets = presetBindingDao.getByActionSets(sets.map { it.id })
+            .filter { it.state == "active" && it.inputSource in targetSources }
+        var flipped = false
+        for (preset in presets) {
+            val group = bindingGroupDao.getById(preset.bindingGroupId) ?: continue
+            if (group.mode != BindingMode.SINGLE_BUTTON) continue
+            bindingGroupDao.update(group.copy(mode = BindingMode.DEVICE_DEFAULT))
+            flipped = true
+            android.util.Log.i(
+                "ControllerConfigRepo",
+                "migrateBumperSwitchToDeviceDefault: flipped group ${group.id} " +
+                    "(${preset.inputSource}) from SINGLE_BUTTON → DEVICE_DEFAULT",
+            )
+        }
+        return flipped
     }
 
     /**
@@ -1288,11 +1332,20 @@ class ControllerConfigRepository @Inject constructor(
                 "dpad", BindingMode.DEVICE_DEFAULT,
                 listOf("dpad_up", "dpad_down", "dpad_left", "dpad_right"),
             ),
+            // 2026-06-01: bumpers default to DEVICE_DEFAULT — out of the box
+            // Mapo doesn't intercept, so a pristine install behaves like a
+            // normal hardware controller (the OS dispatches BTN_TL / BTN_TR
+            // directly, and under EVIOCGRAB the passthrough path forwards
+            // them through the virtual gamepad). Users who want a remap pick
+            // SINGLE_BUTTON in the source picker, which re-surfaces the
+            // "click" sub-input row for binding. Pre-2026-06-01 the seed
+            // shipped SINGLE_BUTTON + UNBOUND click, which made bumpers
+            // silent under grab — a real UX gotcha.
             InputSource.LEFT_BUMPER to InputSourceSeed(
-                "left_bumper", BindingMode.SINGLE_BUTTON, listOf("click"),
+                "left_bumper", BindingMode.DEVICE_DEFAULT, listOf("click"),
             ),
             InputSource.RIGHT_BUMPER to InputSourceSeed(
-                "right_bumper", BindingMode.SINGLE_BUTTON, listOf("click"),
+                "right_bumper", BindingMode.DEVICE_DEFAULT, listOf("click"),
             ),
             // Triggers carry two sub-inputs: "full_pull" (hardware threshold —
             // KEYCODE_BUTTON_L2 / R2) and "soft_pull" (analog soft-pull,
@@ -1311,11 +1364,19 @@ class ControllerConfigRepository @Inject constructor(
             InputSource.RIGHT_JOYSTICK to InputSourceSeed(
                 "right_joystick", BindingMode.DEVICE_DEFAULT, listOf("click", "outer_ring"),
             ),
+            // 2026-06-01: switches default to DEVICE_DEFAULT for the same
+            // reason as bumpers — Start / Select should "just work" out of
+            // the box. The SourceModeCatalog gained a dropdown for these
+            // sources at the same time so users can opt into SINGLE_BUTTON
+            // mode if they want a remap. Steam-parity divergence
+            // intentional: Steam hides the switch picker entirely, but
+            // Steam doesn't EVIOCGRAB the controller either, so users
+            // there get OS pass-through for free.
             InputSource.SWITCH_START to InputSourceSeed(
-                "switch_start", BindingMode.SINGLE_BUTTON, listOf("click"),
+                "switch_start", BindingMode.DEVICE_DEFAULT, listOf("click"),
             ),
             InputSource.SWITCH_SELECT to InputSourceSeed(
-                "switch_select", BindingMode.SINGLE_BUTTON, listOf("click"),
+                "switch_select", BindingMode.DEVICE_DEFAULT, listOf("click"),
             ),
             // Gyro: no sub-inputs (gyro modes emit continuous output, not
             // bindable directional rows). Picker on the subheader is what the

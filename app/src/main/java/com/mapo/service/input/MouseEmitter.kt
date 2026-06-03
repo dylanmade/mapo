@@ -191,6 +191,29 @@ class MouseEmitterImpl @Inject constructor(
     @Volatile
     private var instantResidualY: Float = 0f
 
+    override fun scheduleSmoothDelta(dx: Float, dy: Float, durationMs: Long) {
+        if (dx == 0f && dy == 0f) return
+        if (durationMs <= 0L) {
+            addRelativeDelta(dx, dy)
+            return
+        }
+        val steps = ((durationMs + STEP_INTERVAL_MS - 1) / STEP_INTERVAL_MS).coerceAtLeast(1L)
+        val perStepDx = dx / steps
+        val perStepDy = dy / steps
+        scope.launch {
+            try {
+                var emitted = 0L
+                while (emitted < steps) {
+                    addRelativeDelta(perStepDx, perStepDy)
+                    emitted++
+                    if (emitted < steps) delay(STEP_INTERVAL_MS)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "scheduleSmoothDelta playout crashed (dx=$dx dy=$dy duration=${durationMs}ms)", t)
+            }
+        }
+    }
+
     override fun addRelativeDelta(dx: Float, dy: Float) {
         if (dx == 0f && dy == 0f) return
         val accumX: Float

@@ -40,6 +40,7 @@ class MouseRegionModeTest {
         }
         override fun clearAllVelocities() {}
         override fun addRelativeDelta(dx: Float, dy: Float) {}
+        override fun scheduleSmoothDelta(dx: Float, dy: Float, durationMs: Long) {}
     }
 
     private val mouse = RecordingEmitter()

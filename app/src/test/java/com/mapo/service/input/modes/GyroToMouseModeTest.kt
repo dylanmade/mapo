@@ -45,6 +45,9 @@ class GyroToMouseModeTest {
         override fun addRelativeDelta(dx: Float, dy: Float) {
             // Not exercised by gyro→mouse; Flick Stick uses it.
         }
+        override fun scheduleSmoothDelta(dx: Float, dy: Float, durationMs: Long) {
+            // Not exercised by gyro→mouse.
+        }
     }
 
     private val mouse = RecordingEmitter()

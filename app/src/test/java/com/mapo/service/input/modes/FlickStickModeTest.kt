@@ -94,14 +94,16 @@ class FlickStickModeTest {
     }
 
     @Test
-    fun firstActiveReading_emitsFullFlickImmediately() {
+    fun firstActiveReading_schedulesSmoothFlickOverFlickTime() {
         // Steam-faithful (verified on Steam Deck by user 2026-06-03): the
-        // flick fires the *full* target angle in one delta at the moment
-        // the stick crosses the activation ring. Push stick right (x=1,
-        // y=0) → target = atan2(1, 0) = π/2. One addRelativeDelta call
-        // with dx = π/2 * velocity ≈ 2356px (at velocity=1500).
+        // flick commits at threshold crossing and plays out over
+        // flick_time via the mouse emitter. We assert the scheduled total
+        // matches `target * velocity` and the duration matches flick_time.
         val dxSlot = slot<Float>()
-        every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
+        val durSlot = slot<Long>()
+        every {
+            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, capture(durSlot))
+        } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),
@@ -111,12 +113,18 @@ class FlickStickModeTest {
         val expectedPx = kotlin.math.PI.toFloat() / 2f *
             FlickStickSettings.DEFAULT_VELOCITY_PX_PER_RAD
         assertEquals(expectedPx, dxSlot.captured, 1f)
+        assertEquals(
+            FlickStickSettings.DEFAULT_FLICK_TIME_MS.toLong(),
+            durSlot.captured,
+        )
     }
 
     @Test
-    fun flickRightward_emitsPositiveDx() {
+    fun flickRightward_schedulesPositiveDx() {
         val dxSlot = slot<Float>()
-        every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
+        every {
+            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
+        } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),
@@ -127,9 +135,11 @@ class FlickStickModeTest {
     }
 
     @Test
-    fun flickLeftward_emitsNegativeDx() {
+    fun flickLeftward_schedulesNegativeDx() {
         val dxSlot = slot<Float>()
-        every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
+        every {
+            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
+        } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = -1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),
@@ -148,15 +158,19 @@ class FlickStickModeTest {
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        verify(exactly = 0) { mouse.addRelativeDelta(neq(0f), any()) }
+        verify(exactly = 0) {
+            mouse.scheduleSmoothDelta(neq(0f), any(), any())
+        }
     }
 
     @Test
-    fun flick180Down_emitsFullPiAngle() {
+    fun flick180Down_schedulesFullPiAngle() {
         // Stick down (x=0, y=+1) → atan2(0, -1) = π → flick is a full
         // 180° turn (Steam-Deck-verified by user 2026-06-03).
         val dxSlot = slot<Float>()
-        every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
+        every {
+            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
+        } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = 0f, y = 1f, timestampMs = 0L),
             ctx = ctx(),
@@ -169,12 +183,14 @@ class FlickStickModeTest {
     }
 
     @Test
-    fun flickPartialAngle_emitsProportionalAmount() {
+    fun flickPartialAngle_schedulesProportionalAmount() {
         // 45° east push → +π/4 flick. Confirms the angle-not-just-cardinal
         // observation: a 45° flick produces a 45° turn (user-verified on
         // Steam Deck 2026-06-03).
         val dxSlot = slot<Float>()
-        every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
+        every {
+            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
+        } returns Unit
         // (x, y) = (sin(π/4), -cos(π/4)) = (0.707, -0.707) — stick pointing
         // up-and-to-the-right at 45° from screen-up.
         FlickStickMode.evaluate(
@@ -188,27 +204,120 @@ class FlickStickModeTest {
         assertEquals(expectedPx, dxSlot.captured, 1f)
     }
 
-    // ── HOLDING phase ────────────────────────────────────────────────────────
-
     @Test
-    fun holdPhase_emitsDeltaProportionalToStickRotation() {
-        // First event fires the flick to +π/2 and transitions to HOLDING
-        // with lastStickAngle = +π/2. Second event rotates stick CW
-        // (toward "down"): atan2(0.707, -0.707) → wait, that's NW. We want
-        // (x=0.707, y=+0.707) = SE which is atan2(0.707, -0.707)... hmm
-        // let me re-check. With y-down convention, "down-and-to-the-right"
-        // is (x=+0.707, y=+0.707). atan2(0.707, -0.707) = 3π/4. So delta
-        // from +π/2 to 3π/4 is +π/4 > 0 → positive dx.
+    fun activation_doesNotCall_addRelativeDelta_anymore() {
+        // Regression guard: the prior instant-snap model fired the flick
+        // through addRelativeDelta. The Steam-parity model schedules via
+        // scheduleSmoothDelta instead — addRelativeDelta is only used by
+        // the hold-phase emissions now.
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
+        verify(exactly = 0) { mouse.addRelativeDelta(any(), any()) }
+    }
+
+    @Test
+    fun holdPhase_isLockedOut_duringFlickTimeWindow() {
+        // The reported "bounce-back" artifact: when the user's stick angle
+        // drifts during the finish of their push (e.g. activation at 89°,
+        // stabilizes at 95°), hold-phase rotation must NOT fire while the
+        // flick is still resolving.
+        every {
+            mouse.scheduleSmoothDelta(any(), any(), any())
+        } returns Unit
+        // Activation at t=0, target = +π/2.
+        FlickStickMode.evaluate(
+            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
+            ctx = ctx(),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        // 50ms in, still inside the 100ms flick_time window — stick has
+        // drifted by ~5°. Hold-phase MUST NOT emit.
+        FlickStickMode.evaluate(
+            reading = reading(x = 0.996f, y = 0.087f, timestampMs = 50L),
+            ctx = ctx(),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        verify(exactly = 0) { mouse.addRelativeDelta(any(), any()) }
+    }
+
+    @Test
+    fun holdPhase_baselinesAtCurrentAngle_afterLockoutEnds() {
+        // Right after the lockout, the next stick reading re-baselines
+        // lastStickAngleRad without emitting (so post-lockout hold-phase
+        // measures intentional rotation from where the stick *currently
+        // is*, not from the activation target). Subsequent reading then
+        // emits a delta relative to the settled baseline.
+        every {
+            mouse.scheduleSmoothDelta(any(), any(), any())
+        } returns Unit
+        // Activation: target +π/2 at t=0.
+        FlickStickMode.evaluate(
+            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
+            ctx = ctx(),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        // After lockout (t > 100ms): stick has drifted to ~105°. The
+        // settle pass must NOT emit a delta from 90° → 105°.
+        FlickStickMode.evaluate(
+            reading = reading(x = 0.966f, y = 0.259f, timestampMs = 150L),
+            ctx = ctx(),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        verify(exactly = 0) { mouse.addRelativeDelta(any(), any()) }
+
+        // Next read: stick continues to rotate (intentional this time) →
+        // the delta from the settled baseline should emit.
+        val dxSlot = slot<Float>()
+        every {
+            mouse.addRelativeDelta(capture(dxSlot), 0f)
+        } returns Unit
+        FlickStickMode.evaluate(
+            reading = reading(x = 0.866f, y = 0.5f, timestampMs = 160L),  // ~120°
+            ctx = ctx(),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        assertTrue(
+            "post-settle rotation should emit a hold-phase delta",
+            dxSlot.captured > 0f,
+        )
+    }
+
+    // ── HOLDING phase ────────────────────────────────────────────────────────
+
+    @Test
+    fun holdPhase_emitsDeltaProportionalToStickRotation() {
+        // After activation at t=0, the lockout runs through t=100ms.
+        // The first post-lockout event re-baselines the angle (no emit).
+        // The next event past that emits a delta relative to the settled
+        // baseline.
+        every { mouse.scheduleSmoothDelta(any(), any(), any()) } returns Unit
+        FlickStickMode.evaluate(
+            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
+            ctx = ctx(),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        // Settle pass at t=110ms: lastStickAngleRad re-baselined to π/2.
+        FlickStickMode.evaluate(
+            reading = reading(x = 1f, y = 0f, timestampMs = 110L),
+            ctx = ctx(),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        // CW rotation from +π/2 toward +3π/4 (stick = (0.707, +0.707)).
         val dxSlot = slot<Float>()
         every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
         FlickStickMode.evaluate(
-            reading = reading(x = 0.707f, y = 0.707f, timestampMs = 10L),
+            reading = reading(x = 0.707f, y = 0.707f, timestampMs = 120L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
@@ -218,17 +327,25 @@ class FlickStickModeTest {
 
     @Test
     fun holdPhase_oppositeRotationEmitsNegativeDx() {
+        every { mouse.scheduleSmoothDelta(any(), any(), any()) } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        // Rotate CCW from +π/2 (east) toward +π/4 (NE): stick (0.707, -0.707).
+        // Settle pass past lockout.
+        FlickStickMode.evaluate(
+            reading = reading(x = 1f, y = 0f, timestampMs = 110L),
+            ctx = ctx(),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        // CCW rotation from +π/2 toward +π/4 (stick = (0.707, -0.707)).
         val dxSlot = slot<Float>()
         every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
         FlickStickMode.evaluate(
-            reading = reading(x = 0.707f, y = -0.707f, timestampMs = 10L),
+            reading = reading(x = 0.707f, y = -0.707f, timestampMs = 120L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
@@ -238,6 +355,10 @@ class FlickStickModeTest {
 
     @Test
     fun releaseToCenter_resetsState_nextPushReFlicks() {
+        val dxSlot = slot<Float>()
+        every {
+            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
+        } returns Unit
         // First push → flick to the right and transition to HOLDING.
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
@@ -247,18 +368,15 @@ class FlickStickModeTest {
         )
         // Release to center.
         FlickStickMode.evaluate(
-            reading = reading(x = 0f, y = 0f, timestampMs = 100L),
+            reading = reading(x = 0f, y = 0f, timestampMs = 200L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
         // Second push (leftward) — must re-flick to −π/2, not interpret
-        // as a hold-phase rotation from +π/2 (which would emit +π delta,
-        // i.e. a 180° turn the WRONG way).
-        val dxSlot = slot<Float>()
-        every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
+        // as a hold-phase rotation from +π/2.
         FlickStickMode.evaluate(
-            reading = reading(x = -1f, y = 0f, timestampMs = 200L),
+            reading = reading(x = -1f, y = 0f, timestampMs = 300L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
@@ -276,25 +394,29 @@ class FlickStickModeTest {
     @Test
     fun leftAndRightStick_haveIndependentFlickState() {
         // Left stick flicks right; right stick independently flicks left.
-        // Both fire on first-event activation and must not share state.
+        // Both schedule playouts on first-event activation and must not
+        // share state.
+        val dxCalls = mutableListOf<Float>()
+        every {
+            mouse.scheduleSmoothDelta(any(), 0f, any())
+        } answers {
+            dxCalls += firstArg<Float>()
+        }
         FlickStickMode.evaluate(
             reading = reading(source = InputSource.LEFT_JOYSTICK, x = 1f, y = 0f, timestampMs = 0L),
             ctx = ctx().copy(source = InputSource.LEFT_JOYSTICK),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        val dxSlot = slot<Float>()
-        every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
         FlickStickMode.evaluate(
             reading = reading(source = InputSource.RIGHT_JOYSTICK, x = -1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),  // RIGHT_JOYSTICK
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        assertTrue(
-            "right stick's leftward flick must produce negative dx regardless of left stick's prior state",
-            dxSlot.captured < 0f,
-        )
+        assertEquals("both sticks should schedule independent flick playouts", 2, dxCalls.size)
+        assertTrue("left stick scheduled positive dx", dxCalls[0] > 0f)
+        assertTrue("right stick scheduled negative dx", dxCalls[1] < 0f)
     }
 
     // ── Snap-to-cardinal ─────────────────────────────────────────────────────
@@ -396,7 +518,8 @@ class FlickStickModeTest {
 
     @Test
     fun resetState_clearsPerSourceState() {
-        // Push stick right → flick fires, now in HOLDING.
+        every { mouse.scheduleSmoothDelta(any(), any(), any()) } returns Unit
+        // Push stick right → flick scheduled, now in HOLDING.
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),
@@ -405,11 +528,13 @@ class FlickStickModeTest {
         )
         FlickStickMode.resetState()
         // Without reset, this leftward stick on next event would be
-        // interpreted as a hold-phase rotation from +π/2 → −π/2 (a +π
-        // delta wrap, large positive dx). With reset, NEUTRAL → fresh
-        // flick to −π/2 → expected negative dx.
+        // interpreted as a hold-phase rotation from +π/2 (after lockout).
+        // With reset, the state goes back to NEUTRAL → fresh flick fires
+        // a scheduled playout with negative dx target.
         val dxSlot = slot<Float>()
-        every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
+        every {
+            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
+        } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = -1f, y = 0f, timestampMs = 100L),
             ctx = ctx(),

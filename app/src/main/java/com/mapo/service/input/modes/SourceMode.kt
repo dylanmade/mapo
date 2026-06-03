@@ -188,6 +188,21 @@ interface MouseEmitter {
      */
     fun addRelativeDelta(dx: Float, dy: Float)
 
+    /**
+     * Smoothly emit `(dx, dy)` total pixels over `durationMs`, in small
+     * incremental injections at the same cadence as [setStickVelocity]'s
+     * integration loop. Used by Flick Stick to play out a flick burst
+     * over its `flick_time` window — committed at activation, plays to
+     * completion regardless of subsequent stick state, decoupled from the
+     * caller's event cadence.
+     *
+     * Fire-and-forget per call: each invocation spawns its own playout
+     * coroutine. Multiple concurrent calls' deltas sum naturally at the
+     * uinput layer. `durationMs == 0` falls through to [addRelativeDelta]
+     * (instant emit) so callers don't need to special-case the zero case.
+     */
+    fun scheduleSmoothDelta(dx: Float, dy: Float, durationMs: Long)
+
     companion object {
         /** No-op sink for digital modes and for tests. */
         val NOOP: MouseEmitter = object : MouseEmitter {
@@ -196,6 +211,7 @@ interface MouseEmitter {
             override fun clearStickAbsoluteTarget(source: InputSource) {}
             override fun clearAllVelocities() {}
             override fun addRelativeDelta(dx: Float, dy: Float) {}
+            override fun scheduleSmoothDelta(dx: Float, dy: Float, durationMs: Long) {}
         }
     }
 }
@@ -736,16 +752,21 @@ object JoystickMouseMode : SourceMode {
  *
  * **State machine** per source:
  *  - `NEUTRAL` — stick magnitude < `flick_deadzone`. No output.
- *  - `HOLDING` — stick crossed the activation ring; the flick has already
- *    fired (full target angle emitted in one delta at the crossing
- *    instant). Each subsequent evaluate() emits mouse_dx equal to the
- *    angular delta since the last sample, scaled by `flick_velocity`.
+ *  - `HOLDING` — stick crossed the activation ring; the flick has been
+ *    *committed* and is playing out via the mouse emitter over
+ *    `flick_time` ms. Hold-phase angular-delta emissions are LOCKED OUT
+ *    during this window so the user's finishing-the-push drift isn't
+ *    interpreted as intentional rotation (user-reported bounce-back
+ *    artifact 2026-06-03). After the lockout expires, the first evaluate()
+ *    re-baselines `lastStickAngleRad` to the current stick angle without
+ *    emitting; subsequent evaluates emit hold-phase deltas normally.
  *
  * **Steam parity (verified on Steam Deck by user 2026-06-03):** the flick
- * is committed at threshold-crossing time. What the user does *after*
- * crossing — keeps holding at the edge, drifts back into the live zone,
- * releases immediately — doesn't change the flick amount. The flick equals
- * the angle the stick was pointing AT THE INSTANT it crossed the ring.
+ * is committed at threshold-crossing time and plays out over `flick_time`.
+ * What the user does *after* crossing — keeps holding at the edge, drifts
+ * back into the live zone, releases immediately — doesn't change the flick
+ * amount. The flick equals the angle the stick was pointing AT THE INSTANT
+ * it crossed the ring.
  *
  * **Coordinate convention.** Screen-up is the zero-angle reference, so a
  * stick push straight up = 0 flick, push right = +π/2 flick (clockwise),
@@ -777,6 +798,21 @@ object FlickStickMode : SourceMode {
     private data class State(
         var phase: Phase = Phase.NEUTRAL,
         var lastStickAngleRad: Float = 0f,
+        /**
+         * Timestamp (ms) of the most recent NEUTRAL → HOLDING transition.
+         * Hold-phase emissions are suppressed until
+         * `now - flickActivationMs >= flick_time`. Reset to 0 on return
+         * to NEUTRAL.
+         */
+        var flickActivationMs: Long = 0L,
+        /**
+         * False during the post-activation lockout. Flips true on the first
+         * evaluate() after the lockout expires, at which point we re-baseline
+         * `lastStickAngleRad` to the current stick angle without emitting,
+         * so subsequent hold-phase rotation is measured against where the
+         * stick actually is — not against the flick target angle.
+         */
+        var holdSettled: Boolean = false,
     )
 
     private val stateBySource = mutableMapOf<InputSource, State>()
@@ -806,29 +842,53 @@ object FlickStickMode : SourceMode {
 
         val magnitude = kotlin.math.sqrt(reading.x * reading.x + reading.y * reading.y)
 
-        // Stick neutral → reset state, no output.
+        // Stick neutral → reset state, no output. The flick playout (if
+        // any) continues independently in the MouseEmitter — it was
+        // committed at activation and is uninterruptible by stick state.
         if (magnitude < settings.deadzone) {
             state.phase = Phase.NEUTRAL
+            state.flickActivationMs = 0L
+            state.holdSettled = false
             return
         }
 
         when (state.phase) {
             Phase.NEUTRAL -> {
-                // Threshold crossing: commit the flick at this instant.
-                // The angle the stick is pointing right now IS the flick
-                // amount. atan2(x, -y) gives 0 = up, +π/2 = right, ±π = down,
-                // −π/2 = left. Fire the full delta in one go and transition
-                // straight to HOLDING — no spread-over-time, no waiting on
-                // continued stick deflection. The user's subsequent stick
-                // motion is hold-phase rotation only; the flick is done.
+                // Threshold crossing: commit the flick. atan2(x, -y) gives
+                // 0 = up, +π/2 = right, ±π = down, −π/2 = left. Schedule
+                // the full target * velocity delta to play out over
+                // flick_time ms via the MouseEmitter; we transition
+                // straight to HOLDING with a lockout window so the
+                // user's finishing-the-push drift isn't picked up as
+                // hold-phase rotation while the flick is still resolving.
                 val rawTarget = kotlin.math.atan2(reading.x, -reading.y)
                 val target = settings.snapAngle(rawTarget)
                 val dxPx = target * settings.velocityPxPerRad
-                if (dxPx != 0f) mouse.addRelativeDelta(dxPx, 0f)
+                if (dxPx != 0f) {
+                    mouse.scheduleSmoothDelta(dxPx, 0f, settings.flickTimeMs.toLong())
+                }
                 state.lastStickAngleRad = target
+                state.flickActivationMs = reading.timestampMs
+                state.holdSettled = false
                 state.phase = Phase.HOLDING
             }
             Phase.HOLDING -> {
+                val elapsedMs = reading.timestampMs - state.flickActivationMs
+                if (elapsedMs < settings.flickTimeMs) {
+                    // Lockout window: flick is still playing out. Suppress
+                    // hold-phase emission and don't touch lastStickAngleRad
+                    // — we'll re-baseline at lockout end against whatever
+                    // angle the stick has drifted to.
+                    return
+                }
+                if (!state.holdSettled) {
+                    // First post-lockout evaluate: settle the baseline at
+                    // the current stick angle, emit nothing. Subsequent
+                    // hold-phase rotation is measured against here.
+                    state.lastStickAngleRad = kotlin.math.atan2(reading.x, -reading.y)
+                    state.holdSettled = true
+                    return
+                }
                 val currentAngle = kotlin.math.atan2(reading.x, -reading.y)
                 val delta = angularDelta(state.lastStickAngleRad, currentAngle)
                 state.lastStickAngleRad = currentAngle
@@ -863,13 +923,11 @@ object FlickStickMode : SourceMode {
  * `flick_time`, `flick_deadzone`, `flick_snap_strength`, `flick_snap_mode`,
  * `flick_velocity`, `flick_exponent` — round-trip through this shape.
  *
- * **[flickTimeMs] is currently unused at runtime.** Kept for VDF
- * round-trip with Steam Deck profiles. The Mapo implementation fires the
- * flick in one delta at threshold crossing (Steam-Deck-verified by user
- * 2026-06-03: full flick fires immediately regardless of how long the
- * stick is held at the edge after crossing). If a future smoothing path
- * lands — e.g. spreading the burst across `flick_time` via a coroutine
- * timer decoupled from stick events — this field becomes load-bearing.
+ * **[flickTimeMs]** controls both the flick playout duration (handed to
+ * [MouseEmitter.scheduleSmoothDelta]) AND the hold-phase lockout window
+ * (suppresses angular-delta emission until the flick finishes resolving,
+ * so user's finishing-the-push stick drift doesn't fire as hold-phase
+ * rotation).
  */
 internal data class FlickStickSettings(
     val flickTimeMs: Int,

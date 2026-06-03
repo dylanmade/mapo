@@ -73,6 +73,7 @@ import androidx.compose.ui.graphics.Color
 import com.mapo.data.model.steam.SourceModeShiftGraph
 import com.mapo.service.input.modes.SourceModeCatalog
 import com.mapo.service.input.modes.requiresShizuku
+import com.mapo.service.input.modes.requiresShizukuOnSource
 import com.mapo.ui.component.layout.SectionedListDetailPane
 import com.mapo.ui.screen.remap.RemapPaneItem
 import com.mapo.ui.screen.remap.RemapSections
@@ -122,7 +123,24 @@ fun RemapControlsScreen(
     var pendingAnalogPick by remember { mutableStateOf<Pair<Long, BindingMode>?>(null) }
 
     val gatedSetBindingGroupMode: (Long, BindingMode) -> Unit = { bindingGroupId, mode ->
-        if (mode.requiresShizuku() && !shizukuReady && !shizukuRequiredAcknowledged) {
+        // Resolve the source for this binding group so the gate can be
+        // source-aware: NONE on a stick / trigger / dpad needs Shizuku
+        // (EVIOCGRAB silences); NONE on a button doesn't (handleDigital
+        // silences). Walk both base preset entries and layer-owned binding
+        // groups — either may contain the target group depending on
+        // whether the user's editing the set or a layer overlay.
+        val source: InputSource? = config?.actionSets?.firstNotNullOfOrNull { set ->
+            set.preset.firstOrNull { it.group.group.id == bindingGroupId }?.inputSource
+                ?: set.layers.firstNotNullOfOrNull { layer ->
+                    layer.preset.firstOrNull { it.group.group.id == bindingGroupId }?.inputSource
+                }
+        }
+        val needsShizuku = if (source != null) {
+            mode.requiresShizukuOnSource(source)
+        } else {
+            mode.requiresShizuku()
+        }
+        if (needsShizuku && !shizukuReady && !shizukuRequiredAcknowledged) {
             pendingAnalogPick = bindingGroupId to mode
         } else {
             onSetBindingGroupMode(bindingGroupId, mode)
@@ -151,15 +169,22 @@ fun RemapControlsScreen(
     // when the next overlay session starts.
     if (viewingLayer == null && onlyOverrides) onlyOverrides = false
 
-    // Brick G follow-up: walk the current config for any analog-mode binding.
-    // If one exists AND Shizuku isn't ready, the banner below surfaces the gap
-    // inline — covers the case where the user previously applied analog modes
-    // (so the first-time dialog won't re-fire) and then Shizuku flipped away
-    // from Granted, leaving those bindings silently inert.
+    // Brick G follow-up: walk the current config for any binding whose
+    // (source, mode) pair requires Shizuku. If one exists AND Shizuku isn't
+    // ready, the banner below surfaces the gap inline — covers the case where
+    // the user previously applied an affected mode (so the first-time dialog
+    // won't re-fire) and then Shizuku flipped away from Granted, leaving
+    // those bindings silently inert.
+    //
+    // Source-aware (Brick C.5 follow-up 2026-06-03): NONE on a stick / trigger
+    // / dpad needs Shizuku (EVIOCGRAB silences); NONE on a button doesn't.
+    // The plain `requiresShizuku()` check would miss NONE-on-analog
+    // configurations and the user would have no in-screen signal that their
+    // intended silence isn't actually taking effect.
     val hasAnalogModeInConfig = config?.actionSets?.any { set ->
-        set.preset.any { it.group.group.mode.requiresShizuku() } ||
+        set.preset.any { it.group.group.mode.requiresShizukuOnSource(it.inputSource) } ||
             set.layers.any { layer ->
-                layer.bindingGroups.any { it.group.mode.requiresShizuku() }
+                layer.preset.any { it.group.group.mode.requiresShizukuOnSource(it.inputSource) }
             }
     } == true
 

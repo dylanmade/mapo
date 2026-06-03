@@ -221,20 +221,9 @@ class GyroSensorStream @Inject constructor(
      * — tilt-based Deflection only uses roll + pitch ("tilt to lean").
      */
     private fun updateOrientationCache(event: SensorEvent) {
-        val v = event.values
-        if (v.size < 3) return
-        val qx = v[0]
-        val qy = v[1]
-        val qz = v[2]
-        val qw = if (v.size >= 4) {
-            v[3]
-        } else {
-            val sq = 1f - qx * qx - qy * qy - qz * qz
-            if (sq < 0f) 0f else sqrt(sq)
-        }
-        cachedRollRad = atan2(2f * (qw * qx + qy * qz), 1f - 2f * (qx * qx + qy * qy))
-        // asin's input must be clamped — float noise can push it past ±1.
-        cachedPitchRad = asin((2f * (qw * qy - qz * qx)).coerceIn(-1f, 1f))
+        val rp = quaternionToRollPitch(event.values) ?: return
+        cachedRollRad = rp.first
+        cachedPitchRad = rp.second
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
@@ -248,5 +237,37 @@ class GyroSensorStream @Inject constructor(
         // Compile-time flag; flip to true when chasing a buffer-overflow
         // regression. Keeps the verbose drop log quiet in normal operation.
         private const val BuildLogVerbose = false
+
+        /**
+         * Pure quaternion → (roll, pitch) conversion via the standard
+         * Tait-Bryan ZYX intrinsic formula. Roll is rotation around the
+         * device's X axis, pitch around its Y axis. Returns null if [values]
+         * is missing the minimum three quaternion components.
+         *
+         * The fourth value (w) is optional in some Android versions of the
+         * sensor's value array — `values[3]` may not be present. We
+         * reconstruct it from the unit-quaternion constraint when missing.
+         *
+         * Extracted from [updateOrientationCache] so the math is unit-testable
+         * without constructing a [android.hardware.SensorEvent] (which is
+         * package-private to construct outside the framework).
+         */
+        @androidx.annotation.VisibleForTesting
+        internal fun quaternionToRollPitch(values: FloatArray): Pair<Float, Float>? {
+            if (values.size < 3) return null
+            val qx = values[0]
+            val qy = values[1]
+            val qz = values[2]
+            val qw = if (values.size >= 4) {
+                values[3]
+            } else {
+                val sq = 1f - qx * qx - qy * qy - qz * qz
+                if (sq < 0f) 0f else sqrt(sq)
+            }
+            val roll = atan2(2f * (qw * qx + qy * qz), 1f - 2f * (qx * qx + qy * qy))
+            // asin's input must be clamped — float noise can push it past ±1.
+            val pitch = asin((2f * (qw * qy - qz * qx)).coerceIn(-1f, 1f))
+            return roll to pitch
+        }
     }
 }

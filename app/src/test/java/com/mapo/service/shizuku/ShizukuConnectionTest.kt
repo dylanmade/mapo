@@ -2,6 +2,7 @@ package com.mapo.service.shizuku
 
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -108,12 +109,44 @@ class ShizukuConnectionTest {
     }
 
     @Test
-    fun isReadyFlow_tracksGrantedState() {
+    fun isReadyFlow_requiresBothGrantedStateAndBoundService() {
+        // Two-condition gate: state == Granted is necessary but not sufficient.
+        // The UserService binder is bound asynchronously after grant, and any
+        // consumer reading isReadyFlow during the gap would call a null binder
+        // and silently no-op. Simulate the binder arrival by capturing the
+        // ServiceConnection passed to bindUserService and invoking
+        // onServiceConnected on it.
         val facade = fakeFacade(installed = true, binderAlive = true, granted = true)
+        val connSlot = slot<android.content.ServiceConnection>()
+        every {
+            facade.bindUserService(any(), capture(connSlot))
+        } returns Unit
         val connection = ShizukuConnection(facade, testScope)
-        assertTrue(connection.isReadyFlow.value)
 
-        // User revokes via Shizuku Manager.
+        // State is Granted but binder hasn't arrived yet → not ready.
+        assertEquals(ShizukuState.Granted, connection.state.value)
+        assertFalse(
+            "isReadyFlow must remain false until the UserService binder is bound",
+            connection.isReadyFlow.value,
+        )
+
+        // Simulate the binder callback firing post-grant.
+        val fakeBinder = mockk<android.os.IBinder>(relaxed = true)
+        // The real onServiceConnected uses IMapoInputService.Stub.asInterface
+        // to wrap the IBinder. Stubbing that across the static call boundary
+        // is more trouble than it's worth — the unit test instead invokes the
+        // connection.onServiceConnected with a binder; ShizukuConnection's
+        // implementation wraps it and assigns _service.value. The assignment
+        // is the bit we care about; the resulting service is a stub binder
+        // either way.
+        connSlot.captured.onServiceConnected(null, fakeBinder)
+
+        assertTrue(
+            "isReadyFlow must flip true once state is Granted AND binder is bound",
+            connection.isReadyFlow.value,
+        )
+
+        // User revokes via Shizuku Manager → state drops, ready flips back.
         every { facade.isPermissionGranted() } returns false
         connection.refresh()
         assertFalse(connection.isReadyFlow.value)

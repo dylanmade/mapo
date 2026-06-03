@@ -12,6 +12,7 @@ import com.mapo.di.ApplicationScope
 import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.InputEvaluator
+import com.mapo.service.input.modes.GRABBABLE_ANALOG_SOURCES
 import com.mapo.service.input.modes.requiresMotionCapture
 import com.mapo.service.input.modes.requiresShizuku
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -208,7 +209,7 @@ class ShizukuMotionCoordinator @Inject constructor(
     private fun applyDecision(breakdown: PredicateBreakdown) {
         val prior = lastBreakdown
         lastBreakdown = breakdown
-        Log.d(TAG, "decision: $breakdown")
+        Log.i(TAG, "decision: $breakdown")
 
         if (shouldShowDegradedToast(prior, breakdown)) {
             showDegradedToast()
@@ -229,6 +230,15 @@ class ShizukuMotionCoordinator @Inject constructor(
         // NONE-mode source contributes zero to its slot = silenced.
         val grab = breakdown.shouldEnable &&
             (breakdown.gyroStickModeConfigured || breakdown.noneOnAnalogSourceConfigured)
+        if (prior?.let { p ->
+            (p.shouldEnable && (p.gyroStickModeConfigured || p.noneOnAnalogSourceConfigured)) != grab
+        } != false) {
+            Log.i(
+                TAG,
+                "grab transition → $grab (gyroStick=${breakdown.gyroStickModeConfigured} " +
+                    "noneOnAnalog=${breakdown.noneOnAnalogSourceConfigured})",
+            )
+        }
         tryToggleGrab(grab)
         inputEvaluator.setPhysicalPassthroughEnabled(grab)
         _shizukuModeActive.value = breakdown.shouldEnable
@@ -405,21 +415,5 @@ class ShizukuMotionCoordinator @Inject constructor(
     companion object {
         private const val TAG = "ShizukuMotionCoord"
         private const val DEGRADED_TOAST_TEXT = "Shizuku disconnected — analog modes paused"
-
-        /**
-         * Sources where NONE mode (Mapo intercepts and silences) needs EVIOCGRAB
-         * to actually silence — i.e. physical controller axes the OS would
-         * otherwise dispatch as MotionEvents. Digital sources (face buttons,
-         * bumpers, switches) silence via [InputEvaluator.handleDigital]
-         * returning true, no grab required. GYRO is a SensorManager source —
-         * silenced by simply not subscribing.
-         */
-        private val GRABBABLE_ANALOG_SOURCES: Set<InputSource> = setOf(
-            InputSource.LEFT_JOYSTICK,
-            InputSource.RIGHT_JOYSTICK,
-            InputSource.LEFT_TRIGGER,
-            InputSource.RIGHT_TRIGGER,
-            InputSource.DPAD,
-        )
     }
 }

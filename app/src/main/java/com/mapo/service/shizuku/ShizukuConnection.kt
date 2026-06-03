@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -51,15 +52,6 @@ class ShizukuConnection @Inject constructor(
     val state: StateFlow<ShizukuState> = _state.asStateFlow()
 
     /**
-     * Cached "is Shizuku ready to use?" flag. The Brick E inject chokepoint reads
-     * `.value` directly to decide between the Shizuku path and the reflection
-     * fallback — no per-call binder ping, no per-call coroutine.
-     */
-    val isReadyFlow: StateFlow<Boolean> = state
-        .map { it is ShizukuState.Granted }
-        .stateIn(scope, SharingStarted.Eagerly, false)
-
-    /**
      * Live binder to the Shizuku UserService when bound, null otherwise. Brick B
      * scope: the binder is just an `IMapoInputService` whose methods are no-op
      * stubs. Brick C+ implement the real behavior. Brick F (`ShizukuMotionCoordinator`)
@@ -68,6 +60,27 @@ class ShizukuConnection @Inject constructor(
      */
     private val _service = MutableStateFlow<IMapoInputService?>(null)
     val service: StateFlow<IMapoInputService?> = _service.asStateFlow()
+
+    /**
+     * Cached "is Shizuku ready to use?" flag. The Brick E inject chokepoint reads
+     * `.value` directly to decide between the Shizuku path and the reflection
+     * fallback — no per-call binder ping, no per-call coroutine.
+     *
+     * **Both conditions required:** state is `Granted` AND the UserService binder
+     * is bound. The two flip independently — grant happens before binding, and
+     * during the gap any consumer that called a binder method would silently
+     * no-op. Bundling them here gives every consumer a single truthful signal
+     * for "Mapo can actually talk to the shell-uid service right now." Without
+     * this, the ShizukuMotionCoordinator predicate could fire `shouldEnable=true`
+     * before `_service` resolves, lose its only window to call
+     * `setGrabPhysicalControllers(true)` (the call no-ops on null binder), and
+     * miss the grab transition entirely because no other watched flow emits
+     * after the binder finally arrives (root cause of the C.5 "NONE on analog
+     * doesn't silence" repro 2026-06-03).
+     */
+    val isReadyFlow: StateFlow<Boolean> = combine(state, _service) { s, svc ->
+        s is ShizukuState.Granted && svc != null
+    }.stateIn(scope, SharingStarted.Eagerly, false)
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         Log.i(TAG, "binder received")

@@ -169,4 +169,70 @@ class GyroSensorStreamTest {
         val subject = GyroSensorStream(context, testScope, inputEvaluator)
         assertEquals(0, subject.events.replayCache.size)
     }
+
+    // ── Quaternion → roll/pitch math (Brick D.6) ─────────────────────────────
+
+    @Test
+    fun quaternionToRollPitch_identityQuaternion_isFlat() {
+        // Identity quaternion (0, 0, 0, 1) = no rotation. Both roll and pitch
+        // should be zero.
+        val rp = GyroSensorStream.quaternionToRollPitch(floatArrayOf(0f, 0f, 0f, 1f))
+        assertEquals(0f, rp!!.first, 1e-6f)
+        assertEquals(0f, rp.second, 1e-6f)
+    }
+
+    @Test
+    fun quaternionToRollPitch_pureRollHalfPi_pitchStaysZero() {
+        // Quaternion for +π/2 rotation around X axis: (sin(π/4), 0, 0, cos(π/4))
+        // = (√2/2, 0, 0, √2/2). Roll should be π/2, pitch should be 0.
+        val s = kotlin.math.sqrt(0.5f)
+        val rp = GyroSensorStream.quaternionToRollPitch(floatArrayOf(s, 0f, 0f, s))!!
+        assertEquals(kotlin.math.PI.toFloat() / 2f, rp.first, 1e-5f)
+        assertEquals(0f, rp.second, 1e-5f)
+    }
+
+    @Test
+    fun quaternionToRollPitch_purePitchHalfPi_rollStaysZero() {
+        // Quaternion for +π/2 rotation around Y axis: (0, sin(π/4), 0, cos(π/4)).
+        // Pitch should be π/2 (the gimbal-lock value), roll should be 0.
+        // Tolerance is looser here than the pure-roll test because asin's
+        // derivative goes to infinity at ±1, so float precision around the
+        // singularity is worse — `sqrt(0.5f)²` lands at ~0.4999999, not 0.5
+        // exactly, and the squared error compounds inside asin.
+        val s = kotlin.math.sqrt(0.5f)
+        val rp = GyroSensorStream.quaternionToRollPitch(floatArrayOf(0f, s, 0f, s))!!
+        assertEquals(0f, rp.first, 1e-5f)
+        assertEquals(kotlin.math.PI.toFloat() / 2f, rp.second, 1e-3f)
+    }
+
+    @Test
+    fun quaternionToRollPitch_reconstructsWComponent_whenMissing() {
+        // Some Android versions ship `values` of length 3 (x, y, z) and expect
+        // the caller to reconstruct w from the unit-quaternion constraint.
+        // Same identity quaternion as above but without w — must still return
+        // (0, 0).
+        val rp = GyroSensorStream.quaternionToRollPitch(floatArrayOf(0f, 0f, 0f))!!
+        assertEquals(0f, rp.first, 1e-6f)
+        assertEquals(0f, rp.second, 1e-6f)
+    }
+
+    @Test
+    fun quaternionToRollPitch_clampsPitchAsinInput_doesNotNaN() {
+        // Float-noise scenario: a marginally-overdriven y component can push
+        // `2 * (qw*qy - qz*qx)` past ±1, which would NaN asin. The function
+        // clamps before asin so the worst-case output is ±π/2 (not NaN).
+        // Construct values that would produce 1.01 inside asin if unclamped:
+        // qy=1, qw=0.51 → 2 * (0.51 * 1) = 1.02. With clamp → π/2.
+        val rp = GyroSensorStream.quaternionToRollPitch(floatArrayOf(0f, 1f, 0f, 0.51f))!!
+        assertFalse("pitch must not be NaN", rp.second.isNaN())
+        assertEquals(kotlin.math.PI.toFloat() / 2f, rp.second, 1e-5f)
+    }
+
+    @Test
+    fun quaternionToRollPitch_tooFewValues_returnsNull() {
+        // Defensive: pre-API-18 sensor arrays could theoretically be shorter.
+        // We return null so the caller leaves the cache unchanged.
+        assertEquals(null, GyroSensorStream.quaternionToRollPitch(floatArrayOf()))
+        assertEquals(null, GyroSensorStream.quaternionToRollPitch(floatArrayOf(0f, 0f)))
+    }
 }

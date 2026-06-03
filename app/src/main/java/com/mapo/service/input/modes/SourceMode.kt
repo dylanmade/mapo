@@ -1698,6 +1698,36 @@ val MODES_REQUIRING_SHIZUKU: Set<BindingMode> = ANALOG_MODES_REQUIRING_MOTION_CA
 fun BindingMode.requiresShizuku(): Boolean = this in MODES_REQUIRING_SHIZUKU
 
 /**
+ * Physical sources where [BindingMode.NONE] needs EVIOCGRAB (and therefore Shizuku)
+ * to actually silence. The OS has no API for an app to consume analog MotionEvents,
+ * so NONE on these sources silences only via the kernel-level grab held by Mapo's
+ * Shizuku UserService. Digital sources (face buttons, bumpers, switches) silence
+ * via `InputAccessibilityService.onKeyEvent` returning `true` (consumed), no grab
+ * needed. GYRO is a SensorManager source — silenced by not subscribing.
+ */
+val GRABBABLE_ANALOG_SOURCES: Set<InputSource> = setOf(
+    InputSource.LEFT_JOYSTICK,
+    InputSource.RIGHT_JOYSTICK,
+    InputSource.LEFT_TRIGGER,
+    InputSource.RIGHT_TRIGGER,
+    InputSource.DPAD,
+)
+
+/**
+ * Source-aware companion to [requiresShizuku]. Returns true if the mode requires
+ * Shizuku in general, OR if the mode is [BindingMode.NONE] on a source where
+ * silencing depends on EVIOCGRAB (see [GRABBABLE_ANALOG_SOURCES]).
+ *
+ * Use this — not the unconditional [requiresShizuku] — anywhere the UI gates on
+ * "this configuration won't work without Shizuku": dialog triggers, inline
+ * banners, health notification predicates. Without source-awareness those
+ * surfaces miss NONE-on-stick configurations and the user has no signal that
+ * Shizuku is required for silencing to take effect.
+ */
+fun BindingMode.requiresShizukuOnSource(source: InputSource): Boolean =
+    requiresShizuku() || (this == BindingMode.NONE && source in GRABBABLE_ANALOG_SOURCES)
+
+/**
  * Source-and-mode-aware sub-input vocabulary lookup. Sub-inputs vary by both
  * the physical source and the selected mode — e.g. face-buttons-in-Directional-
  * Pad mode binds A/B/X/Y, while joystick-in-Directional-Pad mode binds

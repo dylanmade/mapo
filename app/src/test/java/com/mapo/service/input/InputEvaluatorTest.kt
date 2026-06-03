@@ -1897,6 +1897,82 @@ class InputEvaluatorTest {
         verify(exactly = 1) { gamepadEmitter.setButton(0x130, true) }
     }
 
+    // ── Brick D.6: end-to-end gyro pipeline integration ──────────────────────
+
+    @Test
+    fun handleGyroReading_withGyroToCameraMode_drivesRightStick() {
+        // Wire GYRO source to GYRO_TO_JOYSTICK_CAMERA via the sentinel-key
+        // SourceMode entry (gyro has no bindable sub-inputs; the compile path
+        // surfaces the mode through SOURCE_MODE_SENTINEL_KEY). A single gyro
+        // event with raw rate above the camera mode's deadzone should produce
+        // exactly one setRightStick call. End-to-end coverage of:
+        //   handleGyroReading(GyroEvent)
+        //   → dispatchReadings(AnalogEvent(GYRO, ...))
+        //   → findSourceModeFor(GYRO)
+        //   → GyroToJoystickCameraMode.evaluate(...)
+        //   → gamepadEmitter.setRightStick(GYRO, ax, ay)
+        // No mode-handler unit-correctness assertions here — those live in
+        // GyroToJoystickModesTest. We just verify the wiring fires.
+        val gyroAddress = InputAddress(InputSource.GYRO, SOURCE_MODE_SENTINEL_KEY)
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(
+                actionSetId = 1L,
+                inputs = mapOf(gyroAddress to CompiledInput(
+                    groupInputId = 0L,
+                    activators = emptyList(),
+                    mode = BindingMode.GYRO_TO_JOYSTICK_CAMERA,
+                )),
+            )),
+        )
+
+        subject.handleGyroReading(GyroEvent(
+            xRadPerSec = 2.0f,
+            yRadPerSec = 1.5f,
+            zRadPerSec = 0.0f,
+            timestampNs = 0L,
+            rollRad = 0f,
+            pitchRad = 0f,
+        ))
+
+        verify(exactly = 1) {
+            gamepadEmitter.setRightStick(InputSource.GYRO, any(), any())
+        }
+        // Camera mode does NOT touch the left stick — Brick D.4 invariant
+        // (gyro→camera is right-stick-only).
+        verify(exactly = 0) {
+            gamepadEmitter.setLeftStick(InputSource.GYRO, any(), any())
+        }
+    }
+
+    @Test
+    fun handleGyroReading_withDeviceDefaultGyro_dropsTheReading() {
+        // Gyro in DEVICE_DEFAULT (no entry in inputs map) — Mapo doesn't
+        // intercept. dispatchReadings should fall straight through with no
+        // gamepad write (gyro isn't a passthrough-eligible source; the
+        // DEVICE_DEFAULT branch only covers stick/trigger/dpad).
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(actionSetId = 1L, inputs = emptyMap())),
+        )
+
+        subject.handleGyroReading(GyroEvent(
+            xRadPerSec = 2.0f,
+            yRadPerSec = 1.5f,
+            zRadPerSec = 0.0f,
+            timestampNs = 0L,
+            rollRad = 0f,
+            pitchRad = 0f,
+        ))
+
+        verify(exactly = 0) {
+            gamepadEmitter.setRightStick(InputSource.GYRO, any(), any())
+        }
+        verify(exactly = 0) {
+            gamepadEmitter.setLeftStick(InputSource.GYRO, any(), any())
+        }
+    }
+
     @Test
     fun handleDigital_returnsFalse_whenOnlyUnboundBinding_passthrough() {
         // Phase 7 Brick A bug fix: a FULL_PRESS activator with only an UNBOUND

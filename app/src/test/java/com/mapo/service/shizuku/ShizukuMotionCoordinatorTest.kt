@@ -240,6 +240,124 @@ class ShizukuMotionCoordinatorTest {
         ).forEach { assertFalse(it.shouldEnable) }
     }
 
+    // ── Brick C.5: NONE-mode analog silence ──────────────────────────────────
+
+    @Test
+    fun noneOnAnalogSource_makesShouldEnableTrue_evenWithoutOtherAnalogModes() {
+        // Single NONE-mode entry on LEFT_JOYSTICK. No JoyMove / MouseJoy / etc.
+        // anywhere else. shouldEnable should still be true so the coordinator
+        // takes EVIOCGRAB and the source is actually silenced.
+        val b = coordinator.evaluatePredicate(
+            compiled = configWithNoneOnSources(1L, setOf(InputSource.LEFT_JOYSTICK)),
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = true,
+        )
+        assertTrue(b.shouldEnable)
+        assertTrue(b.noneOnAnalogSourceConfigured)
+        assertFalse(b.analogModeConfigured)
+    }
+
+    @Test
+    fun noneOnAnalogSource_butShizukuNotReady_disables() {
+        val b = coordinator.evaluatePredicate(
+            compiled = configWithNoneOnSources(1L, setOf(InputSource.RIGHT_JOYSTICK)),
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = false,
+        )
+        assertFalse(b.shouldEnable)
+        assertTrue(b.noneOnAnalogSourceConfigured)
+    }
+
+    @Test
+    fun noneOnDigitalSource_doesNotTriggerGrabClause() {
+        // SWITCH_START + BUTTON_DIAMOND face buttons silence via
+        // InputEvaluator.handleDigital returning true — no EVIOCGRAB needed.
+        // The grab predicate must NOT fire on NONE-mode digital sources.
+        val b = coordinator.evaluatePredicate(
+            compiled = configWithNoneOnSources(1L, setOf(InputSource.SWITCH_START, InputSource.BUTTON_DIAMOND)),
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = true,
+        )
+        assertFalse(b.noneOnAnalogSourceConfigured)
+        assertFalse(b.shouldEnable)
+    }
+
+    @Test
+    fun noneOnTrigger_triggersGrabClause() {
+        val b = coordinator.evaluatePredicate(
+            compiled = configWithNoneOnSources(1L, setOf(InputSource.LEFT_TRIGGER)),
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = true,
+        )
+        assertTrue(b.noneOnAnalogSourceConfigured)
+        assertTrue(b.shouldEnable)
+    }
+
+    @Test
+    fun noneOnDpad_triggersGrabClause() {
+        val b = coordinator.evaluatePredicate(
+            compiled = configWithNoneOnSources(1L, setOf(InputSource.DPAD)),
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = true,
+        )
+        assertTrue(b.noneOnAnalogSourceConfigured)
+        assertTrue(b.shouldEnable)
+    }
+
+    @Test
+    fun noneOnAnalog_andGyroStickMode_bothClausesTrue() {
+        // Combined config: LJ in NONE + GYRO in JOYSTICK_DEFLECTION. Both
+        // grab clauses true, single grab transition.
+        val cfg = configWithNoneOnSourcesAndExtraInput(
+            startingSetId = 1L,
+            noneSources = setOf(InputSource.LEFT_JOYSTICK),
+            extraSource = InputSource.GYRO,
+            extraMode = BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
+        )
+        val b = coordinator.evaluatePredicate(
+            compiled = cfg,
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = true,
+        )
+        assertTrue(b.noneOnAnalogSourceConfigured)
+        assertTrue(b.gyroStickModeConfigured)
+        assertTrue(b.shouldEnable)
+    }
+
+    @Test
+    fun degradedToast_fires_whenShizukuFlips_onNoneOnlyConfig() {
+        // User has only NONE on LJ. Shizuku was ready, now it's not. The
+        // silenced source is about to leak through — the toast should fire
+        // even though analogModeConfigured stays false throughout.
+        val prior = ShizukuMotionCoordinator.PredicateBreakdown(
+            remapEnabled = true,
+            analogModeConfigured = false,
+            anyShizukuModeConfigured = false,
+            noneOnAnalogSourceConfigured = true,
+            shizukuReady = true,
+        )
+        val current = ShizukuMotionCoordinator.PredicateBreakdown(
+            remapEnabled = true,
+            analogModeConfigured = false,
+            anyShizukuModeConfigured = false,
+            noneOnAnalogSourceConfigured = true,
+            shizukuReady = false,
+        )
+        assertTrue(coordinator.shouldShowDegradedToast(prior, current))
+    }
+
     @Test
     fun anyShizukuModeConfigured_isSupersetOfAnalogModeConfigured_inGyroOnlyScope() {
         // Gyro-to-mouse mode alone shouldn't flip analogModeConfigured (no
@@ -303,6 +421,48 @@ class ShizukuMotionCoordinatorTest {
             ),
         )
         return CompiledConfig(startingActionSetId = 1L, sets = mapOf(1L to set))
+    }
+
+    /**
+     * Config whose base set has `noneModeSources` populated with the given
+     * sources. No bindable `inputs` entries (NONE-mode sources don't generate
+     * them, per the compile path).
+     */
+    private fun configWithNoneOnSources(
+        startingSetId: Long,
+        noneSources: Set<InputSource>,
+    ): CompiledConfig {
+        val set = CompiledActionSet(
+            actionSetId = startingSetId,
+            inputs = emptyMap(),
+            noneModeSources = noneSources,
+        )
+        return CompiledConfig(startingActionSetId = startingSetId, sets = mapOf(startingSetId to set))
+    }
+
+    /**
+     * Combined fixture: base set with [noneSources] AND an extra mode entry
+     * on [extraSource]. Used to verify the grab predicate's OR semantics
+     * (any one clause is enough).
+     */
+    private fun configWithNoneOnSourcesAndExtraInput(
+        startingSetId: Long,
+        noneSources: Set<InputSource>,
+        extraSource: InputSource,
+        extraMode: BindingMode,
+    ): CompiledConfig {
+        val set = CompiledActionSet(
+            actionSetId = startingSetId,
+            inputs = mapOf(
+                InputAddress(extraSource, "") to CompiledInput(
+                    groupInputId = 1L,
+                    activators = emptyList(),
+                    mode = extraMode,
+                ),
+            ),
+            noneModeSources = noneSources,
+        )
+        return CompiledConfig(startingActionSetId = startingSetId, sets = mapOf(startingSetId to set))
     }
 
     /** Digital base set + a layer overlay declaring an analog (MOUSE_JOYSTICK) mode. */

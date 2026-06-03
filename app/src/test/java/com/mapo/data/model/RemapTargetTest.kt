@@ -80,7 +80,7 @@ class RemapTargetTest {
 
     @Test
     fun displayLabel_eachVariant() {
-        assertEquals("[Device default]", RemapTarget.Unbound.displayLabel())
+        assertEquals("(Device default)", RemapTarget.Unbound.displayLabel())
         assertEquals("GP: BUTTON_A", RemapTarget.Gamepad("BUTTON_A").displayLabel())
         assertEquals("KB: ENTER", RemapTarget.Keyboard("ENTER").displayLabel())
         assertEquals("MS: LEFT", RemapTarget.Mouse("LEFT").displayLabel())

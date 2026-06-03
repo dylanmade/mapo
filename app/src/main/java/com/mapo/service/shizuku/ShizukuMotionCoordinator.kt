@@ -6,6 +6,7 @@ import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import com.mapo.data.model.Profile
+import com.mapo.data.model.steam.InputSource
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.di.ApplicationScope
 import com.mapo.service.input.CompiledConfig
@@ -218,12 +219,23 @@ class ShizukuMotionCoordinator @Inject constructor(
         // controller only while a gyro→stick mode is in scope. Outside that
         // window, leave the OS-level dispatch alone so DEVICE_DEFAULT
         // physical inputs keep flowing natively.
-        val grab = breakdown.shouldEnable && breakdown.gyroStickModeConfigured
+        //
+        // Brick C.5 (2026-06-01): also grab whenever any analog source is in
+        // NONE mode. NONE means "Mapo intercepts and silences," but Android
+        // gives no way to consume analog MotionEvents from a foreground app —
+        // the OS dispatches the physical stick / trigger / dpad straight to
+        // the game. EVIOCGRAB is the silencing mechanism: grabbed = OS sees
+        // nothing = game only sees what Mapo writes to the virtual gamepad =
+        // NONE-mode source contributes zero to its slot = silenced.
+        val grab = breakdown.shouldEnable &&
+            (breakdown.gyroStickModeConfigured || breakdown.noneOnAnalogSourceConfigured)
         tryToggleGrab(grab)
         inputEvaluator.setPhysicalPassthroughEnabled(grab)
         _shizukuModeActive.value = breakdown.shouldEnable
-        _analogModeWanted.value = breakdown.remapEnabled && breakdown.analogModeConfigured
-        _anyShizukuModeWanted.value = breakdown.remapEnabled && breakdown.anyShizukuModeConfigured
+        _analogModeWanted.value = breakdown.remapEnabled &&
+            (breakdown.analogModeConfigured || breakdown.noneOnAnalogSourceConfigured)
+        _anyShizukuModeWanted.value = breakdown.remapEnabled &&
+            (breakdown.anyShizukuModeConfigured || breakdown.noneOnAnalogSourceConfigured)
     }
 
     /**
@@ -243,7 +255,7 @@ class ShizukuMotionCoordinator @Inject constructor(
         return prior.shouldEnable
             && !current.shizukuReady
             && current.remapEnabled
-            && current.analogModeConfigured
+            && (current.analogModeConfigured || current.noneOnAnalogSourceConfigured)
     }
 
     private fun showDegradedToast() {
@@ -308,6 +320,7 @@ class ShizukuMotionCoordinator @Inject constructor(
             it == com.mapo.data.model.steam.BindingMode.GYRO_TO_JOYSTICK_CAMERA ||
                 it == com.mapo.data.model.steam.BindingMode.GYRO_TO_JOYSTICK_DEFLECTION
         },
+        noneOnAnalogSourceConfigured = hasNoneOnAnalogSource(compiled, activeSetId),
         shizukuReady = shizukuReady,
     )
 
@@ -330,12 +343,36 @@ class ShizukuMotionCoordinator @Inject constructor(
     }
 
     /**
-     * Predicate result. `shouldEnable` is `remapEnabled &&
-     * analogModeConfigured && shizukuReady` — three required for the
-     * motion-capture / inject gate. [anyShizukuModeConfigured] is a strict
-     * superset of [analogModeConfigured] (adds gyro→mouse / gyro→gamepad
-     * modes that need Shizuku for output but not for input) and drives the
-     * UI warning surfaces (dialog / banner / health notification).
+     * Brick C.5: true iff the active scope has any analog-capable source
+     * (one of [GRABBABLE_ANALOG_SOURCES]) set to [com.mapo.data.model.steam.BindingMode.NONE].
+     *
+     * Reads [com.mapo.service.input.CompiledActionSet.noneModeSources] rather
+     * than walking `inputs.values.mode`: the compile path deliberately leaves
+     * NONE-mode sources out of `inputs` entirely (they have no bindable
+     * sub-inputs) and records them in this side-channel set instead. Only the
+     * base set is consulted — layer overrides to NONE aren't surfaced through
+     * the compile path today, a pre-existing limitation independent of C.5.
+     */
+    private fun hasNoneOnAnalogSource(
+        compiled: CompiledConfig,
+        activeSetId: Long,
+    ): Boolean {
+        val resolvedSetId = if (activeSetId == 0L) compiled.startingActionSetId else activeSetId
+        val set = compiled.sets[resolvedSetId] ?: return false
+        return set.noneModeSources.any { it in GRABBABLE_ANALOG_SOURCES }
+    }
+
+    /**
+     * Predicate result. `shouldEnable` is true when the user wants Mapo's
+     * input pipeline running for some reason: either an analog mode needs
+     * the /dev/input motion reader, or an analog source is in NONE mode and
+     * needs EVIOCGRAB to actually silence it. Plus the always-required
+     * `remapEnabled` + `shizukuReady` clauses.
+     *
+     * [anyShizukuModeConfigured] is a strict superset of [analogModeConfigured]
+     * (adds gyro→mouse / gyro→gamepad modes that need Shizuku for output but
+     * not for input) and drives the UI warning surfaces (dialog / banner /
+     * persistent health notification).
      */
     internal data class PredicateBreakdown(
         val remapEnabled: Boolean,
@@ -347,14 +384,42 @@ class ShizukuMotionCoordinator @Inject constructor(
          * activation — see [applyDecision].
          */
         val gyroStickModeConfigured: Boolean = false,
+        /**
+         * Brick C.5: true iff the active scope has any analog-capable
+         * physical source (stick / trigger / dpad) set to
+         * [com.mapo.data.model.steam.BindingMode.NONE]. The OS has no API
+         * for an app to consume analog MotionEvents, so NONE-mode silencing
+         * on an analog source is only achievable via EVIOCGRAB — this clause
+         * is OR-ed with [gyroStickModeConfigured] in [applyDecision] to gate
+         * grab activation.
+         */
+        val noneOnAnalogSourceConfigured: Boolean = false,
         val shizukuReady: Boolean,
     ) {
         val shouldEnable: Boolean
-            get() = remapEnabled && analogModeConfigured && shizukuReady
+            get() = remapEnabled &&
+                (analogModeConfigured || noneOnAnalogSourceConfigured) &&
+                shizukuReady
     }
 
     companion object {
         private const val TAG = "ShizukuMotionCoord"
         private const val DEGRADED_TOAST_TEXT = "Shizuku disconnected — analog modes paused"
+
+        /**
+         * Sources where NONE mode (Mapo intercepts and silences) needs EVIOCGRAB
+         * to actually silence — i.e. physical controller axes the OS would
+         * otherwise dispatch as MotionEvents. Digital sources (face buttons,
+         * bumpers, switches) silence via [InputEvaluator.handleDigital]
+         * returning true, no grab required. GYRO is a SensorManager source —
+         * silenced by simply not subscribing.
+         */
+        private val GRABBABLE_ANALOG_SOURCES: Set<InputSource> = setOf(
+            InputSource.LEFT_JOYSTICK,
+            InputSource.RIGHT_JOYSTICK,
+            InputSource.LEFT_TRIGGER,
+            InputSource.RIGHT_TRIGGER,
+            InputSource.DPAD,
+        )
     }
 }

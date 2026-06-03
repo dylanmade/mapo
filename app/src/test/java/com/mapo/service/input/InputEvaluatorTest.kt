@@ -48,6 +48,12 @@ class InputEvaluatorTest {
         every { dispatcher.compiledConfig } returns compiledConfig
         every { emitter.emitPress(any()) } returns true  // default to "has release" semantics
         subject = InputEvaluator(dispatcher, emitter, mouseEmitter, gamepadEmitter, testScope)
+        // NOTE: tests intentionally do NOT call subject.start() — that
+        // launches a forever-collecting watcher on testScope which would
+        // make `runTest { }` fail with UncompletedCoroutinesError. The
+        // mode-change cleanup the watcher provides isn't relevant to these
+        // tests; the tests that DO need it (handleConfigChange behavior)
+        // can call the helper directly.
     }
 
     // ── Pass-through (no config / no match) ───────────────────────────────────
@@ -1740,6 +1746,155 @@ class InputEvaluatorTest {
         val consumed = subject.handleDigital(BUTTON_A, isDown = true)
         assertTrue("NONE-mode source must consume the event (silence)", consumed)
         verify(exactly = 0) { emitter.emitPress(any()) }
+    }
+
+    // ── Brick C.5: NONE-mode analog silence via counter-inject zeroing ───────
+
+    @Test
+    fun analogReading_onNoneSource_underGrab_zeroesGamepadInsteadOfPassthrough() {
+        // Pre-condition: LEFT_JOYSTICK in NONE mode, EVIOCGRAB held. The
+        // physical stick is deflected at full+right (1.0, 0.0). Without the
+        // C.5 fix, findSourceModeFor(LJ) returns null (NONE sources aren't
+        // in `inputs`), the dispatcher treats null-resolved as DEVICE_DEFAULT,
+        // and writes (1.0, 0.0) to the virtual gamepad — game sees a
+        // hard-right stick deflection, defeating NONE.
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(
+                actionSetId = 1L,
+                inputs = emptyMap(),
+                noneModeSources = setOf(InputSource.LEFT_JOYSTICK),
+            )),
+        )
+        subject.setPhysicalPassthroughEnabled(true)
+        val reading = AnalogEvent(
+            source = InputSource.LEFT_JOYSTICK,
+            x = 1.0f,
+            y = 0.0f,
+            timestampMs = 0L,
+        )
+
+        subject.handleAnalogReadings(listOf(reading))
+
+        verify(exactly = 1) { gamepadEmitter.setLeftStick(InputSource.LEFT_JOYSTICK, 0f, 0f) }
+        verify(exactly = 0) {
+            gamepadEmitter.setLeftStick(InputSource.LEFT_JOYSTICK, 1.0f, 0.0f)
+        }
+    }
+
+    @Test
+    fun analogReading_onNoneTrigger_underGrab_zeroesGamepad() {
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(
+                actionSetId = 1L,
+                inputs = emptyMap(),
+                noneModeSources = setOf(InputSource.LEFT_TRIGGER),
+            )),
+        )
+        subject.setPhysicalPassthroughEnabled(true)
+        val reading = AnalogEvent(
+            source = InputSource.LEFT_TRIGGER,
+            x = 0.8f,
+            y = 0.0f,
+            timestampMs = 0L,
+        )
+
+        subject.handleAnalogReadings(listOf(reading))
+
+        verify(exactly = 1) { gamepadEmitter.setLeftTrigger(InputSource.LEFT_TRIGGER, 0f) }
+        verify(exactly = 0) { gamepadEmitter.setLeftTrigger(InputSource.LEFT_TRIGGER, 0.8f) }
+    }
+
+    @Test
+    fun analogReading_onNoneSource_whenNotGrabbed_isDroppedNoGamepadWrite() {
+        // Without EVIOCGRAB, the OS dispatches the physical stick to the game
+        // directly — Mapo can't intercept analog motion. The NONE-mode source
+        // simply has no handler in `inputs`; the reading falls through with
+        // no gamepad write (the predicate would have kept grab off too).
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(
+                actionSetId = 1L,
+                inputs = emptyMap(),
+                noneModeSources = setOf(InputSource.LEFT_JOYSTICK),
+            )),
+        )
+        // physicalPassthroughEnabled stays false (default)
+        subject.handleAnalogReadings(listOf(
+            AnalogEvent(source = InputSource.LEFT_JOYSTICK, x = 1f, y = 0f, timestampMs = 0L),
+        ))
+
+        verify(exactly = 0) { gamepadEmitter.setLeftStick(any(), any(), any()) }
+    }
+
+    @Test
+    fun analogReading_onDeviceDefaultSource_underGrab_stillPassesThrough() {
+        // Regression guard for the DEVICE_DEFAULT path: a stick that's not in
+        // noneModeSources and has no inputs entry must continue to passthrough
+        // its actual reading under grab. The C.5 fix only changes behavior
+        // for NONE sources — DEVICE_DEFAULT semantics must be untouched.
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(
+                actionSetId = 1L,
+                inputs = emptyMap(),
+                noneModeSources = emptySet(),
+            )),
+        )
+        subject.setPhysicalPassthroughEnabled(true)
+        subject.handleAnalogReadings(listOf(
+            AnalogEvent(source = InputSource.LEFT_JOYSTICK, x = 0.5f, y = -0.5f, timestampMs = 0L),
+        ))
+
+        verify(exactly = 1) { gamepadEmitter.setLeftStick(InputSource.LEFT_JOYSTICK, 0.5f, -0.5f) }
+    }
+
+    @Test
+    fun handleRawKeyReading_onNoneSource_underGrab_silencesInsteadOfButtonPassthrough() {
+        // Pre-condition: BUTTON_DIAMOND in NONE mode, EVIOCGRAB held. Button-A
+        // press arrives via the Shizuku raw-key pipeline. Without the C.5
+        // follow-up, findSourceModeFor returns null (NONE sources aren't in
+        // `inputs`) and the existing DEVICE_DEFAULT passthrough writes the
+        // physical button verbatim to the virtual gamepad — defeating NONE.
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(
+                actionSetId = 1L,
+                inputs = emptyMap(),
+                noneModeSources = setOf(InputSource.BUTTON_DIAMOND),
+            )),
+        )
+        subject.setPhysicalPassthroughEnabled(true)
+
+        subject.handleRawKeyReading(linuxKeyCode = 0x130, pressed = true, timestampNs = 0L)
+        subject.handleRawKeyReading(linuxKeyCode = 0x130, pressed = false, timestampNs = 0L)
+
+        // No button writes to the virtual gamepad — silenced by handleDigital.
+        verify(exactly = 0) { gamepadEmitter.setButton(any(), any()) }
+        // No activator emission either.
+        verify(exactly = 0) { emitter.emitPress(any()) }
+        verify(exactly = 0) { emitter.emitRelease(any()) }
+    }
+
+    @Test
+    fun handleRawKeyReading_onDeviceDefaultSource_underGrab_stillPassesThroughToButton() {
+        // Regression guard for the DEVICE_DEFAULT digital path: button presses
+        // on a DEVICE_DEFAULT source must continue to flow to the virtual
+        // gamepad under grab. C.5 only changes behavior for NONE sources.
+        compiledConfig.value = CompiledConfig(
+            startingActionSetId = 1L,
+            sets = mapOf(1L to CompiledActionSet(
+                actionSetId = 1L,
+                inputs = emptyMap(),
+                noneModeSources = emptySet(),
+            )),
+        )
+        subject.setPhysicalPassthroughEnabled(true)
+
+        subject.handleRawKeyReading(linuxKeyCode = 0x130, pressed = true, timestampNs = 0L)
+
+        verify(exactly = 1) { gamepadEmitter.setButton(0x130, true) }
     }
 
     @Test

@@ -287,13 +287,28 @@ class InputEvaluator @Inject constructor(
      */
     private val priorModeBySource = mutableMapOf<InputSource, com.mapo.data.model.steam.BindingMode?>()
 
-    init {
-        // Watch compiled config for per-source mode changes. Resets stale
-        // gamepad/mode state on the GAMEPAD_EMITTING_SOURCES axis whenever
-        // any of them flips. Active-set / layer / mode-shift changes all
-        // funnel through compiledConfig too, so layer overrides + mode
-        // shifts get this same cleanup automatically.
-        scope.launch {
+    @Volatile
+    private var configWatcherJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Start the compiled-config watcher coroutine. Idempotent — safe to call
+     * multiple times. Resets stale gamepad/mode state on the
+     * [GAMEPAD_EMITTING_SOURCES] axis whenever any source's mode flips.
+     * Active-set / layer / mode-shift changes all funnel through
+     * compiledConfig too, so layer overrides + mode shifts get this same
+     * cleanup automatically.
+     *
+     * Called from [com.mapo.service.InputAccessibilityService.onServiceConnected]
+     * — the lifecycle point where the gamepad output path becomes active.
+     * Lifted out of `init` so tests don't get an unkillable
+     * forever-collecting coroutine parented to their TestScope.
+     */
+    fun start() {
+        if (configWatcherJob?.isActive == true) {
+            Log.d(TAG, "start: config watcher already active")
+            return
+        }
+        configWatcherJob = scope.launch {
             try {
                 dispatcher.compiledConfig.collect { compiled ->
                     handleConfigChange(compiled)
@@ -302,6 +317,15 @@ class InputEvaluator @Inject constructor(
                 Log.e(TAG, "compiledConfig watcher crashed", t)
             }
         }
+    }
+
+    /**
+     * Stop the compiled-config watcher. Called from
+     * [com.mapo.service.InputAccessibilityService.onUnbind].
+     */
+    fun stop() {
+        configWatcherJob?.cancel()
+        configWatcherJob = null
     }
 
     /**
@@ -552,7 +576,18 @@ class InputEvaluator @Inject constructor(
         val set = resolveActiveSet()
         val resolved = set?.let { findSourceModeFor(it, address.source) }
         val isDeviceDefault = resolved?.mode == com.mapo.data.model.steam.BindingMode.DEVICE_DEFAULT
-        if (physicalPassthroughEnabled.get() && (isDeviceDefault || resolved == null)) {
+        // Brick C.5 follow-up: NONE-mode silencing for digital sources under
+        // EVIOCGRAB. Like the analog path, NONE sources are excluded from
+        // `inputs`, so `resolved == null` for them. Without this check they'd
+        // fall straight into the DEVICE_DEFAULT passthrough below, writing
+        // the physical button verbatim to the virtual gamepad and defeating
+        // NONE's "Mapo intercepts and silences" semantic. Route them through
+        // handleDigital instead — handleDigital's own NONE check returns
+        // `true` to consume the event without dispatching any binding.
+        val isNoneSource = set != null && address.source in set.noneModeSources
+        if (physicalPassthroughEnabled.get() && !isNoneSource &&
+            (isDeviceDefault || resolved == null)
+        ) {
             val btn = LINUX_KEY_TO_GAMEPAD_BUTTON[linuxKeyCode]
             if (btn != null) {
                 gamepadEmitter.setButton(btn, pressed)
@@ -604,6 +639,28 @@ class InputEvaluator @Inject constructor(
         val set = resolveActiveSet() ?: return
         for (reading in readings) {
             val resolved = findSourceModeFor(set, reading.source)
+            val isNoneSource = reading.source in set.noneModeSources
+            // Brick C.5: NONE-mode silencing for analog sources under
+            // EVIOCGRAB. The compile path excludes NONE sources from
+            // `inputs` (they have no bindable sub-inputs), so without this
+            // branch findSourceModeFor returns null and the reading would
+            // fall straight into the DEVICE_DEFAULT passthrough below —
+            // writing the physical stick verbatim to the virtual gamepad
+            // and defeating NONE's "Mapo intercepts and silences" semantic.
+            //
+            // Counter-inject zero so any prior contribution (e.g. from a
+            // Mode Shift target that briefly wrote this source) doesn't
+            // bleed through. handleConfigChange already clears the slot on
+            // mode transitions; this is belt-and-suspenders for the steady-
+            // state path. Branch is no-op when not grabbed because the
+            // physical event still flows OS→game directly — NONE-mode
+            // analog silencing only works while EVIOCGRAB is held, which
+            // ShizukuMotionCoordinator gates on this same noneModeSources
+            // walk.
+            if (physicalPassthroughEnabled.get() && isNoneSource) {
+                zeroPassthroughForSource(reading.source)
+                continue
+            }
             // Physical passthrough — when Mapo has EVIOCGRAB held on the
             // physical controller (Brick D EVIOCGRAB follow-up), the OS
             // can't dispatch the controller's events natively. To preserve
@@ -675,6 +732,24 @@ class InputEvaluator @Inject constructor(
                 reading.x.roundedInt(),
                 reading.y.roundedInt(),
             )
+            else -> Unit
+        }
+    }
+
+    /**
+     * Brick C.5: write 0 to [source]'s slot in the virtual gamepad. Mirrors
+     * [passthroughAnalogToGamepad]'s axis routing but discards the reading
+     * value. Used for NONE-mode analog sources under EVIOCGRAB to enforce
+     * silence — the game sees a centered stick / released trigger / no dpad
+     * regardless of physical state.
+     */
+    private fun zeroPassthroughForSource(source: InputSource) {
+        when (source) {
+            InputSource.LEFT_JOYSTICK -> gamepadEmitter.setLeftStick(source, 0f, 0f)
+            InputSource.RIGHT_JOYSTICK -> gamepadEmitter.setRightStick(source, 0f, 0f)
+            InputSource.LEFT_TRIGGER -> gamepadEmitter.setLeftTrigger(source, 0f)
+            InputSource.RIGHT_TRIGGER -> gamepadEmitter.setRightTrigger(source, 0f)
+            InputSource.DPAD -> gamepadEmitter.setDpadHat(source, 0, 0)
             else -> Unit
         }
     }

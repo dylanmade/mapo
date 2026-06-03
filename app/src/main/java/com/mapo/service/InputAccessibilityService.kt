@@ -200,10 +200,15 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         // via ShizukuMotionStream → InputEvaluator.handleAnalogReadings, not
         // through any AccessibilityService-side motion callback.
         shizukuMotionCoordinator.start()
+        // Brick C.5 follow-up: InputEvaluator's mode-change watcher needs an
+        // explicit lifecycle hook so tests don't get an unkillable
+        // forever-collecting coroutine parented to their TestScope.
+        evaluator.start()
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         shizukuMotionCoordinator.stop()
+        evaluator.stop()
         dispatcher.unregister()
         return super.onUnbind(intent)
     }

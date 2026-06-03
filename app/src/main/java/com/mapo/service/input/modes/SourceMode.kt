@@ -174,6 +174,20 @@ interface MouseEmitter {
      */
     fun clearAllVelocities()
 
+    /**
+     * Fire-and-forget instantaneous cursor delta. Used by event-driven modes
+     * (e.g. [com.mapo.service.input.modes.FlickStickMode]) where the
+     * per-evaluate output is a discrete amount of motion rather than a
+     * sustained velocity. The implementation accumulates fractional pixels
+     * across calls and forwards integer steps to the uinput mouse — small
+     * sub-pixel emissions still register over time.
+     *
+     * No per-source bookkeeping: caller owns the cadence + timing. Unlike
+     * [setStickVelocity], no integration loop runs from this method; the
+     * delta is injected immediately and there's nothing to "stop."
+     */
+    fun addRelativeDelta(dx: Float, dy: Float)
+
     companion object {
         /** No-op sink for digital modes and for tests. */
         val NOOP: MouseEmitter = object : MouseEmitter {
@@ -181,6 +195,7 @@ interface MouseEmitter {
             override fun setStickAbsoluteTarget(source: InputSource, xFrac: Float, yFrac: Float) {}
             override fun clearStickAbsoluteTarget(source: InputSource) {}
             override fun clearAllVelocities() {}
+            override fun addRelativeDelta(dx: Float, dy: Float) {}
         }
     }
 }
@@ -706,6 +721,238 @@ object JoystickMouseMode : SourceMode {
         val settings = StickToMouseSettings.parse(ctx.settingsJson, StickToMouseSettings.MOUSE_JOYSTICK_DEFAULTS)
         val (vx, vy) = settings.toVelocity(reading.x, reading.y)
         mouse.setStickVelocity(reading.source, vx, vy)
+    }
+}
+
+/**
+ * **Flick Stick.** Jibb Smart's invention: the player pushes the stick out to
+ * a direction, the camera "flicks" (rotates fast) to face that direction,
+ * then while the stick is held the camera rotates 1:1 with the stick's
+ * angular delta around its center. Returning the stick to center clears the
+ * state; the next push re-flicks to wherever the stick now points.
+ *
+ * **Output: mouse_dx (horizontal only).** dy is always zero — Flick Stick is
+ * a yaw-only camera mode by design.
+ *
+ * **State machine** per source:
+ *  - `NEUTRAL` — stick magnitude < `flick_deadzone`. No output.
+ *  - `HOLDING` — stick crossed the activation ring; the flick has already
+ *    fired (full target angle emitted in one delta at the crossing
+ *    instant). Each subsequent evaluate() emits mouse_dx equal to the
+ *    angular delta since the last sample, scaled by `flick_velocity`.
+ *
+ * **Steam parity (verified on Steam Deck by user 2026-06-03):** the flick
+ * is committed at threshold-crossing time. What the user does *after*
+ * crossing — keeps holding at the edge, drifts back into the live zone,
+ * releases immediately — doesn't change the flick amount. The flick equals
+ * the angle the stick was pointing AT THE INSTANT it crossed the ring.
+ *
+ * **Coordinate convention.** Screen-up is the zero-angle reference, so a
+ * stick push straight up = 0 flick, push right = +π/2 flick (clockwise),
+ * push down = ±π (180°), push left = −π/2.
+ *
+ * **Snap-to-cardinal.** When `flick_snap_mode != 0`, the flick target is
+ * snapped to the nearest cardinal (4-way) or 8-way direction with strength
+ * proportional to `flick_snap_strength`. 0 = no snap; 1 = full snap. Hold-
+ * phase rotation is unaffected — the player can still fine-tune by rotating
+ * the stick after the flick.
+ *
+ * **Source filter.** Stick sources only (LEFT_JOYSTICK / RIGHT_JOYSTICK).
+ * GYRO and other sources are no-ops; the gyro variant lives in
+ * [GyroFlickStickMode] when that lands.
+ *
+ * **Per-source state** lives in [stateBySource]; cleared via [resetState]
+ * from [com.mapo.service.input.InputEvaluator.handleConfigChange] on mode
+ * change so a deflected stick from the prior mode doesn't leak into the
+ * Flick Stick state machine.
+ */
+object FlickStickMode : SourceMode {
+    override val mode: BindingMode = BindingMode.FLICK_STICK
+    override fun validInputs(): Set<String> = INPUTS
+    override fun defaultSettingsJson(): String = FlickStickSettings.DEFAULT_JSON
+    private val INPUTS = setOf("click", "outer_ring")
+
+    private enum class Phase { NEUTRAL, HOLDING }
+
+    private data class State(
+        var phase: Phase = Phase.NEUTRAL,
+        var lastStickAngleRad: Float = 0f,
+    )
+
+    private val stateBySource = mutableMapOf<InputSource, State>()
+
+    /**
+     * Clear all per-source state. Called from
+     * [com.mapo.service.input.InputEvaluator.handleConfigChange] when a
+     * source's mode changes off FLICK_STICK so the flick state machine
+     * starts fresh next time the user picks FLICK_STICK again.
+     */
+    fun resetState() {
+        synchronized(stateBySource) { stateBySource.clear() }
+    }
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        if (reading.source != InputSource.LEFT_JOYSTICK && reading.source != InputSource.RIGHT_JOYSTICK) return
+        val settings = FlickStickSettings.parse(ctx.settingsJson)
+
+        val state = synchronized(stateBySource) {
+            stateBySource.getOrPut(reading.source) { State() }
+        }
+
+        val magnitude = kotlin.math.sqrt(reading.x * reading.x + reading.y * reading.y)
+
+        // Stick neutral → reset state, no output.
+        if (magnitude < settings.deadzone) {
+            state.phase = Phase.NEUTRAL
+            return
+        }
+
+        when (state.phase) {
+            Phase.NEUTRAL -> {
+                // Threshold crossing: commit the flick at this instant.
+                // The angle the stick is pointing right now IS the flick
+                // amount. atan2(x, -y) gives 0 = up, +π/2 = right, ±π = down,
+                // −π/2 = left. Fire the full delta in one go and transition
+                // straight to HOLDING — no spread-over-time, no waiting on
+                // continued stick deflection. The user's subsequent stick
+                // motion is hold-phase rotation only; the flick is done.
+                val rawTarget = kotlin.math.atan2(reading.x, -reading.y)
+                val target = settings.snapAngle(rawTarget)
+                val dxPx = target * settings.velocityPxPerRad
+                if (dxPx != 0f) mouse.addRelativeDelta(dxPx, 0f)
+                state.lastStickAngleRad = target
+                state.phase = Phase.HOLDING
+            }
+            Phase.HOLDING -> {
+                val currentAngle = kotlin.math.atan2(reading.x, -reading.y)
+                val delta = angularDelta(state.lastStickAngleRad, currentAngle)
+                state.lastStickAngleRad = currentAngle
+                // Apply exponent curve to the hold-phase delta. Sign-preserve.
+                val sign = if (delta < 0f) -1f else 1f
+                val curved = kotlin.math.abs(delta).pow(settings.exponent) * sign
+                val dxPx = curved * settings.velocityPxPerRad
+                if (dxPx != 0f) mouse.addRelativeDelta(dxPx, 0f)
+            }
+        }
+    }
+
+    /**
+     * Shortest signed angular difference between two angles. Wraps around
+     * ±π so a 350°-to-10° transition is treated as +20° rather than −340°.
+     */
+    private fun angularDelta(fromRad: Float, toRad: Float): Float {
+        var d = toRad - fromRad
+        val twoPi = (2 * kotlin.math.PI).toFloat()
+        while (d > kotlin.math.PI) d -= twoPi
+        while (d < -kotlin.math.PI) d += twoPi
+        return d
+    }
+}
+
+/**
+ * Parsed [FlickStickMode] settings. Tolerant of missing keys; falls back to
+ * Jibb-Smart-canonical defaults that match Steam Deck's default Flick Stick
+ * configuration as a starting point for device-feel verification.
+ *
+ * **VDF mapping (Steam parity):** Steam's `flickstick` group settings —
+ * `flick_time`, `flick_deadzone`, `flick_snap_strength`, `flick_snap_mode`,
+ * `flick_velocity`, `flick_exponent` — round-trip through this shape.
+ *
+ * **[flickTimeMs] is currently unused at runtime.** Kept for VDF
+ * round-trip with Steam Deck profiles. The Mapo implementation fires the
+ * flick in one delta at threshold crossing (Steam-Deck-verified by user
+ * 2026-06-03: full flick fires immediately regardless of how long the
+ * stick is held at the edge after crossing). If a future smoothing path
+ * lands — e.g. spreading the burst across `flick_time` via a coroutine
+ * timer decoupled from stick events — this field becomes load-bearing.
+ */
+internal data class FlickStickSettings(
+    val flickTimeMs: Int,
+    val deadzone: Float,
+    val velocityPxPerRad: Float,
+    val exponent: Float,
+    val snapMode: SnapMode,
+    val snapStrength: Float,
+) {
+    enum class SnapMode { NONE, FOUR_WAY, EIGHT_WAY }
+
+    /**
+     * If [snapMode] is non-NONE, snap [rawTargetRad] toward the nearest
+     * cardinal (4-way) or 45°-quantized (8-way) angle with
+     * `snapStrength`-weighted blend. Strength 0 → no snap; strength 1 → full
+     * snap; intermediate values interpolate. Hold-phase rotation is
+     * intentionally unaffected — this only adjusts the flick burst's
+     * landing angle.
+     */
+    fun snapAngle(rawTargetRad: Float): Float {
+        if (snapMode == SnapMode.NONE || snapStrength <= 0f) return rawTargetRad
+        val divisions = when (snapMode) {
+            SnapMode.FOUR_WAY -> 4
+            SnapMode.EIGHT_WAY -> 8
+            SnapMode.NONE -> return rawTargetRad
+        }
+        val step = (2 * kotlin.math.PI / divisions).toFloat()
+        val nearest = (kotlin.math.round(rawTargetRad / step) * step).toFloat()
+        val s = snapStrength.coerceIn(0f, 1f)
+        return rawTargetRad * (1f - s) + nearest * s
+    }
+
+    companion object {
+        const val DEFAULT_FLICK_TIME_MS = 100
+        const val DEFAULT_DEADZONE = 0.9f
+        const val DEFAULT_VELOCITY_PX_PER_RAD = 1500f  // ≈ 26 px per degree
+        const val DEFAULT_EXPONENT = 1.0f
+        const val DEFAULT_SNAP_STRENGTH = 0f
+
+        val DEFAULTS = FlickStickSettings(
+            flickTimeMs = DEFAULT_FLICK_TIME_MS,
+            deadzone = DEFAULT_DEADZONE,
+            velocityPxPerRad = DEFAULT_VELOCITY_PX_PER_RAD,
+            exponent = DEFAULT_EXPONENT,
+            snapMode = SnapMode.NONE,
+            snapStrength = DEFAULT_SNAP_STRENGTH,
+        )
+
+        val DEFAULT_JSON =
+            """{"flick_time":$DEFAULT_FLICK_TIME_MS,"flick_deadzone":$DEFAULT_DEADZONE,""" +
+                """"flick_velocity":$DEFAULT_VELOCITY_PX_PER_RAD,""" +
+                """"flick_exponent":$DEFAULT_EXPONENT,"flick_snap_mode":"none",""" +
+                """"flick_snap_strength":$DEFAULT_SNAP_STRENGTH}"""
+
+        fun parse(json: String): FlickStickSettings {
+            if (json.isBlank()) return DEFAULTS
+            return try {
+                val obj = JSONObject(json)
+                FlickStickSettings(
+                    flickTimeMs = obj.optInt("flick_time", DEFAULT_FLICK_TIME_MS)
+                        .coerceAtLeast(1),
+                    deadzone = obj.optDouble("flick_deadzone", DEFAULT_DEADZONE.toDouble())
+                        .toFloat().coerceIn(0.05f, 0.99f),
+                    velocityPxPerRad = obj.optDouble(
+                        "flick_velocity", DEFAULT_VELOCITY_PX_PER_RAD.toDouble()
+                    ).toFloat().coerceAtLeast(1f),
+                    exponent = obj.optDouble("flick_exponent", DEFAULT_EXPONENT.toDouble())
+                        .toFloat().coerceIn(0.1f, 5f),
+                    snapMode = parseSnapMode(obj.optString("flick_snap_mode") ?: "none"),
+                    snapStrength = obj.optDouble(
+                        "flick_snap_strength", DEFAULT_SNAP_STRENGTH.toDouble()
+                    ).toFloat().coerceIn(0f, 1f),
+                )
+            } catch (_: JSONException) {
+                DEFAULTS
+            }
+        }
+
+        private fun parseSnapMode(s: String): SnapMode = when (s.lowercase()) {
+            "4_way", "four_way", "4way" -> SnapMode.FOUR_WAY
+            "8_way", "eight_way", "8way" -> SnapMode.EIGHT_WAY
+            else -> SnapMode.NONE
+        }
     }
 }
 
@@ -1600,7 +1847,7 @@ fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.GYRO_TO_JOYSTICK_CAMERA -> GyroToJoystickCameraMode
     BindingMode.GYRO_TO_JOYSTICK_DEFLECTION -> GyroToJoystickDeflectionMode
     BindingMode.DIRECTIONAL_SWIPE -> DirectionalSwipeMode
-    BindingMode.FLICK_STICK,
+    BindingMode.FLICK_STICK -> FlickStickMode
     BindingMode.SCROLL_WHEEL,
     BindingMode.REFERENCE,
     BindingMode.RADIAL_MENU,

@@ -346,6 +346,7 @@ class ShizukuMotionCoordinatorTest {
             analogModeConfigured = false,
             anyShizukuModeConfigured = false,
             noneOnAnalogSourceConfigured = true,
+            analogSourceHasNonDefaultMode = true,
             shizukuReady = true,
         )
         val current = ShizukuMotionCoordinator.PredicateBreakdown(
@@ -353,6 +354,7 @@ class ShizukuMotionCoordinatorTest {
             analogModeConfigured = false,
             anyShizukuModeConfigured = false,
             noneOnAnalogSourceConfigured = true,
+            analogSourceHasNonDefaultMode = true,
             shizukuReady = false,
         )
         assertTrue(coordinator.shouldShowDegradedToast(prior, current))

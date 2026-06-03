@@ -350,6 +350,13 @@ class InputEvaluator @Inject constructor(
                     com.mapo.service.input.modes.GyroToJoystickDeflectionMode.resetState()
                     com.mapo.service.input.modes.DpadMode.resetState()
                 }
+                // FlickStickMode runs on joystick sources; its per-source
+                // state machine (NEUTRAL/FLICKING/HOLDING) must reset on
+                // mode change so a deflected stick from a prior mode doesn't
+                // leak into the flick state.
+                if (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) {
+                    com.mapo.service.input.modes.FlickStickMode.resetState()
+                }
             }
             priorModeBySource[source] = current
         }

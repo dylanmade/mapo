@@ -229,23 +229,23 @@ class ShizukuMotionCoordinator @Inject constructor(
         // nothing = game only sees what Mapo writes to the virtual gamepad =
         // NONE-mode source contributes zero to its slot = silenced.
         val grab = breakdown.shouldEnable &&
-            (breakdown.gyroStickModeConfigured || breakdown.noneOnAnalogSourceConfigured)
+            (breakdown.gyroStickModeConfigured || breakdown.analogSourceHasNonDefaultMode)
         if (prior?.let { p ->
-            (p.shouldEnable && (p.gyroStickModeConfigured || p.noneOnAnalogSourceConfigured)) != grab
+            (p.shouldEnable && (p.gyroStickModeConfigured || p.analogSourceHasNonDefaultMode)) != grab
         } != false) {
             Log.i(
                 TAG,
                 "grab transition → $grab (gyroStick=${breakdown.gyroStickModeConfigured} " +
-                    "noneOnAnalog=${breakdown.noneOnAnalogSourceConfigured})",
+                    "analogNonDefault=${breakdown.analogSourceHasNonDefaultMode})",
             )
         }
         tryToggleGrab(grab)
         inputEvaluator.setPhysicalPassthroughEnabled(grab)
         _shizukuModeActive.value = breakdown.shouldEnable
         _analogModeWanted.value = breakdown.remapEnabled &&
-            (breakdown.analogModeConfigured || breakdown.noneOnAnalogSourceConfigured)
+            (breakdown.analogModeConfigured || breakdown.analogSourceHasNonDefaultMode)
         _anyShizukuModeWanted.value = breakdown.remapEnabled &&
-            (breakdown.anyShizukuModeConfigured || breakdown.noneOnAnalogSourceConfigured)
+            (breakdown.anyShizukuModeConfigured || breakdown.analogSourceHasNonDefaultMode)
     }
 
     /**
@@ -265,7 +265,7 @@ class ShizukuMotionCoordinator @Inject constructor(
         return prior.shouldEnable
             && !current.shizukuReady
             && current.remapEnabled
-            && (current.analogModeConfigured || current.noneOnAnalogSourceConfigured)
+            && (current.analogModeConfigured || current.analogSourceHasNonDefaultMode)
     }
 
     private fun showDegradedToast() {
@@ -331,6 +331,9 @@ class ShizukuMotionCoordinator @Inject constructor(
                 it == com.mapo.data.model.steam.BindingMode.GYRO_TO_JOYSTICK_DEFLECTION
         },
         noneOnAnalogSourceConfigured = hasNoneOnAnalogSource(compiled, activeSetId),
+        analogSourceHasNonDefaultMode = hasNonDefaultModeOnAnalogSource(
+            compiled, activeSetId, activeLayers,
+        ),
         shizukuReady = shizukuReady,
     )
 
@@ -373,6 +376,45 @@ class ShizukuMotionCoordinator @Inject constructor(
     }
 
     /**
+     * 2026-06-03 follow-up to C.5: true iff any grabbable analog source
+     * (LJ / RJ / LT / RT / DPAD) is in a non-DEVICE_DEFAULT mode in scope.
+     * Strict superset of [hasNoneOnAnalogSource] — also covers TRIGGER /
+     * DPAD / JOYSTICK_MOVE / JOYSTICK_MOUSE / FLICK_STICK / MOUSE_REGION
+     * etc.
+     *
+     * **Why this gates EVIOCGRAB:** when Mapo is interpreting an analog
+     * source's input — translating stick deflection into mouse motion
+     * (FLICK_STICK / JOYSTICK_MOUSE), virtual gamepad axes (JOYSTICK_MOVE),
+     * synthetic edges (TRIGGER / DPAD), absolute cursor position
+     * (MOUSE_REGION) — the OS's native pass-through of that same source
+     * has to be silenced. Otherwise the game receives BOTH Mapo's
+     * synthesized output AND the raw physical analog values, producing the
+     * "still possible to look up/down even in FLICK_STICK" symptom
+     * (user-reported 2026-06-03 on RIGHT_JOYSTICK in FLICK_STICK mode).
+     *
+     * Walks base set's [com.mapo.service.input.CompiledActionSet.inputs]
+     * (which contains entries for every non-DEVICE_DEFAULT, non-NONE
+     * mode), [com.mapo.service.input.CompiledActionSet.noneModeSources]
+     * (which contains the NONE entries — sub-input-less, so they'd be
+     * invisible to the inputs walk), and every active layer's inputs.
+     */
+    private fun hasNonDefaultModeOnAnalogSource(
+        compiled: CompiledConfig,
+        activeSetId: Long,
+        activeLayers: List<Long>,
+    ): Boolean {
+        val resolvedSetId = if (activeSetId == 0L) compiled.startingActionSetId else activeSetId
+        val set = compiled.sets[resolvedSetId] ?: return false
+        if (set.inputs.keys.any { it.source in GRABBABLE_ANALOG_SOURCES }) return true
+        if (set.noneModeSources.any { it in GRABBABLE_ANALOG_SOURCES }) return true
+        for (layerId in activeLayers) {
+            val layer = set.layers[layerId] ?: continue
+            if (layer.inputs.keys.any { it.source in GRABBABLE_ANALOG_SOURCES }) return true
+        }
+        return false
+    }
+
+    /**
      * Predicate result. `shouldEnable` is true when the user wants Mapo's
      * input pipeline running for some reason: either an analog mode needs
      * the /dev/input motion reader, or an analog source is in NONE mode and
@@ -404,11 +446,25 @@ class ShizukuMotionCoordinator @Inject constructor(
          * grab activation.
          */
         val noneOnAnalogSourceConfigured: Boolean = false,
+        /**
+         * 2026-06-03 follow-up: true iff any grabbable analog source has a
+         * non-DEVICE_DEFAULT mode in scope. Strict superset of
+         * [noneOnAnalogSourceConfigured] — also covers TRIGGER, DPAD,
+         * JOYSTICK_MOVE, JOYSTICK_MOUSE, FLICK_STICK, MOUSE_REGION on
+         * stick / trigger / dpad sources.
+         *
+         * Gates EVIOCGRAB whenever Mapo is interpreting an analog source
+         * (translating it to mouse / virtual gamepad / synthetic edges),
+         * which has to suppress the OS's native pass-through of the same
+         * physical source. Without this, the game receives both Mapo's
+         * synthesized output and the raw physical values simultaneously.
+         */
+        val analogSourceHasNonDefaultMode: Boolean = false,
         val shizukuReady: Boolean,
     ) {
         val shouldEnable: Boolean
             get() = remapEnabled &&
-                (analogModeConfigured || noneOnAnalogSourceConfigured) &&
+                (analogModeConfigured || analogSourceHasNonDefaultMode) &&
                 shizukuReady
     }
 

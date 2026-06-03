@@ -170,11 +170,51 @@ class MouseEmitterImpl @Inject constructor(
         synchronized(lock) {
             velocities.clear()
             absSourcePhases.clear()
+            instantResidualX = 0f
+            instantResidualY = 0f
         }
         if (continuousActive && integrationJob?.isActive != true) {
             dispatcher.endContinuousCursor()
             continuousActive = false
         }
+    }
+
+    /**
+     * Separate residual accumulator for [addRelativeDelta]. Kept distinct
+     * from [residualX] / [residualY] (which serve the velocity-integration
+     * loop) so a flick-stick mode's instant injections don't fight the
+     * integration loop's sub-pixel carrying.
+     */
+    @Volatile
+    private var instantResidualX: Float = 0f
+
+    @Volatile
+    private var instantResidualY: Float = 0f
+
+    override fun addRelativeDelta(dx: Float, dy: Float) {
+        if (dx == 0f && dy == 0f) return
+        val accumX: Float
+        val accumY: Float
+        val ix: Int
+        val iy: Int
+        synchronized(lock) {
+            accumX = instantResidualX + dx
+            accumY = instantResidualY + dy
+            ix = accumX.toInt()
+            iy = accumY.toInt()
+            instantResidualX = accumX - ix
+            instantResidualY = accumY - iy
+        }
+        if (ix == 0 && iy == 0) return
+        // Begin a continuous-cursor session if neither the velocity loop nor
+        // a mouse-region session has already opened one. Required so the
+        // service routes the inject through the uinput mouse path; without
+        // an active session the dispatcher's mouse channel is dormant.
+        if (!continuousActive) {
+            dispatcher.beginContinuousCursor()
+            continuousActive = true
+        }
+        dispatcher.injectMouseMove(ix.toFloat(), iy.toFloat())
     }
 
     private fun ensureIntegrationRunning() {

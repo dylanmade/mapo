@@ -184,6 +184,7 @@ class SourceModeTest {
             BindingMode.GYRO_TO_JOYSTICK_CAMERA,  // Brick D.4 runtime — gyro → right-stick deflection
             BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,  // Brick D.4 runtime — gyro → left-stick deflection
             BindingMode.DIRECTIONAL_SWIPE,  // Brick D.5 runtime — gyro rate flicks → directional sub-input edges
+            BindingMode.FLICK_STICK,    // Flick Stick — Jibb Smart stick model, mouse output
         )
         for (mode in BindingMode.values()) {
             if (mode in implemented) continue

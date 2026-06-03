@@ -39,6 +39,7 @@ class MouseRegionModeTest {
             clearCalls += source
         }
         override fun clearAllVelocities() {}
+        override fun addRelativeDelta(dx: Float, dy: Float) {}
     }
 
     private val mouse = RecordingEmitter()

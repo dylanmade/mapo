@@ -801,15 +801,16 @@ class CompiledConfigTest {
         // Brick 6.1 introduced StubMode as the permissive fallback for modes whose
         // runtime hasn't landed yet. Brick 6.3 promoted DPAD out of the stub bucket;
         // Brick K promoted JOYSTICK_MOVE; Brick C.4 promoted MOUSE_REGION; the
-        // Flick Stick brick promoted FLICK_STICK. Now using SCROLL_WHEEL — still
-        // stubbed as of writing. Replace with another still-stub mode if/when
-        // SCROLL_WHEEL gets its real handler.
+        // Flick Stick brick promoted FLICK_STICK; the Scroll Wheel brick promoted
+        // SCROLL_WHEEL. Now using HOTBAR_MENU — still stubbed as of writing.
+        // Replace with another still-stub mode if/when HOTBAR_MENU gets its
+        // real handler.
         val cfg = configWith(
             preset = listOf(
                 presetEntry(
                     inputSource = InputSource.LEFT_JOYSTICK, state = "active",
                     group = groupWith(
-                        mode = BindingMode.SCROLL_WHEEL,
+                        mode = BindingMode.HOTBAR_MENU,
                         inputs = listOf(
                             inputWith("click", listOf(activatorWith(bindings = listOf(binding(BindingOutputType.KEY_PRESS, "ENTER"))))),
                             // Even a typo'd key passes through under a stub mode.

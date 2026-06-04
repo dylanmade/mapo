@@ -4,6 +4,7 @@ import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.InputSource
 import com.mapo.service.input.AnalogEvent
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.pow
 import kotlin.math.sqrt
 import org.json.JSONException
@@ -1010,6 +1011,207 @@ internal data class FlickStickSettings(
             "4_way", "four_way", "4way" -> SnapMode.FOUR_WAY
             "8_way", "eight_way", "8way" -> SnapMode.EIGHT_WAY
             else -> SnapMode.NONE
+        }
+    }
+}
+
+/**
+ * **Scroll Wheel.** Rotating the stick around its center — like turning a
+ * physical dial — emits per-tick sub-input edges that the user binds to mouse
+ * wheel commands (or any other action: next/prev weapon, hotbar cycle, etc.).
+ *
+ * **Behavior** (Steam-parity, verified against Steam Deck):
+ *  - Below the radial deadzone, no ticks fire and the angular baseline resets.
+ *  - Above the deadzone, the mode tracks the stick angle. Whenever the angle
+ *    advances by [ScrollWheelSettings.scrollAngleDeg] in either direction, one
+ *    tick fires on the matching sub-input. The baseline advances by exactly
+ *    one threshold per emitted tick so sub-threshold remainder accumulates
+ *    cleanly into the next tick.
+ *  - Fast rotation that crosses multiple thresholds in a single evaluate
+ *    fires multiple ticks back-to-back (e.g. a flicked stick).
+ *
+ * **Sub-inputs:**
+ *  - `scroll_clockwise` — fires one DOWN→UP edge pair per clockwise tick.
+ *  - `scroll_counter_clockwise` — same for counter-clockwise.
+ *  - `click` / `outer_ring` — passthrough sub-inputs, same as the other
+ *    joystick modes; this mode doesn't drive them.
+ *
+ * The DOWN→UP pair fires in the **same** [evaluate] call, so the activator
+ * engine sees one full press cycle per tick (no held-down state across
+ * events). A bind to `MOUSE_WHEEL_DOWN` therefore emits exactly one
+ * `REL_WHEEL = -1` notch per tick via the existing `dispatchTargetAsClick`
+ * → `injectMouseScroll` chain.
+ *
+ * **Angle convention** (matches [FlickStickMode]): `atan2(x, -y)` so 0 = stick
+ * up, +π/2 = right, ±π = down, −π/2 = left. Rotating clockwise from the
+ * user's perspective increases the angle, so positive angular delta →
+ * `scroll_clockwise` (unless [ScrollWheelSettings.invert] is set).
+ *
+ * **Source filter.** Joystick sources only (LEFT_JOYSTICK / RIGHT_JOYSTICK).
+ * Trackpad rotation would use the same model but Mapo's target hardware
+ * lacks capacitive trackpads.
+ *
+ * **Per-source state** lives in [baselineAngleBySource]; cleared via
+ * [resetState] from [com.mapo.service.input.InputEvaluator.handleConfigChange]
+ * on mode change so a deflected stick from the prior mode doesn't leak in.
+ */
+object ScrollWheelMode : SourceMode {
+    override val mode: BindingMode = BindingMode.SCROLL_WHEEL
+    override fun validInputs(): Set<String> = INPUTS
+    override fun defaultSettingsJson(): String = ScrollWheelSettings.DEFAULT_JSON
+    private val INPUTS = setOf(
+        "click",
+        "outer_ring",
+        "scroll_clockwise",
+        "scroll_counter_clockwise",
+    )
+
+    /**
+     * Most-recently-sampled stick angle per source. `null` = stick is in
+     * deadzone (or this source has never been deflected this session). The
+     * first deflection event after a deadzone period sets the baseline
+     * without emitting; subsequent events accumulate angular delta against
+     * it and fire ticks as the threshold is crossed.
+     */
+    private val baselineAngleBySource = mutableMapOf<InputSource, Float?>()
+
+    fun resetState() {
+        synchronized(baselineAngleBySource) { baselineAngleBySource.clear() }
+    }
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        if (reading.source != InputSource.LEFT_JOYSTICK &&
+            reading.source != InputSource.RIGHT_JOYSTICK
+        ) return
+
+        val settings = ScrollWheelSettings.parse(ctx.settingsJson)
+        val magnitude = sqrt(reading.x * reading.x + reading.y * reading.y)
+
+        // Below deadzone: clear baseline. Next deflection event will set
+        // a fresh baseline rather than measuring against stale state.
+        if (magnitude < settings.deadzone) {
+            synchronized(baselineAngleBySource) { baselineAngleBySource[reading.source] = null }
+            return
+        }
+
+        val currentAngle = atan2(reading.x, -reading.y)
+        val baseline = synchronized(baselineAngleBySource) { baselineAngleBySource[reading.source] }
+
+        if (baseline == null) {
+            // First deflection sample — set baseline, emit nothing.
+            synchronized(baselineAngleBySource) { baselineAngleBySource[reading.source] = currentAngle }
+            return
+        }
+
+        val delta = wrapToPlusMinusPi(currentAngle - baseline)
+        val thresholdRad = (settings.scrollAngleDeg * Math.PI / 180.0).toFloat()
+        if (thresholdRad <= 0f) return  // defensive — settings clamp this, but be safe
+
+        val absDelta = abs(delta)
+        if (absDelta < thresholdRad) {
+            // Sub-threshold motion — let it accumulate; baseline unchanged.
+            return
+        }
+
+        val ticks = (absDelta / thresholdRad).toInt()
+        val deltaSign = if (delta >= 0f) 1f else -1f
+        val isClockwise = (deltaSign > 0f) xor settings.invert
+        val subInput = if (isClockwise) "scroll_clockwise" else "scroll_counter_clockwise"
+
+        // Emit one DOWN→UP pulse per tick crossed. Back-to-back in the same
+        // evaluate() so the activator engine sees N complete press cycles.
+        repeat(ticks) {
+            digitalEmit(subInput, true)
+            digitalEmit(subInput, false)
+        }
+
+        // Advance baseline by exactly N threshold-widths in the direction of
+        // motion. Sub-threshold remainder stays in the baseline-to-current
+        // gap and counts toward the next tick.
+        val consumed = ticks * thresholdRad * deltaSign
+        val newBaseline = wrapToPlusMinusPi(baseline + consumed)
+        synchronized(baselineAngleBySource) { baselineAngleBySource[reading.source] = newBaseline }
+    }
+
+    /** Wrap an angle to (−π, +π]. */
+    private fun wrapToPlusMinusPi(a: Float): Float {
+        val twoPi = (2 * Math.PI).toFloat()
+        var w = a
+        while (w > Math.PI) w -= twoPi
+        while (w <= -Math.PI) w += twoPi
+        return w
+    }
+}
+
+/**
+ * Parsed [ScrollWheelMode] settings. Tolerant of missing keys; falls back
+ * to defaults tuned to Steam's stock Scroll Wheel feel (16 ticks per
+ * full stick revolution, 20% deadzone).
+ *
+ * **VDF mapping (Steam parity):** Steam's `scrollwheel` group settings —
+ * `scroll_angle` (degrees per tick), `scroll_invert` (CW↔CCW swap),
+ * `deadzone_inner_radius` — round-trip through this shape.
+ *
+ * [scrollAngleDeg] is the angular distance the stick must rotate to emit
+ * one tick. Smaller = finer resolution (more ticks per revolution); larger
+ * = coarser (Steam's lowest 45° → 8 ticks/rev for chunky weapon scrolls).
+ */
+internal data class ScrollWheelSettings(
+    val deadzone: Float,
+    val scrollAngleDeg: Float,
+    val invert: Boolean,
+) {
+    companion object {
+        /**
+         * Radial deadzone — stick magnitude below this emits nothing. Higher
+         * than [StickToMouseSettings]' cursor default because spurious wheel
+         * ticks from idle stick noise are more disruptive than spurious
+         * cursor jitter (one notch can scroll a weapon, fire a hotbar action,
+         * etc.).
+         */
+        const val DEFAULT_DEADZONE = 0.20f
+
+        /**
+         * Degrees of stick rotation per emitted tick. 22.5° = 16 ticks per
+         * full revolution, matching Steam Input's stock Scroll Wheel default.
+         * Range typically 5° (very fine, ~72 ticks/rev) to 90° (very chunky,
+         * 4 ticks/rev).
+         */
+        const val DEFAULT_SCROLL_ANGLE_DEG = 22.5f
+
+        const val DEFAULT_INVERT = false
+
+        val DEFAULTS = ScrollWheelSettings(
+            deadzone = DEFAULT_DEADZONE,
+            scrollAngleDeg = DEFAULT_SCROLL_ANGLE_DEG,
+            invert = DEFAULT_INVERT,
+        )
+
+        val DEFAULT_JSON =
+            """{"deadzone_inner_radius":$DEFAULT_DEADZONE,""" +
+                """"scroll_angle":$DEFAULT_SCROLL_ANGLE_DEG,"scroll_invert":$DEFAULT_INVERT}"""
+
+        fun parse(json: String): ScrollWheelSettings {
+            if (json.isBlank()) return DEFAULTS
+            return try {
+                val obj = JSONObject(json)
+                ScrollWheelSettings(
+                    deadzone = obj.optDouble(
+                        "deadzone_inner_radius", DEFAULT_DEADZONE.toDouble()
+                    ).toFloat().coerceIn(0f, 0.99f),
+                    scrollAngleDeg = obj.optDouble(
+                        "scroll_angle", DEFAULT_SCROLL_ANGLE_DEG.toDouble()
+                    ).toFloat().coerceIn(1f, 180f),
+                    invert = obj.optBoolean("scroll_invert", DEFAULT_INVERT),
+                )
+            } catch (_: JSONException) {
+                DEFAULTS
+            }
         }
     }
 }
@@ -2047,9 +2249,8 @@ data class StubMode(override val mode: BindingMode) : SourceMode {
  * Resolve the runtime [SourceMode] handler for a [BindingMode] enum value.
  * Implemented modes return their singleton handler; everything else falls
  * through to [StubMode] — which keeps the compile path non-strict for modes
- * whose runtime ships in later Phase 7 bricks (Mouse Region / Flick Stick /
- * Gyro modes / Joystick Move) and out-of-scope modes (Scroll Wheel, Hotbar /
- * Radial / Touch Menu).
+ * whose runtime ships in later Phase 7 bricks (Hotbar / Radial / Touch Menu /
+ * Reference).
  */
 fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.DEVICE_DEFAULT -> DeviceDefaultMode
@@ -2067,7 +2268,7 @@ fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.DIRECTIONAL_SWIPE -> DirectionalSwipeMode
     BindingMode.FLICK_STICK -> FlickStickMode
     BindingMode.GYRO_FLICK_STICK -> GyroFlickStickMode
-    BindingMode.SCROLL_WHEEL,
+    BindingMode.SCROLL_WHEEL -> ScrollWheelMode
     BindingMode.REFERENCE,
     BindingMode.RADIAL_MENU,
     BindingMode.TOUCH_MENU,
@@ -2234,7 +2435,7 @@ fun validInputsFor(source: InputSource, mode: BindingMode): Set<String> = when (
         BindingMode.FLICK_STICK,
         BindingMode.MOUSE_REGION -> JOYSTICK_CLICK_OUTER_RING
         BindingMode.DPAD -> DPAD_DIRECTIONS + JOYSTICK_CLICK_OUTER_RING
-        BindingMode.SCROLL_WHEEL -> JOYSTICK_CLICK_OUTER_RING  // + scroll_clockwise/etc. when SCROLL_WHEEL runtime lands
+        BindingMode.SCROLL_WHEEL -> JOYSTICK_CLICK_OUTER_RING + SCROLL_WHEEL_ROTATION_INPUTS
         BindingMode.RADIAL_MENU, BindingMode.TOUCH_MENU, BindingMode.HOTBAR_MENU -> emptySet()
         else -> mode.handler().validInputs()
     }
@@ -2271,6 +2472,7 @@ fun validInputsFor(source: InputSource, mode: BindingMode): Set<String> = when (
 private val FACE_BUTTONS = setOf("button_a", "button_b", "button_x", "button_y")
 private val DPAD_DIRECTIONS = setOf("dpad_up", "dpad_down", "dpad_left", "dpad_right")
 private val JOYSTICK_CLICK_OUTER_RING = setOf("click", "outer_ring")
+private val SCROLL_WHEEL_ROTATION_INPUTS = setOf("scroll_clockwise", "scroll_counter_clockwise")
 
 /**
  * Source-aware compile-path acceptance check. Equivalent to

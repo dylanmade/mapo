@@ -186,6 +186,7 @@ class SourceModeTest {
             BindingMode.DIRECTIONAL_SWIPE,  // Brick D.5 runtime — gyro rate flicks → directional sub-input edges
             BindingMode.FLICK_STICK,    // Flick Stick — Jibb Smart stick model, mouse output
             BindingMode.GYRO_FLICK_STICK,  // Mapo extension — gyro yaw + flick burst
+            BindingMode.SCROLL_WHEEL,   // Scroll Wheel — stick rotation → scroll_clockwise/CCW edges
         )
         for (mode in BindingMode.values()) {
             if (mode in implemented) continue

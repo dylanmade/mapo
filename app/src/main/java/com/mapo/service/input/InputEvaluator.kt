@@ -357,6 +357,7 @@ class InputEvaluator @Inject constructor(
                 // leak into the flick state.
                 if (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) {
                     com.mapo.service.input.modes.FlickStickMode.resetState()
+                    com.mapo.service.input.modes.ScrollWheelMode.resetState()
                 }
             }
             priorModeBySource[source] = current

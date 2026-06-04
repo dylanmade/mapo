@@ -96,6 +96,18 @@ object MapoRoute {
         "input_editor/${Uri.encode(inputSource)}/${Uri.encode(groupInputKey)}" +
             "?$ARG_INPUT_LABEL=${Uri.encode(label)}&$ARG_MODE_SHIFT_ID=$modeShiftId"
 
+    // ── Per-(source x mode) settings editor (full-screen, instant-commit) ─────────
+    //
+    // Reached by tapping the settings cog (⚙) next to a source's mode dropdown in
+    // `RemapControlsScreen`. Shows the schema-driven settings menu for that
+    // (inputSource, mode) — see `SourceModeSettingsSchema`. The screen reads the
+    // binding group live from config (resolved by source off the viewed action set)
+    // and commits each change straight to the repo; back navigates without a save.
+    const val ARG_BINDING_GROUP_ID = "bindingGroupId"
+    const val MODE_SETTINGS = "mode_settings/{$ARG_BINDING_GROUP_ID}/{$ARG_INPUT_SOURCE}"
+    fun modeSettings(bindingGroupId: Long, inputSource: String): String =
+        "mode_settings/$bindingGroupId/${Uri.encode(inputSource)}"
+
     // ── Chord partner picker (full-screen, listen-for-press) ──────────────────────
     //
     // Reached from `ActivatorEditorScreen` when the activator type is CHORDED_PRESS. While

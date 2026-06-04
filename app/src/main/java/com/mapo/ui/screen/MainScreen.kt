@@ -558,6 +558,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onSetBindingGroupMode = { bindingGroupId, mode ->
                         viewModel.setBindingGroupMode(bindingGroupId, mode)
                     },
+                    onOpenModeSettings = { bindingGroupId, source ->
+                        navController.navigate(MapoRoute.modeSettings(bindingGroupId, source.name))
+                    },
                     onAddModeShift = { setId, layerId, ownerSource ->
                         if (layerId != null) viewModel.addModeShiftToLayer(layerId, ownerSource)
                         else if (setId != null) viewModel.addModeShiftToSet(setId, ownerSource)
@@ -737,6 +740,32 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     },
                     onPickChordPartner = { id ->
                         navController.navigate(MapoRoute.chordPartnerPicker(id))
+                    },
+                    onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            composable(
+                route = MapoRoute.MODE_SETTINGS,
+                arguments = listOf(
+                    navArgument(MapoRoute.ARG_BINDING_GROUP_ID) { type = NavType.LongType },
+                    navArgument(MapoRoute.ARG_INPUT_SOURCE) { type = NavType.StringType },
+                ),
+            ) { entry ->
+                val bindingGroupId = entry.arguments?.getLong(MapoRoute.ARG_BINDING_GROUP_ID)
+                    ?: return@composable
+                val sourceName = entry.arguments?.getString(MapoRoute.ARG_INPUT_SOURCE)
+                    ?: return@composable
+                val source = runCatching {
+                    com.mapo.data.model.steam.InputSource.valueOf(sourceName)
+                }.getOrNull() ?: return@composable
+                com.mapo.ui.screen.remap.settings.ModeSettingsScreen(
+                    bindingGroupId = bindingGroupId,
+                    source = source,
+                    config = activeControllerConfig,
+                    viewingActionSetId = viewingActionSetId,
+                    onSettingsChange = { id, settingsJson ->
+                        viewModel.setBindingGroupSettings(id, settingsJson)
                     },
                     onBack = { navController.popBackStack() },
                     modifier = Modifier.fillMaxSize(),

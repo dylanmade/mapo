@@ -77,6 +77,7 @@ import com.mapo.service.input.modes.requiresShizukuOnSource
 import com.mapo.ui.component.layout.SectionedListDetailPane
 import com.mapo.ui.screen.remap.RemapPaneItem
 import com.mapo.ui.screen.remap.RemapSections
+import com.mapo.ui.screen.remap.settings.SourceModeSettingsSchema
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +100,7 @@ fun RemapControlsScreen(
     onDeleteLayer: (layerId: Long) -> Unit = {},
     onClearLayerOverride: (layerId: Long, inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit = { _, _, _ -> },
     onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit = { _, _ -> },
+    onOpenModeSettings: (bindingGroupId: Long, source: InputSource) -> Unit = { _, _ -> },
     onAddModeShift: (actionSetId: Long?, actionLayerId: Long?, ownerSource: InputSource) -> Unit = { _, _, _ -> },
     onRemoveModeShift: (modeShiftId: Long) -> Unit = {},
     onSetModeShiftTrigger: (modeShiftId: Long, triggerSource: InputSource?, triggerSubInput: String?) -> Unit = { _, _, _ -> },
@@ -244,6 +246,7 @@ fun RemapControlsScreen(
                     onClearLayerOverride(layerId, inputSource, groupInputKey)
                 },
                 onSetBindingGroupMode = gatedSetBindingGroupMode,
+                onOpenModeSettings = onOpenModeSettings,
                 onAddModeShift = { ownerSource ->
                     val layerId = viewingLayer?.layer?.id
                     val setId = viewingSet?.actionSet?.id
@@ -688,6 +691,7 @@ private fun RemapDetailPane(
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
     onClearOverride: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit,
     onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
+    onOpenModeSettings: (bindingGroupId: Long, source: InputSource) -> Unit,
     onAddModeShift: (ownerSource: InputSource) -> Unit,
     onRemoveModeShift: (modeShiftId: Long) -> Unit,
     onSetModeShiftTrigger: (modeShiftId: Long, triggerSource: InputSource?, triggerSubInput: String?) -> Unit,
@@ -755,6 +759,7 @@ private fun RemapDetailPane(
                         viewingSet = viewingSet,
                         viewingLayer = viewingLayer,
                         onSetBindingGroupMode = onSetBindingGroupMode,
+                        onOpenModeSettings = onOpenModeSettings,
                         onAddModeShift = onAddModeShift,
                     )
                     is RemapPaneItem.BindingRow -> BindingRowItem(
@@ -971,6 +976,7 @@ private fun SubheaderRow(
     viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
     viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
     onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
+    onOpenModeSettings: (bindingGroupId: Long, source: InputSource) -> Unit,
     onAddModeShift: (ownerSource: InputSource) -> Unit,
 ) {
     Column(
@@ -996,8 +1002,13 @@ private fun SubheaderRow(
             val validModes = SourceModeCatalog.modesValidFor(source)
             if (effectiveGroup != null && validModes.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
-                // Mode picker + (optionally) "+ Mode Shift" button side by side.
+                // Mode picker + settings cog + (optionally) "+ Mode Shift" side by side.
                 val pickerEnabled = viewingLayer == null && validModes.size > 1
+                // Cog navigates to the full-screen settings editor for (source, mode).
+                // Base-set view only for now — layer-override settings editing is a
+                // later slice (mirrors the mode picker being base-only).
+                val showCog = viewingLayer == null &&
+                    SourceModeSettingsSchema.hasSettings(source, effectiveGroup.mode)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ModePicker(
                         source = source,
@@ -1006,6 +1017,19 @@ private fun SubheaderRow(
                         enabled = pickerEnabled,
                         onPick = { mode -> onSetBindingGroupMode(effectiveGroup.id, mode) },
                     )
+                    if (showCog) {
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(
+                            onClick = { onOpenModeSettings(effectiveGroup.id, source) },
+                            modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
+                        ) {
+                            Icon(
+                                Icons.Filled.Settings,
+                                contentDescription = "Mode settings",
+                                modifier = Modifier.size(IconButtonDefaults.smallIconSize),
+                            )
+                        }
+                    }
                     if (source in RemapSections.MODE_SHIFT_OWNERS) {
                         Spacer(Modifier.width(8.dp))
                         TextButton(onClick = { onAddModeShift(source) }) {

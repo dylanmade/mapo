@@ -933,6 +933,18 @@ class ControllerConfigRepository @Inject constructor(
     }
 
     /**
+     * Replace [bindingGroupId]'s mode-specific `settingsJson` blob. The settings
+     * cog on each source row in Remap Controls routes here; the runtime mode
+     * handlers parse this JSON (tolerant of missing keys). No-op when unchanged.
+     */
+    suspend fun updateBindingGroupSettings(bindingGroupId: Long, settingsJson: String) {
+        val existing = bindingGroupDao.getById(bindingGroupId) ?: return
+        if (existing.settingsJson == settingsJson) return
+        bindingGroupDao.update(existing.copy(settingsJson = settingsJson))
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
      * Find the [InputSource] that owns [bindingGroupId] when it's a
      * set-owned (base) group. Walks the active `preset_binding` rows whose
      * bindingGroupId matches. Returns null if the group isn't preset-linked

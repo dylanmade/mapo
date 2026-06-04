@@ -601,6 +601,17 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Replace a binding group's mode-specific settings JSON. Wired from the
+     * settings cog on each Remap Controls source row.
+     */
+    fun setBindingGroupSettings(bindingGroupId: Long, settingsJson: String) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch {
+            controllerConfigRepository.updateBindingGroupSettings(bindingGroupId, settingsJson)
+        }
+    }
+
     // ── Phase 7 Brick B.6: Source Mode Shifts ────────────────────────────────
 
     /**

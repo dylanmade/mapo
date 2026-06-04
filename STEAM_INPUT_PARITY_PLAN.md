@@ -989,13 +989,19 @@ LJ in Joystick Move → GameNative game reads virtual XInput stick. LJ in Mouse 
 
 ---
 
-## Phase 8 — VDF import (legacy_set only)
+## Phase 8 — Steam Input config import + in-app browser (legacy_set only)
 
 ### Scope
 
-Parse a Steam VDF controller config and translate it into our Phase 1+ schema. Action-based configs (`legacy_set "0"`) are parsed and warned-about but not auto-resolved — `game_action` bindings land as placeholder bindings flagged "Unresolved game action: <set>/<action>" (manifest registry is out-of-scope; would require a Mapo-hosted action-manifest service).
+Import Steam Input controller configs into Mapo's Phase 1+ schema. Action-based configs (`legacy_set "0"`) are parsed and warned-about but not auto-resolved — `game_action` bindings land as placeholder bindings flagged "Unresolved game action: <set>/<action>" (manifest registry is out-of-scope; would require a Mapo-hosted action-manifest service).
 
-### Parser
+**Architecture decision (2026-06-04, see `project_vdf_import_in_app_browser_primary.md` + `feedback_steam_login_on_android_is_fine.md`):** the primary import UX is an **in-app browser** equivalent to Steam Deck's "Browse Configs" screen, backed by **on-device Steam Guard QR login** and Steam's `IPublishedFile.QueryFiles` unified-messaging service. File-picker and paste-by-ID are demoted to secondary/fallback paths. Phase splits into three subphases.
+
+### Phase 8a — Import pipeline + Steam auth + fallback acquisition
+
+Shared infrastructure that every later subphase rides on.
+
+#### Parser / translator
 
 - **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfParser.kt` — Kotlin VDF parser. Honor duplicate-key semantics (collect into lists, not maps) — many `"group"` blocks, multiple `"preset"` blocks at the same level are intentional and a naive JSON-style parser will silently lose data.
 - **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfImporter.kt` — schema translator:
@@ -1006,7 +1012,7 @@ Parse a Steam VDF controller config and translate it into our Phase 1+ schema. A
   - Binding strings (CSV) → typed `BindingOutput`
   - `localization` → resolved during import (store resolved title/description; fall back to literal `#token` on miss)
 
-### Controller-type mapping
+#### Controller-type mapping
 
 VDF targets a specific controller (`controller_neptune` / `controller_xboxelite` / `controller_xboxone` / `controller_ps4`). Our `controller_profile.controllerType` should preserve the source type so the user can re-import on a matching device. For cross-controller import, surface a mapping confirmation:
 
@@ -1027,29 +1033,70 @@ VDF targets a specific controller (`controller_neptune` / `controller_xboxelite`
 └───────────────────────────────────────────────────┘
 ```
 
-### UI
+The summary + optional preview run regardless of how the VDF was acquired (browser, paste, file-picker).
 
-- **Profile drawer** → new entry "Import Steam Config"
-- File picker (Android Storage Access Framework) selecting a `.vdf` file
-- The summary dialog above
-- Optional **Preview** flips to a read-only version of the controller overview screen so the user can inspect the imported config before committing
-- On Import: lands as a new `ControllerProfile` under the current `Profile`, named from the VDF's title
+#### Steam protocol layer
+
+- Stand up a Kotlin/JVM SteamKit-equivalent module under `data/steam/` that supports:
+  - **Steam Guard QR device-grant login** (no password handling in Mapo) — refresh token persisted via Android Keystore
+  - `IPublishedFile.QueryFiles` against appid 241100 (Steam Controller Configs) over Steam unified messaging
+  - VDF body download (direct URL when the QueryFiles response provides one; CDN depot fetch via app-ownership-ticket + depot-decryption-key + manifest+chunks otherwise)
+  - `ICloudService` access to the user's own `userdata/<steamid32>/241100/remote/controller_config/` tree
+- **First step before writing this from scratch:** audit GameNative (and other open-source Android-Steam-integration prior art) — if a working Kotlin/Android implementation of the relevant SteamKit subset already exists, wrap or vendor it instead of porting fresh. Decision point lives at the top of 8a.
+
+#### Fallback acquisition (secondary UX)
+
+- **Paste-by-ID** — user pastes a Steam Workshop URL or `publishedfileid`; resolved to a VDF via the protocol layer. Useful for sharing a specific config out-of-band.
+- **Local-folder / file import** — SAF file picker for a `.vdf` file. The original Phase 8 UI shape, now positioned as "offline / privacy-conscious" path. Profile drawer label: "Import from file."
+
+### Phase 8b — In-app browser (primary UX)
+
+The headline acquisition path. Functionally equivalent to Steam Deck's per-game "Browse Configs" screen, rendered natively in Mapo.
+
+#### Entry point
+
+- Profile drawer → "Browse Steam configs" → game picker
+- Game picker pulls owned-games via `IPlayerService.GetOwnedGames` (public Web API, simple key auth, no scope issues) so the user browses by game title + icon, not appid
+- Game metadata (icon, header image) from the Steam store API
+
+#### Browser tabs (per selected game)
+
+- **Yours** — user's own Cloud-synced configs via `ICloudService`
+- **Most Popular** — `QueryFiles` ranked by subscription count
+- **Most Recent** — `QueryFiles` ranked by publish date
+
+#### Per-config row
+
+- Title, author, vote score, subscription count
+- Mapo-glyph-rendered binding summary (uses our own glyph system, not Steam's)
+- One-tap **Apply** → fetches VDF body → runs through the 8a import pipeline → shows the summary dialog → lands as a new `ControllerProfile` under the current `Profile`
+
+### Phase 8c — Polish
+
+- **Friends tab** — `ISteamFriends` enumeration + per-friend `QueryFiles` filter
+- **Per-controller ranking** — boost configs whose source `controller_*` matches the user's detected device
+- **"Recommended"-spirit ranking** — our own algorithmic mix (popularity × recency × controller match), since Steam's curated/featured tabs aren't reachable via the public protocol
+- **Richer preview** — full read-only controller overview screen (the optional Preview step from the summary dialog), surfaced as a sheet before Apply
 
 ### Files
 
 - **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfParser.kt`
 - **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfImporter.kt`
 - **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfTokenStream.kt` (tokenizer)
-- **Create** `app/src/main/java/com/mapo/ui/screen/import/VdfImportScreen.kt`
-- **Edit** `app/src/main/java/com/mapo/ui/nav/MapoRoute.kt` — add `IMPORT_VDF`
-- **Edit** `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` — add the menu entry
-- **Edit** `app/src/main/AndroidManifest.xml` — declare SAF intent filter for `.vdf` files if desired (open-with from a file manager)
+- **Create** `app/src/main/java/com/mapo/data/steam/` (whole tree — protocol client, QR login flow, token storage, QueryFiles wrapper, CDN downloader)
+- **Create** `app/src/main/java/com/mapo/ui/screen/import/SteamLoginScreen.kt`
+- **Create** `app/src/main/java/com/mapo/ui/screen/import/SteamConfigBrowserScreen.kt`
+- **Create** `app/src/main/java/com/mapo/ui/screen/import/VdfImportScreen.kt` (shared summary dialog + fallback paste/file UI)
+- **Edit** `app/src/main/java/com/mapo/ui/nav/MapoRoute.kt` — add `IMPORT_STEAM_LOGIN`, `IMPORT_STEAM_BROWSER`, `IMPORT_VDF`
+- **Edit** `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` — add the entries
+- **Edit** `app/src/main/AndroidManifest.xml` — SAF intent filter for `.vdf` files if desired (open-with from a file manager)
 
 ### Verify
 
-- Import a real Steam Deck VDF (e.g., the Guild Wars 2 example previously analyzed). All 24 groups produce equivalent BindingGroups; all activators (Full / Soft / Long / Start / release) parse correctly; layer activation pairs survive round-trip.
-- Re-export (Phase 7.b, stretch) round-trips structurally-stable: parsed → re-emitted is semantically equivalent (key reorder OK).
-- A `legacy_set "0"` action-based VDF imports without crashing; `game_action` bindings show as placeholders.
+- **8a** — import a real Steam Deck VDF via the file-picker fallback (e.g., the Guild Wars 2 example previously analyzed). All 24 groups produce equivalent BindingGroups; all activators (Full / Soft / Long / Start / release) parse correctly; layer activation pairs survive round-trip. A `legacy_set "0"` action-based VDF imports without crashing; `game_action` bindings show as placeholders. Steam Guard QR login completes end-to-end and the refresh token survives an app restart.
+- **8b** — from a clean install: log in via Steam Guard QR, pick an owned game, browse Yours / Most Popular / Most Recent, one-tap-apply a config, verify the resulting `ControllerProfile` matches what file-import would produce for the same source VDF.
+- **8c** — friends tab populates with at least one friend's published configs; per-controller ranking promotes configs whose source `controller_*` matches the device.
+- **Re-export** (stretch, post-parity) round-trips structurally-stable: parsed → re-emitted is semantically equivalent (key reorder OK).
 
 ---
 
@@ -1129,7 +1176,7 @@ Mapo is pre-release; destructive changes are OK. Phase 1's schema rebuild wipes 
 
 - Glyph database / `GetGlyphForActionOrigin` equivalent
 - Action origin translation across controller families
-- Workshop / community-config sharing (file import in Phase 7 is the MVP)
+- (Workshop / community-config browsing was previously listed here as out-of-scope; pulled in 2026-06-04 as the **primary** import UX — see Phase 8b)
 - Game action manifest registration (forces legacy-only import scope)
 - Preview-before-apply for layouts beyond the VDF import flow
 - Controller HUD / debug overlay
@@ -1186,9 +1233,12 @@ A consolidated list for quick scanning at execution time.
 - `app/src/main/java/com/mapo/service/input/modes/` (one file per mode)
 - `app/src/main/java/com/mapo/ui/screen/binding/SourceEditorScreen.kt`
 
-**New in Phase 7 (VDF import):**
+**New in Phase 8 (Steam config import + in-app browser):**
 
 - `app/src/main/java/com/mapo/data/io/vdf/` (parser + importer)
+- `app/src/main/java/com/mapo/data/steam/` (Steam protocol client, QR login, QueryFiles, CDN downloader)
+- `app/src/main/java/com/mapo/ui/screen/import/SteamLoginScreen.kt`
+- `app/src/main/java/com/mapo/ui/screen/import/SteamConfigBrowserScreen.kt`
 - `app/src/main/java/com/mapo/ui/screen/import/VdfImportScreen.kt`
 
 **New in Phase 8 (menu scaffold):**

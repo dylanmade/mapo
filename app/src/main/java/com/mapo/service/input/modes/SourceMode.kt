@@ -1624,6 +1624,166 @@ internal data class DirectionalSwipeSettings(
 }
 
 /**
+ * **Mapo extension — no Steam equivalent.** Gyro yaw → mouse_dx
+ * continuous mapping with an additive flick burst on rapid yaw gestures.
+ * Loose analog to the joystick [FlickStickMode]: a quick wrist-flick
+ * fires a one-shot rotation boost, while sustained slow yaw flows as
+ * 1:1 (or settings-scaled) gyro→mouse. **Yaw-only — pitch is ignored**
+ * (the design intent is camera turning, not look-up/down).
+ *
+ * **Steady-state** — every evaluate() emits a velocity proportional to
+ * `reading.z` (yaw rate, rad/sec). Below `deadzone` (drift suppression),
+ * the source's velocity slot is zeroed.
+ *
+ * **Flick gesture** — when `|yaw rate|` crosses `flick_threshold` AND
+ * the source is armed (no recent flick in flight), schedule a
+ * `flick_angle * velocity` burst via [MouseEmitter.scheduleSmoothDelta]
+ * over `flick_time` ms. The burst is *additive* on top of the continuous
+ * velocity — the user's flick gesture contributes its native yaw motion
+ * PLUS the configured boost angle. Disarms until yaw rate drops below
+ * the deadzone (rearm hysteresis), so one sustained rotation = one flick.
+ *
+ * **Sign convention** — positive `reading.z` = CCW yaw (top-edge-rotates-
+ * left), which the user intends as "look left." Mouse-dx convention is
+ * positive = look right, so the math sign-flips internally.
+ *
+ * **Source filter** — gyro only. Other sources are a no-op.
+ *
+ * **Per-source state** — armed/disarmed boolean keyed by [InputSource];
+ * cleared via [resetState] from
+ * [com.mapo.service.input.InputEvaluator.handleConfigChange] on mode
+ * change.
+ */
+object GyroFlickStickMode : SourceMode {
+    override val mode: BindingMode = BindingMode.GYRO_FLICK_STICK
+    override fun validInputs(): Set<String> = emptySet()
+    override fun defaultSettingsJson(): String = GyroFlickStickSettings.DEFAULT_JSON
+
+    private val armedBySource = mutableMapOf<InputSource, Boolean>()
+
+    /** Reset per-source arming state. Called on mode change. */
+    fun resetState() {
+        synchronized(armedBySource) { armedBySource.clear() }
+    }
+
+    override fun evaluate(
+        reading: AnalogEvent,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        mouse: MouseEmitter,
+    ) {
+        if (reading.source != InputSource.GYRO) return
+        val settings = GyroFlickStickSettings.parse(ctx.settingsJson)
+
+        val yawRate = reading.z  // rad/sec
+        val absRate = kotlin.math.abs(yawRate)
+
+        // Below deadzone: zero contribution and re-arm for the next flick.
+        if (absRate < settings.deadzone) {
+            mouse.setStickVelocity(reading.source, 0f, 0f)
+            synchronized(armedBySource) { armedBySource[reading.source] = true }
+            return
+        }
+
+        // Continuous yaw → mouse_dx velocity. Sign-flip from sensor
+        // convention (+z = CCW = left) to mouse_dx convention (+dx = right).
+        val baseVx = -yawRate * settings.velocityPxPerRad
+        mouse.setStickVelocity(reading.source, baseVx, 0f)
+
+        // Flick detection: rate above threshold AND armed → fire burst.
+        val armed = synchronized(armedBySource) {
+            armedBySource.getOrPut(reading.source) { true }
+        }
+        if (armed && absRate >= settings.flickThreshold) {
+            // Sign matches the yaw direction (positive yaw rate → look-left
+            // mouse, so negative dx; negative yaw → positive dx).
+            val flickSign = if (yawRate > 0f) -1f else 1f
+            val flickPx = flickSign * settings.flickAngleRad * settings.velocityPxPerRad
+            mouse.scheduleSmoothDelta(flickPx, 0f, settings.flickTimeMs.toLong())
+            synchronized(armedBySource) { armedBySource[reading.source] = false }
+        }
+    }
+}
+
+/**
+ * Parsed [GyroFlickStickMode] settings. Tolerant of missing keys; falls
+ * back to defaults tuned for FPS camera use.
+ *
+ * **Mapo-only — no VDF mapping** since Steam doesn't expose a gyro flick
+ * stick mode. The settings live entirely in Mapo's JSON namespace.
+ */
+internal data class GyroFlickStickSettings(
+    val deadzone: Float,
+    val velocityPxPerRad: Float,
+    val flickThreshold: Float,
+    val flickAngleRad: Float,
+    val flickTimeMs: Int,
+) {
+    companion object {
+        /** Drift-suppression floor. Yaw rates below this emit zero. */
+        const val DEFAULT_DEADZONE = 0.05f
+
+        /**
+         * Continuous yaw→mouse sensitivity. Matches joystick
+         * [FlickStickSettings.DEFAULT_VELOCITY_PX_PER_RAD] so the two
+         * flick stick modes feel consistent in their hold-phase
+         * sensitivity.
+         */
+        const val DEFAULT_VELOCITY_PX_PER_RAD = 1500f
+
+        /**
+         * Yaw rate at which a flick burst fires. ~2 rad/sec is a
+         * deliberate-flick speed — slow tilts and fine aim don't trigger
+         * it. Same value [DirectionalSwipeSettings] uses for its rate
+         * threshold (gesture-detection symmetry).
+         */
+        const val DEFAULT_FLICK_THRESHOLD = 2.0f
+
+        /**
+         * Flick burst rotation amount. π/2 = 90° turn. Mapo extension —
+         * user can dial to π (180°), 2π (full spin), etc.
+         */
+        val DEFAULT_FLICK_ANGLE_RAD = (kotlin.math.PI / 2.0).toFloat()
+
+        /** Flick playout duration. Same default as joystick FLICK_STICK. */
+        const val DEFAULT_FLICK_TIME_MS = 100
+
+        val DEFAULTS = GyroFlickStickSettings(
+            deadzone = DEFAULT_DEADZONE,
+            velocityPxPerRad = DEFAULT_VELOCITY_PX_PER_RAD,
+            flickThreshold = DEFAULT_FLICK_THRESHOLD,
+            flickAngleRad = DEFAULT_FLICK_ANGLE_RAD,
+            flickTimeMs = DEFAULT_FLICK_TIME_MS,
+        )
+
+        val DEFAULT_JSON =
+            """{"deadzone":$DEFAULT_DEADZONE,"velocity":$DEFAULT_VELOCITY_PX_PER_RAD,""" +
+                """"flick_threshold":$DEFAULT_FLICK_THRESHOLD,""" +
+                """"flick_angle":$DEFAULT_FLICK_ANGLE_RAD,"flick_time":$DEFAULT_FLICK_TIME_MS}"""
+
+        fun parse(json: String): GyroFlickStickSettings {
+            if (json.isBlank()) return DEFAULTS
+            return try {
+                val obj = JSONObject(json)
+                GyroFlickStickSettings(
+                    deadzone = obj.optDouble("deadzone", DEFAULT_DEADZONE.toDouble())
+                        .toFloat().coerceAtLeast(0f),
+                    velocityPxPerRad = obj.optDouble("velocity", DEFAULT_VELOCITY_PX_PER_RAD.toDouble())
+                        .toFloat().coerceAtLeast(1f),
+                    flickThreshold = obj.optDouble("flick_threshold", DEFAULT_FLICK_THRESHOLD.toDouble())
+                        .toFloat().coerceAtLeast(0f),
+                    flickAngleRad = obj.optDouble("flick_angle", DEFAULT_FLICK_ANGLE_RAD.toDouble())
+                        .toFloat(),
+                    flickTimeMs = obj.optInt("flick_time", DEFAULT_FLICK_TIME_MS).coerceAtLeast(1),
+                )
+            } catch (_: JSONException) {
+                DEFAULTS
+            }
+        }
+    }
+}
+
+/**
  * Parsed settings + math for the gyro→stick modes
  * ([GyroToJoystickCameraMode], [GyroToJoystickDeflectionMode]). Sibling
  * of [StickToMouseSettings]: same "caller-supplied defaults" pattern so
@@ -1906,6 +2066,7 @@ fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.GYRO_TO_JOYSTICK_DEFLECTION -> GyroToJoystickDeflectionMode
     BindingMode.DIRECTIONAL_SWIPE -> DirectionalSwipeMode
     BindingMode.FLICK_STICK -> FlickStickMode
+    BindingMode.GYRO_FLICK_STICK -> GyroFlickStickMode
     BindingMode.SCROLL_WHEEL,
     BindingMode.REFERENCE,
     BindingMode.RADIAL_MENU,
@@ -1994,6 +2155,7 @@ val MODES_REQUIRING_SHIZUKU: Set<BindingMode> = ANALOG_MODES_REQUIRING_MOTION_CA
     BindingMode.GYRO_TO_MOUSE,                // uinput mouse for clean cursor (else dispatchGesture click-drag)
     BindingMode.GYRO_TO_JOYSTICK_CAMERA,      // uinput gamepad axes
     BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,  // uinput gamepad axes
+    BindingMode.GYRO_FLICK_STICK,             // uinput mouse for continuous yaw + flick burst
     // DIRECTIONAL_SWIPE outputs synthetic digital edges via the normal key
     // inject path — works without Shizuku via reflection. Intentionally
     // omitted.
@@ -2095,6 +2257,7 @@ fun validInputsFor(source: InputSource, mode: BindingMode): Set<String> = when (
         BindingMode.GYRO_TO_MOUSE,
         BindingMode.GYRO_TO_JOYSTICK_CAMERA,
         BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
+        BindingMode.GYRO_FLICK_STICK,
         BindingMode.MOUSE_REGION -> emptySet()
         BindingMode.RADIAL_MENU, BindingMode.TOUCH_MENU, BindingMode.HOTBAR_MENU -> emptySet()
         else -> mode.handler().validInputs()
@@ -2194,6 +2357,7 @@ object SourceModeCatalog {
             BindingMode.GYRO_TO_MOUSE,
             BindingMode.GYRO_TO_JOYSTICK_CAMERA,
             BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
+            BindingMode.GYRO_FLICK_STICK,  // Mapo extension; no Steam equivalent
             // MOUSE_REGION hidden for the same reason as the joystick rows.
             BindingMode.DPAD,
             BindingMode.DIRECTIONAL_SWIPE,

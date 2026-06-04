@@ -112,6 +112,15 @@ enum class BindingMode {
      */
     DIRECTIONAL_SWIPE,
 
+    /**
+     * **Mapo extension — no Steam equivalent.** Gyro yaw → mouse_dx
+     * continuous mapping with an additive "flick" burst when yaw rate
+     * spikes above threshold. Lets the user snap-turn by quickly
+     * rotating the device + small physical rotation. Yaw only — pitch
+     * ignored. Runtime in [com.mapo.service.input.modes.GyroFlickStickMode].
+     */
+    GYRO_FLICK_STICK,
+
     RADIAL_MENU,
     TOUCH_MENU,
 
@@ -217,6 +226,7 @@ fun BindingMode.displayName(): String = when (this) {
     BindingMode.GYRO_TO_JOYSTICK_CAMERA -> "Gyro to Joystick Camera"
     BindingMode.GYRO_TO_JOYSTICK_DEFLECTION -> "Gyro to Joystick Deflection"
     BindingMode.DIRECTIONAL_SWIPE -> "Directional Swipe"
+    BindingMode.GYRO_FLICK_STICK -> "Gyro Flick Stick"
     BindingMode.RADIAL_MENU -> "Radial Menu"
     BindingMode.TOUCH_MENU -> "Touch Menu"
     BindingMode.HOTBAR_MENU -> "Hotbar Menu"

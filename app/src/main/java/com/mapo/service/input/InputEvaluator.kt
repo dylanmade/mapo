@@ -349,6 +349,7 @@ class InputEvaluator @Inject constructor(
                 if (source == InputSource.GYRO) {
                     com.mapo.service.input.modes.GyroToJoystickDeflectionMode.resetState()
                     com.mapo.service.input.modes.DpadMode.resetState()
+                    com.mapo.service.input.modes.GyroFlickStickMode.resetState()
                 }
                 // FlickStickMode runs on joystick sources; its per-source
                 // state machine (NEUTRAL/FLICKING/HOLDING) must reset on

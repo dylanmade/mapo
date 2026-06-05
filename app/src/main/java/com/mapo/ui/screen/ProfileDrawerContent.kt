@@ -3,7 +3,10 @@ package com.mapo.ui.screen
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -28,13 +31,17 @@ import com.mapo.data.model.Profile
 @Composable
 fun ProfileDrawerContent(
     activeProfile: Profile?,
+    steamAccountName: String?,
     onOpenChangeProfile: () -> Unit,
     onOpenRemapControls: () -> Unit,
     onOpenAutoSwitch: () -> Unit,
     onOpenBlocklist: () -> Unit,
     onOpenThemeStudio: () -> Unit,
     onOpenShizukuSetup: () -> Unit,
+    onOpenSteamSetup: () -> Unit,
     onToggleKeyboardOverlay: () -> Unit,
+    onToggleOverlay: () -> Unit,
+    onEditOverlay: () -> Unit,
 ) {
     // surfaceContainerHigh — drawer sheet (canonical M3 elevated container per Reply)
     ModalDrawerSheet(
@@ -107,6 +114,25 @@ fun ProfileDrawerContent(
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
             }
+            item {
+                NavigationDrawerItem(
+                    label = {
+                        Text(
+                            stringResource(
+                                if (steamAccountName != null) {
+                                    R.string.steam_drawer_label_signed_in
+                                } else {
+                                    R.string.steam_drawer_label_connect
+                                },
+                            ),
+                        )
+                    },
+                    selected = false,
+                    onClick = onOpenSteamSetup,
+                    icon = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
             // Mirror of the Quick Settings tile. The tile is the primary activation
             // surface (system-wide reach without opening Mapo); this drawer entry is
             // a convenience for first-run setup / users who don't know about the tile.
@@ -116,6 +142,27 @@ fun ProfileDrawerContent(
                     selected = false,
                     onClick = onToggleKeyboardOverlay,
                     icon = { Icon(Icons.Default.Keyboard, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+            // Rebuilt free-positioned button overlay (one window per button). Coexists
+            // with the legacy keyboard overlay above; see OVERLAY_REBUILD_PLAN.md.
+            item {
+                NavigationDrawerItem(
+                    label = { Text(stringResource(R.string.overlay_show_drawer_label)) },
+                    selected = false,
+                    onClick = onToggleOverlay,
+                    icon = { Icon(Icons.Default.Gamepad, contentDescription = null) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+            // Live on-overlay editor for the rebuilt button overlay (OVERLAY_REBUILD_PLAN.md).
+            item {
+                NavigationDrawerItem(
+                    label = { Text(stringResource(R.string.overlay_edit_drawer_label)) },
+                    selected = false,
+                    onClick = onEditOverlay,
+                    icon = { Icon(Icons.Default.Edit, contentDescription = null) },
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
             }

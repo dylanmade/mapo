@@ -46,7 +46,38 @@
     <string name="theme_studio_drawer_label">Theme Studio</string>
     <string name="keyboard_overlay_tile_label">Mapo keyboard</string>
     <string name="keyboard_overlay_drawer_label">Toggle keyboard overlay</string>
+    <string name="overlay_show_drawer_label">Toggle button overlay</string>
+    <string name="overlay_edit_drawer_label">Edit overlay</string>
     <string name="shizuku_drawer_label">Shizuku setup</string>
+    <string name="steam_drawer_label_connect">Connect to Steam</string>
+    <string name="steam_drawer_label_signed_in">Steam account</string>
+
+    <!-- Steam setup / login screen. -->
+    <string name="steam_screen_title_connect">Connect to Steam</string>
+    <string name="steam_screen_title_signed_in">Steam account</string>
+    <string name="steam_back">Back</string>
+    <string name="steam_state_connecting">Connecting to Steam…</string>
+    <string name="steam_qr_headline">Scan to sign in</string>
+    <string name="steam_qr_instructions">Open the Steam mobile app, tap the QR scanner in the top-right of any screen, and point it at this code. Approve the sign-in on your phone.</string>
+    <string name="steam_state_awaiting_approval">Waiting for approval…</string>
+    <string name="steam_state_awaiting_approval_subtitle">Open the Steam mobile app and tap Approve to finish signing in.</string>
+    <string name="steam_signed_in_label">Signed in as</string>
+    <string name="steam_sign_out_button">Sign out</string>
+    <string name="steam_error_headline">Sign-in failed</string>
+    <string name="steam_retry_button">Try again</string>
+    <string name="steam_browse_button">Browse configs</string>
+
+    <!-- Steam config browse screen (Brick B.0 POC). -->
+    <string name="steam_browse_title_games">Browse Steam configs</string>
+    <string name="steam_browse_title_configs">Configs for %1$s</string>
+    <string name="steam_browse_loading_games">Loading your games…</string>
+    <string name="steam_browse_loading_configs">Loading configs…</string>
+    <string name="steam_browse_empty_games">No games found in your library.</string>
+    <string name="steam_browse_empty_filtered">No games match that filter.</string>
+    <string name="steam_browse_empty_configs">No configs found for this game.</string>
+    <string name="steam_browse_filter_hint">Filter by name</string>
+    <string name="steam_browse_game_subtext">App %1$d · %2$d min played</string>
+    <string name="steam_browse_config_subtext">%1$d up · %2$d subs · creator %3$d</string>
 
     <!-- Shizuku Setup screen. -->
     <string name="shizuku_screen_title">Shizuku</string>

@@ -5,6 +5,7 @@ import com.mapo.data.db.AppDatabase
 import com.mapo.data.db.AppProfileBindingDao
 import com.mapo.data.db.KeyboardTemplateDao
 import com.mapo.data.db.LayoutDao
+import com.mapo.data.db.OverlayElementDao
 import com.mapo.data.db.ProfileDao
 import com.mapo.data.db.steam.ActionLayerDao
 import com.mapo.data.db.steam.ActionSetDao
@@ -48,6 +49,10 @@ object AppModule {
     @Provides
     @Singleton
     fun provideKeyboardTemplateDao(db: AppDatabase): KeyboardTemplateDao = db.keyboardTemplateDao()
+
+    @Provides
+    @Singleton
+    fun provideOverlayElementDao(db: AppDatabase): OverlayElementDao = db.overlayElementDao()
 
     @Provides @Singleton
     fun provideControllerProfileDao(db: AppDatabase): ControllerProfileDao = db.controllerProfileDao()

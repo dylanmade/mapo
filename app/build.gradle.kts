@@ -124,6 +124,18 @@ dependencies {
     implementation(project(":input-shared"))
     implementation(project(":shizuku-service"))
 
+    // Steam Input config import + browse (Phase 8). :steam-client wraps
+    // JavaSteam for Steam Guard QR login + (later) IPublishedFile.QueryFiles
+    // + CDN downloads.
+    implementation(project(":steam-client"))
+
+    // EncryptedSharedPreferences — backs the Steam credentials store
+    // (refresh token + account name persisted across launches).
+    implementation(libs.androidx.security.crypto)
+
+    // ZXing — QR rendering for the Steam Guard login screen.
+    implementation(libs.zxing.core)
+
     // JVM unit tests
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

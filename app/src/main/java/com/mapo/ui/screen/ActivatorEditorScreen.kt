@@ -8,11 +8,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -21,6 +25,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -39,6 +44,7 @@ import com.mapo.data.model.steam.ControllerConfig
 import com.mapo.data.model.steam.displayName
 import com.mapo.data.model.steam.resolveActionSet
 import com.mapo.service.input.CompiledActivatorSettings
+import com.mapo.service.input.HapticIntensity
 import kotlin.math.roundToLong
 
 /**
@@ -201,6 +207,14 @@ fun ActivatorEditorScreen(
                 checked = settings.cycleBindings,
                 onCheckedChange = { newValue ->
                     onSettingsChange(activatorId, settings.copy(cycleBindings = newValue))
+                },
+            )
+
+            SectionHeader("Haptics")
+            HapticIntensityRow(
+                selected = settings.hapticIntensity,
+                onSelect = { newValue ->
+                    onSettingsChange(activatorId, settings.copy(hapticIntensity = newValue))
                 },
             )
 
@@ -418,6 +432,63 @@ private fun ChordPartnerRow(
  * Tapping anywhere on the row toggles the switch (matches M3 settings-screen idiom; tap
  * target is the whole row, not just the switch thumb).
  */
+private fun hapticLabel(intensity: HapticIntensity): String = when (intensity) {
+    HapticIntensity.OFF -> "Off"
+    HapticIntensity.LOW -> "Low"
+    HapticIntensity.MEDIUM -> "Medium"
+    HapticIntensity.HIGH -> "High"
+}
+
+/**
+ * Settings-row treatment with a trailing dropdown chip. Whole-row chip opens a menu
+ * of the four [HapticIntensity] levels; selection commits instantly via [onSelect].
+ */
+@Composable
+private fun HapticIntensityRow(
+    selected: HapticIntensity,
+    onSelect: (HapticIntensity) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ListItem(
+        headlineContent = { Text("Haptic intensity") },
+        supportingContent = { Text("Vibration strength when this activator fires.") },
+        trailingContent = {
+            Box {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier.clickable { expanded = true },
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(hapticLabel(selected), style = MaterialTheme.typography.bodyMedium)
+                        Icon(
+                            Icons.Filled.ArrowDropDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    HapticIntensity.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(hapticLabel(option)) },
+                            onClick = {
+                                expanded = false
+                                if (option != selected) onSelect(option)
+                            },
+                        )
+                    }
+                }
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
 @Composable
 private fun SettingsSwitchRow(
     label: String,

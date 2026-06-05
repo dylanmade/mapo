@@ -38,6 +38,19 @@ Background remapping works even when Mapo is not visible on any screen.
   `KeyboardHost(mode = Activity, ...)`). Same composable as the overlay, with
   edit affordances enabled.
 
+### 2b. Overlay rebuild — free-positioned multi-window buttons (in progress)
+- **Paradigm shift (2026-06-04):** the tabbed-keyboard / grid metaphor above is now
+  **legacy**. The overlay feature is being rebuilt around the conventional mobile
+  game-overlay model — discrete, **free-positioned** buttons (normalized x/y + size),
+  each button its **own** `TYPE_APPLICATION_OVERLAY` window. Empty space is passthrough
+  for free (no window exists there), replacing the single-window + `@hide`
+  touchable-region hack. A new **"Edit Overlay"** drawer entry opens a button editor.
+- New code lives under `service/overlay/element/` + `data/.../OverlayElement*`; it
+  **coexists** with the legacy keyboard overlay (nothing deleted yet). MVP buttons emit
+  via the existing `RemapTarget` + `InputDispatcher` dispatch; they migrate to the
+  `Binding`/`Activator` pipeline later for consistency with physical remap.
+- See `OVERLAY_REBUILD_PLAN.md` for the brick sequence and decisions.
+
 ## Profile System
 - Both features governed per-profile
 - Profiles planned to be per-app and per-game (not fully implemented yet)

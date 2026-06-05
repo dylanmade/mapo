@@ -21,6 +21,7 @@ import com.mapo.data.db.steam.SteamTypeConverters
 import com.mapo.data.model.AppProfileBinding
 import com.mapo.data.model.KeyLayout
 import com.mapo.data.model.KeyboardTemplate
+import com.mapo.data.model.OverlayElement
 import com.mapo.data.model.Profile
 import com.mapo.data.model.steam.ActionLayer
 import com.mapo.data.model.steam.ActionSet
@@ -40,6 +41,7 @@ import com.mapo.data.model.steam.SourceModeShift
         Profile::class,
         AppProfileBinding::class,
         KeyboardTemplate::class,
+        OverlayElement::class,
         ControllerProfile::class,
         ActionSet::class,
         ActionLayer::class,
@@ -52,7 +54,7 @@ import com.mapo.data.model.steam.SourceModeShift
         LayerPresetBinding::class,
         SourceModeShift::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = false
 )
 @TypeConverters(SteamTypeConverters::class)
@@ -62,6 +64,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun profileDao(): ProfileDao
     abstract fun appProfileBindingDao(): AppProfileBindingDao
     abstract fun keyboardTemplateDao(): KeyboardTemplateDao
+    abstract fun overlayElementDao(): OverlayElementDao
 
     abstract fun controllerProfileDao(): ControllerProfileDao
     abstract fun actionSetDao(): ActionSetDao

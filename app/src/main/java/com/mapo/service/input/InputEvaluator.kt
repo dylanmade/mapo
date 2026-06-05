@@ -63,6 +63,7 @@ class InputEvaluator @Inject constructor(
     private val emitter: OutputEmitter,
     private val mouseEmitter: MouseEmitterImpl,
     private val gamepadEmitter: com.mapo.service.shizuku.ShizukuGamepadInjector,
+    private val haptics: HapticEmitter,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
 
@@ -337,6 +338,10 @@ class InputEvaluator @Inject constructor(
      * we also zero those.
      */
     private fun handleConfigChange(compiled: CompiledConfig) {
+        // Re-center + drop any digital→joystick synthesis held state; the source may
+        // have just left JOYSTICK_MOVE mode, which would otherwise strand its stick.
+        for (src in digitalStickHeld.keys) gamepadEmitter.clearSource(src)
+        digitalStickHeld.clear()
         val startingSetId = compiled.startingActionSetId
         val set = compiled.sets[startingSetId] ?: return
         for (source in GAMEPAD_EMITTING_SOURCES) {
@@ -457,7 +462,42 @@ class InputEvaluator @Inject constructor(
             Log.d(TAG, "handleDigital: NONE-mode source ${address.source} — consuming + silencing")
             return true
         }
+        // Digital → joystick synthesis: a face-button cluster in JOYSTICK_MOVE mode
+        // emits a virtual gamepad stick rather than firing per-button bindings. The
+        // buttons aren't bindable in this mode (validInputsFor returns none), so the
+        // source-mode sentinel carries the mode + settings; intercept here and consume.
+        if (address.source == InputSource.BUTTON_DIAMOND) {
+            val sentinel = lookupActive(InputAddress(address.source, SOURCE_MODE_SENTINEL_KEY))
+            if (sentinel?.mode == BindingMode.JOYSTICK_MOVE) {
+                updateDigitalStick(address, isDown, sentinel.modeSettingsJson)
+                return true
+            }
+        }
         return if (isDown) onPress(address) else onRelease(address)
+    }
+
+    /** Held digital direction sub-inputs per source, for Button-Pad → joystick synthesis. */
+    private val digitalStickHeld = HashMap<InputSource, MutableSet<String>>()
+
+    /**
+     * Update the synthesized virtual stick for a digital source in JOYSTICK_MOVE mode:
+     * fold the just-changed button into the held set, rebuild the unit-ish vector,
+     * apply the output settings, and emit to the configured gamepad stick. Emits (0,0)
+     * when the last direction releases, re-centering the stick.
+     */
+    private fun updateDigitalStick(address: InputAddress, isDown: Boolean, settingsJson: String) {
+        val held = digitalStickHeld.getOrPut(address.source) { mutableSetOf() }
+        if (isDown) held.add(address.inputKey) else held.remove(address.inputKey)
+        val (rx, ry) = com.mapo.service.input.modes.JoystickOutputSettings.faceButtonVector(held)
+        val settings = com.mapo.service.input.modes.JoystickOutputSettings.parse(settingsJson)
+        val (x, y) = settings.apply(rx, ry)
+        Log.d(TAG, "digitalStick ${address.source} held=$held -> (${"%.2f".format(x)},${"%.2f".format(y)}) stick=${settings.outputStick}")
+        when (settings.outputStick) {
+            com.mapo.service.input.modes.JoystickOutputSettings.OutputStick.LEFT ->
+                gamepadEmitter.setLeftStick(address.source, x, y)
+            com.mapo.service.input.modes.JoystickOutputSettings.OutputStick.RIGHT ->
+                gamepadEmitter.setRightStick(address.source, x, y)
+        }
     }
 
     /**
@@ -1243,6 +1283,8 @@ class InputEvaluator @Inject constructor(
             if (tryHandleControllerAction(binding, address)) continue
             if (emitter.emitPress(binding, activator.settings.sendAsGesture)) holdable += binding
         }
+        // Haptic on activation — fired after the inject so it stays off the critical path.
+        haptics.buzz(activator.effectiveHaptic)
 
         if (activator.settings.toggle) {
             // Latch — release is via the next toggle fire, not physical UP. Note: if a
@@ -1311,6 +1353,8 @@ class InputEvaluator @Inject constructor(
             val holdable = emitter.emitPress(binding, activator.settings.sendAsGesture)
             if (holdable) emitter.emitRelease(binding)
         }
+        // Haptic on this tap activation (START_PRESS / RELEASE_PRESS / expired-double).
+        haptics.buzz(activator.effectiveHaptic)
     }
 
     private fun cancelPendingTimers(address: InputAddress) {

@@ -167,6 +167,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val displayLayout by viewModel.displayLayout.collectAsStateWithLifecycle()
     val selectedButtonId by viewModel.selectedButtonId.collectAsStateWithLifecycle()
     val activeProfile by viewModel.activeProfile.collectAsStateWithLifecycle()
+    val steamAccountName by viewModel.steamAccountName.collectAsStateWithLifecycle()
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val tabContextMenuFor by viewModel.tabContextMenuFor.collectAsStateWithLifecycle()
     val templates by viewModel.templates.collectAsStateWithLifecycle()
@@ -282,6 +283,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         drawerContent = {
             ProfileDrawerContent(
                 activeProfile = activeProfile,
+                steamAccountName = steamAccountName,
                 onOpenChangeProfile = {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.CHANGE_PROFILE)
@@ -306,9 +308,21 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.SHIZUKU_SETUP)
                 },
+                onOpenSteamSetup = {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(MapoRoute.STEAM_SETUP)
+                },
                 onToggleKeyboardOverlay = {
                     scope.launch { drawerState.close() }
                     viewModel.toggleKeyboardOverlay()
+                },
+                onToggleOverlay = {
+                    scope.launch { drawerState.close() }
+                    viewModel.toggleOverlay()
+                },
+                onEditOverlay = {
+                    scope.launch { drawerState.close() }
+                    viewModel.startLiveOverlayEdit()
                 },
             )
         }
@@ -806,6 +820,15 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             }
             composable(MapoRoute.SHIZUKU_SETUP) {
                 ShizukuSetupScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MapoRoute.STEAM_SETUP) {
+                SteamSetupScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenBrowse = { navController.navigate(MapoRoute.STEAM_BROWSE) },
+                )
+            }
+            composable(MapoRoute.STEAM_BROWSE) {
+                SteamBrowseScreen(onBack = { navController.popBackStack() })
             }
             composable(
                 route = MapoRoute.CONFIGURE_BUTTON,

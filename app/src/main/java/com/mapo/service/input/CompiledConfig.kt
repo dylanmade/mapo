@@ -203,6 +203,13 @@ data class CompiledActivator(
     val type: ActivatorType,
     val bindings: List<BindingOutput>,
     val settings: CompiledActivatorSettings = CompiledActivatorSettings.DEFAULTS,
+    /**
+     * Haptic strength to fire on each activation — the per-source override folded over
+     * this activator's own [CompiledActivatorSettings.hapticIntensity] at compile time
+     * (see [resolveEffectiveHaptic]). Pre-resolved here so the evaluator's hot path is a
+     * field read, never a JSON parse. Defaults to OFF for test/builder construction.
+     */
+    val effectiveHaptic: HapticIntensity = HapticIntensity.OFF,
 )
 
 /**
@@ -273,6 +280,13 @@ data class CompiledActivatorSettings(
      */
     val sendAsGesture: Boolean = false,
     /**
+     * This activator's own haptic strength. The per-source "Haptic intensity override"
+     * (on the binding group) can override this; the two are folded into
+     * [CompiledActivator.effectiveHaptic] at compile time via [resolveEffectiveHaptic].
+     * Steam default: off (button presses don't rumble unless opted in).
+     */
+    val hapticIntensity: HapticIntensity = HapticIntensity.OFF,
+    /**
      * Partner input that must be currently held for a [ActivatorType.CHORDED_PRESS] to fire.
      * Null on non-chord activators (and on chord activators that haven't picked a partner yet).
      */
@@ -302,6 +316,7 @@ data class CompiledActivatorSettings(
             cycleBindings = false,
             interruptable = true,
             sendAsGesture = false,
+            hapticIntensity = HapticIntensity.OFF,
             chordPartnerSource = null,
             chordPartnerKey = null,
         )
@@ -326,6 +341,8 @@ data class CompiledActivatorSettings(
                     cycleBindings = obj.optBooleanOrNull("cycle_bindings") ?: false,
                     interruptable = obj.optBooleanOrNull("interruptable") ?: true,
                     sendAsGesture = obj.optBooleanOrNull("send_as_gesture") ?: false,
+                    hapticIntensity = HapticIntensity.fromId(obj.optStringOrNull(HapticIntensity.ACTIVATOR_KEY))
+                        ?: HapticIntensity.OFF,
                     chordPartnerSource = obj.optInputSourceOrNull("chord_partner_source"),
                     chordPartnerKey = obj.optStringOrNull("chord_partner_key"),
                 )
@@ -355,6 +372,7 @@ data class CompiledActivatorSettings(
         obj.put("cycle_bindings", cycleBindings)
         obj.put("interruptable", interruptable)
         obj.put("send_as_gesture", sendAsGesture)
+        obj.put(HapticIntensity.ACTIVATOR_KEY, hapticIntensity.id)
         if (chordPartnerSource != null) obj.put("chord_partner_source", chordPartnerSource.name)
         if (chordPartnerKey != null) obj.put("chord_partner_key", chordPartnerKey)
         return obj.toString()
@@ -439,12 +457,15 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                     continue
                 }
                 val address = InputAddress(preset.inputSource, inputKey)
+                val groupSettingsJson = preset.group.group.settingsJson
                 val compiledActivators = inputGraph.activators.map { actGraph ->
+                    val settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson)
                     CompiledActivator(
                         activatorId = actGraph.activator.id,
                         type = actGraph.activator.type,
                         bindings = actGraph.bindings.map { BindingOutput.fromEntity(it.outputType, it.args) },
-                        settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson),
+                        settings = settings,
+                        effectiveHaptic = resolveEffectiveHaptic(groupSettingsJson, settings.hapticIntensity),
                     )
                 }
                 inputs[address] = CompiledInput(
@@ -483,13 +504,16 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
     // The same group may appear in multiple buckets — `putIfAbsent` keeps the first.
     fun compileBindingGroup(group: com.mapo.data.model.steam.BindingGroupGraph): CompiledBindingGroup {
         val inputsBySubInput = HashMap<String, List<CompiledActivator>>()
+        val groupSettingsJson = group.group.settingsJson
         for (inputGraph in group.inputs) {
             val compiledActivators = inputGraph.activators.map { actGraph ->
+                val settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson)
                 CompiledActivator(
                     activatorId = actGraph.activator.id,
                     type = actGraph.activator.type,
                     bindings = actGraph.bindings.map { BindingOutput.fromEntity(it.outputType, it.args) },
-                    settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson),
+                    settings = settings,
+                    effectiveHaptic = resolveEffectiveHaptic(groupSettingsJson, settings.hapticIntensity),
                 )
             }
             inputsBySubInput[inputGraph.input.inputKey] = compiledActivators

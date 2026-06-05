@@ -16,6 +16,12 @@ gson = "2.11.0"
 kotlinxCollectionsImmutable = "0.4.0"
 hiddenApiBypass = "4.3"
 shizuku = "13.1.5"
+javasteam = "1.8.0"
+spongycastle = "1.58.0.0"
+zxing = "3.5.3"
+securityCrypto = "1.1.0-alpha06"
+kotlinxCoroutines = "1.10.2"
+protobufJava = "4.28.3"
 
 # Testing
 junit = "4.13.2"
@@ -78,6 +84,36 @@ hidden-api-bypass = { group = "org.lsposed.hiddenapibypass", name = "hiddenapiby
 # inject path — analog modes are simply gated.
 shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
 shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
+
+# JavaSteam — Kotlin/Java port of SteamKit2. Powers the Steam Input config
+# import + browser feature (Phase 8). Used for: Steam Guard QR device-grant
+# login, IPublishedFile.QueryFiles via SteamUnifiedMessages, and Workshop
+# CDN body fetch. Same library GameNative ships in production on Android.
+javasteam = { group = "in.dragonbra", name = "javasteam", version.ref = "javasteam" }
+
+# Spongy Castle — Android-compatible BouncyCastle rebadge. JavaSteam's
+# crypto needs BC primitives that conflict with Android's stripped-down
+# built-in BC; Spongy provides them under a non-colliding package.
+spongycastle = { group = "com.madgag.spongycastle", name = "prov", version.ref = "spongycastle" }
+
+# ZXing core — QR bitmap generation for the Steam Guard QR login screen.
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+
+# AndroidX security-crypto — EncryptedSharedPreferences for persisting the
+# Steam refresh token + account name across app launches.
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
+
+# Kotlinx coroutines — explicit deps for :steam-client (which doesn't get
+# them transitively via AndroidX). JDK8 extension supplies CompletableFuture.await(),
+# used to bridge JavaSteam's CompletableFuture API into suspend functions.
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-jdk8 = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-jdk8", version.ref = "kotlinxCoroutines" }
+
+# Protobuf runtime — JavaSteam's response types extend GeneratedMessage,
+# so any code that reads response bodies needs protobuf-java on its
+# compile classpath. JavaSteam ships its own bundled version but doesn't
+# expose it transitively at compile time.
+protobuf-java = { group = "com.google.protobuf", name = "protobuf-java", version.ref = "protobufJava" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }

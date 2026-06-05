@@ -19,6 +19,8 @@ object MapoRoute {
     const val BLOCKLIST = "blocklist"
     const val THEME_STUDIO = "theme_studio"
     const val SHIZUKU_SETUP = "shizuku_setup"
+    const val STEAM_SETUP = "steam_setup"
+    const val STEAM_BROWSE = "steam_browse"
 
     // ── Remap-target picker (full-screen, multi-step: category → filtered list) ────
     //

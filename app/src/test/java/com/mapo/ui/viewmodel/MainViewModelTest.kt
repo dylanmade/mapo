@@ -24,6 +24,9 @@ import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.keyboard.KeyboardController
+import com.mapo.service.overlay.element.OverlayLiveEditController
+import com.mapo.service.overlay.element.OverlayPresenter
+import com.mapo.steam.auth.SteamCredentialStore
 import com.mapo.service.overlay.keyboard.KeyboardOverlayPresenter
 import app.cash.turbine.test
 import io.mockk.coEvery
@@ -68,6 +71,9 @@ class MainViewModelTest {
     private lateinit var templateRepo: KeyboardTemplateRepository
     private lateinit var inputDispatcher: InputDispatcher
     private lateinit var keyboardOverlayPresenter: KeyboardOverlayPresenter
+    private lateinit var overlayPresenter: OverlayPresenter
+    private lateinit var overlayLiveEditController: OverlayLiveEditController
+    private lateinit var steamCredentialStore: SteamCredentialStore
     private lateinit var keyboardController: KeyboardController
 
     private val activeProfile = MutableStateFlow<Profile?>(null)
@@ -101,6 +107,12 @@ class MainViewModelTest {
         templateRepo = mockk(relaxed = true)
         inputDispatcher = mockk(relaxed = true)
         keyboardOverlayPresenter = mockk(relaxed = true)
+        overlayPresenter = mockk(relaxed = true)
+        overlayLiveEditController = mockk(relaxed = true)
+        steamCredentialStore = mockk(relaxed = true)
+        // SharedFlow.collect returns Nothing — a relaxed mock throws on collect, so the
+        // VM's errorMessages relay needs a real (empty) flow.
+        every { overlayPresenter.errorMessages } returns MutableSharedFlow()
         // Real KeyboardController with mocked deps — the controller's StateFlows /
         // mutators are the source of truth for `layouts`, `selectedIndex`,
         // `remapEnabled`, etc., so tests need a working instance, not a relaxed mock.
@@ -137,6 +149,9 @@ class MainViewModelTest {
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
             keyboardOverlayPresenter = keyboardOverlayPresenter,
+            overlayPresenter = overlayPresenter,
+            overlayLiveEditController = overlayLiveEditController,
+            steamCredentialStore = steamCredentialStore,
                 keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
         )
@@ -509,6 +524,9 @@ class MainViewModelTest {
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
             keyboardOverlayPresenter = keyboardOverlayPresenter,
+            overlayPresenter = overlayPresenter,
+            overlayLiveEditController = overlayLiveEditController,
+            steamCredentialStore = steamCredentialStore,
                 keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
         )
@@ -915,6 +933,9 @@ class MainViewModelTest {
         keyboardTemplateRepository = templateRepo,
         inputDispatcher = inputDispatcher,
         keyboardOverlayPresenter = keyboardOverlayPresenter,
+        overlayPresenter = overlayPresenter,
+        overlayLiveEditController = overlayLiveEditController,
+        steamCredentialStore = steamCredentialStore,
         keyboardController = keyboardController,
         ioDispatcher = testDispatcher,
     )

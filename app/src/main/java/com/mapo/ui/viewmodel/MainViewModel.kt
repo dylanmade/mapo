@@ -40,12 +40,15 @@ import com.mapo.data.settings.ShizukuRequiredPreferences
 import com.mapo.data.settings.AutoSwitchSettings
 import com.mapo.di.IoDispatcher
 import com.mapo.service.shizuku.ShizukuConnection
+import com.mapo.steam.auth.SteamCredentialStore
 import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.input.toCompiled
 import com.mapo.service.keyboard.KeyboardController
+import com.mapo.service.overlay.element.OverlayLiveEditController
+import com.mapo.service.overlay.element.OverlayPresenter
 import com.mapo.service.overlay.keyboard.KeyboardOverlayPresenter
 import com.mapo.ui.screen.keyboard.KeyboardHostState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -99,9 +102,20 @@ class MainViewModel @Inject constructor(
     private val keyboardTemplateRepository: KeyboardTemplateRepository,
     private val inputDispatcher: InputDispatcher,
     private val keyboardOverlayPresenter: KeyboardOverlayPresenter,
+    private val overlayPresenter: OverlayPresenter,
+    private val overlayLiveEditController: OverlayLiveEditController,
     private val keyboardController: KeyboardController,
+    steamCredentialStore: SteamCredentialStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel(), KeyboardHostState {
+
+    // Drives the "Connect to Steam" / "Steam account" label switch on the
+    // drawer. Null = signed out. Source flow is reactive — sign-in /
+    // sign-out from SteamSetupScreen flips the drawer label without any
+    // explicit refresh.
+    val steamAccountName: StateFlow<String?> = steamCredentialStore.credentials
+        .map { it?.accountName }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     // Source of truth lives in KeyboardController (Brick 2 of single-screen refactor).
     // Re-exposed here so the activity surface — MainScreen, tests, drawer wiring —
@@ -256,6 +270,10 @@ class MainViewModel @Inject constructor(
         // so MainScreen's existing `toastMessage` collector keeps surfacing them.
         viewModelScope.launch {
             keyboardController.errorMessages.collect { _toastMessage.tryEmit(it) }
+        }
+        // Same relay for the rebuilt button overlay's dispatch errors.
+        viewModelScope.launch {
+            overlayPresenter.errorMessages.collect { _toastMessage.tryEmit(it) }
         }
         viewModelScope.launch {
             activeControllerConfig.collect { config ->
@@ -1386,6 +1404,22 @@ class MainViewModel @Inject constructor(
      */
     fun toggleKeyboardOverlay() {
         keyboardOverlayPresenter.toggle()
+    }
+
+    /**
+     * Drawer affordance for toggling the rebuilt free-positioned button overlay
+     * (`OVERLAY_REBUILD_PLAN.md`, Brick B). Independent of the keyboard overlay above.
+     */
+    fun toggleOverlay() {
+        overlayPresenter.toggle()
+    }
+
+    /**
+     * Brick C spike: launch the live on-overlay editor (candidate C2). The in-app canvas
+     * editor (C1) is reached by navigation instead; both write the same elements.
+     */
+    fun startLiveOverlayEdit() {
+        overlayLiveEditController.start()
     }
 
     /**

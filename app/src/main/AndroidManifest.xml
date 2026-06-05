@@ -7,6 +7,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Steam Input config browse/import (Phase 8). The :steam-client module
+         opens a WebSocket connection to Steam's CMs for Steam Guard QR login
+         and (later) IPublishedFile.QueryFiles + CDN downloads. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Visibility into launchable activities so the app-picker in Auto-Switch
          can enumerate installed games / apps on Android 11+ (package-visibility

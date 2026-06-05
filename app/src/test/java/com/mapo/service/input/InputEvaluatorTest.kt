@@ -28,6 +28,7 @@ class InputEvaluatorTest {
     private lateinit var emitter: OutputEmitter
     private lateinit var mouseEmitter: MouseEmitterImpl
     private lateinit var gamepadEmitter: com.mapo.service.shizuku.ShizukuGamepadInjector
+    private lateinit var haptics: HapticEmitter
     private val compiledConfig = MutableStateFlow(CompiledConfig.EMPTY)
     private val ENTER = BindingOutput.KeyPress("ENTER")
     private val ESCAPE = BindingOutput.KeyPress("ESCAPE")
@@ -45,9 +46,10 @@ class InputEvaluatorTest {
         emitter = mockk(relaxed = true)
         mouseEmitter = mockk(relaxed = true)
         gamepadEmitter = mockk(relaxed = true)
+        haptics = mockk(relaxed = true)
         every { dispatcher.compiledConfig } returns compiledConfig
         every { emitter.emitPress(any()) } returns true  // default to "has release" semantics
-        subject = InputEvaluator(dispatcher, emitter, mouseEmitter, gamepadEmitter, testScope)
+        subject = InputEvaluator(dispatcher, emitter, mouseEmitter, gamepadEmitter, haptics, testScope)
         // NOTE: tests intentionally do NOT call subject.start() — that
         // launches a forever-collecting watcher on testScope which would
         // make `runTest { }` fail with UncompletedCoroutinesError. The

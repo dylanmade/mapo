@@ -18,6 +18,9 @@ import com.mapo.service.autoswitch.ProfileAutoSwitcher
 import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.keyboard.KeyboardController
+import com.mapo.service.overlay.element.OverlayLiveEditController
+import com.mapo.service.overlay.element.OverlayPresenter
+import com.mapo.steam.auth.SteamCredentialStore
 import com.mapo.service.overlay.keyboard.KeyboardOverlayPresenter
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -62,6 +65,9 @@ class MainViewModelMultiBindTest {
     private lateinit var templateRepo: KeyboardTemplateRepository
     private lateinit var inputDispatcher: InputDispatcher
     private lateinit var keyboardOverlayPresenter: KeyboardOverlayPresenter
+    private lateinit var overlayPresenter: OverlayPresenter
+    private lateinit var overlayLiveEditController: OverlayLiveEditController
+    private lateinit var steamCredentialStore: SteamCredentialStore
     private lateinit var keyboardController: KeyboardController
 
     private val activeProfile = MutableStateFlow<Profile?>(null)
@@ -95,6 +101,11 @@ class MainViewModelMultiBindTest {
         templateRepo = mockk(relaxed = true)
         inputDispatcher = mockk(relaxed = true)
         keyboardOverlayPresenter = mockk(relaxed = true)
+        overlayPresenter = mockk(relaxed = true)
+        overlayLiveEditController = mockk(relaxed = true)
+        steamCredentialStore = mockk(relaxed = true)
+        // SharedFlow.collect returns Nothing — a relaxed mock throws on collect.
+        every { overlayPresenter.errorMessages } returns MutableSharedFlow()
         keyboardController = KeyboardController(
             inputDispatcher = inputDispatcher,
             layoutRepository = layoutRepo,
@@ -129,6 +140,9 @@ class MainViewModelMultiBindTest {
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
             keyboardOverlayPresenter = keyboardOverlayPresenter,
+            overlayPresenter = overlayPresenter,
+            overlayLiveEditController = overlayLiveEditController,
+            steamCredentialStore = steamCredentialStore,
             keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
         )

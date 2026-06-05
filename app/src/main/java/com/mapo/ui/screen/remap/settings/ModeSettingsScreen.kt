@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -21,6 +23,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -34,7 +38,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.ControllerConfig
@@ -144,6 +150,20 @@ private fun SettingRow(
             current = obj.optDouble(spec.key, control.default.toDouble()).toFloat(),
             onChange = { onChange(settingsWith(settingsJson, spec.key, it)) },
         )
+        is SettingControl.RangeSlider -> RangeSliderSettingRow(
+            spec = spec,
+            control = control,
+            start = obj.optDouble(control.startKey, control.startDefault.toDouble()).toFloat(),
+            end = obj.optDouble(control.endKey, control.endDefault.toDouble()).toFloat(),
+            onChange = { s, e ->
+                onChange(
+                    settingsWithAll(
+                        settingsJson,
+                        mapOf(control.startKey to s.toDouble(), control.endKey to e.toDouble()),
+                    )
+                )
+            },
+        )
     }
 }
 
@@ -243,51 +263,146 @@ private fun SliderSettingRow(
     current: Float,
     onChange: (Float) -> Unit,
 ) {
-    // Local draft for smooth dragging; commit on release so we don't round-trip
-    // every drag delta through the DB.
+    // Shared draft drives both the slider and the manual-entry field; commit on
+    // slider release / field done so we don't round-trip every delta through the DB.
     var draft by remember(current) { mutableStateOf(current) }
-    val steps = control.step
-        ?.let { (((control.max - control.min) / it).roundToInt() - 1).coerceAtLeast(0) }
-        ?: 0
+    var text by remember(current) { mutableStateOf(formatNumber(current, control.decimals)) }
+    val steps = sliderSteps(control.min, control.max, control.step)
+
+    fun commit(value: Float) {
+        val c = value.coerceIn(control.min, control.max)
+        draft = c
+        text = formatNumber(c, control.decimals)
+        onChange(c)
+    }
+
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) { SettingHeader(spec.label, spec.helper) }
             Spacer(Modifier.width(12.dp))
-            Text(
-                text = formatSliderValue(draft, control),
-                style = MaterialTheme.typography.labelLarge,
-                textAlign = TextAlign.End,
+            NumericEntryField(
+                text = text,
+                unitSuffix = control.unitSuffix,
+                onTextChange = { s ->
+                    text = s
+                    s.toFloatOrNull()?.let { draft = it.coerceIn(control.min, control.max) }
+                },
+                onCommit = { commit(text.toFloatOrNull() ?: draft) },
             )
         }
         Slider(
             value = draft,
-            onValueChange = { draft = it },
-            onValueChangeFinished = { onChange(draft) },
+            onValueChange = { draft = it; text = formatNumber(it, control.decimals) },
+            onValueChangeFinished = { commit(draft) },
             valueRange = control.min..control.max,
             steps = steps,
         )
     }
 }
 
-private fun formatSliderValue(value: Float, control: SettingControl.Slider): String {
-    val num = if (control.decimals <= 0) {
-        value.roundToInt().toString()
-    } else {
-        "%.${control.decimals}f".format(value)
+@Composable
+private fun RangeSliderSettingRow(
+    spec: SettingSpec,
+    control: SettingControl.RangeSlider,
+    start: Float,
+    end: Float,
+    onChange: (Float, Float) -> Unit,
+) {
+    var lo by remember(start) { mutableStateOf(start) }
+    var hi by remember(end) { mutableStateOf(end) }
+    var loText by remember(start) { mutableStateOf(formatNumber(start, control.decimals)) }
+    var hiText by remember(end) { mutableStateOf(formatNumber(end, control.decimals)) }
+    val steps = sliderSteps(control.min, control.max, control.step)
+
+    fun commit(newLo: Float, newHi: Float) {
+        // Lower handle can't pass the upper.
+        val cLo = newLo.coerceIn(control.min, control.max)
+        val cHi = newHi.coerceIn(control.min, control.max)
+        val finalLo = minOf(cLo, cHi)
+        val finalHi = maxOf(cLo, cHi)
+        lo = finalLo; hi = finalHi
+        loText = formatNumber(finalLo, control.decimals)
+        hiText = formatNumber(finalHi, control.decimals)
+        onChange(finalLo, finalHi)
     }
-    return "$num${control.unitSuffix}"
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        SettingHeader(spec.label, spec.helper)
+        Spacer(Modifier.size(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            NumericEntryField(
+                text = loText,
+                unitSuffix = control.unitSuffix,
+                onTextChange = { s -> loText = s; s.toFloatOrNull()?.let { lo = it.coerceIn(control.min, control.max) } },
+                onCommit = { commit(loText.toFloatOrNull() ?: lo, hi) },
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("to", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(8.dp))
+            NumericEntryField(
+                text = hiText,
+                unitSuffix = control.unitSuffix,
+                onTextChange = { s -> hiText = s; s.toFloatOrNull()?.let { hi = it.coerceIn(control.min, control.max) } },
+                onCommit = { commit(lo, hiText.toFloatOrNull() ?: hi) },
+            )
+        }
+        RangeSlider(
+            value = lo..hi,
+            onValueChange = { range ->
+                lo = range.start; hi = range.endInclusive
+                loText = formatNumber(range.start, control.decimals)
+                hiText = formatNumber(range.endInclusive, control.decimals)
+            },
+            onValueChangeFinished = { commit(lo, hi) },
+            valueRange = control.min..control.max,
+            steps = steps,
+        )
+    }
 }
 
+/** Compact numeric input used by slider rows for manual entry. Never auto-focuses. */
+@Composable
+private fun NumericEntryField(
+    text: String,
+    unitSuffix: String,
+    onTextChange: (String) -> Unit,
+    onCommit: () -> Unit,
+) {
+    OutlinedTextField(
+        value = text,
+        onValueChange = onTextChange,
+        singleLine = true,
+        suffix = if (unitSuffix.isNotEmpty()) ({ Text(unitSuffix) }) else null,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onCommit() }),
+        modifier = Modifier
+            .width(116.dp)
+            .onFocusChanged { if (!it.isFocused) onCommit() },
+    )
+}
+
+private fun sliderSteps(min: Float, max: Float, step: Float?): Int =
+    step?.let { (((max - min) / it).roundToInt() - 1).coerceAtLeast(0) } ?: 0
+
+private fun formatNumber(value: Float, decimals: Int): String =
+    if (decimals <= 0) value.roundToInt().toString() else "%.${decimals}f".format(value)
+
 /** Returns [currentJson] with [key] set to [value] (string / boolean / number). */
-private fun settingsWith(currentJson: String, key: String, value: Any): String {
+private fun settingsWith(currentJson: String, key: String, value: Any): String =
+    settingsWithAll(currentJson, mapOf(key to value))
+
+/** Returns [currentJson] with every (key → value) in [entries] applied. */
+private fun settingsWithAll(currentJson: String, entries: Map<String, Any>): String {
     val obj = try {
         JSONObject(currentJson)
     } catch (_: Exception) {
         JSONObject()
     }
-    when (value) {
-        is Float -> obj.put(key, value.toDouble())
-        else -> obj.put(key, value)
+    for ((key, value) in entries) {
+        when (value) {
+            is Float -> obj.put(key, value.toDouble())
+            else -> obj.put(key, value)
+        }
     }
     return obj.toString()
 }

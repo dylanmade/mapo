@@ -90,18 +90,10 @@ fun ActivatorEditorScreen(
                     }
                 },
                 actions = {
-                    val ctx = activatorContext
-                    if (ctx != null) {
-                        // Reset tunable settings to defaults; keep the chord partner
-                        // (that defines the activator's chord, not a tunable setting).
+                    if (activatorContext != null) {
+                        // Reset all settings to defaults, including the chord partner.
                         TextButton(onClick = {
-                            onSettingsChange(
-                                activatorId,
-                                CompiledActivatorSettings.DEFAULTS.copy(
-                                    chordPartnerSource = ctx.settings.chordPartnerSource,
-                                    chordPartnerKey = ctx.settings.chordPartnerKey,
-                                ),
-                            )
+                            onSettingsChange(activatorId, CompiledActivatorSettings.DEFAULTS)
                         }) {
                             Text("Reset")
                         }

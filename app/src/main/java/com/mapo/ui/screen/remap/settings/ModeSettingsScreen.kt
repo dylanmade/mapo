@@ -30,8 +30,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,6 +89,13 @@ fun ModeSettingsScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    // Reset clears the group's settings JSON; absent keys fall back to
+                    // each spec's default, so this restores the whole menu to defaults.
+                    TextButton(onClick = { onSettingsChange(bindingGroupId, "{}") }) {
+                        Text("Reset")
                     }
                 },
             )
@@ -266,34 +275,24 @@ private fun SliderSettingRow(
     // Shared draft drives both the slider and the manual-entry field; commit on
     // slider release / field done so we don't round-trip every delta through the DB.
     var draft by remember(current) { mutableStateOf(current) }
-    var text by remember(current) { mutableStateOf(formatNumber(current, control.decimals)) }
     val steps = sliderSteps(control.min, control.max, control.step)
-
-    fun commit(value: Float) {
-        val c = value.coerceIn(control.min, control.max)
-        draft = c
-        text = formatNumber(c, control.decimals)
-        onChange(c)
-    }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) { SettingHeader(spec.label, spec.helper) }
             Spacer(Modifier.width(12.dp))
             NumericEntryField(
-                text = text,
+                value = draft,
+                decimals = control.decimals,
                 unitSuffix = control.unitSuffix,
-                onTextChange = { s ->
-                    text = s
-                    s.toFloatOrNull()?.let { draft = it.coerceIn(control.min, control.max) }
-                },
-                onCommit = { commit(text.toFloatOrNull() ?: draft) },
+                onValueChange = { draft = it.coerceIn(control.min, control.max) },
+                onCommit = { onChange(it.coerceIn(control.min, control.max)) },
             )
         }
         Slider(
             value = draft,
-            onValueChange = { draft = it; text = formatNumber(it, control.decimals) },
-            onValueChangeFinished = { commit(draft) },
+            onValueChange = { draft = it },
+            onValueChangeFinished = { onChange(draft) },
             valueRange = control.min..control.max,
             steps = steps,
         )
@@ -310,8 +309,6 @@ private fun RangeSliderSettingRow(
 ) {
     var lo by remember(start) { mutableStateOf(start) }
     var hi by remember(end) { mutableStateOf(end) }
-    var loText by remember(start) { mutableStateOf(formatNumber(start, control.decimals)) }
-    var hiText by remember(end) { mutableStateOf(formatNumber(end, control.decimals)) }
     val steps = sliderSteps(control.min, control.max, control.step)
 
     fun commit(newLo: Float, newHi: Float) {
@@ -321,8 +318,6 @@ private fun RangeSliderSettingRow(
         val finalLo = minOf(cLo, cHi)
         val finalHi = maxOf(cLo, cHi)
         lo = finalLo; hi = finalHi
-        loText = formatNumber(finalLo, control.decimals)
-        hiText = formatNumber(finalHi, control.decimals)
         onChange(finalLo, finalHi)
     }
 
@@ -331,28 +326,26 @@ private fun RangeSliderSettingRow(
         Spacer(Modifier.size(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             NumericEntryField(
-                text = loText,
+                value = lo,
+                decimals = control.decimals,
                 unitSuffix = control.unitSuffix,
-                onTextChange = { s -> loText = s; s.toFloatOrNull()?.let { lo = it.coerceIn(control.min, control.max) } },
-                onCommit = { commit(loText.toFloatOrNull() ?: lo, hi) },
+                onValueChange = { lo = it.coerceIn(control.min, control.max) },
+                onCommit = { commit(it, hi) },
             )
             Spacer(Modifier.width(8.dp))
             Text("to", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.width(8.dp))
             NumericEntryField(
-                text = hiText,
+                value = hi,
+                decimals = control.decimals,
                 unitSuffix = control.unitSuffix,
-                onTextChange = { s -> hiText = s; s.toFloatOrNull()?.let { hi = it.coerceIn(control.min, control.max) } },
-                onCommit = { commit(lo, hiText.toFloatOrNull() ?: hi) },
+                onValueChange = { hi = it.coerceIn(control.min, control.max) },
+                onCommit = { commit(lo, it) },
             )
         }
         RangeSlider(
             value = lo..hi,
-            onValueChange = { range ->
-                lo = range.start; hi = range.endInclusive
-                loText = formatNumber(range.start, control.decimals)
-                hiText = formatNumber(range.endInclusive, control.decimals)
-            },
+            onValueChange = { range -> lo = range.start; hi = range.endInclusive },
             onValueChangeFinished = { commit(lo, hi) },
             valueRange = control.min..control.max,
             steps = steps,
@@ -360,24 +353,45 @@ private fun RangeSliderSettingRow(
     }
 }
 
-/** Compact numeric input used by slider rows for manual entry. Never auto-focuses. */
+/**
+ * Compact numeric input for slider rows' manual entry. Never auto-focuses.
+ *
+ * Owns its own text buffer and only re-syncs from [value] while NOT focused, so an
+ * async source update (slider drag, Reset, repo round-trip) can't clobber what the
+ * user is typing mid-edit — the root cause of the app-wide "typing doesn't show"
+ * bug. [onValueChange] fires live (for slider tracking); [onCommit] fires on
+ * keyboard-done and on focus loss (guarded so it doesn't fire on first compose).
+ */
 @Composable
 private fun NumericEntryField(
-    text: String,
+    value: Float,
+    decimals: Int,
     unitSuffix: String,
-    onTextChange: (String) -> Unit,
-    onCommit: () -> Unit,
+    onValueChange: (Float) -> Unit,
+    onCommit: (Float) -> Unit,
 ) {
+    var focused by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf(formatNumber(value, decimals)) }
+    LaunchedEffect(value, focused) {
+        if (!focused) text = formatNumber(value, decimals)
+    }
     OutlinedTextField(
         value = text,
-        onValueChange = onTextChange,
+        onValueChange = { s ->
+            text = s
+            s.toFloatOrNull()?.let { onValueChange(it) }
+        },
         singleLine = true,
         suffix = if (unitSuffix.isNotEmpty()) ({ Text(unitSuffix) }) else null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { onCommit() }),
+        keyboardActions = KeyboardActions(onDone = { onCommit(text.toFloatOrNull() ?: value) }),
         modifier = Modifier
             .width(116.dp)
-            .onFocusChanged { if (!it.isFocused) onCommit() },
+            .onFocusChanged { fs ->
+                val wasFocused = focused
+                focused = fs.isFocused
+                if (wasFocused && !fs.isFocused) onCommit(text.toFloatOrNull() ?: value)
+            },
     )
 }
 

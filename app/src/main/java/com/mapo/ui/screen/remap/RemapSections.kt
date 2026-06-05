@@ -2,6 +2,8 @@ package com.mapo.ui.screen.remap
 
 import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.InputSource
+import com.mapo.service.input.modes.StubMode
+import com.mapo.service.input.modes.handler
 import com.mapo.ui.component.layout.SectionedPaneItem
 
 /**
@@ -253,10 +255,26 @@ object RemapSections {
         source: InputSource,
         mode: com.mapo.data.model.steam.BindingMode,
     ): List<Pair<String, String>> {
-        val keys = com.mapo.service.input.modes.validInputsFor(source, mode)
-            .ifEmpty { canonicalSubInputsFor(source) }
+        val valid = com.mapo.service.input.modes.validInputsFor(source, mode)
+        // Empty-mode fallback applies ONLY to the "no real mode picked" sentinels
+        // (DEVICE_DEFAULT / NONE) and not-yet-built stub modes. A real mode that
+        // intentionally has zero bindable sub-inputs (e.g. Joystick, where the
+        // buttons/stick become the analog output; or the gyro→* modes) must render
+        // NO rows — its empty result is authoritative, not a "fall back" signal.
+        val keys = when {
+            valid.isNotEmpty() -> valid
+            shouldFallBackWhenEmpty(mode) -> canonicalSubInputsFor(source)
+            else -> emptySet()
+        }
         return keys.map { key -> key to labelFor(source, key) }
     }
+
+    /** True for the modes where an empty sub-input set means "show canonical rows so
+     *  the user can pre-bind" rather than "this mode genuinely has no sub-inputs." */
+    private fun shouldFallBackWhenEmpty(mode: com.mapo.data.model.steam.BindingMode): Boolean =
+        mode == com.mapo.data.model.steam.BindingMode.DEVICE_DEFAULT ||
+            mode == com.mapo.data.model.steam.BindingMode.NONE ||
+            mode.handler() is StubMode
 
     /**
      * Canonical sub-input set per mode-aware source — the rows the editor

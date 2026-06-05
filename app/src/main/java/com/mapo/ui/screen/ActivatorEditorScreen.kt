@@ -28,6 +28,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -86,6 +87,24 @@ fun ActivatorEditorScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    val ctx = activatorContext
+                    if (ctx != null) {
+                        // Reset tunable settings to defaults; keep the chord partner
+                        // (that defines the activator's chord, not a tunable setting).
+                        TextButton(onClick = {
+                            onSettingsChange(
+                                activatorId,
+                                CompiledActivatorSettings.DEFAULTS.copy(
+                                    chordPartnerSource = ctx.settings.chordPartnerSource,
+                                    chordPartnerKey = ctx.settings.chordPartnerKey,
+                                ),
+                            )
+                        }) {
+                            Text("Reset")
+                        }
                     }
                 },
             )

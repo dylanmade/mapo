@@ -491,12 +491,16 @@ class InputEvaluator @Inject constructor(
         val (rx, ry) = com.mapo.service.input.modes.JoystickOutputSettings.faceButtonVector(held)
         val settings = com.mapo.service.input.modes.JoystickOutputSettings.parse(settingsJson)
         val (x, y) = settings.apply(rx, ry)
-        Log.d(TAG, "digitalStick ${address.source} held=$held -> (${"%.2f".format(x)},${"%.2f".format(y)}) stick=${settings.outputStick}")
+        // Synthesis math is intuitive (+Y = up); the virtual gamepad's Y axis is
+        // +down, so negate at the emit boundary. (Same convention for the diamond
+        // D-Pad source when that menu wires up.)
+        val emitY = -y
+        Log.d(TAG, "digitalStick ${address.source} held=$held -> (${"%.2f".format(x)},${"%.2f".format(emitY)}) stick=${settings.outputStick}")
         when (settings.outputStick) {
             com.mapo.service.input.modes.JoystickOutputSettings.OutputStick.LEFT ->
-                gamepadEmitter.setLeftStick(address.source, x, y)
+                gamepadEmitter.setLeftStick(address.source, x, emitY)
             com.mapo.service.input.modes.JoystickOutputSettings.OutputStick.RIGHT ->
-                gamepadEmitter.setRightStick(address.source, x, y)
+                gamepadEmitter.setRightStick(address.source, x, emitY)
         }
     }
 

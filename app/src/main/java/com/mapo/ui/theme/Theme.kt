@@ -1,6 +1,7 @@
 package com.mapo.ui.theme
 
 import android.os.Build
+import android.view.inputmethod.EditorInfo
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
@@ -13,8 +14,13 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import com.themestudio.core.LocalThemeStudioController
 import com.themestudio.core.LocalThemeStudioVariantOverride
 import com.themestudio.core.applyOverrides
@@ -96,7 +102,7 @@ private val darkScheme = darkColorScheme(
     surfaceContainerHighest = surfaceContainerHighestDark,
 )
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalComposeUiApi::class)
 @Composable
 fun MapoTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -138,7 +144,29 @@ fun MapoTheme(
         typography = typography,
         shapes = shapes,
     ) {
-        CompositionLocalProvider(LocalMapoExtraColors provides extraColors, content = content)
+        // Force the soft keyboard to NOT go fullscreen ("extract" mode). On landscape
+        // handhelds the IME defaults to a fullscreen editor that covers the app, and in
+        // that mode Compose text fields don't refresh on delete (backspace stays stale
+        // until the next keystroke). Compose has no per-field IME flag, so we intercept
+        // the platform text-input request and OR IME_FLAG_NO_FULLSCREEN/NO_EXTRACT_UI
+        // into the EditorInfo. Living in MapoTheme means every host (both activities +
+        // the overlay windows) and every current/future field inherits it — one place,
+        // no per-field or per-screen maintenance.
+        val noFullscreenIme = remember {
+            PlatformTextInputInterceptor { request, nextHandler ->
+                val patched = PlatformTextInputMethodRequest { outAttrs ->
+                    request.createInputConnection(outAttrs).also {
+                        outAttrs.imeOptions = outAttrs.imeOptions or
+                            EditorInfo.IME_FLAG_NO_FULLSCREEN or
+                            EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                    }
+                }
+                nextHandler.startInputMethod(patched)
+            }
+        }
+        InterceptPlatformTextInput(interceptor = noFullscreenIme) {
+            CompositionLocalProvider(LocalMapoExtraColors provides extraColors, content = content)
+        }
     }
 }
 

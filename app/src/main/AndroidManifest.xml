@@ -56,14 +56,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground host for the live overlay editor: hosts the frozen backdrop. Edit mode
-             persists through home/recents (the buttons are overlay windows) and ends only via
-             the toolbar Done. excludeFromRecents + singleTask: a transient editing surface. -->
+        <!-- Foreground host for the live overlay editor: hosts the frozen backdrop. Exits: toolbar
+             Done, back (→ confirm), and Home (onUserLeaveHint). Recents/overview does NOT exit —
+             the session stays intact. Own task (taskAffinity="") so it stays foreground while
+             editing; excludeFromRecents + singleTask: a transient editing surface. -->
         <activity
             android:name=".ui.overlay.OverlayEditActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
+            android:taskAffinity=""
             android:theme="@style/Theme.Mapo.Translucent"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 

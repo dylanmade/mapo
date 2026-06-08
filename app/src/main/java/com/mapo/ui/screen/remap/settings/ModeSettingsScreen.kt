@@ -2,18 +2,20 @@ package com.mapo.ui.screen.remap.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -33,13 +35,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -110,25 +115,30 @@ fun ModeSettingsScreen(
         val lookup = SettingsLookup { key -> if (obj.has(key)) obj.get(key).toString() else null }
         val onChange: (String) -> Unit = { json -> onSettingsChange(bindingGroupId, json) }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentPadding = PaddingValues(bottom = 24.dp),
+        // A plain scrolling Column rather than a LazyColumn: these menus are short
+        // (a handful of rows) so lazy recycling buys nothing, and text fields inside
+        // a LazyColumn item hit a focus/IME reconciliation quirk where typed
+        // characters don't render until focus is lost. A non-lazy Column avoids it.
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState()),
         ) {
             for (category in categories) {
                 val visible = category.settings.filter { it.visibleWhen?.invoke(lookup) ?: true }
                 if (visible.isEmpty()) continue
-                item(key = "cat:${category.title}") {
-                    Text(
-                        text = category.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
-                    )
-                }
-                items(items = visible, key = { "s:${it.key}" }) { spec ->
+                Text(
+                    text = category.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+                )
+                for (spec in visible) {
                     SettingRow(spec = spec, obj = obj, settingsJson = settingsJson, onChange = onChange)
                 }
             }
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
@@ -282,6 +292,8 @@ private fun SliderSettingRow(
             Spacer(Modifier.width(12.dp))
             NumericEntryField(
                 value = draft,
+                min = control.min,
+                max = control.max,
                 decimals = control.decimals,
                 unitSuffix = control.unitSuffix,
                 onValueChange = { draft = it.coerceIn(control.min, control.max) },
@@ -326,6 +338,8 @@ private fun RangeSliderSettingRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             NumericEntryField(
                 value = lo,
+                min = control.min,
+                max = control.max,
                 decimals = control.decimals,
                 unitSuffix = control.unitSuffix,
                 onValueChange = { lo = it.coerceIn(control.min, control.max) },
@@ -336,6 +350,8 @@ private fun RangeSliderSettingRow(
             Spacer(Modifier.width(8.dp))
             NumericEntryField(
                 value = hi,
+                min = control.min,
+                max = control.max,
                 decimals = control.decimals,
                 unitSuffix = control.unitSuffix,
                 onValueChange = { hi = it.coerceIn(control.min, control.max) },
@@ -364,37 +380,65 @@ private fun RangeSliderSettingRow(
 @Composable
 private fun NumericEntryField(
     value: Float,
+    min: Float,
+    max: Float,
     decimals: Int,
     unitSuffix: String,
     onValueChange: (Float) -> Unit,
     onCommit: (Float) -> Unit,
 ) {
+    val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
-    var text by remember { mutableStateOf(formatNumber(value, decimals)) }
-    // While the field is focused we touch no state during composition — typing flows
-    // straight through onValueChange, so the IME's selection/cursor is never disturbed.
-    // While it's NOT focused we mirror the external value (slider drag, Reset, repo
-    // round-trip) into the buffer; the != guard makes this converge in one pass.
-    if (!focused) {
-        val formatted = formatNumber(value, decimals)
-        if (formatted != text) text = formatted
+    // State-based text field: the field owns its buffer (TextFieldState) directly, so
+    // edits render without the value/onValueChange IME↔state round-trip that was
+    // desyncing the display (backspace not repainting, digits appearing only on Done).
+    val state = rememberTextFieldState(formatNumber(value, decimals))
+
+    // Mirror the external value (slider drag, Reset, repo round-trip) into the buffer
+    // only while the field isn't focused — never clobber what the user is typing.
+    LaunchedEffect(value, focused) {
+        if (!focused) {
+            val formatted = formatNumber(value, decimals)
+            if (formatted != state.text.toString()) state.setTextAndPlaceCursorAtEnd(formatted)
+        }
     }
+    // Track the slider live for in-range edits; out-of-range typing leaves the slider
+    // put and just shows the warning.
+    LaunchedEffect(Unit) {
+        snapshotFlow { state.text.toString() }.collect { s ->
+            s.toFloatOrNull()?.let { if (it in min..max) onValueChange(it) }
+        }
+    }
+    // Free typing: the buffer accepts any input. Out-of-range / unparseable entries are
+    // flagged with the field's native error state + a range hint rather than blocked or
+    // rewritten mid-keystroke; the value is clamped only on commit (Done / focus loss),
+    // so what's persisted is always valid and the user saw the warning first.
+    val current = state.text.toString()
+    val parsed = current.toFloatOrNull()
+    val invalid = focused && current.isNotBlank() && (parsed == null || parsed < min || parsed > max)
+
     OutlinedTextField(
-        value = text,
-        onValueChange = { s ->
-            text = s
-            s.toFloatOrNull()?.let { onValueChange(it) }
-        },
-        singleLine = true,
+        state = state,
+        lineLimits = TextFieldLineLimits.SingleLine,
+        isError = invalid,
         suffix = if (unitSuffix.isNotEmpty()) ({ Text(unitSuffix) }) else null,
+        supportingText = if (invalid) {
+            { Text("Allowed: ${formatNumber(min, decimals)}–${formatNumber(max, decimals)}$unitSuffix") }
+        } else null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { onCommit(text.toFloatOrNull() ?: value) }),
+        // Done hides the keyboard by clearing focus, which runs the commit path below.
+        onKeyboardAction = { focusManager.clearFocus() },
         modifier = Modifier
             .width(116.dp)
             .onFocusChanged { fs ->
                 val wasFocused = focused
                 focused = fs.isFocused
-                if (wasFocused && !fs.isFocused) onCommit(text.toFloatOrNull() ?: value)
+                // On blur, commit the clamped value; the field then resyncs (via the
+                // LaunchedEffect above) to the formatted in-range result, so an
+                // out-of-range entry visibly snaps to the nearest valid value.
+                if (wasFocused && !fs.isFocused) {
+                    onCommit((state.text.toString().toFloatOrNull() ?: value).coerceIn(min, max))
+                }
             },
     )
 }

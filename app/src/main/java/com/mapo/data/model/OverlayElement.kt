@@ -4,6 +4,8 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.mapo.data.model.steam.ActionLayer
+import com.mapo.data.model.steam.ActionSet
 
 /**
  * One free-positioned button in the rebuilt overlay (see `OVERLAY_REBUILD_PLAN.md`).
@@ -21,23 +23,44 @@ import androidx.room.PrimaryKey
  * overlay buttons migrate onto the physical-remap `Binding`/`Activator` pipeline, this
  * single field swaps to a binding reference and nothing else here changes.
  *
- * The active overlay is "every element for the active profile" today. That keeps
- * element ownership separable from *which* overlay is active, so the future
- * action-set-governed model can re-key without touching the element shape.
+ * **Scope (FC1).** Each element is owned by exactly one of:
+ *  - an [ActionSet] ([actionSetId] set, [actionLayerId] null) — "set-owned", or
+ *  - an [ActionLayer] ([actionLayerId] set, [actionSetId] null) — "layer-owned".
+ * The editor edits one scope at a time (a dropdown picks it); run mode shows the active
+ * action set's set-owned elements. Layer→set inheritance is a later brick — for now a
+ * scope shows only its own elements. [profileId] is retained for the profile CASCADE and
+ * "clear all for profile".
  */
 @Entity(
     tableName = "overlay_elements",
-    foreignKeys = [ForeignKey(
-        entity = Profile::class,
-        parentColumns = ["id"],
-        childColumns = ["profileId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
-    indices = [Index("profileId")],
+    foreignKeys = [
+        ForeignKey(
+            entity = Profile::class,
+            parentColumns = ["id"],
+            childColumns = ["profileId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = ActionSet::class,
+            parentColumns = ["id"],
+            childColumns = ["actionSetId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = ActionLayer::class,
+            parentColumns = ["id"],
+            childColumns = ["actionLayerId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("profileId"), Index("actionSetId"), Index("actionLayerId")],
 )
 data class OverlayElement(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val profileId: Long,
+    // Scope: exactly one is non-null (see class doc). Null/null = unscoped (legacy/no config).
+    val actionSetId: Long? = null,
+    val actionLayerId: Long? = null,
     val label: String = "",
 
     // Normalized display fractions in [0f, 1f]. (x, y) is the top-left corner.

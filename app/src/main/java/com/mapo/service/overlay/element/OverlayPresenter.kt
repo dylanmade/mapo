@@ -4,6 +4,7 @@ import android.util.Log
 import com.mapo.data.model.OverlayElement
 import com.mapo.data.model.OverlayGesture
 import com.mapo.data.model.targetFor
+import com.mapo.data.repository.ControllerConfigRepository
 import com.mapo.data.repository.OverlayRepository
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.service.overlay.keyboard.KeyboardDisplayRouter
@@ -19,8 +20,11 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -42,6 +46,7 @@ class OverlayPresenter @Inject constructor(
     private val manager: OverlayElementWindowManager,
     private val overlayRepository: OverlayRepository,
     private val profileRepository: ProfileRepository,
+    private val controllerConfigRepository: ControllerConfigRepository,
     private val dispatcher: OverlayTargetDispatcher,
     private val displayRouter: KeyboardDisplayRouter,
 ) {
@@ -69,12 +74,21 @@ class OverlayPresenter @Inject constructor(
             return
         }
         _showing.value = true
-        // Re-renders whenever the active profile's elements change, so edits made in the
-        // editor reflect on the live overlay immediately.
+        // Run mode shows the **active action set's** set-owned elements (live action-set
+        // switching is a later brick — we follow the config's first/active set for now).
+        // Re-renders whenever those elements change, so editor edits reflect immediately.
         collectJob = scope.launch {
             profileRepository.activeProfile
                 .filterNotNull()
-                .flatMapLatest { overlayRepository.elementsByProfile(it.id) }
+                .flatMapLatest { profile ->
+                    controllerConfigRepository.observeActiveConfig(profile.id)
+                        .map { it?.activeActionSet?.actionSet?.id }
+                        .distinctUntilChanged()
+                        .flatMapLatest { setId ->
+                            if (setId == null) flowOf(emptyList())
+                            else overlayRepository.elementsBySet(setId)
+                        }
+                }
                 .collect { elements ->
                     val displayId = displayRouter.routeOverlay(OVERLAY_ID).first()
                     manager.render(elements, displayId, ::onGesture)

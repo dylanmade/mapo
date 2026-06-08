@@ -16,6 +16,12 @@ class OverlayRepository @Inject constructor(private val dao: OverlayElementDao) 
 
     fun elementsByProfile(profileId: Long): Flow<List<OverlayElement>> = dao.getByProfile(profileId)
 
+    /** Set-owned elements (editor set scope / run-mode active-set overlay). */
+    fun elementsBySet(actionSetId: Long): Flow<List<OverlayElement>> = dao.getBySet(actionSetId)
+
+    /** Layer-owned elements (editor layer scope). */
+    fun elementsByLayer(actionLayerId: Long): Flow<List<OverlayElement>> = dao.getByLayer(actionLayerId)
+
     suspend fun elementsByProfileOnce(profileId: Long): List<OverlayElement> =
         dao.getByProfileOnce(profileId)
 

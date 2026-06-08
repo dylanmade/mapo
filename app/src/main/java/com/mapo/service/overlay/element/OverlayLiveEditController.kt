@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.graphics.Point
-import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -17,42 +16,60 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOff
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -137,7 +154,13 @@ class OverlayLiveEditController @Inject constructor(
     private val elementWindows = mutableMapOf<Long, ElementWindow>()
     private var scrim: Pair<View, OverlayLifecycleOwner>? = null
     private var toolbar: Pair<View, OverlayLifecycleOwner>? = null
+    private var toolbarParams: WindowManager.LayoutParams? = null
     private var configWindow: Pair<View, OverlayLifecycleOwner>? = null
+    private var confirmWindow: Pair<View, OverlayLifecycleOwner>? = null
+    private var scopeMenuWindow: Pair<View, OverlayLifecycleOwner>? = null
+    // Drives the toolbar dropdown arrow; the menu list itself lives in its own window so opening
+    // it never resizes the toolbar (a resize animated the dragged toolbar back to its old spot).
+    private val scopeMenuOpen = MutableStateFlow(false)
 
     fun canShow(): Boolean = Settings.canDrawOverlays(context)
     fun isEditing(): Boolean = _editing.value
@@ -196,9 +219,12 @@ class OverlayLiveEditController @Inject constructor(
             collectJob?.cancel()
             collectJob = null
             dismissConfig()
+            dismissExitConfirm()
+            dismissScopeMenu()
             elementWindows.keys.toList().forEach { detachElement(it) }
             scrim?.let { detach(it) }; scrim = null
             toolbar?.let { detach(it) }; toolbar = null
+            toolbarParams = null
             _editing.value = false
             backdropBitmap = null
             Log.i(TAG, "live edit stopped")
@@ -372,34 +398,74 @@ class OverlayLiveEditController @Inject constructor(
         runCatching { windowManager.addView(view, params) }
             .onFailure { Log.e(TAG, "addView(scrim) failed", it); return }
         scrim = view to owner
-        // Suppress the system back / edge gestures across the whole edit surface so dragging
-        // a button near an edge doesn't trigger them. (The bottom home/recents gesture is
-        // reserved by the platform and can't be excluded by a non-launcher app.) API 29+.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val size = displaySizePx()
-            view.post { view.systemGestureExclusionRects = listOf(Rect(0, 0, size.x, size.y)) }
-        }
+        // Note: we intentionally do NOT exclude the system back gesture here anymore. Back
+        // (gesture or button) should route through the activity's back dispatcher to the
+        // "Exit overlay editing?" confirm — an escape hatch, with a guard against accidents.
     }
 
     private fun addToolbar() {
         val owner = OverlayLifecycleOwner()
+        // Drag handler for the toolbar's grip — same raw-coord technique as the buttons
+        // (anchored to the window position at touch-down so the moving window doesn't fight
+        // the finger). Lets the user shove the toolbar aside to edit what's beneath it.
+        var startRawX = 0f
+        var startRawY = 0f
+        var startX = 0
+        var startY = 0
+        val onHandleTouch: (MotionEvent) -> Boolean = { ev ->
+            val p = toolbarParams
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startRawX = ev.rawX; startRawY = ev.rawY
+                    startX = p?.x ?: 0; startY = p?.y ?: 0
+                    // Close the scope menu (its own window, anchored to the toolbar) so it
+                    // doesn't float detached while the toolbar moves.
+                    dismissScopeMenu()
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (p != null) {
+                        val size = displaySizePx()
+                        val v = toolbar?.first
+                        val w = v?.width ?: 0
+                        val h = v?.height ?: 0
+                        p.x = (startX + (ev.rawX - startRawX)).roundToInt()
+                            .coerceIn(0, (size.x - w).coerceAtLeast(0))
+                        p.y = (startY + (ev.rawY - startRawY)).roundToInt()
+                            .coerceIn(0, (size.y - h).coerceAtLeast(0))
+                        runCatching { windowManager.updateViewLayout(v, p) }
+                    }
+                    true
+                }
+                else -> true
+            }
+        }
         val view = ComposeView(context).apply {
             attachOwner(owner)
-            setContent { MapoTheme { ToolbarContent() } }
+            setContent { MapoTheme { ToolbarContent(onHandleTouch = onHandleTouch) } }
         }
         owner.resumeTo()
-        // Full-width window so the centered toolbar pill can never be clipped off the
-        // screen edge (which made the rightmost / Done button hard to hit).
+        // Compact, free-positioned, draggable window (wrap-content) anchored top-left; centered
+        // horizontally once measured. (Was full-width to avoid clipping; now it's movable, so a
+        // tight window is what lets the user reveal the area beneath it.)
         val params = layoutParams(
-            width = WindowManager.LayoutParams.MATCH_PARENT,
+            width = WindowManager.LayoutParams.WRAP_CONTENT,
             height = WindowManager.LayoutParams.WRAP_CONTENT,
             focusable = false,
         ).apply {
-            gravity = Gravity.TOP
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = (12 * context.resources.displayMetrics.density).roundToInt()
         }
         runCatching { windowManager.addView(view, params) }
             .onFailure { Log.e(TAG, "addView(toolbar) failed", it); return }
         toolbar = view to owner
+        toolbarParams = params
+        view.post {
+            val size = displaySizePx()
+            params.x = ((size.x - view.width) / 2).coerceAtLeast(0)
+            runCatching { windowManager.updateViewLayout(view, params) }
+        }
     }
 
     /**
@@ -464,59 +530,263 @@ class OverlayLiveEditController @Inject constructor(
         configWindow = null
     }
 
+    /**
+     * Back-button entry point (called from `OverlayEditActivity`'s back dispatcher): toggle the
+     * "Exit overlay editing?" confirm. Drawn as a top overlay window because an activity dialog
+     * would sit *beneath* the edit-mode overlay windows.
+     */
+    fun handleBack() = runOnMain {
+        if (confirmWindow != null) dismissExitConfirm() else showExitConfirm()
+    }
+
+    private fun showExitConfirm() {
+        if (confirmWindow != null) return
+        val owner = OverlayLifecycleOwner()
+        val view = ComposeView(context).apply {
+            attachOwner(owner)
+            setContent {
+                MapoTheme {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0x99000000)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Surface(
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            tonalElevation = 6.dp,
+                        ) {
+                            Column(modifier = Modifier.padding(24.dp)) {
+                                Text(
+                                    "Exit overlay editing?",
+                                    style = MaterialTheme.typography.titleLarge,
+                                )
+                                Text(
+                                    "Your buttons are saved as you edit them.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 24.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                                ) {
+                                    TextButton(onClick = { dismissExitConfirm() }) { Text("Cancel") }
+                                    Button(onClick = { dismissExitConfirm(); stop() }) { Text("Exit") }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        owner.resumeTo()
+        // Full-screen + non-focusable: it's touch-modal (a full-screen window absorbs touches so
+        // the editor below is frozen) yet leaves key focus on the activity, so the hardware/back
+        // gesture keeps routing through the activity's back dispatcher to [handleBack].
+        val params = layoutParams(
+            width = WindowManager.LayoutParams.MATCH_PARENT,
+            height = WindowManager.LayoutParams.MATCH_PARENT,
+            focusable = false,
+        )
+        runCatching { windowManager.addView(view, params) }
+            .onFailure { Log.e(TAG, "addView(confirm) failed", it); return }
+        confirmWindow = view to owner
+    }
+
+    private fun dismissExitConfirm() {
+        confirmWindow?.let { detach(it) }
+        confirmWindow = null
+    }
+
+    // ── scope menu (its own window) ──────────────────────────────────────────────
+
+    private fun toggleScopeMenu() = runOnMain {
+        if (scopeMenuWindow != null) dismissScopeMenu() else showScopeMenu()
+    }
+
+    /**
+     * The action-set/layer picker, in its **own** window docked just under the toolbar. Kept out
+     * of the toolbar window so opening it never resizes the toolbar — a resize animated the
+     * dragged toolbar back to its pre-drag spot. Layers are indented under their set.
+     */
+    private fun showScopeMenu() {
+        if (scopeMenuWindow != null) return
+        val toolbarView = toolbar?.first ?: return
+        val tp = toolbarParams ?: return
+        val owner = OverlayLifecycleOwner()
+        val view = ComposeView(context).apply {
+            attachOwner(owner)
+            setContent {
+                MapoTheme {
+                    val scopes by overlayEditor.availableScopes.collectAsStateWithLifecycle()
+                    val current by overlayEditor.editingScope.collectAsStateWithLifecycle()
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = MaterialTheme.shapes.medium,
+                        tonalElevation = 6.dp,
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .widthIn(min = 180.dp, max = 300.dp)
+                                .heightIn(max = 320.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            scopes.forEach { option ->
+                                val selected = option.scope == current
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            overlayEditor.setScope(option.scope)
+                                            dismissScopeMenu()
+                                        }
+                                        .padding(
+                                            start = if (option.isLayer) 32.dp else 16.dp,
+                                            end = 24.dp,
+                                            top = 12.dp,
+                                            bottom = 12.dp,
+                                        ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = option.label,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        owner.resumeTo()
+        val params = layoutParams(
+            width = WindowManager.LayoutParams.WRAP_CONTENT,
+            height = WindowManager.LayoutParams.WRAP_CONTENT,
+            focusable = false,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = tp.x
+            y = tp.y + toolbarView.height
+        }
+        runCatching { windowManager.addView(view, params) }
+            .onFailure { Log.e(TAG, "addView(scopeMenu) failed", it); return }
+        scopeMenuWindow = view to owner
+        scopeMenuOpen.value = true
+    }
+
+    private fun dismissScopeMenu() {
+        scopeMenuWindow?.let { detach(it) }
+        scopeMenuWindow = null
+        scopeMenuOpen.value = false
+    }
+
+    @OptIn(ExperimentalComposeUiApi::class, ExperimentalLayoutApi::class)
     @Composable
-    private fun ToolbarContent() {
+    private fun ToolbarContent(onHandleTouch: (MotionEvent) -> Boolean) {
         val sel by selectedId.collectAsStateWithLifecycle()
         val snap by overlaySettings.snapEnabled.collectAsStateWithLifecycle()
-        // Center the pill within the full-width window with a little top inset (clears the
-        // status bar / notch). surfaceContainerHigh — floating toolbar (elevated container).
-        // This is the overlay's own settings surface in edit mode (Brick D): snap lives here.
-        Box(
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-            contentAlignment = Alignment.TopCenter,
-        ) {
+        val scopes by overlayEditor.availableScopes.collectAsStateWithLifecycle()
+        val currentScope by overlayEditor.editingScope.collectAsStateWithLifecycle()
+        val menuOpen by scopeMenuOpen.collectAsStateWithLifecycle()
+        val currentLabel = scopes.firstOrNull { it.scope == currentScope }?.label ?: "No action set"
+        // Bound the toolbar to the screen width so the action row can wrap to fit rather than
+        // run off-screen (the toolbar grows downward to accommodate its buttons).
+        val maxToolbarWidth = (LocalConfiguration.current.screenWidthDp - 16).dp
+
+        // surfaceContainerHigh — floating toolbar (elevated container). Also the overlay's own
+        // settings surface in edit mode (Brick D): snap + the action-set/layer scope live here.
         Surface(
             shape = MaterialTheme.shapes.extraLarge,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                modifier = Modifier
+                    .widthIn(max = maxToolbarWidth)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
             ) {
-                IconButton(onClick = { overlayEditor.addDefaultElement() }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add button")
-                }
-                FilledIconToggleButton(
-                    checked = snap,
-                    onCheckedChange = { overlaySettings.setSnapEnabled(it) },
-                ) {
+                // Row 1: drag grip + the "editing scope" (action set / layer) dropdown trigger.
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        if (snap) Icons.Default.GridOn else Icons.Default.GridOff,
-                        contentDescription = if (snap) "Snapping on" else "Snapping off",
+                        Icons.Default.DragIndicator,
+                        contentDescription = "Move toolbar",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(end = 2.dp)
+                            .pointerInteropFilter(onTouchEvent = onHandleTouch),
                     )
+                    TextButton(
+                        onClick = { if (scopes.isNotEmpty()) toggleScopeMenu() },
+                        enabled = scopes.isNotEmpty(),
+                    ) {
+                        Icon(
+                            Icons.Default.Layers,
+                            contentDescription = null,
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                        Text(
+                            currentLabel,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 160.dp),
+                        )
+                        Icon(
+                            if (menuOpen) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                            contentDescription = "Choose action set or layer",
+                        )
+                    }
                 }
-                IconButton(onClick = { sel?.let { scaleSelected(it, 1.15f) } }, enabled = sel != null) {
-                    Icon(Icons.Default.ZoomIn, contentDescription = "Bigger")
-                }
-                IconButton(onClick = { sel?.let { scaleSelected(it, 1f / 1.15f) } }, enabled = sel != null) {
-                    Icon(Icons.Default.ZoomOut, contentDescription = "Smaller")
-                }
-                IconButton(onClick = { sel?.let { showConfig(it) } }, enabled = sel != null) {
-                    Icon(Icons.Default.Edit, contentDescription = "Configure")
-                }
-                IconButton(
-                    onClick = { sel?.let { overlayEditor.delete(it); selectedId.value = null } },
-                    enabled = sel != null,
+
+                // Row 2: edit actions. FlowRow so they wrap onto extra lines when the toolbar
+                // is narrower than the full set — the toolbar grows in whatever direction it
+                // needs rather than clipping any button (Done included).
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete")
-                }
-                FilledIconButton(onClick = { stop() }) {
-                    Icon(Icons.Default.Check, contentDescription = "Done")
+                    IconButton(onClick = { overlayEditor.addDefaultElement() }) {
+                        Icon(Icons.Default.Add, contentDescription = "Add button")
+                    }
+                    FilledIconToggleButton(
+                        checked = snap,
+                        onCheckedChange = { overlaySettings.setSnapEnabled(it) },
+                    ) {
+                        Icon(
+                            if (snap) Icons.Default.GridOn else Icons.Default.GridOff,
+                            contentDescription = if (snap) "Snapping on" else "Snapping off",
+                        )
+                    }
+                    IconButton(onClick = { sel?.let { scaleSelected(it, 1.15f) } }, enabled = sel != null) {
+                        Icon(Icons.Default.ZoomIn, contentDescription = "Bigger")
+                    }
+                    IconButton(onClick = { sel?.let { scaleSelected(it, 1f / 1.15f) } }, enabled = sel != null) {
+                        Icon(Icons.Default.ZoomOut, contentDescription = "Smaller")
+                    }
+                    IconButton(onClick = { sel?.let { showConfig(it) } }, enabled = sel != null) {
+                        Icon(Icons.Default.Edit, contentDescription = "Configure")
+                    }
+                    IconButton(
+                        onClick = { sel?.let { overlayEditor.delete(it); selectedId.value = null } },
+                        enabled = sel != null,
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete")
+                    }
+                    FilledIconButton(onClick = { stop() }) {
+                        Icon(Icons.Default.Check, contentDescription = "Done")
+                    }
                 }
             }
-        }
         }
     }
 

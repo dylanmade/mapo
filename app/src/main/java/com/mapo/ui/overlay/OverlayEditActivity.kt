@@ -3,6 +3,7 @@ package com.mapo.ui.overlay
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
@@ -29,15 +30,16 @@ import javax.inject.Inject
  * this activity provides:
  *  - the **frozen backdrop** (a screenshot of the game captured at trigger time, so editing
  *    is still WYSIWYG over the real content), and
- *  - a foreground task to launch the session from.
+ *  - a foreground task (its own `taskAffinity`) that keeps receiving back + lifecycle
+ *    callbacks while editing, so back/home/recents can leave edit mode.
  *
  * We previously screen-pinned (`startLockTask`) to disable home/recents while editing, but
  * that forced an OS "pin this app?" confirmation on every open (unavoidable for a
- * non-device-owner app). Dropped in favor of letting the user leave freely; edit mode (the
- * overlay windows) persists across home/recents and ends only on the toolbar Done.
+ * non-device-owner app). Dropped in favor of explicit exits: the toolbar Done, **back**
+ * (→ an "Exit overlay editing?" confirm), and **home/recents** (→ [onStop] tears down).
  *
  * Launched via [OverlayLiveEditController.requestEdit]. The controller owns the "am I
- * editing" flag; when it flips false (toolbar ✓ / back) this activity finishes.
+ * editing" flag; when it flips false this activity finishes.
  */
 @AndroidEntryPoint
 class OverlayEditActivity : ComponentActivity() {
@@ -78,17 +80,27 @@ class OverlayEditActivity : ComponentActivity() {
 
         controller.start()
 
-        // Controller owns the edit-session lifecycle; mirror it into this activity. Edit mode
-        // ends ONLY when the user taps Done (✓) / back in the toolbar — NOT on home/recents.
-        // The buttons are `TYPE_APPLICATION_OVERLAY` windows, so they survive the activity
-        // being backgrounded (an accidental recents/home tap must not drop the user's
-        // in-progress edits). We intentionally do NOT tear down in onStop for that reason;
-        // onDestroy is the only safety net (system reclaim).
+        // Back (gesture or button) → "Exit overlay editing?" confirm, drawn by the controller
+        // as a top overlay window. This activity lives in its own task (taskAffinity="") so it
+        // stays foreground while editing and keeps receiving back + lifecycle callbacks.
+        onBackPressedDispatcher.addCallback(this) { controller.handleBack() }
+
+        // Controller owns the edit-session lifecycle; mirror it into this activity.
         lifecycleScope.launch {
             controller.editing.collect { editing ->
                 if (!editing) finishAndRemoveTask()
             }
         }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Leave edit mode on HOME only. onUserLeaveHint fires on an intentional Home press but
+        // NOT on recents/overview (or notification shade) — so recents never exits edit mode,
+        // which is a hard requirement. Recents/back-gesture etc. just background us with the
+        // overlay session intact; the user returns to it. (Back is handled separately, via the
+        // dispatcher → confirm.) controller.stop() drives the finish via the collector above.
+        if (controller.isEditing()) controller.stop()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

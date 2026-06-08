@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
@@ -375,7 +376,12 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     } else {
                         MaterialTheme.colorScheme.surfaceContainerLowest
                     },
-                ),
+                )
+                // Size routes to the area above the (now docked) soft keyboard, so a
+                // focused field scrolls into view instead of hiding behind it. The window
+                // uses FLAG_LAYOUT_NO_LIMITS and won't resize for the IME, so we consume
+                // the IME inset here in Compose. Home has no fields, so it's unaffected.
+                .imePadding(),
             // Crossfade at 250 ms with default FastOutSlowInEasing.
             enterTransition = { fadeIn(tween(250)) },
             exitTransition = { fadeOut(tween(250)) },

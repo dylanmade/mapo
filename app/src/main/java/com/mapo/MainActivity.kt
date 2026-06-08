@@ -1,11 +1,18 @@
 package com.mapo
 
+import android.app.Activity
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.remember
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.themestudio.core.ThemeStudioProvider
 import com.themestudio.persistence.SharedPrefsThemeOverridesStorage
 import dagger.hilt.android.AndroidEntryPoint
@@ -17,32 +24,42 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Window-flag toggling lives entirely in `ApplyMainScreenWindowBehavior` (see
-        // MainScreen.kt). The single-screen refactor removed the unconditional
-        // `FLAG_NOT_FOCUSABLE` bootstrap that used to live here: with the run-mode
-        // keyboard now in an overlay rather than this activity's content, the only
-        // remaining use of that flag is the Thor secondary-device path (activity-mode
-        // keyboard on bottom screen while a game runs on top). That path is handled
-        // per-destination by the Compose-side toggle.
+        // Fully immersive, GameNative-style: the system bars are HIDDEN by default and Mapo
+        // uses the entire screen (incl. the display cutout). A swipe from the edge reveals the
+        // bars transiently, OVER the content, without shifting layout — so the Edit Overlay
+        // coordinate space matches a real fullscreen game.
         //
-        // No enableEdgeToEdge() on purpose: we want the OS to size the window below the
-        // status bar where one exists (phone, Thor primary screen) and to leave the window
-        // alone where one doesn't (Thor bottom bezel screen). enableEdgeToEdge + reactive
-        // statusBarsPadding had an intermittent first-frame stale-inset bug that shifted
-        // content down on the bezel screen. Letting decorFitsSystemWindows stay at its
-        // default (true) sidesteps the inset race entirely — no per-screen padding needed.
-        //
-        // But the window IS translucent (home = drawer over the live app), so the system
-        // bars must not paint an opaque background, or you see a black status/nav bar slide
-        // in with the launch animation and tint the app behind. Make the bars transparent
-        // and turn off the targetSdk-35+ auto contrast scrim so the live app shows through
-        // them on the home. (Secondary routes draw an opaque Scaffold that fills under the
-        // bars, so they read as opaque there.)
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.isStatusBarContrastEnforced = false
-            window.isNavigationBarContrastEnforced = false
+        // Why immersive and not plain edge-to-edge: the window is translucent (so the home
+        // drawer reveals the app behind), and a translucent activity is laid out within the
+        // content frame — it's exempt from edge-to-edge enforcement and can't draw under the
+        // bars no matter the flags. Hiding the bars sidesteps that: there are no bar insets,
+        // so the content frame becomes the whole display. FLAG_LAYOUT_NO_LIMITS pins the frame
+        // to the full display (incl. cutout); enableEdgeToEdge keeps the bars transparent for
+        // the moments they transiently appear. See `hideSystemBars` + onWindowFocusChanged.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+        )
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        WindowCompat.getInsetsController(window, window.decorView).systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        hideSystemBars()
+
+        // The home IS a drawer, so the default "scale up from the launcher icon" open animation
+        // looks wrong. Override it to slide the (mostly transparent) window in from the start
+        // edge — visually, just the drawer panel sliding in from the side while the app behind
+        // holds still — and to retract the same way on leave. API 34+ only; older devices keep
+        // the platform default.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_OPEN, R.anim.drawer_slide_in, R.anim.hold)
+            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, R.anim.hold, R.anim.drawer_slide_out)
         }
 
         setContent {
@@ -53,5 +70,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Immersive isn't sticky across focus changes (the transient swipe, returning from
+        // another activity, dialogs), so re-hide whenever we regain focus.
+        if (hasFocus) hideSystemBars()
+    }
+
+    private fun hideSystemBars() {
+        WindowCompat.getInsetsController(window, window.decorView)
+            .hide(WindowInsetsCompat.Type.systemBars())
     }
 }

@@ -33,7 +33,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -372,8 +371,13 @@ private fun NumericEntryField(
 ) {
     var focused by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf(formatNumber(value, decimals)) }
-    LaunchedEffect(value, focused) {
-        if (!focused) text = formatNumber(value, decimals)
+    // While the field is focused we touch no state during composition — typing flows
+    // straight through onValueChange, so the IME's selection/cursor is never disturbed.
+    // While it's NOT focused we mirror the external value (slider drag, Reset, repo
+    // round-trip) into the buffer; the != guard makes this converge in one pass.
+    if (!focused) {
+        val formatted = formatNumber(value, decimals)
+        if (formatted != text) text = formatted
     }
     OutlinedTextField(
         value = text,

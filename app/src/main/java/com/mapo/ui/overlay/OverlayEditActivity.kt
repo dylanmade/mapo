@@ -1,9 +1,13 @@
 package com.mapo.ui.overlay
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -25,13 +29,12 @@ import javax.inject.Inject
  * this activity provides:
  *  - the **frozen backdrop** (a screenshot of the game captured at trigger time, so editing
  *    is still WYSIWYG over the real content), and
- *  - a foreground task that **owns the edit-session lifecycle** — when the user leaves via
- *    home/recents the session is torn down here so the overlay windows don't linger.
+ *  - a foreground task to launch the session from.
  *
  * We previously screen-pinned (`startLockTask`) to disable home/recents while editing, but
  * that forced an OS "pin this app?" confirmation on every open (unavoidable for a
- * non-device-owner app). Dropped in favor of letting the user leave freely + a clean teardown
- * on [onStop].
+ * non-device-owner app). Dropped in favor of letting the user leave freely; edit mode (the
+ * overlay windows) persists across home/recents and ends only on the toolbar Done.
  *
  * Launched via [OverlayLiveEditController.requestEdit]. The controller owns the "am I
  * editing" flag; when it flips false (toolbar ✓ / back) this activity finishes.
@@ -43,7 +46,14 @@ class OverlayEditActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge() // full-bleed so the screenshot aligns 1:1 with the overlay windows
+        // Match MainActivity: fully immersive (bars hidden, swipe to reveal transiently) so the
+        // edit surface is full-bleed and the screenshot/overlay coordinate space lines up 1:1
+        // with a real fullscreen game.
+        enableEdgeToEdge()
+        window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        WindowCompat.getInsetsController(window, window.decorView).systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        hideSystemBars()
 
         val backdrop = controller.backdropBitmap
         setContent {
@@ -68,7 +78,12 @@ class OverlayEditActivity : ComponentActivity() {
 
         controller.start()
 
-        // Controller owns the edit-session lifecycle; mirror it into this activity.
+        // Controller owns the edit-session lifecycle; mirror it into this activity. Edit mode
+        // ends ONLY when the user taps Done (✓) / back in the toolbar — NOT on home/recents.
+        // The buttons are `TYPE_APPLICATION_OVERLAY` windows, so they survive the activity
+        // being backgrounded (an accidental recents/home tap must not drop the user's
+        // in-progress edits). We intentionally do NOT tear down in onStop for that reason;
+        // onDestroy is the only safety net (system reclaim).
         lifecycleScope.launch {
             controller.editing.collect { editing ->
                 if (!editing) finishAndRemoveTask()
@@ -76,15 +91,14 @@ class OverlayEditActivity : ComponentActivity() {
         }
     }
 
-    // No screen-pinning, so the user can leave via home/recents at any time. End the edit
-    // session here, or the overlay windows (scrim/toolbar/buttons/config) would linger over
-    // whatever they land on. onStop covers home, recents, and the normal finish alike;
-    // controller.stop() is idempotent and flips `editing` false (which also drives the
-    // collector above). Rotation etc. don't reach here (configChanges handles them).
-    override fun onStop() {
-        super.onStop()
-        if (controller.isEditing()) controller.stop()
-        if (!isFinishing) finishAndRemoveTask()
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
+    }
+
+    private fun hideSystemBars() {
+        WindowCompat.getInsetsController(window, window.decorView)
+            .hide(WindowInsetsCompat.Type.systemBars())
     }
 
     override fun onDestroy() {

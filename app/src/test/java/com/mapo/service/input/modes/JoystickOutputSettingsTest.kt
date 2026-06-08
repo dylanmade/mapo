@@ -57,10 +57,23 @@ class JoystickOutputSettingsTest {
 
     @Test
     fun apply_scaleAndInvert() {
+        // Scale is applied through the Steam-parity concave curve (deflection =
+        // scale^0.6), so 50% emits ~0.66 deflection, not a linear 0.5. Vertical
+        // scale stays at the default 1.0 here, so the inverted Y is full -1.
         val s = JoystickOutputSettings.DEFAULTS.copy(horizontalScale = 0.5f, invertVertical = true)
         val (x, y) = s.apply(1f, 1f)
-        assertClose(0.5f, x)
+        assertClose(0.6598f, x)
         assertClose(-1f, y)
+    }
+
+    @Test
+    fun apply_scaleCurve_endpointsAreLinear() {
+        // The curve must still pass through 0→0 and 1→1 so full and zero scale
+        // behave exactly; only the interior is lifted.
+        val full = JoystickOutputSettings.DEFAULTS.copy(horizontalScale = 1f).apply(1f, 0f)
+        assertClose(1f, full.first)
+        val zero = JoystickOutputSettings.DEFAULTS.copy(horizontalScale = 0f).apply(1f, 0f)
+        assertClose(0f, zero.first)
     }
 
     @Test

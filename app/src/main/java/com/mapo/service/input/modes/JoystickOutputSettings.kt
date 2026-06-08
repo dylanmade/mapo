@@ -2,6 +2,7 @@ package com.mapo.service.input.modes
 
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.pow
 import kotlin.math.sin
 import org.json.JSONException
 import org.json.JSONObject
@@ -48,8 +49,17 @@ internal data class JoystickOutputSettings(
             x = nx
             y = ny
         }
-        x *= horizontalScale
-        y *= verticalScale
+        // Steam-parity scale curve. Steam's H/V scale slider is NOT a linear
+        // deflection multiplier — measured against Steam Input (L4D2, face-pad →
+        // joystick, linear response curve, no deadzone) its 50% setting emits
+        // ~0.65 deflection while 100% emits full and 0% emits none. That fits a
+        // power curve deflection = scale^0.6 (concave: rises fast off zero, flattens
+        // toward the top). Mapo previously multiplied linearly, which matched Steam
+        // at 100% but felt weak everywhere below it. Applying the same curve here
+        // brings the slider's feel in line with Steam. Per-axis so asymmetric
+        // H/V scales still work.
+        x *= horizontalScale.pow(SCALE_CURVE_EXPONENT)
+        y *= verticalScale.pow(SCALE_CURVE_EXPONENT)
         if (invertHorizontal) x = -x
         if (invertVertical) y = -y
         when (outputAxis) {
@@ -61,6 +71,13 @@ internal data class JoystickOutputSettings(
     }
 
     companion object {
+        /**
+         * Exponent for the Steam-parity scale curve (see [apply]). ~0.6 fits the
+         * measured Steam mapping (50% → ~0.65 deflection). Tunable if further
+         * calibration points refine the fit.
+         */
+        private const val SCALE_CURVE_EXPONENT = 0.6f
+
         val DEFAULTS = JoystickOutputSettings(
             horizontalScale = 1f,
             verticalScale = 1f,

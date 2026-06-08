@@ -1,26 +1,32 @@
 package com.mapo.service.overlay.element
 
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.graphics.Point
+import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -36,16 +42,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -54,11 +60,15 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.mapo.data.model.OverlayElement
-import com.mapo.data.model.displayLabel
-import com.mapo.data.model.tapRemapTarget
 import com.mapo.data.settings.OverlaySettings
+import com.mapo.service.input.InputDispatcher
 import com.mapo.service.overlay.OverlayLifecycleOwner
+import com.mapo.ui.overlay.OverlayEditActivity
 import com.mapo.ui.screen.overlay.OverlayElementConfigContent
+import com.mapo.ui.screen.overlay.OverlayElementLabel
+import com.mapo.ui.screen.overlay.overlayContentColor
+import com.mapo.ui.screen.overlay.overlayFillColor
+import com.mapo.ui.screen.overlay.overlayShape
 import com.mapo.ui.theme.MapoTheme
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -100,7 +110,16 @@ class OverlayLiveEditController @Inject constructor(
     private val overlayEditor: OverlayEditor,
     private val runPresenter: OverlayPresenter,
     private val overlaySettings: OverlaySettings,
+    private val inputDispatcher: InputDispatcher,
 ) {
+
+    /**
+     * Frozen game backdrop captured at [requestEdit] time, read by `OverlayEditActivity`.
+     * Null when capture is unavailable (API < 30) or failed → the activity uses a plain
+     * backdrop. Held here (not passed via Intent) because bitmaps are too large for extras.
+     */
+    var backdropBitmap: Bitmap? = null
+        private set
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -111,6 +130,7 @@ class OverlayLiveEditController @Inject constructor(
     private val selectedId = MutableStateFlow<Long?>(null)
 
     private val windowManager get() = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private val snapThresholdPx =
         (OverlaySettings.SNAP_THRESHOLD_DP * context.resources.displayMetrics.density).roundToInt()
 
@@ -121,6 +141,35 @@ class OverlayLiveEditController @Inject constructor(
 
     fun canShow(): Boolean = Settings.canDrawOverlays(context)
     fun isEditing(): Boolean = _editing.value
+
+    /**
+     * Public entry point for editing. Captures a backdrop screenshot (the game, when
+     * triggered over it via the QS tile), then launches the foreground [OverlayEditActivity]
+     * — which enters lock-task to block home/recents and calls [start]. From the in-app
+     * drawer Mapo is foreground, so the backdrop is whatever Mapo was showing (or null).
+     */
+    fun requestEdit() {
+        if (_editing.value) return
+        if (!canShow()) {
+            Log.w(TAG, "requestEdit() skipped: overlay permission not granted")
+            return
+        }
+        val launch: (Bitmap?) -> Unit = { bmp ->
+            backdropBitmap = bmp
+            val intent = Intent(context, OverlayEditActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { context.startActivity(intent) }
+                .onFailure { Log.e(TAG, "launch OverlayEditActivity failed", it) }
+        }
+        // Only capture a backdrop when a real (non-Mapo) app is foreground — otherwise the
+        // shot would just be Mapo's own UI, so we use a plain canvas instead.
+        // (queryPrimaryDisplayForegroundPackage returns null when Mapo is foreground.)
+        if (inputDispatcher.queryPrimaryDisplayForegroundPackage() != null) {
+            inputDispatcher.captureScreenshot(launch)
+        } else {
+            launch(null)
+        }
+    }
 
     fun start() {
         runOnMain {
@@ -151,6 +200,7 @@ class OverlayLiveEditController @Inject constructor(
             scrim?.let { detach(it) }; scrim = null
             toolbar?.let { detach(it) }; toolbar = null
             _editing.value = false
+            backdropBitmap = null
             Log.i(TAG, "live edit stopped")
         }
     }
@@ -187,6 +237,54 @@ class OverlayLiveEditController @Inject constructor(
     private fun attachElement(element: OverlayElement, size: Point) {
         val owner = OverlayLifecycleOwner()
         val state: MutableState<OverlayElement> = mutableStateOf(element)
+        // Per-element touch handler. pointerInteropFilter (not a view OnTouchListener, which
+        // never fires on a ComposeView) hands us the raw MotionEvent, so we drag with
+        // absolute screen coords (rawX/rawY) anchored to the window position captured at
+        // touch-down. That's immune to the "window moves under the finger" lag that made
+        // window-relative deltas oscillate/jitter.
+        var startRawX = 0f
+        var startRawY = 0f
+        var startWinX = 0
+        var startWinY = 0
+        var dragging = false
+        val onTouch: (MotionEvent) -> Boolean = { ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    val w = elementWindows[element.id]
+                    startRawX = ev.rawX
+                    startRawY = ev.rawY
+                    startWinX = w?.params?.x ?: 0
+                    startWinY = w?.params?.y ?: 0
+                    dragging = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = ev.rawX - startRawX
+                    val dy = ev.rawY - startRawY
+                    if (!dragging && hypot(dx, dy) > touchSlop) dragging = true
+                    if (dragging) {
+                        moveElementTo(
+                            element.id,
+                            (startWinX + dx).roundToInt(),
+                            (startWinY + dy).roundToInt(),
+                        )
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!dragging) {
+                        // Tap selects; tap an already-selected button to open its config.
+                        if (selectedId.value == element.id) showConfig(element.id)
+                        else selectedId.value = element.id
+                    } else {
+                        onElementDragEnd(element.id)
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+
         val view = ComposeView(context).apply {
             attachOwner(owner)
             setContent {
@@ -195,14 +293,7 @@ class OverlayLiveEditController @Inject constructor(
                     EditableElement(
                         element = state.value,
                         selected = sel == state.value.id,
-                        // Tap selects; tapping an already-selected button opens its command
-                        // config (so assigning an input is reachable without the toolbar pencil).
-                        onTap = {
-                            if (selectedId.value == element.id) showConfig(element.id)
-                            else selectedId.value = element.id
-                        },
-                        onDrag = { dx, dy -> onElementDrag(element.id, dx, dy) },
-                        onDragEnd = { onElementDragEnd(element.id) },
+                        onTouch = onTouch,
                     )
                 }
             }
@@ -222,18 +313,12 @@ class OverlayLiveEditController @Inject constructor(
         elementWindows[element.id] = ElementWindow(view, owner, params, state)
     }
 
-    /**
-     * Move an element's window by a Compose-gesture delta. [dx]/[dy] are
-     * `pointer.position − grabPoint` (current-window-relative), so `params + delta` tracks
-     * the finger's absolute screen position even though the window moves under it each
-     * event — no raw-coordinate listener needed (and a `setOnTouchListener` on a ComposeView
-     * never fires anyway; the Compose child eats the touch — see memory).
-     */
-    private fun onElementDrag(id: Long, dx: Float, dy: Float) {
+    /** Move an element's window to an absolute screen position (clamped, then snapped). */
+    private fun moveElementTo(id: Long, targetX: Int, targetY: Int) {
         val w = elementWindows[id] ?: return
         val size = displaySizePx()
-        var nx = (w.params.x + dx).roundToInt().coerceIn(0, size.x - w.params.width)
-        var ny = (w.params.y + dy).roundToInt().coerceIn(0, size.y - w.params.height)
+        var nx = targetX.coerceIn(0, size.x - w.params.width)
+        var ny = targetY.coerceIn(0, size.y - w.params.height)
         if (overlaySettings.snapEnabled.value) {
             val snapped = snapPosition(id, nx, ny, w.params.width, w.params.height, size)
             nx = snapped.x; ny = snapped.y
@@ -287,6 +372,13 @@ class OverlayLiveEditController @Inject constructor(
         runCatching { windowManager.addView(view, params) }
             .onFailure { Log.e(TAG, "addView(scrim) failed", it); return }
         scrim = view to owner
+        // Suppress the system back / edge gestures across the whole edit surface so dragging
+        // a button near an edge doesn't trigger them. (The bottom home/recents gesture is
+        // reserved by the platform and can't be excluded by a non-launcher app.) API 29+.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val size = displaySizePx()
+            view.post { view.systemGestureExclusionRects = listOf(Rect(0, 0, size.x, size.y)) }
+        }
     }
 
     private fun addToolbar() {
@@ -310,6 +402,12 @@ class OverlayLiveEditController @Inject constructor(
         toolbar = view to owner
     }
 
+    /**
+     * Config as a full-height **side drawer** docked to the edge *opposite* the button, so
+     * the button stays visible while editing. A side panel scrolls freely for long settings
+     * lists (a bottom sheet would dismiss on scroll). Edits commit live (WYSIWYG) — the
+     * button's window re-renders as the repo emits.
+     */
     private fun showConfig(elementId: Long) {
         dismissConfig()
         val element = overlayEditor.elements.value.firstOrNull { it.id == elementId } ?: return
@@ -318,20 +416,21 @@ class OverlayLiveEditController @Inject constructor(
             attachOwner(owner)
             setContent {
                 MapoTheme {
-                    // surfaceContainerHigh — elevated transient config panel.
+                    // surfaceContainerHigh — elevated side panel; scrolls for long settings.
                     Surface(
-                        shape = MaterialTheme.shapes.large,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         tonalElevation = 6.dp,
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.fillMaxSize(),
                     ) {
-                        Box(Modifier.padding(vertical = 16.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(vertical = 20.dp),
+                        ) {
                             OverlayElementConfigContent(
-                                initialLabel = element.label,
-                                initialTarget = element.tapRemapTarget,
-                                onSave = { label, target ->
-                                    overlayEditor.setBinding(elementId, label, target)
-                                },
+                                element = element,
+                                onChange = { overlayEditor.update(it) },
                                 onDelete = {
                                     overlayEditor.delete(elementId)
                                     selectedId.value = null
@@ -345,12 +444,16 @@ class OverlayLiveEditController @Inject constructor(
             }
         }
         owner.resumeTo()
+        // Dock to the side opposite the button (button center on the left half → drawer right).
+        val buttonOnLeftHalf = (element.x + element.width / 2f) < 0.5f
+        val drawerEdge = if (buttonOnLeftHalf) Gravity.END else Gravity.START
+        val widthPx = (CONFIG_DRAWER_WIDTH_DP * context.resources.displayMetrics.density).roundToInt()
         // Focusable — the label TextField needs IME. The only focusable surface in edit mode.
         val params = layoutParams(
-            width = WindowManager.LayoutParams.MATCH_PARENT,
-            height = WindowManager.LayoutParams.WRAP_CONTENT,
+            width = widthPx,
+            height = WindowManager.LayoutParams.MATCH_PARENT,
             focusable = true,
-        ).apply { gravity = Gravity.CENTER }
+        ).apply { gravity = Gravity.TOP or drawerEdge }
         runCatching { windowManager.addView(view, params) }
             .onFailure { Log.e(TAG, "addView(config) failed", it); return }
         configWindow = view to owner
@@ -418,61 +521,35 @@ class OverlayLiveEditController @Inject constructor(
     }
 
     /**
-     * Editable button. Select + drag are driven by **Compose `pointerInput`** (not a view
-     * `OnTouchListener`, which never fires on a ComposeView). The drag reports
-     * `position − grab` deltas; [onDrag] applies them to the window. A move past touch-slop
-     * is a drag; otherwise it's a tap.
+     * Editable button. Select + drag are driven by **`pointerInteropFilter`**, which hands
+     * us the raw `MotionEvent` (incl. screen `rawX/rawY`) inside Compose — a plain view
+     * `OnTouchListener` does NOT fire on a ComposeView. Raw coords keep dragging jitter-free
+     * (independent of the window's lagging on-screen position). All gesture logic lives in
+     * [onTouch] (built per element in `attachElement`).
      */
+    @OptIn(ExperimentalComposeUiApi::class)
     @Composable
     private fun EditableElement(
         element: OverlayElement,
         selected: Boolean,
-        onTap: () -> Unit,
-        onDrag: (dx: Float, dy: Float) -> Unit,
-        onDragEnd: () -> Unit,
+        onTouch: (MotionEvent) -> Boolean,
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(element.id) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val grabX = down.position.x
-                        val grabY = down.position.y
-                        var dragging = false
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
-                            val dx = change.position.x - grabX
-                            val dy = change.position.y - grabY
-                            if (!dragging && hypot(dx, dy) > viewConfiguration.touchSlop) dragging = true
-                            if (dragging) {
-                                onDrag(dx, dy)
-                                change.consume()
-                            }
-                        }
-                        if (dragging) onDragEnd() else onTap()
-                    }
-                },
+                .pointerInteropFilter(onTouchEvent = onTouch),
         ) {
+            // WYSIWYG — same shape / fill / content / opacity as the run-mode button, with a
+            // selection outline added.
             Surface(
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                shape = overlayShape(element),
+                color = overlayFillColor(element),
+                contentColor = overlayContentColor(element),
                 tonalElevation = 3.dp,
                 border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().alpha(element.opacity),
             ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().padding(4.dp)) {
-                    Text(
-                        text = element.label.ifBlank { element.tapRemapTarget.displayLabel() },
-                        style = MaterialTheme.typography.labelLarge,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                OverlayElementLabel(element)
             }
         }
     }
@@ -595,5 +672,6 @@ class OverlayLiveEditController @Inject constructor(
     companion object {
         private const val TAG = "OverlayLiveEdit"
         private const val SCRIM_COLOR = 0x66000000.toInt() // ~40% black
+        private const val CONFIG_DRAWER_WIDTH_DP = 340
     }
 }

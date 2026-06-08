@@ -97,10 +97,9 @@ class MapoApplication : Application() {
      *    Without this, every injected event defaults to `Display.DEFAULT_DISPLAY`,
      *    dropping any remap output meant for the AYN Thor's bottom screen.
      *
-     *  - `android.view.ViewTreeObserver`: `OnComputeInternalInsetsListener` /
-     *    `InternalInsetsInfo` so [com.mapo.service.overlay.keyboard.KeyboardOverlayManager]
-     *    can declare per-rect touchable regions on the system-overlay window — letting
-     *    touches in empty areas of the keyboard pass through to the foreground game.
+     * (The former `android.view.ViewTreeObserver` exemption — for the legacy keyboard
+     * overlay's per-rect touchable-region bridge — was removed when that overlay was
+     * gutted; the rebuilt overlay uses one window per button, so no `@hide` insets API.)
      *
      * Scoped to specific class signatures so we don't blanket-exempt the whole runtime.
      * No-op on Android <9 (no hidden-API enforcement); the library handles the
@@ -111,14 +110,8 @@ class MapoApplication : Application() {
         try {
             HiddenApiBypass.addHiddenApiExemptions(
                 "Landroid/view/InputEvent;",
-                // No trailing ';' — prefix match so the exemption reaches
-                // ViewTreeObserver$InternalInsetsInfo and ViewTreeObserver$OnComputeInternalInsetsListener
-                // as well as the outer class. The hidden-API descriptors look like
-                // `Landroid/view/ViewTreeObserver$InternalInsetsInfo;->TOUCHABLE_INSETS_REGION:I`,
-                // which a `;`-terminated prefix wouldn't match.
-                "Landroid/view/ViewTreeObserver",
             )
-            Log.i("MapoApplication", "Hidden API exemptions installed (InputEvent, ViewTreeObserver)")
+            Log.i("MapoApplication", "Hidden API exemptions installed (InputEvent)")
         } catch (e: Throwable) {
             Log.w("MapoApplication", "Failed to install hidden API exemptions", e)
         }

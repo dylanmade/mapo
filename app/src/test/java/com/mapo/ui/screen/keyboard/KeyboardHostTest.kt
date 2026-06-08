@@ -23,7 +23,7 @@ import org.robolectric.annotation.Config
 
 /**
  * Brick 3 smoke check for [KeyboardHost] — confirms the same composable renders
- * cleanly in both [KeyboardHostMode.Activity] and [KeyboardHostMode.Overlay]. The
+ * cleanly in [KeyboardHostMode.Activity]. The
  * goal isn't exhaustive verification of every edit-mode interaction (those live
  * with the underlying composables in `MainScreen.kt`); it's "does the host wire
  * up against both modes without crashing or losing the leaf affordances."
@@ -53,29 +53,6 @@ class KeyboardHostTest {
         composeRule.waitForIdle()
 
         composeRule.onAllNodesWithText("Quit").assertCountEquals(1)
-        composeRule.onAllNodesWithText("Hide").assertCountEquals(0)
-    }
-
-    @Test
-    fun overlayMode_rendersWithoutCrashing_andBottomBarSaysHide() {
-        val state = FakeKeyboardHostState(listOf(sampleLayout("Tab-A")))
-
-        composeRule.setContent {
-            MapoTheme {
-                KeyboardHost(
-                    state = state,
-                    mode = KeyboardHostMode.Overlay(
-                        onOpenMapoActivity = {},
-                        onHideOverlay = {},
-                    ),
-                    modifier = Modifier.size(width = 480.dp, height = 360.dp),
-                )
-            }
-        }
-        composeRule.waitForIdle()
-
-        composeRule.onAllNodesWithText("Hide").assertCountEquals(1)
-        composeRule.onAllNodesWithText("Quit").assertCountEquals(0)
     }
 
     @Test

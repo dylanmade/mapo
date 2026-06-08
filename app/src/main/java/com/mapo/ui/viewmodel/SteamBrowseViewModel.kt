@@ -5,7 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapo.steam.library.OwnedGame
 import com.mapo.steam.library.SteamLibraryRepository
-import com.mapo.steam.workshop.ConfigSummary
+import com.mapo.steam.workshop.WorkshopConfig
 import com.mapo.steam.workshop.SteamWorkshopRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -58,17 +58,9 @@ class SteamBrowseViewModel @Inject constructor(
         }
     }
 
-    fun selectConfig(config: ConfigSummary) {
-        // POC: no apply / download yet — just dump everything we got to logcat
-        // so we can sanity-check the QueryFiles response shape against real items.
-        Log.i(
-            TAG,
-            "Selected config: id=${config.publishedFileId} title='${config.title}' " +
-                "creator=${config.creatorSteamId64} votesUp=${config.votesUp} " +
-                "votesDown=${config.votesDown} subs=${config.subscriptions} " +
-                "preview=${config.previewUrl}",
-        )
-    }
+    // selectConfig() removed — taps now navigate to the detail screen
+    // via an onOpenConfig callback on the screen. The detail VM does
+    // its own logging from the cached WorkshopConfig.
 
     fun backToGames() {
         inFlight?.cancel()
@@ -101,5 +93,5 @@ sealed interface SteamBrowseState {
             else games.filter { it.name.contains(filter.trim(), ignoreCase = true) }
     }
     data class LoadingConfigs(val game: OwnedGame) : SteamBrowseState
-    data class Configs(val game: OwnedGame, val configs: List<ConfigSummary>) : SteamBrowseState
+    data class Configs(val game: OwnedGame, val configs: List<WorkshopConfig>) : SteamBrowseState
 }

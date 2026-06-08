@@ -27,7 +27,6 @@ import com.mapo.service.keyboard.KeyboardController
 import com.mapo.service.overlay.element.OverlayLiveEditController
 import com.mapo.service.overlay.element.OverlayPresenter
 import com.mapo.steam.auth.SteamCredentialStore
-import com.mapo.service.overlay.keyboard.KeyboardOverlayPresenter
 import app.cash.turbine.test
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -70,7 +69,6 @@ class MainViewModelTest {
     private lateinit var filter: ForegroundAppFilter
     private lateinit var templateRepo: KeyboardTemplateRepository
     private lateinit var inputDispatcher: InputDispatcher
-    private lateinit var keyboardOverlayPresenter: KeyboardOverlayPresenter
     private lateinit var overlayPresenter: OverlayPresenter
     private lateinit var overlayLiveEditController: OverlayLiveEditController
     private lateinit var steamCredentialStore: SteamCredentialStore
@@ -106,7 +104,6 @@ class MainViewModelTest {
         filter = mockk(relaxed = true)
         templateRepo = mockk(relaxed = true)
         inputDispatcher = mockk(relaxed = true)
-        keyboardOverlayPresenter = mockk(relaxed = true)
         overlayPresenter = mockk(relaxed = true)
         overlayLiveEditController = mockk(relaxed = true)
         steamCredentialStore = mockk(relaxed = true)
@@ -148,7 +145,6 @@ class MainViewModelTest {
             foregroundAppFilter = filter,
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
-            keyboardOverlayPresenter = keyboardOverlayPresenter,
             overlayPresenter = overlayPresenter,
             overlayLiveEditController = overlayLiveEditController,
             steamCredentialStore = steamCredentialStore,
@@ -523,7 +519,6 @@ class MainViewModelTest {
             foregroundAppFilter = filter,
             keyboardTemplateRepository = templateRepo,
             inputDispatcher = inputDispatcher,
-            keyboardOverlayPresenter = keyboardOverlayPresenter,
             overlayPresenter = overlayPresenter,
             overlayLiveEditController = overlayLiveEditController,
             steamCredentialStore = steamCredentialStore,
@@ -932,7 +927,6 @@ class MainViewModelTest {
         foregroundAppFilter = filter,
         keyboardTemplateRepository = templateRepo,
         inputDispatcher = inputDispatcher,
-        keyboardOverlayPresenter = keyboardOverlayPresenter,
         overlayPresenter = overlayPresenter,
         overlayLiveEditController = overlayLiveEditController,
         steamCredentialStore = steamCredentialStore,

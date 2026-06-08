@@ -49,7 +49,6 @@ import com.mapo.service.input.toCompiled
 import com.mapo.service.keyboard.KeyboardController
 import com.mapo.service.overlay.element.OverlayLiveEditController
 import com.mapo.service.overlay.element.OverlayPresenter
-import com.mapo.service.overlay.keyboard.KeyboardOverlayPresenter
 import com.mapo.ui.screen.keyboard.KeyboardHostState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.util.Log
@@ -101,7 +100,6 @@ class MainViewModel @Inject constructor(
     private val foregroundAppFilter: ForegroundAppFilter,
     private val keyboardTemplateRepository: KeyboardTemplateRepository,
     private val inputDispatcher: InputDispatcher,
-    private val keyboardOverlayPresenter: KeyboardOverlayPresenter,
     private val overlayPresenter: OverlayPresenter,
     private val overlayLiveEditController: OverlayLiveEditController,
     private val keyboardController: KeyboardController,
@@ -1396,20 +1394,10 @@ class MainViewModel @Inject constructor(
         _toastMessage.tryEmit(message)
     }
 
-    /**
-     * Drawer affordance for toggling the run-mode keyboard overlay (mirrors the QS tile).
-     * Both call the same [KeyboardOverlayPresenter] so there is exactly one
-     * orchestration point for "show / hide the overlay" — easy to add new triggers
-     * later (FGS notification action, physical-button binding, …) without drifting.
-     */
-    fun toggleKeyboardOverlay() {
-        keyboardOverlayPresenter.toggle()
-    }
+    /** Whether the rebuilt button overlay is currently shown (drawer bottom switch). */
+    val overlayShowing: StateFlow<Boolean> = overlayPresenter.showing
 
-    /**
-     * Drawer affordance for toggling the rebuilt free-positioned button overlay
-     * (`OVERLAY_REBUILD_PLAN.md`, Brick B). Independent of the keyboard overlay above.
-     */
+    /** Drawer affordance for toggling the rebuilt free-positioned button overlay. */
     fun toggleOverlay() {
         overlayPresenter.toggle()
     }
@@ -1419,7 +1407,7 @@ class MainViewModel @Inject constructor(
      * editor (C1) is reached by navigation instead; both write the same elements.
      */
     fun startLiveOverlayEdit() {
-        overlayLiveEditController.start()
+        overlayLiveEditController.requestEdit()
     }
 
     /**

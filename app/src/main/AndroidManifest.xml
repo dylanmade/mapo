@@ -48,12 +48,24 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:theme="@style/Theme.Mapo.Translucent"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Foreground host for the live overlay editor: hosts the frozen backdrop and owns
+             the edit-session lifecycle (torn down on leave). excludeFromRecents + singleTask:
+             it's a transient editing surface, not a task to switch back to. -->
+        <activity
+            android:name=".ui.overlay.OverlayEditActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.Mapo.Translucent"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
 
         <service
             android:name=".service.InputAccessibilityService"
@@ -68,24 +80,16 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- Foreground service that holds process priority while the rebuilt button
+             overlay (run mode or live edit) is mounted. Named "keyboard" for historical
+             reasons; now shared infra for the element overlay. -->
         <service
             android:name=".service.overlay.keyboard.KeyboardOverlayService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="virtual_keyboard_overlay" />
-        </service>
-
-        <service
-            android:name=".service.overlay.keyboard.KeyboardTileService"
-            android:exported="true"
-            android:icon="@drawable/ic_keyboard_overlay"
-            android:label="@string/keyboard_overlay_tile_label"
-            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter>
-                <action android:name="android.service.quicksettings.action.QS_TILE" />
-            </intent-filter>
+                android:value="button_overlay" />
         </service>
 
     </application>

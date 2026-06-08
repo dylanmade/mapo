@@ -162,7 +162,7 @@ fun RemapTargetPickerScreen(
 /** True when [current] matches a [BindingOutput] inhabitant of [category]. */
 private fun matchesCategory(current: BindingOutput, category: PickerCategory): Boolean = when (category) {
     PickerCategory.Unbound          -> current is BindingOutput.Unbound
-    PickerCategory.Gamepad          -> current is BindingOutput.XInputButton
+    PickerCategory.Gamepad          -> current is BindingOutput.XInputButton || current is BindingOutput.XInputStick
     PickerCategory.Keyboard         -> current is BindingOutput.KeyPress
     PickerCategory.Mouse            -> current is BindingOutput.MouseButton || current is BindingOutput.MouseWheel
     PickerCategory.SwitchActionSet  -> current is BindingOutput.ControllerAction && current.verb == "CHANGE_PRESET"

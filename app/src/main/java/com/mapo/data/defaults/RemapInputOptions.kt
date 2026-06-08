@@ -9,8 +9,16 @@ data class InputOption(val label: String, val target: RemapTarget)
 
 object RemapInputOptions {
 
-    val gamepadOptions: ImmutableList<InputOption> = DeviceButton.entries.map { btn ->
-        InputOption(btn.displayName, RemapTarget.Gamepad(btn.name))
+    val gamepadOptions: ImmutableList<InputOption> = buildList {
+        DeviceButton.entries.forEach { btn -> add(InputOption(btn.displayName, RemapTarget.Gamepad(btn.name))) }
+        // Stick directions emit analog axis output on the virtual gamepad (requires Shizuku).
+        // Tokens parse back to BindingOutput.XInputStick via fromRemapTarget.
+        listOf(
+            "LSTICK_UP" to "Left Stick Up", "LSTICK_DOWN" to "Left Stick Down",
+            "LSTICK_LEFT" to "Left Stick Left", "LSTICK_RIGHT" to "Left Stick Right",
+            "RSTICK_UP" to "Right Stick Up", "RSTICK_DOWN" to "Right Stick Down",
+            "RSTICK_LEFT" to "Right Stick Left", "RSTICK_RIGHT" to "Right Stick Right",
+        ).forEach { (token, label) -> add(InputOption(label, RemapTarget.Gamepad(token))) }
     }.toImmutableList()
 
     val keyboardOptions: ImmutableList<InputOption> = listOf(

@@ -4,4 +4,12 @@
          the activity windowBackground is dark; prevents white from bleeding through during
          Compose transitions or partial-transparency moments while in dark mode. -->
     <style name="Theme.Mapo" parent="android:Theme.Material.NoActionBar" />
+
+    <!-- Translucent variant for MainActivity (dark). See values/themes.xml for rationale. -->
+    <style name="Theme.Mapo.Translucent" parent="Theme.Mapo">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

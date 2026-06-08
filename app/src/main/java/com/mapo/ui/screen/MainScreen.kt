@@ -79,6 +79,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -115,7 +116,6 @@ import com.mapo.data.model.gestureTarget
 import com.mapo.data.model.onDoubleTapTarget
 import com.mapo.data.model.onHoldTarget
 import com.mapo.data.model.onTapTarget
-import com.mapo.service.overlay.keyboard.overlayTouchable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -230,7 +230,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val shizukuReady by viewModel.shizukuReady.collectAsStateWithLifecycle()
     val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
 
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    // Home is the drawer over the apps underneath (translucent window) — open it on launch.
+    val drawerState = rememberDrawerState(DrawerValue.Open)
     val scope = rememberCoroutineScope()
     val navController = rememberNavController()
 
@@ -250,6 +251,28 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         scope.launch { drawerState.close() }
     }
 
+    // The home is a fullscreen *transparent* window, so a closed drawer on the MAIN route is
+    // an invisible trap: nothing is drawn, yet the activity still swallows every touch over
+    // the app the user can see underneath. Treat "drawer dismissed on MAIN" (swipe / scrim /
+    // back) as "leave Mapo" — send the task to the back so touches fall through to that app.
+    // Dismissals that are really navigations (tapping a drawer item) flip the route off MAIN
+    // first, so the isMainRoute guard lets those pass without backgrounding.
+    val activity = context as? Activity
+    val currentIsMainRoute by rememberUpdatedState(isMainRoute)
+    LaunchedEffect(drawerState) {
+        snapshotFlow { drawerState.currentValue }.collect { value ->
+            if (value == DrawerValue.Closed && currentIsMainRoute) {
+                activity?.moveTaskToBack(true)
+            }
+        }
+    }
+    // Re-entering MAIN (popping back from a settings screen) restores the home by reopening
+    // the drawer, rather than dropping the user onto the empty transparent trap. First
+    // composition is already Open, so this is a no-op there.
+    LaunchedEffect(isMainRoute) {
+        if (isMainRoute) drawerState.open()
+    }
+
     var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted(context)) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -263,6 +286,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 // the game, so the auto-switcher's distinctUntilChanged would suppress
                 // it. Force a re-evaluation on every resume.
                 viewModel.reevaluateAutoSwitch()
+                // Reopened from the launcher after a drawer-dismiss backgrounded us: the
+                // composition is retained (drawer still closed, route unchanged), so neither
+                // route/drawer effect re-fires. Restore the home drawer here so reopening
+                // Mapo never lands on the empty transparent trap.
+                if (currentIsMainRoute) scope.launch { drawerState.open() }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -279,11 +307,21 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     Box(modifier = Modifier.fillMaxSize()) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = drawerState.isOpen,
+        // On the (transparent) home the drawer is the only UI, so it must always be
+        // swipe-reachable; elsewhere only allow the swipe-to-close when already open.
+        gesturesEnabled = isMainRoute || drawerState.isOpen,
+        // No scrim: the home is the drawer floating over a live app, and any tint here dims
+        // that app (the "vignette" that brightened on close). Transparent keeps the app behind
+        // looking exactly as it does normally; the scrim still catches taps to dismiss.
+        scrimColor = androidx.compose.ui.graphics.Color.Transparent,
         drawerContent = {
+            val drawerRemapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
+            val drawerOverlayShowing by viewModel.overlayShowing.collectAsStateWithLifecycle()
             ProfileDrawerContent(
                 activeProfile = activeProfile,
                 steamAccountName = steamAccountName,
+                remapEnabled = drawerRemapEnabled,
+                overlayShowing = drawerOverlayShowing,
                 onOpenChangeProfile = {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.CHANGE_PROFILE)
@@ -312,31 +350,32 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.STEAM_SETUP)
                 },
-                onToggleKeyboardOverlay = {
-                    scope.launch { drawerState.close() }
-                    viewModel.toggleKeyboardOverlay()
-                },
-                onToggleOverlay = {
-                    scope.launch { drawerState.close() }
-                    viewModel.toggleOverlay()
-                },
                 onEditOverlay = {
                     scope.launch { drawerState.close() }
                     viewModel.startLiveOverlayEdit()
                 },
+                // Sticky bottom switches — left interactive without closing the drawer.
+                onToggleRemap = { viewModel.toggleRemap() },
+                onToggleOverlay = { viewModel.toggleOverlay() },
             )
         }
     ) {
         NavHost(
             navController = navController,
             startDestination = MapoRoute.MAIN,
-            // Background matches the home screen's Scaffold (and the secondary destinations'
-            // visual base in this theme), so the crossfade middle no longer reveals the
-            // activity window beneath. Without this the partial alpha of both screens lets
-            // the activity background bleed through mid-transition.
+            // On secondary routes an opaque base prevents the crossfade from revealing the
+            // (now translucent) activity window mid-transition. On the MAIN route the home is
+            // the drawer over the apps underneath, so it MUST stay transparent — otherwise
+            // this fill is the opaque layer that hides everything below.
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+                .background(
+                    if (isMainRoute) {
+                        androidx.compose.ui.graphics.Color.Transparent
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerLowest
+                    },
+                ),
             // Crossfade at 250 ms with default FastOutSlowInEasing.
             enterTransition = { fadeIn(tween(250)) },
             exitTransition = { fadeOut(tween(250)) },
@@ -408,14 +447,16 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             }
                         }
                     },
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    // Transparent so the app underneath shows through the translucent window.
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
                     contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
                 ) { _ ->
-                    // Single-screen refactor Brick 3: keyboard subtree (TopBar +
-                    // Surface + Grid + BottomBar) now lives behind `KeyboardHost`.
-                    // Edit-mode callbacks + dialog triggers + navigation are routed
-                    // here through `KeyboardHostMode.Activity`. The same composable
-                    // serves the system-overlay window in Overlay mode (Brick 4).
+                    // Home is the drawer floating over the apps underneath (translucent
+                    // window). The in-activity virtual-keyboard host is hidden for now but
+                    // kept — flip `showKeyboardHome` (or wire a future "Edit keyboards"
+                    // entry) to bring it back; its edit wiring + VM logic stay intact.
+                    val showKeyboardHome = remember { false }
+                    if (showKeyboardHome) {
                     KeyboardHost(
                         state = viewModel,
                         mode = KeyboardHostMode.Activity(
@@ -498,6 +539,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             onQuit = { (context as? Activity)?.finish() },
                         ),
                     )
+                    }
                 }
             }
             composable(MapoRoute.CHANGE_PROFILE) {
@@ -828,7 +870,18 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 )
             }
             composable(MapoRoute.STEAM_BROWSE) {
-                SteamBrowseScreen(onBack = { navController.popBackStack() })
+                SteamBrowseScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenConfig = { id ->
+                        navController.navigate(MapoRoute.steamConfigDetail(id))
+                    },
+                )
+            }
+            composable(
+                route = MapoRoute.STEAM_CONFIG_DETAIL,
+                arguments = listOf(navArgument(MapoRoute.ARG_PUBLISHED_FILE_ID) { type = NavType.LongType }),
+            ) {
+                SteamConfigDetailScreen(onBack = { navController.popBackStack() })
             }
             composable(
                 route = MapoRoute.CONFIGURE_BUTTON,
@@ -1353,12 +1406,6 @@ internal fun KeyGrid(
                     modifier = Modifier
                         .absoluteOffset(x = bx, y = by)
                         .size(width = bw, height = bh)
-                        // overlayTouchable MUST come after absoluteOffset/size in the chain.
-                        // Modifier order is outside-in; if onGloballyPositioned wraps
-                        // absoluteOffset, it reports the wrapper's natural bounds (anchored
-                        // at the parent's placement, ignoring the offset) instead of the
-                        // visually-placed content's bounds.
-                        .overlayTouchable()
                         .pointerInput(button.id + "_tp") {
                             var lastTapTimeMs = 0L
                             awaitPointerEventScope {
@@ -1452,10 +1499,6 @@ internal fun KeyGrid(
                     modifier = Modifier
                         .absoluteOffset(x = bx, y = by)
                         .size(width = bw, height = bh)
-                        // See trackpad branch above — overlayTouchable must come after
-                        // absoluteOffset so onGloballyPositioned reports the offset
-                        // content's bounds, not the wrapper's anchored-at-parent bounds.
-                        .overlayTouchable()
                         .zIndex(if (isDragging) 10f else 0f)
                         .then(
                             if (isEditMode) Modifier.pointerInput(button.id) {

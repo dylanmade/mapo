@@ -159,6 +159,8 @@ enum class BindingOutputType {
     UNBOUND,
     KEY_PRESS,
     XINPUT_BUTTON,
+    /** A virtual gamepad stick direction (left/right stick × up/down/left/right) — analog axis output. */
+    XINPUT_STICK,
     MOUSE_BUTTON,
     MOUSE_WHEEL,
     GAME_ACTION,

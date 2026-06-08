@@ -8,12 +8,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 
@@ -38,8 +40,14 @@ fun TwoNumberInputRow(
     modifier: Modifier = Modifier,
     labelWidth: Int = 160,
 ) {
-    var widthText by remember(width) { mutableStateOf(width.toString()) }
-    var heightText by remember(height) { mutableStateOf(height.toString()) }
+    // Local text buffers that only re-sync from their source while NOT focused, so an
+    // async round-trip can't clobber what the user is typing mid-edit.
+    var widthFocused by remember { mutableStateOf(false) }
+    var heightFocused by remember { mutableStateOf(false) }
+    var widthText by remember { mutableStateOf(width.toString()) }
+    var heightText by remember { mutableStateOf(height.toString()) }
+    LaunchedEffect(width, widthFocused) { if (!widthFocused) widthText = width.toString() }
+    LaunchedEffect(height, heightFocused) { if (!heightFocused) heightText = height.toString() }
 
     Row(
         modifier = modifier,
@@ -63,7 +71,9 @@ fun TwoNumberInputRow(
             label = { Text("W") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.width(72.dp),
+            modifier = Modifier
+                .width(72.dp)
+                .onFocusChanged { widthFocused = it.isFocused },
         )
         Text(
             "×",
@@ -82,7 +92,9 @@ fun TwoNumberInputRow(
             label = { Text("H") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.width(72.dp),
+            modifier = Modifier
+                .width(72.dp)
+                .onFocusChanged { heightFocused = it.isFocused },
         )
     }
 }

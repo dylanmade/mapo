@@ -4,4 +4,14 @@
          M3 surfaceContainerLowest, so this only shows during transitions / partial-transparency
          moments. Dark variant lives in values-night/themes.xml. -->
     <style name="Theme.Mapo" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Translucent variant for MainActivity: the home is the drawer floating over whatever
+         app is underneath, so the window must let it show through. Secondary routes paint
+         opaque Scaffolds over this, so only the transparent MAIN route reveals the app behind. -->
+    <style name="Theme.Mapo.Translucent" parent="Theme.Mapo">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

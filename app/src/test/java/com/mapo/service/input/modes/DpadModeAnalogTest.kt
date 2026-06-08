@@ -367,6 +367,27 @@ class DpadModeAnalogTest {
         assertEquals(listOf("dpad_right" to true), emits)
     }
 
+    // ── Cross gate: diagonals allowed near the edge, cardinal-only near center ──
+
+    private val settingsCrossGate =
+        """{"inner_deadzone":0.20,"outer_deadzone":0.05,"dpad_layout":"cross_gate"}"""
+
+    @Test
+    fun crossGate_edgeDiagonal_emitsBothAxes() {
+        // mag ≈ 0.99 ≥ 0.7 threshold → full 8-way diagonal.
+        DpadMode.evaluate(reading(0.7f, -0.7f), ctx(settingsJson = settingsCrossGate), emit, MouseEmitter.NOOP)
+        assertTrue("expected north, got $emits", "dpad_up" to true in emits)
+        assertTrue("expected east, got $emits", "dpad_right" to true in emits)
+        assertEquals(2, emits.size)
+    }
+
+    @Test
+    fun crossGate_centerDiagonal_snapsToDominantCardinal() {
+        // mag ≈ 0.46 < 0.7 threshold → diagonal suppressed; |x| > |y| → east only.
+        DpadMode.evaluate(reading(0.35f, -0.30f), ctx(settingsJson = settingsCrossGate), emit, MouseEmitter.NOOP)
+        assertEquals(listOf("dpad_right" to true), emits)
+    }
+
     companion object {
         private const val EPSILON = 1e-4f
     }

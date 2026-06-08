@@ -1,9 +1,12 @@
 package com.mapo.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityService.ScreenshotResult
+import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.graphics.Path
 import android.os.Build
 import android.os.SystemClock
@@ -407,6 +410,53 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
         val pkg = candidate.root?.packageName?.toString()
         Log.d(TAG, "queryPrimaryDisplayForegroundPackage → $pkg (apps=${apps.size})")
         return pkg?.takeIf { it.isNotBlank() && it != packageName }
+    }
+
+    /**
+     * Capture the default display via `AccessibilityService.takeScreenshot` (API 30+) and
+     * hand back a software [Bitmap]. Used as a frozen game backdrop for the overlay editor.
+     * Below API 30 (or on any failure) returns null — the editor falls back to a plain
+     * backdrop. The callback is delivered on the main thread.
+     */
+    override fun captureScreenshot(onResult: (Bitmap?) -> Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            onResult(null)
+            return
+        }
+        try {
+            takeScreenshot(
+                Display.DEFAULT_DISPLAY,
+                mainExecutor,
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: ScreenshotResult) {
+                        val bitmap = try {
+                            val hardware = Bitmap.wrapHardwareBuffer(
+                                screenshot.hardwareBuffer,
+                                screenshot.colorSpace,
+                            )
+                            // Copy to a software bitmap so it survives buffer.close().
+                            val software = hardware?.copy(Bitmap.Config.ARGB_8888, false)
+                            hardware?.recycle()
+                            software
+                        } catch (e: Exception) {
+                            Log.w(TAG, "screenshot buffer → bitmap failed", e)
+                            null
+                        } finally {
+                            screenshot.hardwareBuffer.close()
+                        }
+                        onResult(bitmap)
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        Log.w(TAG, "takeScreenshot failed: errorCode=$errorCode")
+                        onResult(null)
+                    }
+                },
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "takeScreenshot threw", e)
+            onResult(null)
+        }
     }
 
     override fun onInterrupt() = Unit

@@ -9,12 +9,14 @@ import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 
 /**
@@ -32,7 +34,11 @@ fun SizeDropdown(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var text by remember(value) { mutableStateOf(formatSize(value)) }
+    // Local text buffer that only re-syncs from [value] while NOT focused, so an
+    // async round-trip can't clobber what the user is typing mid-edit.
+    var focused by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf(formatSize(value)) }
+    LaunchedEffect(value, focused) { if (!focused) text = formatSize(value) }
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -51,6 +57,7 @@ fun SizeDropdown(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
+                .onFocusChanged { focused = it.isFocused }
                 .fillMaxWidth(),
         )
         ExposedDropdownMenu(

@@ -14,12 +14,14 @@ import org.junit.Test
 class OutputEmitterTest {
 
     private lateinit var dispatcher: InputDispatcher
+    private lateinit var gamepad: com.mapo.service.shizuku.ShizukuGamepadInjector
     private lateinit var subject: OutputEmitter
 
     @Before
     fun setUp() {
         dispatcher = mockk(relaxed = true)
-        subject = OutputEmitter(dispatcher)
+        gamepad = mockk(relaxed = true)
+        subject = OutputEmitter(dispatcher, gamepad)
     }
 
     // ── Press: held outputs (return true) ─────────────────────────────────────
@@ -38,6 +40,32 @@ class OutputEmitterTest {
 
         assertTrue("XInputButton has a matching release edge", held)
         verify(exactly = 1) { dispatcher.injectKeyDown("BUTTON_A") }
+    }
+
+    @Test
+    fun pressXInputStick_emitsNetAxis_upIsNegativeY_returnsTrue() {
+        val held = subject.emitPress(BindingOutput.XInputStick("LEFT", "UP"))
+        assertTrue("XInputStick is held (released on up)", held)
+        // +x right, +y down → UP is (0, -1).
+        verify { gamepad.setLeftStickOutput(0f, -1f) }
+    }
+
+    @Test
+    fun xInputStick_accumulatesDiagonal_andReleasesBackToCenter() {
+        subject.emitPress(BindingOutput.XInputStick("LEFT", "UP"))
+        subject.emitPress(BindingOutput.XInputStick("LEFT", "RIGHT"))
+        verify { gamepad.setLeftStickOutput(1f, -1f) } // up-right diagonal
+        subject.emitRelease(BindingOutput.XInputStick("LEFT", "UP"))
+        verify { gamepad.setLeftStickOutput(1f, 0f) } // only right remains
+        subject.emitRelease(BindingOutput.XInputStick("LEFT", "RIGHT"))
+        verify { gamepad.setLeftStickOutput(0f, 0f) } // centered
+    }
+
+    @Test
+    fun xInputStick_opposingDirectionsCancel() {
+        subject.emitPress(BindingOutput.XInputStick("RIGHT", "UP"))
+        subject.emitPress(BindingOutput.XInputStick("RIGHT", "DOWN"))
+        verify { gamepad.setRightStickOutput(0f, 0f) } // up + down → neutral Y
     }
 
     // ── Press: fire-and-done outputs (return false) ───────────────────────────

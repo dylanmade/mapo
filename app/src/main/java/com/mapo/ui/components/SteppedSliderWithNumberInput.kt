@@ -9,12 +9,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 
@@ -28,7 +30,11 @@ fun SteppedSliderWithNumberInput(
     modifier: Modifier = Modifier,
     labelWidth: Int = 80
 ) {
-    var textInput by remember(value) { mutableStateOf(value.toString()) }
+    // Local text buffer that only re-syncs from [value] while NOT focused, so an
+    // async round-trip can't clobber what the user is typing mid-edit.
+    var focused by remember { mutableStateOf(false) }
+    var textInput by remember { mutableStateOf(value.toString()) }
+    LaunchedEffect(value, focused) { if (!focused) textInput = value.toString() }
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -57,7 +63,9 @@ fun SteppedSliderWithNumberInput(
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.width(64.dp)
+            modifier = Modifier
+                .width(64.dp)
+                .onFocusChanged { focused = it.isFocused }
         )
     }
 }

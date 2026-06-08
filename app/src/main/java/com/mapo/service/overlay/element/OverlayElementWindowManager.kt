@@ -22,6 +22,7 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.mapo.data.model.OverlayElement
+import com.mapo.data.model.OverlayGesture
 import com.mapo.service.overlay.OverlayLifecycleOwner
 import com.mapo.service.overlay.keyboard.KeyboardOverlayService
 import com.mapo.ui.screen.overlay.OverlayElementButton
@@ -66,13 +67,13 @@ class OverlayElementWindowManager @Inject constructor(
 
     /**
      * Reconcile the live windows to [elements]: detach removed ids, attach new ones,
-     * and update position / content for ids that persist. [onTap] is invoked on the
-     * main thread with the latest element when its window is clicked.
+     * and update position / content for ids that persist. [onGesture] fires on the main
+     * thread with the latest element + which gesture (tap / double-tap / hold) occurred.
      */
     fun render(
         elements: List<OverlayElement>,
         displayId: Int = Display.DEFAULT_DISPLAY,
-        onTap: (OverlayElement) -> Unit,
+        onGesture: (OverlayElement, OverlayGesture) -> Unit,
     ) {
         runOnMain {
             if (!canShow()) {
@@ -91,7 +92,7 @@ class OverlayElementWindowManager @Inject constructor(
             elements.forEach { element ->
                 val existing = attached[element.id]
                 if (existing == null) {
-                    attach(element, displayContext, windowManager, size, displayId, onTap)
+                    attach(element, displayContext, windowManager, size, displayId, onGesture)
                 } else {
                     // Update content (label / target) in place; reposition if the rect moved.
                     existing.state.value = element
@@ -125,7 +126,7 @@ class OverlayElementWindowManager @Inject constructor(
         windowManager: WindowManager,
         size: Point,
         displayId: Int,
-        onTap: (OverlayElement) -> Unit,
+        onGesture: (OverlayElement, OverlayGesture) -> Unit,
     ) {
         val owner = OverlayLifecycleOwner()
         val state: MutableState<OverlayElement> = mutableStateOf(element)
@@ -136,7 +137,12 @@ class OverlayElementWindowManager @Inject constructor(
             defaultFocusHighlightEnabled = false
             setContent {
                 MapoTheme {
-                    OverlayElementButton(element = state.value, onClick = { onTap(state.value) })
+                    OverlayElementButton(
+                        element = state.value,
+                        onTap = { onGesture(state.value, OverlayGesture.TAP) },
+                        onDoubleTap = { onGesture(state.value, OverlayGesture.DOUBLE_TAP) },
+                        onHold = { onGesture(state.value, OverlayGesture.HOLD) },
+                    )
                 }
             }
         }

@@ -44,9 +44,6 @@
 
     <string name="blocklist_drawer_label">Edit blocklist</string>
     <string name="theme_studio_drawer_label">Theme Studio</string>
-    <string name="keyboard_overlay_tile_label">Mapo keyboard</string>
-    <string name="keyboard_overlay_drawer_label">Toggle keyboard overlay</string>
-    <string name="overlay_show_drawer_label">Toggle button overlay</string>
     <string name="overlay_edit_drawer_label">Edit overlay</string>
     <string name="shizuku_drawer_label">Shizuku setup</string>
     <string name="steam_drawer_label_connect">Connect to Steam</string>
@@ -76,6 +73,68 @@
     <string name="steam_browse_empty_filtered">No games match that filter.</string>
     <string name="steam_browse_empty_configs">No configs found for this game.</string>
     <string name="steam_browse_filter_hint">Filter by name</string>
+
+    <!-- Steam config detail screen (Brick B.0 POC). -->
+    <string name="steam_config_detail_title_not_found">Config not found</string>
+    <string name="steam_config_not_found_body">Config %1$d isn\'t in the local cache. Re-open the configs list and tap it again.</string>
+
+    <string name="steam_config_section_header">Overview</string>
+    <string name="steam_config_section_stats">Stats</string>
+    <string name="steam_config_section_tags">Tags</string>
+    <string name="steam_config_section_kvtags">Key/value tags</string>
+    <string name="steam_config_section_previews">Previews</string>
+    <string name="steam_config_section_description">Description</string>
+    <string name="steam_config_section_file">File</string>
+    <string name="steam_config_section_misc">Misc</string>
+
+    <string name="steam_config_empty_tags">No tags.</string>
+    <string name="steam_config_empty_kvtags">No key/value tags.</string>
+    <string name="steam_config_empty_previews">No preview images.</string>
+    <string name="steam_config_empty_description">No description provided.</string>
+
+    <string name="steam_config_field_app_name">For %1$s (appid %2$d)</string>
+    <string name="steam_config_field_author">Author: %1$s</string>
+    <string name="steam_config_field_created">Created %1$s</string>
+    <string name="steam_config_field_updated">Updated %1$s</string>
+    <string name="steam_config_field_published_file_id">Published file id: %1$d</string>
+    <string name="steam_config_field_preview_url">Convenience preview URL</string>
+    <string name="steam_config_field_image_url">Header image URL</string>
+    <string name="steam_config_field_short_description">Short</string>
+    <string name="steam_config_field_file_description">Full</string>
+
+    <string name="steam_config_stat_score">Score</string>
+    <string name="steam_config_stat_votes_up">Votes up</string>
+    <string name="steam_config_stat_votes_down">Votes down</string>
+    <string name="steam_config_stat_subscriptions">Current subscriptions</string>
+    <string name="steam_config_stat_lifetime_subscriptions">Lifetime subscriptions</string>
+    <string name="steam_config_stat_favorited">Favorited</string>
+    <string name="steam_config_stat_lifetime_favorited">Lifetime favorited</string>
+    <string name="steam_config_stat_followers">Followers</string>
+    <string name="steam_config_stat_lifetime_followers">Lifetime followers</string>
+    <string name="steam_config_stat_views">Views</string>
+    <string name="steam_config_stat_comments">Comments</string>
+
+    <string name="steam_config_preview_row">[%1$d / type %2$d] %3$s</string>
+
+    <string name="steam_config_file_name">Filename</string>
+    <string name="steam_config_file_size">File size</string>
+    <string name="steam_config_file_hcontent">Content handle</string>
+    <string name="steam_config_file_url">File URL</string>
+    <string name="steam_config_file_no_url">No direct file URL — body fetch will go through CDN depot.</string>
+
+    <string name="steam_config_misc_visibility">Visibility</string>
+    <string name="steam_config_misc_language">Language code</string>
+    <string name="steam_config_misc_flags">Flags</string>
+    <string name="steam_config_misc_revision_change">Revision change number</string>
+    <string name="steam_config_misc_num_children">Children</string>
+    <string name="steam_config_misc_inappropriate_sex">⚠ Flagged: possibly inappropriate (sex)</string>
+    <string name="steam_config_misc_inappropriate_violence">⚠ Flagged: possibly inappropriate (violence)</string>
+    <string name="steam_config_misc_spoiler">⚠ Flagged: spoiler</string>
+    <string name="steam_config_misc_metadata">Metadata</string>
+
+    <string name="steam_config_visibility_public">Public</string>
+    <string name="steam_config_visibility_friends_only">Friends only</string>
+    <string name="steam_config_visibility_private">Private</string>
     <string name="steam_browse_game_subtext">App %1$d · %2$d min played</string>
     <string name="steam_browse_config_subtext">%1$d up · %2$d subs · creator %3$d</string>
 

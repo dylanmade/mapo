@@ -7,6 +7,7 @@ import android.util.Log
 import android.widget.Toast
 import com.mapo.data.model.Profile
 import com.mapo.data.model.steam.InputSource
+import com.mapo.data.model.steam.requiresShizuku
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.di.ApplicationScope
 import com.mapo.service.input.CompiledConfig
@@ -325,7 +326,8 @@ class ShizukuMotionCoordinator @Inject constructor(
     ): PredicateBreakdown = PredicateBreakdown(
         remapEnabled = remapEnabled,
         analogModeConfigured = hasModeInScope(compiled, activeSetId, activeLayers) { it.requiresMotionCapture() },
-        anyShizukuModeConfigured = hasModeInScope(compiled, activeSetId, activeLayers) { it.requiresShizuku() },
+        anyShizukuModeConfigured = hasModeInScope(compiled, activeSetId, activeLayers) { it.requiresShizuku() } ||
+            hasOutputInScope(compiled, activeSetId, activeLayers) { it.requiresShizuku() },
         gyroStickModeConfigured = hasModeInScope(compiled, activeSetId, activeLayers) {
             it == com.mapo.data.model.steam.BindingMode.GYRO_TO_JOYSTICK_CAMERA ||
                 it == com.mapo.data.model.steam.BindingMode.GYRO_TO_JOYSTICK_DEFLECTION
@@ -351,6 +353,30 @@ class ShizukuMotionCoordinator @Inject constructor(
         for (layerId in activeLayers) {
             val layer = set.layers[layerId] ?: continue
             if (layer.inputs.values.any { predicate(it.mode) }) return true
+        }
+        return false
+    }
+
+    /**
+     * Parallel to [hasModeInScope] but over binding OUTPUTS — true if any binding in the
+     * active scope (base set + active layers) has an output matching [predicate]. Used to
+     * catch Shizuku-requiring outputs (e.g. analog stick directions) bound under a mode
+     * that doesn't itself require Shizuku, which would otherwise silently no-op.
+     */
+    private inline fun hasOutputInScope(
+        compiled: CompiledConfig,
+        activeSetId: Long,
+        activeLayers: List<Long>,
+        crossinline predicate: (com.mapo.data.model.steam.BindingOutput) -> Boolean,
+    ): Boolean {
+        val resolvedSetId = if (activeSetId == 0L) compiled.startingActionSetId else activeSetId
+        val set = compiled.sets[resolvedSetId] ?: return false
+        // Inlined match check (a local `fun` isn't allowed inside an inline fun; `predicate`
+        // is crossinline so it's callable from these nested lambdas).
+        if (set.inputs.values.any { ci -> ci.activators.any { a -> a.bindings.any(predicate) } }) return true
+        for (layerId in activeLayers) {
+            val layer = set.layers[layerId] ?: continue
+            if (layer.inputs.values.any { ci -> ci.activators.any { a -> a.bindings.any(predicate) } }) return true
         }
         return false
     }

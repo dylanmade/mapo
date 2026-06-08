@@ -11,9 +11,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -22,93 +27,217 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.mapo.data.model.OverlayElement
+import com.mapo.data.model.OverlayGesture
 import com.mapo.data.model.RemapTarget
+import com.mapo.data.model.displayLabel
+import com.mapo.data.model.targetFor
+import com.mapo.data.model.withTarget
+import com.mapo.ui.component.ColorPicker
+import kotlin.math.roundToInt
 
 /**
- * Shared "configure this overlay button" content used by BOTH editor prototypes
- * (Brick C): inside a `ModalBottomSheet` for the in-app canvas editor, and inside a
- * focusable overlay window for the live on-overlay editor. Keeping the config UI shared
- * means the prototype comparison is about the *placement* UX, not the binding UX.
- *
- * Instant-commit (matches the rest of the app): every label / command change calls
- * [onSave] immediately — no explicit save button. The label field is NOT auto-focused
- * (see feedback_no_keyboard_autospawn).
+ * Full per-button editor for the live overlay's config side-drawer (Brick D, "+ light
+ * appearance"). Sections: label, commands (tap / double-tap / hold), geometry (size +
+ * position), and appearance (shape / opacity / fill + text color). Instant-commit:
+ * every change calls [onChange] with the updated element — the live button reflects it
+ * immediately (WYSIWYG). The label field is not auto-focused (feedback_no_keyboard_autospawn).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun OverlayElementConfigContent(
-    initialLabel: String,
-    initialTarget: RemapTarget,
-    onSave: (label: String, target: RemapTarget) -> Unit,
+    element: OverlayElement,
+    onChange: (OverlayElement) -> Unit,
     onDelete: () -> Unit,
+    onDone: () -> Unit,
     modifier: Modifier = Modifier,
-    onDone: (() -> Unit)? = null,
 ) {
-    var label by remember { mutableStateOf(initialLabel) }
-    var target by remember { mutableStateOf(initialTarget) }
+    // Draft seeded by element identity; edits mutate it + commit. (Sole editor while open.)
+    var draft by remember(element.id) { mutableStateOf(element) }
+    fun commit(updated: OverlayElement) {
+        draft = updated
+        onChange(updated)
+    }
 
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(
-            text = "Configure button",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Text("Edit button", style = MaterialTheme.typography.titleLarge)
 
+        // ── Label ──
         OutlinedTextField(
-            value = label,
-            onValueChange = {
-                label = it
-                onSave(label, target)
-            },
+            value = draft.label,
+            onValueChange = { commit(draft.copy(label = it)) },
             label = { Text("Label (optional)") },
             singleLine = true,
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Done),
             modifier = Modifier.fillMaxWidth(),
         )
 
+        // ── Commands ──
+        HorizontalDivider()
+        SectionLabel("Command")
+        var gesture by remember { mutableStateOf(OverlayGesture.TAP) }
+        val gestures = listOf(
+            OverlayGesture.TAP to "Tap",
+            OverlayGesture.DOUBLE_TAP to "Double-tap",
+            OverlayGesture.HOLD to "Hold",
+        )
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            gestures.forEachIndexed { i, (g, label) ->
+                SegmentedButton(
+                    selected = gesture == g,
+                    onClick = { gesture = g },
+                    shape = SegmentedButtonDefaults.itemShape(i, gestures.size),
+                ) { Text(label) }
+            }
+        }
+        val current = draft.targetFor(gesture)
         Text(
-            text = "Command",
-            style = MaterialTheme.typography.titleSmall,
+            "Fires: ${current.displayLabel()}",
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = current is RemapTarget.Unbound,
+                onClick = { commit(draft.withTarget(gesture, RemapTarget.Unbound)) },
+                label = { Text("None") },
+            )
             OverlayCommonCommands.forEach { code ->
                 val codeTarget = RemapTarget.fromCode(code)
                 FilterChip(
-                    selected = target == codeTarget,
-                    onClick = {
-                        target = codeTarget
-                        onSave(label, target)
-                    },
+                    selected = current == codeTarget,
+                    onClick = { commit(draft.withTarget(gesture, codeTarget)) },
                     label = { Text(code) },
                 )
             }
         }
 
+        // ── Geometry ──
+        HorizontalDivider()
+        SectionLabel("Size & position")
+        PercentSlider("Width", draft.width, 0.04f..1f) {
+            commit(draft.copy(width = it, x = draft.x.coerceAtMost(1f - it)))
+        }
+        PercentSlider("Height", draft.height, 0.04f..1f) {
+            commit(draft.copy(height = it, y = draft.y.coerceAtMost(1f - it)))
+        }
+        PercentSlider("X", draft.x, 0f..1f) {
+            commit(draft.copy(x = it.coerceAtMost(1f - draft.width)))
+        }
+        PercentSlider("Y", draft.y, 0f..1f) {
+            commit(draft.copy(y = it.coerceAtMost(1f - draft.height)))
+        }
+
+        // ── Appearance ──
+        HorizontalDivider()
+        SectionLabel("Appearance")
+        val shapes = listOf(
+            OverlayElement.SHAPE_ROUNDED to "Rounded",
+            OverlayElement.SHAPE_CIRCLE to "Circle",
+            OverlayElement.SHAPE_RECTANGLE to "Square",
+        )
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            shapes.forEachIndexed { i, (value, label) ->
+                SegmentedButton(
+                    selected = draft.shape == value,
+                    onClick = { commit(draft.copy(shape = value)) },
+                    shape = SegmentedButtonDefaults.itemShape(i, shapes.size),
+                ) { Text(label) }
+            }
+        }
+        PercentSlider("Opacity", draft.opacity, 0.2f..1f) { commit(draft.copy(opacity = it)) }
+
+        // One inline HSL picker, retargeted between fill and text by a toggle.
+        var editingFill by remember { mutableStateOf(true) }
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SegmentedButton(
+                selected = editingFill,
+                onClick = { editingFill = true },
+                shape = SegmentedButtonDefaults.itemShape(0, 2),
+            ) { Text("Fill color") }
+            SegmentedButton(
+                selected = !editingFill,
+                onClick = { editingFill = false },
+                shape = SegmentedButtonDefaults.itemShape(1, 2),
+            ) { Text("Text color") }
+        }
+        val defaultFill = MaterialTheme.colorScheme.secondaryContainer
+        val defaultText = MaterialTheme.colorScheme.onSecondaryContainer
+        val shownColor = if (editingFill) {
+            draft.fillColorArgb?.let { Color(it) } ?: defaultFill
+        } else {
+            draft.contentColorArgb?.let { Color(it) } ?: defaultText
+        }
+        ColorPicker(
+            color = shownColor,
+            onChange = { c ->
+                commit(
+                    if (editingFill) draft.copy(fillColorArgb = c.toArgb())
+                    else draft.copy(contentColorArgb = c.toArgb()),
+                )
+            },
+            onClearOverride = {
+                commit(
+                    if (editingFill) draft.copy(fillColorArgb = null)
+                    else draft.copy(contentColorArgb = null),
+                )
+            },
+            pickerKey = editingFill,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        // ── Actions ──
+        HorizontalDivider()
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             TextButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = null)
-                Text("  Delete button")
+                Text("  Delete")
             }
-            if (onDone != null) {
-                FilledTonalButton(onClick = onDone) { Text("Done") }
-            }
+            FilledTonalButton(onClick = onDone) { Text("Done") }
         }
     }
 }
 
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun PercentSlider(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+) {
+    Column {
+        Text(
+            "$label  ${(value * 100).roundToInt()}%",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Slider(value = value, onValueChange = onChange, valueRange = range)
+    }
+}
+
 /**
- * A small starter palette of common commands for the prototype config UI. Classified via
+ * A small starter palette of common commands for the config chips, classified via
  * [RemapTarget.fromCode]. The full key/mouse/gamepad picker (`remapTargetPicker`) can be
- * wired in once the editor direction is chosen.
+ * wired in once the binding model migrates.
  */
 val OverlayCommonCommands: List<String> = listOf(
     "ENTER", "ESCAPE", "SPACE", "TAB",

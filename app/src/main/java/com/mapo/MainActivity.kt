@@ -1,5 +1,7 @@
 package com.mapo
 
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -29,6 +31,19 @@ class MainActivity : ComponentActivity() {
         // statusBarsPadding had an intermittent first-frame stale-inset bug that shifted
         // content down on the bezel screen. Letting decorFitsSystemWindows stay at its
         // default (true) sidesteps the inset race entirely — no per-screen padding needed.
+        //
+        // But the window IS translucent (home = drawer over the live app), so the system
+        // bars must not paint an opaque background, or you see a black status/nav bar slide
+        // in with the launch animation and tint the app behind. Make the bars transparent
+        // and turn off the targetSdk-35+ auto contrast scrim so the live app shows through
+        // them on the home. (Secondary routes draw an opaque Scaffold that fills under the
+        // bars, so they read as opaque there.)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
 
         setContent {
             val themeStorage = remember { SharedPrefsThemeOverridesStorage(applicationContext) }

@@ -3,10 +3,10 @@ package com.mapo.ui.screen.keyboard
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Variant of [KeyboardHost] to render. `Activity` is the full-feature in-app keyboard
- * (edit mode, drawer, tab context menus, all CRUD callbacks). `Overlay` is the
- * run-only system-overlay keyboard (no edit affordances; the only "leave run-mode"
- * affordance is an "Open Mapo" Intent fire).
+ * Variant of [KeyboardHost] to render. Only `Activity` remains — the full-feature in-app
+ * keyboard (edit mode, drawer, tab context menus, all CRUD callbacks). The former `Overlay`
+ * variant (run-only system-overlay keyboard) was removed when the legacy keyboard-overlay
+ * path was gutted in favor of the rebuilt free-positioned button overlay.
  */
 sealed interface KeyboardHostMode {
 
@@ -45,16 +45,5 @@ sealed interface KeyboardHostMode {
 
         // ── Bottom-bar callbacks ─────────────────────────────────────────────
         val onQuit: () -> Unit,
-    ) : KeyboardHostMode
-
-    /**
-     * Overlay host: run-only. No edit affordances anywhere in the tree; the bottom
-     * bar shows "Hide overlay" instead of a quit-app button, and the top bar's
-     * "Open Mapo" affordance fires [onOpenMapoActivity] (typically a launch-intent
-     * for `MainActivity`).
-     */
-    data class Overlay(
-        val onOpenMapoActivity: () -> Unit,
-        val onHideOverlay: () -> Unit,
     ) : KeyboardHostMode
 }

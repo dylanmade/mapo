@@ -46,6 +46,9 @@ class GyroToJoystickModesTest {
         override fun setDpadHat(source: InputSource, x: Int, y: Int) { dpadHatCalls++ }
         override fun clearSource(source: InputSource) { clearSourceCalls++ }
         override fun setButton(btnCode: Int, pressed: Boolean) { buttonCalls++ }
+        override fun setLeftStickOutput(x: Float, y: Float) {}
+        override fun setRightStickOutput(x: Float, y: Float) {}
+        override fun clearOutputSticks() {}
     }
 
     private val gamepad = RecordingGamepadEmitter()

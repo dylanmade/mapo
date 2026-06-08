@@ -1,10 +1,13 @@
 package com.mapo.service.shizuku
 
 import android.content.Context
+import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.BindingMode
+import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.InputSource
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.service.input.CompiledActionSet
+import com.mapo.service.input.CompiledActivator
 import com.mapo.service.input.CompiledConfig
 import com.mapo.service.input.CompiledInput
 import com.mapo.service.input.CompiledLayer
@@ -76,6 +79,22 @@ class ShizukuMotionCoordinatorTest {
         assertFalse(b.shouldEnable)
         assertTrue(b.remapEnabled)
         assertFalse(b.analogModeConfigured)
+    }
+
+    @Test
+    fun digitalModeWithStickOutput_marksAnyShizukuConfigured() {
+        val b = coordinator.evaluatePredicate(
+            compiled = digitalModeWithShizukuOutputConfig(),
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = false,
+        )
+        // The mode is digital (not analog), but a binding emits an analog stick
+        // direction, which needs the virtual gamepad → the Shizuku-wanted signal
+        // must fire so the banner / drawer notification surface the gap.
+        assertFalse(b.analogModeConfigured)
+        assertTrue(b.anyShizukuModeConfigured)
     }
 
     @Test
@@ -403,6 +422,26 @@ class ShizukuMotionCoordinatorTest {
             ),
         )
         return CompiledConfig(startingActionSetId = startingSetId, sets = mapOf(startingSetId to set))
+    }
+
+    /** Digital mode (BUTTON_PAD) but a binding outputs an analog stick direction. */
+    private fun digitalModeWithShizukuOutputConfig(): CompiledConfig {
+        val input = CompiledInput(
+            groupInputId = 20L,
+            activators = listOf(
+                CompiledActivator(
+                    activatorId = 1L,
+                    type = ActivatorType.FULL_PRESS,
+                    bindings = listOf(BindingOutput.XInputStick("LEFT", "UP")),
+                ),
+            ),
+            mode = BindingMode.BUTTON_PAD,
+        )
+        val set = CompiledActionSet(
+            actionSetId = 1L,
+            inputs = mapOf(InputAddress(InputSource.BUTTON_DIAMOND, "button_a") to input),
+        )
+        return CompiledConfig(startingActionSetId = 1L, sets = mapOf(1L to set))
     }
 
     /** Config with all-digital modes only. */

@@ -72,12 +72,21 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.graphics.Color
 import com.mapo.data.model.steam.SourceModeShiftGraph
 import com.mapo.service.input.modes.SourceModeCatalog
+import com.mapo.data.model.steam.requiresShizuku as outputRequiresShizuku
 import com.mapo.service.input.modes.requiresShizuku
 import com.mapo.service.input.modes.requiresShizukuOnSource
 import com.mapo.ui.component.layout.SectionedListDetailPane
 import com.mapo.ui.screen.remap.RemapPaneItem
 import com.mapo.ui.screen.remap.RemapSections
 import com.mapo.ui.screen.remap.settings.SourceModeSettingsSchema
+
+/** True if any binding in [group] has a Shizuku-requiring output (e.g. analog stick directions). */
+private fun shizukuOutputInGroup(group: com.mapo.data.model.steam.BindingGroupGraph): Boolean =
+    group.inputs.any { gi ->
+        gi.activators.any { ag ->
+            ag.bindings.any { b -> BindingOutput.fromEntity(b.outputType, b.args).outputRequiresShizuku() }
+        }
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -184,9 +193,9 @@ fun RemapControlsScreen(
     // configurations and the user would have no in-screen signal that their
     // intended silence isn't actually taking effect.
     val hasAnalogModeInConfig = config?.actionSets?.any { set ->
-        set.preset.any { it.group.group.mode.requiresShizukuOnSource(it.inputSource) } ||
+        set.preset.any { it.group.group.mode.requiresShizukuOnSource(it.inputSource) || shizukuOutputInGroup(it.group) } ||
             set.layers.any { layer ->
-                layer.preset.any { it.group.group.mode.requiresShizukuOnSource(it.inputSource) }
+                layer.preset.any { it.group.group.mode.requiresShizukuOnSource(it.inputSource) || shizukuOutputInGroup(it.group) }
             }
     } == true
 

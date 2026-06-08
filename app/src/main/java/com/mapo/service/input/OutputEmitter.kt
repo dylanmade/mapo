@@ -31,7 +31,15 @@ import javax.inject.Singleton
 @Singleton
 class OutputEmitter @Inject constructor(
     private val dispatcher: InputDispatcher,
+    private val gamepad: com.mapo.service.shizuku.ShizukuGamepadInjector,
 ) {
+
+    // Held count per (stick, direction) for XInputStick outputs — multiple inputs can
+    // drive the same direction, so a count (not a flag) keeps it active until the last
+    // releases. Guarded because emit can be called from the evaluator thread and the
+    // analog-emulation pulse coroutine.
+    private val stickLock = Any()
+    private val stickHeld = HashMap<String, Int>()
 
     /**
      * Returns true if [output] has a matching release edge — i.e. the evaluator must hold it.
@@ -51,6 +59,11 @@ class OutputEmitter @Inject constructor(
         is BindingOutput.XInputButton -> {
             Log.d(TAG, "press XInputButton(${output.button})")
             dispatcher.injectKeyDown(output.button)
+            true
+        }
+        is BindingOutput.XInputStick -> {
+            Log.d(TAG, "press XInputStick(${output.stick}/${output.direction})")
+            adjustStick(output, +1)
             true
         }
         is BindingOutput.MouseButton -> {
@@ -83,8 +96,43 @@ class OutputEmitter @Inject constructor(
                 Log.d(TAG, "release XInputButton(${output.button})")
                 dispatcher.injectKeyUp(output.button)
             }
+            is BindingOutput.XInputStick -> {
+                Log.d(TAG, "release XInputStick(${output.stick}/${output.direction})")
+                adjustStick(output, -1)
+            }
             else -> Unit
         }
+    }
+
+    /** Update the held count for [output]'s direction and re-push that stick's net axis. */
+    private fun adjustStick(output: BindingOutput.XInputStick, delta: Int) {
+        val key = "${output.stick}|${output.direction}"
+        synchronized(stickLock) {
+            val n = (stickHeld[key] ?: 0) + delta
+            if (n <= 0) stickHeld.remove(key) else stickHeld[key] = n
+        }
+        pushStick(output.stick)
+    }
+
+    /** Compute and emit the net (x, y) for [stick] from its held directions. */
+    private fun pushStick(stick: String) {
+        val (x, y) = synchronized(stickLock) {
+            val up = (stickHeld["$stick|UP"] ?: 0) > 0
+            val down = (stickHeld["$stick|DOWN"] ?: 0) > 0
+            val left = (stickHeld["$stick|LEFT"] ?: 0) > 0
+            val right = (stickHeld["$stick|RIGHT"] ?: 0) > 0
+            // +x = right, +y = down (gamepad convention) — so UP is negative.
+            val x = (if (right) 1f else 0f) - (if (left) 1f else 0f)
+            val y = (if (down) 1f else 0f) - (if (up) 1f else 0f)
+            x to y
+        }
+        if (stick == "LEFT") gamepad.setLeftStickOutput(x, y) else gamepad.setRightStickOutput(x, y)
+    }
+
+    /** Drop all held stick-output state + zero the slots. Called on mode/config change. */
+    fun resetStickOutputs() {
+        synchronized(stickLock) { stickHeld.clear() }
+        gamepad.clearOutputSticks()
     }
 
     companion object {

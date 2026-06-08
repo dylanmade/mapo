@@ -62,6 +62,12 @@ class ShizukuGamepadInjector @Inject constructor(
     // in the sum).
     private val leftStickBySource = mutableMapOf<InputSource, FloatArray>()
     private val rightStickBySource = mutableMapOf<InputSource, FloatArray>()
+
+    // Binding-output stick contributions (not source-keyed) — a single net slot per
+    // stick driven by directional stick OUTPUTS bound to arbitrary inputs. Summed
+    // alongside the per-source maps in push().
+    private val leftStickOutput = FloatArray(2)
+    private val rightStickOutput = FloatArray(2)
     private val leftTriggerBySource = mutableMapOf<InputSource, Float>()
     private val rightTriggerBySource = mutableMapOf<InputSource, Float>()
     private val hatBySource = mutableMapOf<InputSource, IntArray>()
@@ -137,6 +143,24 @@ class ShizukuGamepadInjector @Inject constructor(
         if (changed) push()
     }
 
+    override fun setLeftStickOutput(x: Float, y: Float) {
+        synchronized(lock) { leftStickOutput[0] = x; leftStickOutput[1] = y }
+        push()
+    }
+
+    override fun setRightStickOutput(x: Float, y: Float) {
+        synchronized(lock) { rightStickOutput[0] = x; rightStickOutput[1] = y }
+        push()
+    }
+
+    override fun clearOutputSticks() {
+        synchronized(lock) {
+            leftStickOutput[0] = 0f; leftStickOutput[1] = 0f
+            rightStickOutput[0] = 0f; rightStickOutput[1] = 0f
+        }
+        push()
+    }
+
     /** Press or release a gamepad button. `btnCode` is a `UinputGamepad.Buttons.*` int. */
     override fun setButton(btnCode: Int, pressed: Boolean) {
         if (!shizukuConnection.isReadyFlow.value) return
@@ -155,9 +179,9 @@ class ShizukuGamepadInjector @Inject constructor(
         // Snapshot + sum under lock so per-source updates from concurrent
         // mutators don't tear the merged result.
         val merged = synchronized(lock) {
-            var lx = 0f; var ly = 0f
+            var lx = leftStickOutput[0]; var ly = leftStickOutput[1]
             for (v in leftStickBySource.values) { lx += v[0]; ly += v[1] }
-            var rx = 0f; var ry = 0f
+            var rx = rightStickOutput[0]; var ry = rightStickOutput[1]
             for (v in rightStickBySource.values) { rx += v[0]; ry += v[1] }
             var lt = 0f
             for (v in leftTriggerBySource.values) lt += v

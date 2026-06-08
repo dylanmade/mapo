@@ -1,7 +1,6 @@
 package com.mapo.service.overlay.element
 
 import com.mapo.data.model.OverlayElement
-import com.mapo.data.model.RemapTarget
 import com.mapo.data.repository.OverlayRepository
 import com.mapo.data.repository.ProfileRepository
 import kotlinx.coroutines.CoroutineScope
@@ -87,12 +86,9 @@ class OverlayEditor @Inject constructor(
         }
     }
 
-    /** Update the label + tap command for [id]. */
-    fun setBinding(id: Long, label: String, target: RemapTarget) {
-        scope.launch {
-            val current = overlayRepository.getById(id) ?: return@launch
-            overlayRepository.update(current.copy(label = label, tapTarget = target.encode()))
-        }
+    /** Persist a full element edit (instant-commit from the config drawer). */
+    fun update(element: OverlayElement) {
+        scope.launch { overlayRepository.update(element) }
     }
 
     fun delete(id: Long) {

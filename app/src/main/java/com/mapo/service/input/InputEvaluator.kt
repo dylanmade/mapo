@@ -342,6 +342,15 @@ class InputEvaluator @Inject constructor(
         // have just left JOYSTICK_MOVE mode, which would otherwise strand its stick.
         for (src in digitalStickHeld.keys) gamepadEmitter.clearSource(src)
         digitalStickHeld.clear()
+        // Stop any analog-emulation pulses (releasing their bindings), release any
+        // single-active gated directions, then drop the gate state — so nothing sticks
+        // across a mode/config change.
+        for (addr in dpadPulseJobs.keys.toList()) stopDpadPulse(addr)
+        for ((src, active) in dpadActiveInputs) for (k in active) onRelease(InputAddress(src, k))
+        dpadActiveInputs.clear()
+        dpadHeldOrder.clear()
+        // Drop any held directional stick-OUTPUT bindings so they don't stick across change.
+        emitter.resetStickOutputs()
         val startingSetId = compiled.startingActionSetId
         val set = compiled.sets[startingSetId] ?: return
         for (source in GAMEPAD_EMITTING_SOURCES) {
@@ -473,7 +482,95 @@ class InputEvaluator @Inject constructor(
                 return true
             }
         }
+        // Digital directional-pad gating: a digital cluster (face buttons / d-pad) in
+        // DPAD mode with a single-active layout (4-way / cross-gate) routes presses
+        // through a press-order gate so only one direction is active at a time. 8-way
+        // and analog-emulation pass straight through (handled by the normal path below).
+        if (address.source == InputSource.BUTTON_DIAMOND || address.source == InputSource.DPAD) {
+            val input = lookupActive(address)
+            if (input != null && input.mode == BindingMode.DPAD) {
+                val layout = com.mapo.service.input.modes.DirectionalPadLayout.parse(input.modeSettingsJson)
+                if (!layout.isDigitalPassthrough) {
+                    handleDigitalDpad(address, isDown, layout)
+                    return true
+                }
+            }
+        }
         return if (isDown) onPress(address) else onRelease(address)
+    }
+
+    /** Press-ordered held directions per source, for single-active dpad layouts (4-way/cross-gate). */
+    private val dpadHeldOrder = HashMap<InputSource, MutableList<String>>()
+
+    /** Currently-active (pressed-through or pulsing) dpad sub-inputs per source. */
+    private val dpadActiveInputs = HashMap<InputSource, MutableSet<String>>()
+
+    /** Analog-emulation PWM jobs, keyed by the directional sub-input address. */
+    private val dpadPulseJobs = HashMap<InputAddress, Job>()
+
+    /**
+     * Directional-pad gate for digital clusters. Folds the just-changed direction into the
+     * press-ordered held list, resolves which sub-input(s) should be active for [layout]
+     * (4-way = latest press; cross-gate = first press; analog-emulation = all held), then:
+     *  - single-active layouts drive the activator engine via [onPress]/[onRelease],
+     *    suppressing the rest so a diagonal collapses to one command;
+     *  - analog-emulation PWM-pulses each active direction to fake an analog stick.
+     */
+    private fun handleDigitalDpad(
+        address: InputAddress,
+        isDown: Boolean,
+        layout: com.mapo.service.input.modes.DirectionalPadLayout,
+    ) {
+        val source = address.source
+        val order = dpadHeldOrder.getOrPut(source) { mutableListOf() }
+        if (isDown) {
+            if (address.inputKey !in order) order.add(address.inputKey)
+        } else {
+            order.remove(address.inputKey)
+        }
+        val desired = com.mapo.service.input.modes.activeDirectionalInputs(layout, order)
+        val active = dpadActiveInputs.getOrPut(source) { mutableSetOf() }
+        val pulsing = layout == com.mapo.service.input.modes.DirectionalPadLayout.ANALOG_EMULATION
+        for (k in active - desired) {
+            val a = InputAddress(source, k)
+            if (pulsing) stopDpadPulse(a) else onRelease(a)
+        }
+        for (k in desired - active) {
+            val a = InputAddress(source, k)
+            if (pulsing) startDpadPulse(a) else onPress(a)
+        }
+        dpadActiveInputs[source] = desired.toMutableSet()
+        Log.d(TAG, "digitalDpad $source $layout held=$order active=$desired pulsing=$pulsing")
+    }
+
+    /** Bindings to PWM for analog emulation — every binding on the sub-input's activators. */
+    private fun dpadPulseBindings(addr: InputAddress): List<BindingOutput> =
+        lookupActive(addr)?.activators?.flatMap { it.bindings }.orEmpty()
+
+    /**
+     * Analog emulation: PWM the direction's command(s) at a fixed duty cycle so a digital
+     * full-press reads as analog-ish movement. Pulses at the binding/emitter level (like
+     * turbo) rather than re-entering the activator engine, so it stays off the evaluator's
+     * shared state from the coroutine. Duty/rate are tunable constants.
+     */
+    private fun startDpadPulse(addr: InputAddress) {
+        dpadPulseJobs[addr]?.cancel()
+        val bindings = dpadPulseBindings(addr)
+        if (bindings.isEmpty()) return
+        dpadPulseJobs[addr] = scope.launch {
+            while (isActive) {
+                bindings.forEach { emitter.emitPress(it) }
+                delay(DPAD_PULSE_ON_MS)
+                bindings.forEach { emitter.emitRelease(it) }
+                delay(DPAD_PULSE_OFF_MS)
+            }
+        }
+    }
+
+    private fun stopDpadPulse(addr: InputAddress) {
+        dpadPulseJobs.remove(addr)?.cancel()
+        // Ensure nothing's left held if cancelled mid-pulse.
+        dpadPulseBindings(addr).forEach { emitter.emitRelease(it) }
     }
 
     /** Held digital direction sub-inputs per source, for Button-Pad → joystick synthesis. */
@@ -1743,6 +1840,11 @@ class InputEvaluator @Inject constructor(
         private const val TAG = "InputEvaluator"
         /** Distinct from [TAG] so motion logs can be filtered independently (`-s InputEvaluator.Motion`). */
         private const val TAG_MOTION = "InputEvaluator.Motion"
+
+        // Analog-emulation PWM (digital dpad → analog stick): ~50% duty at ~25 Hz.
+        // Tunable; true variable magnitude isn't possible from a single digital full-press.
+        private const val DPAD_PULSE_ON_MS = 20L
+        private const val DPAD_PULSE_OFF_MS = 20L
 
         /**
          * Linux EV_KEY → (InputSource, sub_input) mapping for the raw-key

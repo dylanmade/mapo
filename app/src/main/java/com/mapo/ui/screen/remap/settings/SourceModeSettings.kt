@@ -254,6 +254,26 @@ object SourceModeSettingsSchema {
         control = SettingControl.Dropdown(HAPTIC_INTENSITY_OPTIONS, defaultId = "off"),
     )
 
+    private val DIRECTIONAL_PAD_LAYOUT_OPTIONS = listOf(
+        DropdownOption("8_way", "8-way (overlap)", "Pie layout whose diagonals activate both directional commands."),
+        DropdownOption("4_way", "4-way (no overlap)", "Diagonals activate only the single nearest directional command."),
+        DropdownOption("analog_emulation", "Analog emulation", "Directional commands are pulsed to simulate an analog stick."),
+        DropdownOption("cross_gate", "Cross gate", "Cross-shaped pad that prioritizes horizontal/vertical over the diagonals."),
+    )
+
+    // Key matches the runtime DpadSettings ("dpad_layout") so the analog dpad menus reuse it.
+    private val DIRECTIONAL_PAD_LAYOUT = SettingSpec(
+        key = "dpad_layout",
+        label = "Directional pad layout",
+        control = SettingControl.Dropdown(DIRECTIONAL_PAD_LAYOUT_OPTIONS, defaultId = "8_way"),
+    )
+
+    /** The "Directional Pad" mode menu for a digital cluster (Button Pad / D-Pad sources). */
+    private val DIGITAL_DIRECTIONAL_PAD_CATEGORIES = listOf(
+        SettingCategory("General", listOf(DIRECTIONAL_PAD_LAYOUT)),
+        SettingCategory("Haptics", listOf(HAPTIC_INTENSITY_OVERRIDE)),
+    )
+
     /** The "Joystick" mode menu — shared across Button Pad / D-Pad / Joystick sources. */
     private val JOYSTICK_CATEGORIES = listOf(
         SettingCategory(
@@ -281,6 +301,9 @@ object SourceModeSettingsSchema {
 
         // Button Pad (face-button cluster) emulating a joystick.
         source == InputSource.BUTTON_DIAMOND && mode == BindingMode.JOYSTICK_MOVE -> JOYSTICK_CATEGORIES
+
+        // Button Pad (face-button cluster) as a directional pad.
+        source == InputSource.BUTTON_DIAMOND && mode == BindingMode.DPAD -> DIGITAL_DIRECTIONAL_PAD_CATEGORIES
 
         else -> emptyList()
     }

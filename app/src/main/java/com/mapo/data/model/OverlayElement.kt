@@ -46,12 +46,46 @@ data class OverlayElement(
     val width: Float,
     val height: Float,
 
-    // Encoded RemapTarget (RemapTarget.encode/decode). FC1 seam — see class doc.
+    // Encoded RemapTarget (RemapTarget.encode/decode) per gesture. FC1 seam — see class doc.
     val tapTarget: String = RemapTarget.Unbound.encode(),
+    val doubleTapTarget: String = RemapTarget.Unbound.encode(),
+    val holdTarget: String = RemapTarget.Unbound.encode(),
+
+    // ── Light appearance ──────────────────────────────────────────────────────
+    // "rounded" | "circle" | "rectangle". See OverlayShape.
+    val shape: String = SHAPE_ROUNDED,
+    val opacity: Float = 1f,
+    // null = theme default (secondaryContainer / onSecondaryContainer).
+    val fillColorArgb: Int? = null,
+    val contentColorArgb: Int? = null,
 
     // Paint order: higher draws on top. Mirrors the window z-order the manager assigns.
     val zIndex: Int = 0,
-)
+) {
+    companion object {
+        const val SHAPE_ROUNDED = "rounded"
+        const val SHAPE_CIRCLE = "circle"
+        const val SHAPE_RECTANGLE = "rectangle"
+    }
+}
 
-/** Decoded tap binding. Mirrors `GridButton.onTapTarget`. */
+/** The three command gestures an overlay button can emit. */
+enum class OverlayGesture { TAP, DOUBLE_TAP, HOLD }
+
 val OverlayElement.tapRemapTarget: RemapTarget get() = RemapTarget.decode(tapTarget)
+val OverlayElement.doubleTapRemapTarget: RemapTarget get() = RemapTarget.decode(doubleTapTarget)
+val OverlayElement.holdRemapTarget: RemapTarget get() = RemapTarget.decode(holdTarget)
+
+/** Decoded command for [gesture]. */
+fun OverlayElement.targetFor(gesture: OverlayGesture): RemapTarget = when (gesture) {
+    OverlayGesture.TAP -> tapRemapTarget
+    OverlayGesture.DOUBLE_TAP -> doubleTapRemapTarget
+    OverlayGesture.HOLD -> holdRemapTarget
+}
+
+/** Copy with [gesture]'s command set to [target]. */
+fun OverlayElement.withTarget(gesture: OverlayGesture, target: RemapTarget): OverlayElement = when (gesture) {
+    OverlayGesture.TAP -> copy(tapTarget = target.encode())
+    OverlayGesture.DOUBLE_TAP -> copy(doubleTapTarget = target.encode())
+    OverlayGesture.HOLD -> copy(holdTarget = target.encode())
+}

@@ -281,6 +281,17 @@ interface GamepadEmitter {
     /** Press or release a gamepad button. `btnCode` is a `UinputGamepad.Buttons.*` int. */
     fun setButton(btnCode: Int, pressed: Boolean)
 
+    /**
+     * Binding-output stick contribution — a single non-source-keyed slot per stick for
+     * directional stick OUTPUTS bound to arbitrary inputs ([BindingOutput.XInputStick]).
+     * Summed alongside the per-source contributions. Net (x, y) is computed by the caller
+     * ([OutputEmitter]); same convention as [setLeftStick] (+x right, +y down).
+     */
+    fun setLeftStickOutput(x: Float, y: Float)
+    fun setRightStickOutput(x: Float, y: Float)
+    /** Zero both binding-output stick slots (mode/config change cleanup). */
+    fun clearOutputSticks()
+
     companion object {
         /** No-op sink for digital modes and for tests. */
         val NOOP: GamepadEmitter = object : GamepadEmitter {
@@ -291,6 +302,9 @@ interface GamepadEmitter {
             override fun setDpadHat(source: InputSource, x: Int, y: Int) {}
             override fun clearSource(source: InputSource) {}
             override fun setButton(btnCode: Int, pressed: Boolean) {}
+            override fun setLeftStickOutput(x: Float, y: Float) {}
+            override fun setRightStickOutput(x: Float, y: Float) {}
+            override fun clearOutputSticks() {}
         }
     }
 }
@@ -478,6 +492,24 @@ object DpadMode : SourceMode {
             wantDown = effY > axial
             wantRight = effX > axial
             wantLeft = effX < -axial
+        } else if (settings.dpadLayout == DpadSettings.LAYOUT_CROSS_GATE) {
+            // Cross gate: diagonals are allowed, but only once deflection reaches the
+            // outer edge (mag >= CROSS_GATE_DIAGONAL_THRESHOLD). Below that, near the
+            // center, snap to the dominant cardinal — making diagonals harder to hit
+            // near center than at the edge (the "+ gate" cardinal bias).
+            if (mag >= DpadSettings.CROSS_GATE_DIAGONAL_THRESHOLD) {
+                val axial = settings.innerDeadzone * AXIAL_PROJECTION_45
+                wantUp = effY < -axial
+                wantDown = effY > axial
+                wantRight = effX > axial
+                wantLeft = effX < -axial
+            } else if (abs(effX) > abs(effY)) {
+                wantUp = false; wantDown = false
+                wantRight = effX > 0f; wantLeft = effX < 0f
+            } else {
+                wantUp = effY < 0f; wantDown = effY > 0f
+                wantRight = false; wantLeft = false
+            }
         } else {
             // 4_way: dominant-axis quantization. Ties (|x| == |y| exactly) fall to
             // the vertical branch — arbitrary but stable.
@@ -548,7 +580,12 @@ internal data class DpadSettings(
         const val DEFAULT_OUTER_DEADZONE = 0.05f
         const val LAYOUT_4_WAY = "4_way"
         const val LAYOUT_8_WAY = "8_way"
+        const val LAYOUT_CROSS_GATE = "cross_gate"
         const val DEFAULT_LAYOUT = LAYOUT_4_WAY
+        // Cross-gate: diagonals allowed, but only once deflection magnitude reaches this
+        // fraction of full — below it, snap to the dominant cardinal. This is the
+        // "diagonals harder near center, easier at the edge" cardinal bias. Tunable.
+        const val CROSS_GATE_DIAGONAL_THRESHOLD = 0.7f
         // GYRO-only: scales integrated tilt angle (radians) into stick-
         // deflection-equivalent units before the deadzone check. 5.0 means
         // ~0.2 rad (≈11.5°) of tilt clamps to full direction-active range.
@@ -565,7 +602,11 @@ internal data class DpadSettings(
             return try {
                 val obj = JSONObject(json)
                 val layoutRaw = obj.optString("dpad_layout", DEFAULT_LAYOUT)
-                val layout = if (layoutRaw == LAYOUT_4_WAY || layoutRaw == LAYOUT_8_WAY) layoutRaw else DEFAULT_LAYOUT
+                val layout = if (layoutRaw in setOf(LAYOUT_4_WAY, LAYOUT_8_WAY, LAYOUT_CROSS_GATE)) {
+                    layoutRaw
+                } else {
+                    DEFAULT_LAYOUT
+                }
                 DpadSettings(
                     innerDeadzone = obj.optDouble("inner_deadzone", DEFAULT_INNER_DEADZONE.toDouble())
                         .toFloat().coerceIn(0f, 0.95f),

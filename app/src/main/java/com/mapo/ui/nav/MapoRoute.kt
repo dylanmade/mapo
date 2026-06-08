@@ -22,6 +22,17 @@ object MapoRoute {
     const val STEAM_SETUP = "steam_setup"
     const val STEAM_BROWSE = "steam_browse"
 
+    // ── Steam config detail screen ─────────────────────────────────────────────
+    //
+    // Shows every PublishedFileDetails field for a single Workshop config.
+    // Reached by tapping a row in SteamBrowseScreen's Configs state. The
+    // publishedFileId arg is the Workshop item ID — the detail VM looks up
+    // the full WorkshopConfig from the workshop repo's in-memory cache.
+    const val ARG_PUBLISHED_FILE_ID = "publishedFileId"
+    const val STEAM_CONFIG_DETAIL = "steam_config_detail/{$ARG_PUBLISHED_FILE_ID}"
+    fun steamConfigDetail(publishedFileId: Long): String =
+        "steam_config_detail/$publishedFileId"
+
     // ── Remap-target picker (full-screen, multi-step: category → filtered list) ────
     //
     // Caller navigates with title + currently-selected target (encoded). On selection the

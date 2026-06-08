@@ -34,7 +34,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mapo.R
 import com.mapo.steam.library.OwnedGame
-import com.mapo.steam.workshop.ConfigSummary
+import com.mapo.steam.workshop.WorkshopConfig
 import com.mapo.ui.viewmodel.SteamBrowseState
 import com.mapo.ui.viewmodel.SteamBrowseViewModel
 
@@ -42,6 +42,7 @@ import com.mapo.ui.viewmodel.SteamBrowseViewModel
 @Composable
 fun SteamBrowseScreen(
     onBack: () -> Unit,
+    onOpenConfig: (Long) -> Unit,
     viewModel: SteamBrowseViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -94,7 +95,10 @@ fun SteamBrowseScreen(
                     onPick = viewModel::selectGame,
                 )
                 is SteamBrowseState.LoadingConfigs -> CenteredSpinner(R.string.steam_browse_loading_configs)
-                is SteamBrowseState.Configs -> ConfigsList(configs = s.configs, onPick = viewModel::selectConfig)
+                is SteamBrowseState.Configs -> ConfigsList(
+                    configs = s.configs,
+                    onPick = { onOpenConfig(it.publishedFileId) },
+                )
             }
         }
     }
@@ -183,7 +187,7 @@ private fun GamesListBody(games: List<OwnedGame>, onPick: (OwnedGame) -> Unit) {
 }
 
 @Composable
-private fun ConfigsList(configs: List<ConfigSummary>, onPick: (ConfigSummary) -> Unit) {
+private fun ConfigsList(configs: List<WorkshopConfig>, onPick: (WorkshopConfig) -> Unit) {
     if (configs.isEmpty()) {
         EmptyState(R.string.steam_browse_empty_configs)
         return

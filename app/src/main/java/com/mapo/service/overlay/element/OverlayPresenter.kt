@@ -2,7 +2,8 @@ package com.mapo.service.overlay.element
 
 import android.util.Log
 import com.mapo.data.model.OverlayElement
-import com.mapo.data.model.tapRemapTarget
+import com.mapo.data.model.OverlayGesture
+import com.mapo.data.model.targetFor
 import com.mapo.data.repository.OverlayRepository
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.service.overlay.keyboard.KeyboardDisplayRouter
@@ -76,7 +77,7 @@ class OverlayPresenter @Inject constructor(
                 .flatMapLatest { overlayRepository.elementsByProfile(it.id) }
                 .collect { elements ->
                     val displayId = displayRouter.routeOverlay(OVERLAY_ID).first()
-                    manager.render(elements, displayId, ::onTap)
+                    manager.render(elements, displayId, ::onGesture)
                 }
         }
     }
@@ -92,8 +93,8 @@ class OverlayPresenter @Inject constructor(
         if (isShowing()) hide() else show()
     }
 
-    private fun onTap(element: OverlayElement) {
-        if (!dispatcher.dispatch(element.tapRemapTarget)) {
+    private fun onGesture(element: OverlayElement, gesture: OverlayGesture) {
+        if (!dispatcher.dispatch(element.targetFor(gesture))) {
             _errorMessages.tryEmit(ERR_SERVICE_NOT_RUNNING)
         }
     }

@@ -21,6 +21,16 @@ sealed class BindingOutput {
     /** A virtual gamepad button. `button` matches DeviceButton naming (e.g. "BUTTON_A"). */
     data class XInputButton(val button: String) : BindingOutput()
 
+    /**
+     * A virtual gamepad stick deflection. [stick] is "LEFT" / "RIGHT"; [direction] is
+     * "UP" / "DOWN" / "LEFT" / "RIGHT". Emits an analog axis on the virtual gamepad
+     * (requires Shizuku), unlike [XInputButton] which injects a digital button key.
+     */
+    data class XInputStick(val stick: String, val direction: String) : BindingOutput() {
+        /** Token form used by the [RemapTarget.Gamepad] picker bridge, e.g. "LSTICK_UP". */
+        fun token(): String = (if (stick == "LEFT") "LSTICK_" else "RSTICK_") + direction
+    }
+
     /** Mouse button — "MOUSE_LEFT", "MOUSE_RIGHT", "MOUSE_MIDDLE", "MOUSE_BACK", "MOUSE_FORWARD". */
     data class MouseButton(val button: String) : BindingOutput()
 
@@ -48,6 +58,7 @@ sealed class BindingOutput {
         Unbound              -> BindingOutputType.UNBOUND to ""
         is KeyPress          -> BindingOutputType.KEY_PRESS to keyCode
         is XInputButton      -> BindingOutputType.XINPUT_BUTTON to button
+        is XInputStick       -> BindingOutputType.XINPUT_STICK to "$stick,$direction"
         is MouseButton       -> BindingOutputType.MOUSE_BUTTON to button
         is MouseWheel        -> BindingOutputType.MOUSE_WHEEL to direction
         is GameAction        -> BindingOutputType.GAME_ACTION to "$setName,$actionName"
@@ -73,6 +84,10 @@ sealed class BindingOutput {
             BindingOutputType.UNBOUND -> Unbound
             BindingOutputType.KEY_PRESS -> KeyPress(args)
             BindingOutputType.XINPUT_BUTTON -> XInputButton(args)
+            BindingOutputType.XINPUT_STICK -> {
+                val parts = args.split(",", limit = 2)
+                XInputStick(parts.getOrElse(0) { "LEFT" }, parts.getOrElse(1) { "UP" })
+            }
             BindingOutputType.MOUSE_BUTTON -> MouseButton(args)
             BindingOutputType.MOUSE_WHEEL -> MouseWheel(args)
             BindingOutputType.GAME_ACTION -> {
@@ -92,9 +107,32 @@ sealed class BindingOutput {
                 "SCROLL_UP", "SCROLL_DOWN" -> MouseWheel(target.code)
                 else -> MouseButton(target.code)
             }
-            is RemapTarget.Gamepad -> XInputButton(target.button)
+            is RemapTarget.Gamepad -> stickFromToken(target.button) ?: XInputButton(target.button)
+        }
+
+        /** Parse a stick token ("LSTICK_UP" / "RSTICK_LEFT" …) to an [XInputStick], or null. */
+        private fun stickFromToken(token: String): XInputStick? {
+            val stick = when {
+                token.startsWith("LSTICK_") -> "LEFT"
+                token.startsWith("RSTICK_") -> "RIGHT"
+                else -> return null
+            }
+            val direction = token.substringAfter("STICK_")
+            if (direction !in setOf("UP", "DOWN", "LEFT", "RIGHT")) return null
+            return XInputStick(stick, direction)
         }
     }
+}
+
+/**
+ * True if this output can only be produced via the Shizuku virtual gamepad — i.e. it
+ * silently no-ops without Shizuku. Currently the analog stick directions; the analog
+ * trigger axis output will join when it ships. Drives the Shizuku-required warning
+ * surfaces (banner / drawer notification), parallel to `BindingMode.requiresShizuku()`.
+ */
+fun BindingOutput.requiresShizuku(): Boolean = when (this) {
+    is BindingOutput.XInputStick -> true
+    else -> false
 }
 
 /** One-line display label for a binding output, suitable for trailing row text. */
@@ -102,6 +140,8 @@ fun BindingOutput.displayLabel(): String = when (this) {
     BindingOutput.Unbound          -> "(Device default)"
     is BindingOutput.KeyPress      -> "KB: $keyCode"
     is BindingOutput.XInputButton  -> "GP: $button"
+    is BindingOutput.XInputStick   -> "GP: ${if (stick == "LEFT") "Left" else "Right"} Stick " +
+        direction.lowercase().replaceFirstChar { it.uppercase() }
     is BindingOutput.MouseButton   -> "MS: $button"
     is BindingOutput.MouseWheel    -> "MS: $direction"
     is BindingOutput.GameAction    -> "Action: $setName/$actionName"
@@ -172,6 +212,7 @@ fun BindingOutput.toRemapTarget(): RemapTarget = when (this) {
     is BindingOutput.MouseButton -> RemapTarget.Mouse(button)
     is BindingOutput.MouseWheel  -> RemapTarget.Mouse(direction)
     is BindingOutput.XInputButton -> RemapTarget.Gamepad(button)
+    is BindingOutput.XInputStick -> RemapTarget.Gamepad(token())
     is BindingOutput.GameAction,
     is BindingOutput.ControllerAction -> RemapTarget.Unbound
 }

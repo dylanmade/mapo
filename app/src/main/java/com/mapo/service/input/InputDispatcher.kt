@@ -105,6 +105,14 @@ interface InputSink {
      * `getWindowsOnAllDisplays()` so it works across both screens of dual-display devices.
      */
     fun queryPrimaryDisplayForegroundPackage(): String?
+
+    /**
+     * Capture a screenshot of the default display as a software [Bitmap] (used as a frozen
+     * backdrop for the overlay editor). Returns null via [onResult] when unavailable —
+     * `AccessibilityService.takeScreenshot` is API 30+, so older devices always get null.
+     * [onResult] is invoked on the main thread.
+     */
+    fun captureScreenshot(onResult: (android.graphics.Bitmap?) -> Unit)
 }
 
 /**
@@ -227,4 +235,9 @@ class InputDispatcher @Inject constructor() {
 
     fun queryPrimaryDisplayForegroundPackage(): String? =
         sink?.queryPrimaryDisplayForegroundPackage()
+
+    fun captureScreenshot(onResult: (android.graphics.Bitmap?) -> Unit) {
+        val s = sink
+        if (s == null) onResult(null) else s.captureScreenshot(onResult)
+    }
 }

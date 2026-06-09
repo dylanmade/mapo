@@ -171,10 +171,14 @@ class OverlayElementWindowManager @Inject constructor(
     }
 
     private fun layoutParamsFor(element: OverlayElement, size: Point): WindowManager.LayoutParams {
+        // FLAG_HARDWARE_ACCELERATED: WindowManager-added windows don't inherit it from the
+        // manifest; without it the ComposeView button renders in software and its rounded
+        // shape / gradient fill look jagged and "pixely".
         val flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         return WindowManager.LayoutParams(
             (element.width * size.x).roundToInt().coerceAtLeast(1),
             (element.height * size.y).roundToInt().coerceAtLeast(1),

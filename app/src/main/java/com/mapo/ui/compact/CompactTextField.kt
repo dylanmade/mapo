@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -30,6 +31,23 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 
 /**
+ * Which height/padding a [CompactTextField] uses. [Standard] follows the ambient
+ * [LocalCompactDensity] (so it matches the screen's chosen density); [Slim] is always the
+ * fixed ~40dp field, for the occasional call site that wants a shorter field than the
+ * surrounding screen — part of the component repertoire, not the default.
+ */
+enum class CompactFieldSize { Standard, Slim }
+
+/** Height of the [CompactFieldSize.Slim] field. */
+private val SlimFieldMinHeight = 40.dp
+
+/**
+ * Padding for the [CompactFieldSize.Slim] field. Horizontal inset matches the standard field
+ * (16dp) so placeholder/text start at the same x; vertical is tightened to keep it short.
+ */
+private val SlimFieldContentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+
+/**
  * A compact single-line-friendly text field.
  *
  * M3's `OutlinedTextField` / `TextField` have no compact variant — their ~56dp height is
@@ -46,6 +64,9 @@ import androidx.compose.ui.unit.dp
  *
  * @param outlined true for an outlined container (border), false for a filled container
  *   (tonal background, no border) — mirrors the M3 OutlinedTextField / TextField split.
+ * @param size [CompactFieldSize.Standard] takes its height + padding from the ambient density;
+ *   [CompactFieldSize.Slim] forces the always-compact (~40dp) field regardless of density, for
+ *   when a particular call site wants a tighter field than the screen's default.
  */
 @Composable
 fun CompactTextField(
@@ -55,6 +76,7 @@ fun CompactTextField(
     enabled: Boolean = true,
     readOnly: Boolean = false,
     outlined: Boolean = true,
+    size: CompactFieldSize = CompactFieldSize.Standard,
     label: String? = null,
     placeholder: String? = null,
     leadingIcon: (@Composable () -> Unit)? = null,
@@ -69,6 +91,19 @@ fun CompactTextField(
     val density = LocalCompactDensity.current
     val colors = MaterialTheme.colorScheme
     val shape = MaterialTheme.shapes.extraSmall
+
+    // Standard = follow the ambient density; Slim = always the fixed slim metrics, so a single
+    // call can opt into a shorter field than the surrounding screen uses. Slim keeps the same
+    // 16dp horizontal inset as the standard field (so placeholder/text start at the same x);
+    // only its height + vertical padding are tightened.
+    val fieldMinHeight = when (size) {
+        CompactFieldSize.Standard -> density.fieldMinHeight
+        CompactFieldSize.Slim -> SlimFieldMinHeight
+    }
+    val fieldContentPadding = when (size) {
+        CompactFieldSize.Standard -> density.fieldContentPadding
+        CompactFieldSize.Slim -> SlimFieldContentPadding
+    }
 
     val focused by interactionSource.collectIsFocusedAsState()
 
@@ -130,8 +165,8 @@ fun CompactTextField(
                 Row(
                     modifier = Modifier
                         .then(containerModifier)
-                        .heightIn(min = density.fieldMinHeight)
-                        .padding(density.fieldContentPadding),
+                        .heightIn(min = fieldMinHeight)
+                        .padding(fieldContentPadding),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {

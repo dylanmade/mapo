@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -496,15 +497,15 @@ private fun ColorSwatch(argb: Int?) {
     Box(
         modifier = Modifier
             .size(28.dp)
-            .background(Color(0xFFCCCCCC), RoundedCornerShape(6.dp))
+            .background(Color(0xFFCCCCCC), CircleShape)
             .padding(2.dp),
     ) {
         Box(
             modifier = Modifier
                 .size(24.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .clip(CircleShape)
                 .background(if (argb != null) Color(argb) else Color.Transparent)
-                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
+                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
         )
     }
 }

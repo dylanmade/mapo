@@ -36,17 +36,30 @@ class JoystickOutputSettingsTest {
     }
 
     @Test
-    fun faceButtonVector_cardinalAndDiagonal() {
+    fun directionalVector_cardinalAndDiagonal() {
         // North only.
-        assertEquals(0f to 1f, JoystickOutputSettings.faceButtonVector(setOf("button_y")))
+        assertEquals(0f to 1f, JoystickOutputSettings.directionalVector(setOf("button_y")))
         // East only.
-        assertEquals(1f to 0f, JoystickOutputSettings.faceButtonVector(setOf("button_b")))
+        assertEquals(1f to 0f, JoystickOutputSettings.directionalVector(setOf("button_b")))
         // NE diagonal normalized to magnitude 1.
-        val (x, y) = JoystickOutputSettings.faceButtonVector(setOf("button_y", "button_b"))
+        val (x, y) = JoystickOutputSettings.directionalVector(setOf("button_y", "button_b"))
         assertClose(0.7071f, x)
         assertClose(0.7071f, y)
         // Opposing directions cancel.
-        assertEquals(0f to 0f, JoystickOutputSettings.faceButtonVector(setOf("button_x", "button_b")))
+        assertEquals(0f to 0f, JoystickOutputSettings.directionalVector(setOf("button_x", "button_b")))
+    }
+
+    @Test
+    fun directionalVector_handlesDpadKeys() {
+        // The D-Pad source uses dpad_* sub-inputs but maps to the same vector.
+        assertEquals(0f to 1f, JoystickOutputSettings.directionalVector(setOf("dpad_up")))
+        assertEquals(0f to -1f, JoystickOutputSettings.directionalVector(setOf("dpad_down")))
+        assertEquals(-1f to 0f, JoystickOutputSettings.directionalVector(setOf("dpad_left")))
+        assertEquals(1f to 0f, JoystickOutputSettings.directionalVector(setOf("dpad_right")))
+        // NE diagonal (up + right) normalized.
+        val (x, y) = JoystickOutputSettings.directionalVector(setOf("dpad_up", "dpad_right"))
+        assertClose(0.7071f, x)
+        assertClose(0.7071f, y)
     }
 
     @Test

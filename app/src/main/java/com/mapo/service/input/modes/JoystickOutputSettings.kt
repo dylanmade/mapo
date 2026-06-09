@@ -116,16 +116,18 @@ internal data class JoystickOutputSettings(
 
         /**
          * Synthesize a unit-ish stick vector from the set of held digital direction
-         * sub-inputs on a face-button cluster. Diagonals are normalized to magnitude 1
-         * so they don't read as a stronger push than a cardinal.
+         * sub-inputs. Handles both the face-button cluster (`button_*`) and the D-Pad
+         * (`dpad_*`) — a source only uses one scheme, so accepting both is safe and lets
+         * the same Joystick-mode synthesis serve both digital sources. Diagonals are
+         * normalized to magnitude 1 so they don't read as a stronger push than a cardinal.
          */
-        fun faceButtonVector(heldKeys: Set<String>): Pair<Float, Float> {
+        fun directionalVector(heldKeys: Set<String>): Pair<Float, Float> {
             var x = 0f
             var y = 0f
-            if ("button_b" in heldKeys) x += 1f   // east
-            if ("button_x" in heldKeys) x -= 1f   // west
-            if ("button_y" in heldKeys) y += 1f   // north
-            if ("button_a" in heldKeys) y -= 1f   // south
+            if ("button_b" in heldKeys || "dpad_right" in heldKeys) x += 1f   // east
+            if ("button_x" in heldKeys || "dpad_left" in heldKeys) x -= 1f    // west
+            if ("button_y" in heldKeys || "dpad_up" in heldKeys) y += 1f      // north
+            if ("button_a" in heldKeys || "dpad_down" in heldKeys) y -= 1f    // south
             val mag = hypot(x, y)
             return if (mag > 1f) (x / mag) to (y / mag) else x to y
         }

@@ -322,6 +322,11 @@ class ShizukuMotionCoordinatorTest {
 
     @Test
     fun noneOnDpad_triggersGrabClause() {
+        // Corrected 2026-06-09: Mapo's target hardware reports the physical D-Pad as an
+        // ABS_HAT0 hat axis — NOT KEYCODE_DPAD_* — so it never reaches onKeyEvent and is
+        // captured ONLY via the Shizuku raw reader while grabbed. NONE-on-DPAD therefore
+        // depends on EVIOCGRAB to silence (the hat reading is zeroed under grab), exactly
+        // like NONE on a real stick/trigger. So it MUST trip the grab clause.
         val b = coordinator.evaluatePredicate(
             compiled = configWithNoneOnSources(1L, setOf(InputSource.DPAD)),
             activeSetId = 1L,
@@ -330,6 +335,29 @@ class ShizukuMotionCoordinatorTest {
             shizukuReady = true,
         )
         assertTrue(b.noneOnAnalogSourceConfigured)
+        assertTrue(b.shouldEnable)
+    }
+
+    @Test
+    fun dpadInNonDefaultMode_triggersGrabClause() {
+        // Corrected 2026-06-09: a non-Device-Default mode on the physical D-Pad (here
+        // DPAD mode) MUST force a grab. The D-Pad is HAT-only on Mapo's targets, so the
+        // grabbed hat is the sole capture path — without the grab the hat readings never
+        // arrive and every D-Pad mode goes dead. InputEvaluator bridges the grabbed hat
+        // into the digital dpad_* edge pipeline.
+        val b = coordinator.evaluatePredicate(
+            compiled = configWithNoneOnSourcesAndExtraInput(
+                startingSetId = 1L,
+                noneSources = emptySet(),
+                extraSource = InputSource.DPAD,
+                extraMode = BindingMode.DPAD,
+            ),
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = true,
+        )
+        assertTrue(b.analogSourceHasNonDefaultMode)
         assertTrue(b.shouldEnable)
     }
 

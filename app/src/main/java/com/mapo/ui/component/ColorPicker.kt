@@ -3,17 +3,14 @@ package com.mapo.ui.component
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,10 +39,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 
 private enum class PickerMode { HSL, RGB }
 
@@ -108,14 +105,14 @@ fun ColorPicker(
             Box(
                 modifier = Modifier
                     .size(56.dp)
-                    .background(Color(0xFFCCCCCC), RoundedCornerShape(8.dp))
+                    .background(Color(0xFFCCCCCC), CircleShape)
                     .padding(4.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .size(48.dp)
-                        .background(color, RoundedCornerShape(6.dp))
-                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp))
+                        .background(color, CircleShape)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
                 )
             }
             Spacer(Modifier.width(12.dp))
@@ -268,6 +265,12 @@ fun ColorPicker(
     }
 }
 
+/**
+ * One labelled channel row built on the stock M3 [Slider] for conventional drag/press
+ * behavior and ripple. The default track is swapped for a rounded gradient bar that
+ * previews the channel's range; the thumb is a neutral white handle that reads cleanly
+ * over any track color. Everything is vector — no bitmap/raster handle artifacts.
+ */
 @Composable
 private fun GradientSlider(
     label: String,
@@ -278,10 +281,8 @@ private fun GradientSlider(
     onChange: (Int) -> Unit,
     backgroundChecker: Boolean = false,
 ) {
-    val density = LocalDensity.current
-    val thumbDiameter = 22.dp
-    val span = (valueRange.last - valueRange.first).coerceAtLeast(1)
-    val normalized = ((value - valueRange.first).toFloat() / span).coerceIn(0f, 1f)
+    val interactionSource = remember { MutableInteractionSource() }
+    val trackShape = RoundedCornerShape(8.dp)
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -289,61 +290,44 @@ private fun GradientSlider(
     ) {
         Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(20.dp))
         Spacer(Modifier.width(8.dp))
-        BoxWithConstraints(
-            modifier = Modifier
-                .weight(1f)
-                .height(32.dp),
-        ) {
-            val widthPx = with(density) { maxWidth.toPx() }
-            if (backgroundChecker) {
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.roundToInt()) },
+            valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
+            interactionSource = interactionSource,
+            modifier = Modifier.weight(1f),
+            thumb = {
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                )
+            },
+            track = {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(20.dp)
-                        .align(Alignment.CenterStart)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFCCCCCC))
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(20.dp)
-                    .align(Alignment.CenterStart)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(gradient)
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.outline,
-                        RoundedCornerShape(10.dp),
+                        .height(16.dp)
+                        .clip(trackShape),
+                ) {
+                    if (backgroundChecker) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(Color(0xFFCCCCCC)),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(gradient)
+                            .border(1.dp, MaterialTheme.colorScheme.outline, trackShape),
                     )
-                    .pointerInput(valueRange) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            onChange(positionToValue(down.position.x, size.width, valueRange))
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull() ?: break
-                                if (!change.pressed) break
-                                onChange(positionToValue(change.position.x, size.width, valueRange))
-                                change.consume()
-                            }
-                        }
-                    },
-            )
-            val thumbXDp = with(density) {
-                (normalized * widthPx - thumbDiameter.toPx() / 2f).toDp()
-            }
-            Box(
-                modifier = Modifier
-                    .offset(x = thumbXDp)
-                    .align(Alignment.CenterStart)
-                    .size(thumbDiameter)
-                    .clip(CircleShape)
-                    .background(Color.White)
-                    .border(2.dp, Color(0xFF333333), CircleShape),
-            )
-        }
+                }
+            },
+        )
         Spacer(Modifier.width(8.dp))
         Text(
             text = valueLabel.padStart(5, ' '),
@@ -351,12 +335,6 @@ private fun GradientSlider(
             modifier = Modifier.width(48.dp),
         )
     }
-}
-
-private fun positionToValue(x: Float, widthPx: Int, range: IntRange): Int {
-    if (widthPx <= 0) return range.first
-    val span = range.last - range.first
-    return (range.first + (x / widthPx) * span).toInt().coerceIn(range.first, range.last)
 }
 
 private fun rgb(r: Int, g: Int, b: Int, a: Int): Color =

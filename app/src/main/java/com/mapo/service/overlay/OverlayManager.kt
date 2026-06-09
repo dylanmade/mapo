@@ -140,8 +140,12 @@ class OverlayManager @Inject constructor(
         // FLAG_NOT_TOUCH_MODAL on both surfaces lets touches outside the visible
         // snackbar/prompt content pass through to the underlying app. Toast also
         // adds FLAG_NOT_FOCUSABLE + FLAG_NOT_TOUCHABLE so it's purely passive.
+        // FLAG_HARDWARE_ACCELERATED: WindowManager-added windows don't inherit it from the
+        // manifest; without it the ComposeView renders in software, where gradients band and
+        // antialiased rounded shapes come out jagged and "pixely".
         var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         if (!focusable) {
             flags = flags or
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or

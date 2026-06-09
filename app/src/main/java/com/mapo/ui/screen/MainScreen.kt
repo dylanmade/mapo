@@ -355,6 +355,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.COMPACT_GALLERY)
                 },
+                onOpenColorPickerDemo = {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(MapoRoute.COLOR_PICKER_DEMO)
+                },
                 onEditOverlay = {
                     scope.launch { drawerState.close() }
                     viewModel.startLiveOverlayEdit()
@@ -877,6 +881,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             }
             composable(MapoRoute.COMPACT_GALLERY) {
                 com.mapo.ui.compact.CompactGalleryScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MapoRoute.COLOR_PICKER_DEMO) {
+                ColorPickerDemoScreen(onBack = { navController.popBackStack() })
             }
             composable(MapoRoute.STEAM_SETUP) {
                 SteamSetupScreen(

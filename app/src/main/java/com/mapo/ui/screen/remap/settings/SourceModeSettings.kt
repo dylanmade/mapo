@@ -254,6 +254,96 @@ object SourceModeSettingsSchema {
         control = SettingControl.Dropdown(HAPTIC_INTENSITY_OPTIONS, defaultId = "off"),
     )
 
+    // ── Trigger-mode specs (Triggers → Trigger; one menu per L/R trigger) ────────
+    private val THRESHOLD_TRIGGER_STYLE_OPTIONS = listOf(
+        DropdownOption("simple_threshold", "Simple threshold", "Soft Pull fires first as you pull, then Full Pull. Good for mouse clicks and drags."),
+        DropdownOption("hair_trigger", "Hair trigger", "Rapid Soft Pull on quick pulls & releases. Good for action games."),
+        DropdownOption("hip_fire_aggressive", "Hip fire aggressive", "Quick pulls send only Full Pull; slower pulls send Soft Pull first, then Full Pull."),
+        DropdownOption("hip_fire_normal", "Hip fire normal", "Like aggressive, with a larger window to skip the Soft Pull."),
+        DropdownOption("hip_fire_relaxed", "Hip fire relaxed", "An even larger window to skip the Soft Pull."),
+        DropdownOption("hip_fire_exclusive", "Hip fire exclusive", "Once Full or Soft Pull fires, the other can't fire until the trigger is fully released."),
+    )
+    private val ANALOG_OUTPUT_TRIGGER_OPTIONS = listOf(
+        DropdownOption("left", "Left trigger"),
+        DropdownOption("right", "Right trigger"),
+        DropdownOption("off", "Analog off"),
+    )
+
+    private val THRESHOLD_TRIGGER_STYLE = SettingSpec(
+        key = "threshold_trigger_style",
+        label = "Threshold trigger style",
+        helper = "How the Soft Pull and Full Pull commands are timed as you pull.",
+        control = SettingControl.Dropdown(THRESHOLD_TRIGGER_STYLE_OPTIONS, defaultId = "hair_trigger"),
+    )
+    private val TRIGGER_THRESHOLD_POINT = SettingSpec(
+        key = "trigger_threshold",
+        label = "Trigger threshold point",
+        helper = "The Soft Pull command fires once the trigger is pulled past this point. Left = lighter press; right = heavier.",
+        // Range is Steam-canonical 0..32767 for VDF round-trip. Default ≈10% (3277/32767)
+        // per the user's call to keep the existing light soft-pull feel rather than
+        // adopt the spec's heavier 10000 (~30%). Matches the runtime default 0.10.
+        control = SettingControl.Slider(0f, 32767f, default = 3277f),
+    )
+    private val TRIGGER_RESPONSE_CURVE = SettingSpec(
+        key = "trigger_response_curve",
+        label = "Trigger response curve",
+        helper = "How analog trigger pull maps to output.",
+        control = SettingControl.Dropdown(RESPONSE_CURVE_OPTIONS, defaultId = "linear"),
+    )
+    private val TRIGGER_CUSTOM_RESPONSE_CURVE = SettingSpec(
+        key = "trigger_custom_response_curve",
+        label = "Custom response curve",
+        helper = "Lower = pull further before reaching max; higher = max almost immediately past the threshold.",
+        control = SettingControl.Slider(25f, 4000f, default = 1000f),
+        visibleWhen = { it.raw("trigger_response_curve") == "custom" },
+    )
+    private val TRIGGER_HOLD_TO_REPEAT = SettingSpec(
+        key = "hold_to_repeat",
+        label = "Hold to repeat (turbo)",
+        helper = "Repeatedly fire the command while the trigger is held past the threshold.",
+        control = SettingControl.Toggle(),
+    )
+    private val TRIGGER_RANGE_START = SettingSpec(
+        key = "trigger_range_start",
+        label = "Trigger range start",
+        helper = "Analog deadzone at the start of the pull — a greater value sends no analog output until the trigger is pulled this far.",
+        control = SettingControl.Slider(0f, 32767f, default = 1000f),
+        visibleWhen = { it.raw("analog_output_trigger") != "off" },
+    )
+    private val TRIGGER_RANGE_END = SettingSpec(
+        key = "trigger_range_end",
+        label = "Trigger range end",
+        helper = "The point past which the maximum analog value is sent — a smaller value reaches max earlier in the throw.",
+        control = SettingControl.Slider(0f, 32767f, default = 32000f),
+        visibleWhen = { it.raw("analog_output_trigger") != "off" },
+    )
+
+    /** Analog Output Trigger defaults to the matching trigger (source-aware). */
+    private fun analogOutputTrigger(source: InputSource) = SettingSpec(
+        key = "analog_output_trigger",
+        label = "Analog output trigger",
+        helper = "Send the trigger's analog value to the game as this XInput trigger. Only works with XInput-compatible games.",
+        control = SettingControl.Dropdown(
+            ANALOG_OUTPUT_TRIGGER_OPTIONS,
+            defaultId = if (source == InputSource.RIGHT_TRIGGER) "right" else "left",
+        ),
+    )
+
+    /** The "Trigger" mode menu for an analog trigger source (built per L/R for the source-aware default). */
+    private fun triggerCategories(source: InputSource) = listOf(
+        SettingCategory(
+            "General",
+            listOf(
+                THRESHOLD_TRIGGER_STYLE, TRIGGER_THRESHOLD_POINT, TRIGGER_RESPONSE_CURVE,
+                TRIGGER_CUSTOM_RESPONSE_CURVE, TRIGGER_HOLD_TO_REPEAT,
+            ),
+        ),
+        SettingCategory(
+            "Analog output",
+            listOf(analogOutputTrigger(source), TRIGGER_RANGE_START, TRIGGER_RANGE_END),
+        ),
+    )
+
     private val DIRECTIONAL_PAD_LAYOUT_OPTIONS = listOf(
         DropdownOption("8_way", "8-way (overlap)", "Pie layout whose diagonals activate both directional commands."),
         DropdownOption("4_way", "4-way (no overlap)", "Diagonals activate only the single nearest directional command."),
@@ -266,6 +356,11 @@ object SourceModeSettingsSchema {
         key = "dpad_layout",
         label = "Directional pad layout",
         control = SettingControl.Dropdown(DIRECTIONAL_PAD_LAYOUT_OPTIONS, defaultId = "8_way"),
+    )
+
+    /** The "Button Pad" mode menu for a digital cluster (Button Pad / D-Pad sources). */
+    private val BUTTON_PAD_CATEGORIES = listOf(
+        SettingCategory("Haptics", listOf(HAPTIC_INTENSITY_OVERRIDE)),
     )
 
     /** The "Directional Pad" mode menu for a digital cluster (Button Pad / D-Pad sources). */
@@ -294,16 +389,19 @@ object SourceModeSettingsSchema {
      * Filled in menu-by-menu as each slice lands.
      */
     fun categoriesFor(source: InputSource, mode: BindingMode): List<SettingCategory> = when {
-        // Button Pad (face-button cluster) in Button Pad mode.
-        source == InputSource.BUTTON_DIAMOND && mode == BindingMode.BUTTON_PAD -> listOf(
-            SettingCategory("Haptics", listOf(HAPTIC_INTENSITY_OVERRIDE)),
-        )
+        // Digital direction clusters — the face-button pad and the D-Pad share the same
+        // menus per the settings spec ("DPad - <mode> = same as Button Pad - <mode>").
+        source == InputSource.BUTTON_DIAMOND || source == InputSource.DPAD -> when (mode) {
+            BindingMode.BUTTON_PAD -> BUTTON_PAD_CATEGORIES
+            BindingMode.JOYSTICK_MOVE -> JOYSTICK_CATEGORIES
+            BindingMode.DPAD -> DIGITAL_DIRECTIONAL_PAD_CATEGORIES
+            else -> emptyList()
+        }
 
-        // Button Pad (face-button cluster) emulating a joystick.
-        source == InputSource.BUTTON_DIAMOND && mode == BindingMode.JOYSTICK_MOVE -> JOYSTICK_CATEGORIES
-
-        // Button Pad (face-button cluster) as a directional pad.
-        source == InputSource.BUTTON_DIAMOND && mode == BindingMode.DPAD -> DIGITAL_DIRECTIONAL_PAD_CATEGORIES
+        // Analog triggers in Trigger mode (one menu each for L/R; source-aware default
+        // on Analog Output Trigger).
+        (source == InputSource.LEFT_TRIGGER || source == InputSource.RIGHT_TRIGGER) &&
+            mode == BindingMode.TRIGGER -> triggerCategories(source)
 
         else -> emptyList()
     }

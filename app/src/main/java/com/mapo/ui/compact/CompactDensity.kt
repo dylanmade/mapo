@@ -54,13 +54,13 @@ data class CompactDensity(
 
     // ── List / settings rows ────────────────────────────────────────────────────
     /**
-     * Minimum height of a [CompactListItem]'s **content area** (inside the vertical padding) —
-     * the row's total height is roughly this plus 2×[listItemPaddingVertical]. Set this to a
-     * full touch target (48dp) to make every row reserve the height a trailing switch needs, so
-     * text rows, two-line rows, and switch rows all stay uniform instead of switch rows sticking
-     * out taller (a one-line M3 ListItem's equivalent content area is ~40dp).
+     * Minimum **total** height of a [CompactListItem] — a tappability floor for the whole row,
+     * applied outside the padding. Above this floor the row grows naturally with its content
+     * while [listItemPaddingVertical] stays constant (so every row gets identical top/bottom
+     * whitespace and multi-line rows aren't crammed). The floor only adds slack for rows shorter
+     * than it; a one-line text row at [listItemPaddingVertical] typically already clears it.
      */
-    val listItemMinContentHeight: Dp,
+    val listItemMinHeight: Dp,
     /** Horizontal inset on a [CompactListItem]. */
     val listItemPaddingHorizontal: Dp,
     /** Vertical inset on a [CompactListItem] (added above + below the content). */
@@ -133,7 +133,7 @@ data class CompactDensity(
             buttonMinHeight = 40.dp,
             buttonContentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
             iconButtonSize = 48.dp,
-            listItemMinContentHeight = 40.dp, // + 2×8 padding ≈ 56dp total (one-line M3)
+            listItemMinHeight = 56.dp, // one-line M3 ListItem height; floor for the whole row
             listItemPaddingHorizontal = 16.dp,
             listItemPaddingVertical = 8.dp,
             listItemTextSpacing = 0.dp,
@@ -160,7 +160,7 @@ data class CompactDensity(
             buttonMinHeight = 36.dp,
             buttonContentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
             iconButtonSize = 40.dp,
-            listItemMinContentHeight = 32.dp, // + 2×6 padding ≈ 44dp total
+            listItemMinHeight = 44.dp, // floor for the whole row
             listItemPaddingHorizontal = 16.dp,
             listItemPaddingVertical = 6.dp,
             listItemTextSpacing = 0.dp,
@@ -177,18 +177,29 @@ data class CompactDensity(
         )
 
         /**
-         * Dylan's Cut — the intended app default. Stock-M3 [Comfortable] proportions everywhere
-         * (the level he preferred side-by-side), with two deliberate tweaks:
-         *  - the switch stays full M3 size; instead, **every** row reserves a full switch's
-         *    worth of content height ([listItemMinContentHeight] = 48dp), so a plain text row
-         *    has the same vertical padding it would have with a trailing switch — rows stay
-         *    uniform and the switch keeps its natural size + tap target;
+         * Dylan's Cut — the intended app default. Stock-M3 [Comfortable] proportions, with a few
+         * deliberate tweaks settled on iteratively:
+         *  - list rows use **constant vertical padding** (12dp) and grow with their content, so
+         *    every row has identical top/bottom whitespace and multi-line rows never look
+         *    crammed. The 48dp [listItemMinHeight] is just a tappability floor;
+         *  - the switch is scaled to 0.85× ([switchScale]) — a touch smaller — and drops its
+         *    48dp min-interactive reservation ([switchReserveMinTouch] = false). With both, it
+         *    contributes only ~27dp to a row instead of a 48dp touch-target halo, so a switch row
+         *    is ~51dp — right next to the ~48dp text rows — rather than ballooning to ~72dp.
+         *    (Cost: the switch's own tap target is ~27dp tall; whole-row clicks are unaffected.);
+         *  - a 2dp gap between a row's headline and its supporting line ([listItemTextSpacing]);
          *  - the stock M3 line-handle slider, but with the handle shortened from 44dp to 40dp.
+         *
+         * Text fields stay at the standard ~56dp here; the slim field is opt-in per call via
+         * [CompactTextField]'s `size = CompactFieldSize.Slim`, not the density default.
          */
         val DylansCut = Comfortable.copy(
             label = "Dylan's Cut",
-            listItemMinContentHeight = 48.dp,
+            listItemMinHeight = 48.dp,
+            listItemPaddingVertical = 12.dp,
             listItemTextSpacing = 2.dp,
+            switchScale = 0.85f,
+            switchReserveMinTouch = false,
             sliderThumbHeight = 40.dp,
         )
 

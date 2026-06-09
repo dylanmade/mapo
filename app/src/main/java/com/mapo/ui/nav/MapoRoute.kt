@@ -26,6 +26,9 @@ object MapoRoute {
     // Dev-only scratchpad for A/B'ing density presets on-device; not a shipping feature.
     const val COMPACT_GALLERY = "compact_gallery"
 
+    // Design harness: review surface for the new MapoColorPickerDialog. Dev-only.
+    const val COLOR_PICKER_DEMO = "color_picker_demo"
+
     // ── Steam config detail screen ─────────────────────────────────────────────
     //
     // Shows every PublishedFileDetails field for a single Workshop config.

@@ -5,18 +5,23 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -117,6 +122,11 @@ fun CompactGalleryBody(modifier: Modifier = Modifier) {
     var switchOn by remember { mutableStateOf(true) }
     var sliderValue by remember { mutableFloatStateOf(0.4f) }
     var menuOpen by remember { mutableStateOf(false) }
+    var stdRowField by remember { mutableStateOf("") }
+    var compactRowField by remember { mutableStateOf("") }
+    var tapEditValue by remember { mutableStateOf("") }
+    var editDraft by remember { mutableStateOf("") }
+    var showEditDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -144,6 +154,13 @@ fun CompactGalleryBody(modifier: Modifier = Modifier) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
             )
+            CompactTextField(
+                value = "",
+                onValueChange = {},
+                size = CompactFieldSize.Slim,
+                placeholder = "Slim size (opt-in via size = Slim)",
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         GallerySection("Buttons") {
@@ -161,6 +178,25 @@ fun CompactGalleryBody(modifier: Modifier = Modifier) {
                     icon = Icons.Default.Settings,
                     contentDescription = "Settings",
                     onClick = {},
+                )
+            }
+            Text(
+                text = "Slim variants (opt-in via size = Slim)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CompactButton(onClick = {}, size = CompactButtonSize.Slim) { Text("Filled") }
+                CompactOutlinedButton(onClick = {}, size = CompactButtonSize.Slim) { Text("Outlined") }
+                CompactTextButton(onClick = {}, size = CompactButtonSize.Slim) { Text("Text") }
+                CompactIconButton(
+                    icon = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    onClick = {},
+                    size = CompactButtonSize.Slim,
                 )
             }
         }
@@ -199,6 +235,60 @@ fun CompactGalleryBody(modifier: Modifier = Modifier) {
                         leading = { Icon(Icons.Default.Settings, contentDescription = null) },
                         onClick = {},
                     )
+                    HorizontalDivider()
+                    // Trailing = stock M3 OutlinedTextField (the chunky "standard" field, ~56dp).
+                    // No row onClick — the field owns its own focus/clicks.
+                    CompactListItem(
+                        headline = "Row with standard text field",
+                        supporting = "Stock M3 OutlinedTextField as the trailing element",
+                        trailing = {
+                            OutlinedTextField(
+                                value = stdRowField,
+                                onValueChange = { stdRowField = it },
+                                placeholder = { Text("Value") },
+                                singleLine = true,
+                                modifier = Modifier.width(140.dp),
+                            )
+                        },
+                    )
+                    HorizontalDivider()
+                    // Trailing = CompactTextField, slim size (~40dp) — opted in per call.
+                    CompactListItem(
+                        headline = "Row with slim text field",
+                        supporting = "CompactTextField(size = Slim) as the trailing element",
+                        trailing = {
+                            CompactTextField(
+                                value = compactRowField,
+                                onValueChange = { compactRowField = it },
+                                size = CompactFieldSize.Slim,
+                                placeholder = "Value",
+                                modifier = Modifier.width(140.dp),
+                            )
+                        },
+                    )
+                    HorizontalDivider()
+                    // Alternative to an inline editable field: show the value, tap to edit it in
+                    // a dialog. Often reads cleaner than cramming an editable field into a row.
+                    CompactListItem(
+                        headline = "Tap-to-edit value",
+                        supporting = "Displays the value; tap the row to edit in a dialog",
+                        trailing = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = tapEditValue.ifEmpty { "Not set" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(start = 8.dp).size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        },
+                        onClick = { editDraft = tapEditValue; showEditDialog = true },
+                    )
                 }
             }
         }
@@ -227,6 +317,31 @@ fun CompactGalleryBody(modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
+
+    // Tap-to-edit dialog for the "Tap-to-edit value" row. Field is not auto-focused.
+    if (showEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("Edit value") },
+            text = {
+                CompactTextField(
+                    value = editDraft,
+                    onValueChange = { editDraft = it },
+                    placeholder = "Value",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                CompactTextButton(onClick = {
+                    tapEditValue = editDraft
+                    showEditDialog = false
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                CompactTextButton(onClick = { showEditDialog = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 

@@ -342,6 +342,10 @@ class InputEvaluator @Inject constructor(
         // have just left JOYSTICK_MOVE mode, which would otherwise strand its stick.
         for (src in digitalStickHeld.keys) gamepadEmitter.clearSource(src)
         digitalStickHeld.clear()
+        // Drop hat-derived held directions; the subsequent dpadActiveInputs / onRelease
+        // sweep below releases anything they pressed through handleDigital, and the next
+        // hat reading re-presses cleanly against an empty held set.
+        hatHeldDirections.clear()
         // Stop any analog-emulation pulses (releasing their bindings), release any
         // single-active gated directions, then drop the gate state — so nothing sticks
         // across a mode/config change.
@@ -471,11 +475,12 @@ class InputEvaluator @Inject constructor(
             Log.d(TAG, "handleDigital: NONE-mode source ${address.source} — consuming + silencing")
             return true
         }
-        // Digital → joystick synthesis: a face-button cluster in JOYSTICK_MOVE mode
-        // emits a virtual gamepad stick rather than firing per-button bindings. The
-        // buttons aren't bindable in this mode (validInputsFor returns none), so the
-        // source-mode sentinel carries the mode + settings; intercept here and consume.
-        if (address.source == InputSource.BUTTON_DIAMOND) {
+        // Digital → joystick synthesis: a digital cluster (face buttons OR the D-Pad) in
+        // JOYSTICK_MOVE mode emits a virtual gamepad stick rather than firing per-button
+        // bindings. The sub-inputs aren't bindable in this mode (validInputsFor returns
+        // none), so the source-mode sentinel carries the mode + settings; intercept here
+        // and consume.
+        if (address.source == InputSource.BUTTON_DIAMOND || address.source == InputSource.DPAD) {
             val sentinel = lookupActive(InputAddress(address.source, SOURCE_MODE_SENTINEL_KEY))
             if (sentinel?.mode == BindingMode.JOYSTICK_MOVE) {
                 updateDigitalStick(address, isDown, sentinel.modeSettingsJson)
@@ -577,6 +582,42 @@ class InputEvaluator @Inject constructor(
     private val digitalStickHeld = HashMap<InputSource, MutableSet<String>>()
 
     /**
+     * Last hat-derived held directions per source, for `ABS_HAT0` → digital edge
+     * synthesis (see [dispatchHatAsDigital]). Mapo's target hardware reports the
+     * physical D-Pad as a hat axis, not `KEYCODE_DPAD_*`, so the grabbed hat reading
+     * is translated here into the same `dpad_*` press/release edges a synthesized
+     * keycode would have produced.
+     */
+    private val hatHeldDirections = HashMap<InputSource, MutableSet<String>>()
+
+    /**
+     * Bridge a hat-axis reading (`ABS_HAT0X` / `ABS_HAT0Y`, values ≈ −1 / 0 / +1)
+     * into the digital `dpad_*` edge pipeline. Mapo's targets report the physical
+     * D-Pad as a hat — no `KEYCODE_DPAD_*` reaches `onKeyEvent` — so while grabbed
+     * the hat surfaces here as an [AnalogEvent]. We diff the desired direction set
+     * against what was last held and feed [handleDigital] one edge per change, so
+     * every D-Pad mode (Directional Pad gate / Button Pad bindings / Joystick
+     * synthesis / None silence) runs through the exact same path a real keycode
+     * would. The two hat axes are independent, so diagonals (x=±1 AND y=±1) emit
+     * two simultaneous directions, matching dual-keycode behavior.
+     *
+     * Y convention: `ABS_HAT0Y < 0` is up (kernel hat-up = −1), matching
+     * [AnalogEvent]'s "y > 0 is screen-down" — so `y < 0` → `dpad_up`.
+     */
+    private fun dispatchHatAsDigital(reading: AnalogEvent) {
+        val want = HashSet<String>(4)
+        if (reading.y < -HAT_DIRECTION_THRESHOLD) want += "dpad_up"
+        if (reading.y > HAT_DIRECTION_THRESHOLD) want += "dpad_down"
+        if (reading.x < -HAT_DIRECTION_THRESHOLD) want += "dpad_left"
+        if (reading.x > HAT_DIRECTION_THRESHOLD) want += "dpad_right"
+        val held = hatHeldDirections.getOrPut(reading.source) { mutableSetOf() }
+        if (want == held) return
+        for (k in held - want) handleDigital(InputAddress(reading.source, k), false)
+        for (k in want - held) handleDigital(InputAddress(reading.source, k), true)
+        hatHeldDirections[reading.source] = want.toMutableSet()
+    }
+
+    /**
      * Update the synthesized virtual stick for a digital source in JOYSTICK_MOVE mode:
      * fold the just-changed button into the held set, rebuild the unit-ish vector,
      * apply the output settings, and emit to the configured gamepad stick. Emits (0,0)
@@ -585,7 +626,7 @@ class InputEvaluator @Inject constructor(
     private fun updateDigitalStick(address: InputAddress, isDown: Boolean, settingsJson: String) {
         val held = digitalStickHeld.getOrPut(address.source) { mutableSetOf() }
         if (isDown) held.add(address.inputKey) else held.remove(address.inputKey)
-        val (rx, ry) = com.mapo.service.input.modes.JoystickOutputSettings.faceButtonVector(held)
+        val (rx, ry) = com.mapo.service.input.modes.JoystickOutputSettings.directionalVector(held)
         val settings = com.mapo.service.input.modes.JoystickOutputSettings.parse(settingsJson)
         val (x, y) = settings.apply(rx, ry)
         // Synthesis math is intuitive (+Y = up); the virtual gamepad's Y axis is
@@ -834,6 +875,16 @@ class InputEvaluator @Inject constructor(
                 (resolved == null || resolved.mode == com.mapo.data.model.steam.BindingMode.DEVICE_DEFAULT)
             ) {
                 passthroughAnalogToGamepad(reading)
+                continue
+            }
+            // DPAD bridge: Mapo's target hardware reports the physical D-Pad as an
+            // ABS_HAT0 hat axis (no KEYCODE_DPAD_* reaches onKeyEvent), so the grabbed
+            // hat arrives here as an analog reading. Translate it into digital dpad_*
+            // edges through handleDigital, the same path a synthesized keycode would
+            // take, so every emit mode (Directional Pad / Button Pad / Joystick) works.
+            // None + Device Default for DPAD are already handled by the branches above.
+            if (reading.source == InputSource.DPAD) {
+                dispatchHatAsDigital(reading)
                 continue
             }
             if (resolved == null) continue
@@ -1845,6 +1896,13 @@ class InputEvaluator @Inject constructor(
         // Tunable; true variable magnitude isn't possible from a single digital full-press.
         private const val DPAD_PULSE_ON_MS = 20L
         private const val DPAD_PULSE_OFF_MS = 20L
+
+        /**
+         * Magnitude floor for treating a hat-axis reading as a held direction
+         * (see [dispatchHatAsDigital]). Hat values are ≈ −1 / 0 / +1, so 0.5
+         * cleanly separates "pressed" from "centered" regardless of calibration.
+         */
+        private const val HAT_DIRECTION_THRESHOLD = 0.5f
 
         /**
          * Linux EV_KEY → (InputSource, sub_input) mapping for the raw-key

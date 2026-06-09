@@ -114,6 +114,29 @@ class TriggerModeSoftPressTest {
     }
 
     @Test
+    fun triggerThresholdInSteamUnits_isConvertedToMagnitude() {
+        // The settings UI stores the soft-pull point in Steam units (0..32767).
+        // 16383 ≈ 0.50 magnitude.
+        val settings = """{"trigger_threshold":16383}"""
+        // 0.40 below the converted 0.50 threshold → no emit.
+        TriggerMode.evaluate(reading(0.40f), ctx(priorLatched = false, settings), emit, MouseEmitter.NOOP)
+        assertTrue("Below converted 0.50 must not fire, got $emits", emits.isEmpty())
+
+        // 0.55 crosses → DOWN.
+        TriggerMode.evaluate(reading(0.55f), ctx(priorLatched = false, settings), emit, MouseEmitter.NOOP)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to true), emits)
+    }
+
+    @Test
+    fun triggerThreshold_takesPrecedenceOverLegacySoftThreshold() {
+        // When both keys exist, the Steam-units trigger_threshold wins.
+        val settings = """{"trigger_threshold":3277,"soft_threshold":0.90}"""
+        // 3277/32767 ≈ 0.10; 0.15 crosses that, but is well below the legacy 0.90.
+        TriggerMode.evaluate(reading(0.15f), ctx(priorLatched = false, settings), emit, MouseEmitter.NOOP)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to true), emits)
+    }
+
+    @Test
     fun missingSettingsKeys_fallBackToSteamDefaults() {
         // Brick 4 / Brick 5 install seeded `click_threshold` only — verify the parser
         // tolerates the older shape (no `soft_threshold` / `soft_hysteresis` keys)

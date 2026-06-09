@@ -448,9 +448,11 @@ object DpadMode : SourceMode {
         digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
         mouse: MouseEmitter,
     ) {
-        // The digital DPAD source emits dpad_* sub-inputs via the accessibility
-        // service's KEYCODE_DPAD_* path. Skip analog evaluation here to avoid
-        // double-fire on controllers that report both BTN_DPAD_* and ABS_HAT0*.
+        // The physical DPAD source is bridged from its ABS_HAT0 hat reading into
+        // the digital dpad_* edge pipeline upstream in InputEvaluator.dispatchReadings
+        // (Mapo's targets are HAT-only — no KEYCODE_DPAD_* reaches onKeyEvent), so this
+        // analog handler never runs for DPAD. Defensive bail in case routing changes,
+        // and to keep this mode purely stick/gyro-driven.
         if (reading.source == InputSource.DPAD) return
 
         val settings = DpadSettings.parse(ctx.settingsJson)
@@ -710,13 +712,25 @@ internal data class TriggerSettings(
         const val DEFAULT_SOFT_THRESHOLD = 0.10f
         const val DEFAULT_SOFT_HYSTERESIS = 0.05f
 
+        /** Steam-canonical analog range; the settings UI's "Trigger threshold point" is 0..[STEAM_AXIS_MAX]. */
+        private const val STEAM_AXIS_MAX = 32767.0
+
         fun parse(json: String): TriggerSettings {
             if (json.isBlank()) return defaults()
             return try {
                 val obj = JSONObject(json)
+                // The settings UI stores the soft-pull point as "trigger_threshold" in
+                // Steam units (0..32767) for VDF round-trip; convert to the 0..1 magnitude
+                // this mode compares against. Fall back to the legacy 0..1 "soft_threshold"
+                // key for any group seeded before the trigger menu existed.
+                val softThreshold = when {
+                    obj.has("trigger_threshold") ->
+                        (obj.optDouble("trigger_threshold", 0.0) / STEAM_AXIS_MAX).toFloat().coerceIn(0f, 1f)
+                    else -> obj.optDouble("soft_threshold", DEFAULT_SOFT_THRESHOLD.toDouble()).toFloat()
+                }
                 TriggerSettings(
                     clickThreshold = obj.optDouble("click_threshold", DEFAULT_CLICK_THRESHOLD.toDouble()).toFloat(),
-                    softThreshold = obj.optDouble("soft_threshold", DEFAULT_SOFT_THRESHOLD.toDouble()).toFloat(),
+                    softThreshold = softThreshold,
                     softHysteresis = obj.optDouble("soft_hysteresis", DEFAULT_SOFT_HYSTERESIS.toDouble()).toFloat(),
                 )
             } catch (_: JSONException) {
@@ -2413,6 +2427,19 @@ fun BindingMode.requiresShizuku(): Boolean = this in MODES_REQUIRING_SHIZUKU
  * Shizuku UserService. Digital sources (face buttons, bumpers, switches) silence
  * via `InputAccessibilityService.onKeyEvent` returning `true` (consumed), no grab
  * needed. GYRO is a SensorManager source — silenced by not subscribing.
+ *
+ * **DPAD belongs here (corrected 2026-06-09).** The earlier assumption that
+ * Android delivers the physical D-Pad as `KEYCODE_DPAD_*` to the accessibility
+ * service is FALSE on Mapo's target hardware (AYN Thor / Odin 2 Mini / Anbernic
+ * / Retroid): those devices report the D-Pad as an `ABS_HAT0X` / `ABS_HAT0Y`
+ * hat axis, not as key events, so `InputAccessibilityService.onKeyEvent` never
+ * sees it and the digital `handleDigital` path is never entered. The D-Pad
+ * therefore reaches Mapo ONLY through the Shizuku raw reader (as an analog hat
+ * event) and ONLY while grabbed. [InputEvaluator.dispatchReadings] bridges that
+ * grabbed hat into the digital `dpad_*` edge pipeline so every D-Pad mode (None
+ * silence / Directional Pad / Button Pad / Joystick synthesis) works uniformly.
+ * Without DPAD in this set there is no grab, no hat readings, and nothing fires —
+ * which is exactly what broke every mode including None when DPAD was removed.
  */
 val GRABBABLE_ANALOG_SOURCES: Set<InputSource> = setOf(
     InputSource.LEFT_JOYSTICK,

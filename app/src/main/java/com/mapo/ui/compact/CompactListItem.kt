@@ -49,12 +49,13 @@ fun CompactListItem(
     val density = LocalCompactDensity.current
     val colors = MaterialTheme.colorScheme
 
-    // Modifier order matters here: the height floor is applied *inside* the padding (last in
-    // the chain), so it sizes the content area — not the padded box. That means every row
-    // reserves at least [listItemMinContentHeight] of content regardless of what's in it, and
-    // a trailing switch (which needs ~48dp) no longer pushes its row taller than a text-only
-    // row. Total row height ≈ listItemMinContentHeight + 2×listItemPaddingVertical. The
-    // clickable/background sit outside the padding so the tap target + fill cover the whole row.
+    // Modifier order matters here: the height floor is applied *outside* the padding (before it
+    // in the chain), so it bounds the whole row, not the content. That keeps the vertical
+    // padding constant on every row — the row grows naturally with its content (multi-line text,
+    // a trailing switch) while the top/bottom whitespace stays identical. [listItemMinHeight] is
+    // only a tappability floor that adds slack for rows shorter than it (a one-line text row at
+    // this padding typically already clears it). Background/clickable sit outermost so the fill +
+    // tap target cover the whole row including any floor-added height.
     val rowModifier = modifier
         .fillMaxWidth()
         .then(
@@ -62,11 +63,11 @@ fun CompactListItem(
             else Modifier,
         )
         .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+        .heightIn(min = density.listItemMinHeight)
         .padding(
             horizontal = density.listItemPaddingHorizontal,
             vertical = density.listItemPaddingVertical,
         )
-        .heightIn(min = density.listItemMinContentHeight)
 
     Row(
         modifier = rowModifier,

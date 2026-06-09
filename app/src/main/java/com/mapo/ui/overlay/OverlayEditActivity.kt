@@ -31,12 +31,14 @@ import javax.inject.Inject
  *  - the **frozen backdrop** (a screenshot of the game captured at trigger time, so editing
  *    is still WYSIWYG over the real content), and
  *  - a foreground task (its own `taskAffinity`) that keeps receiving back + lifecycle
- *    callbacks while editing, so back/home/recents can leave edit mode.
+ *    callbacks while editing, so back/home can route to the exit confirm.
  *
  * We previously screen-pinned (`startLockTask`) to disable home/recents while editing, but
  * that forced an OS "pin this app?" confirmation on every open (unavoidable for a
- * non-device-owner app). Dropped in favor of explicit exits: the toolbar Done, **back**
- * (→ an "Exit overlay editing?" confirm), and **home/recents** (→ [onStop] tears down).
+ * non-device-owner app). Dropped in favor of explicit exits, all funneled through the same
+ * "Exit overlay editing?" confirm: the toolbar Done, **back** (dispatcher → confirm), and
+ * **Home** ([onUserLeaveHint] → confirm; Cancel re-foregrounds). **Recents/overview never
+ * prompts and never exits** — onUserLeaveHint doesn't fire for it — so the session survives.
  *
  * Launched via [OverlayLiveEditController.requestEdit]. The controller owns the "am I
  * editing" flag; when it flips false this activity finishes.
@@ -95,12 +97,11 @@ class OverlayEditActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        // Leave edit mode on HOME only. onUserLeaveHint fires on an intentional Home press but
-        // NOT on recents/overview (or notification shade) — so recents never exits edit mode,
-        // which is a hard requirement. Recents/back-gesture etc. just background us with the
-        // overlay session intact; the user returns to it. (Back is handled separately, via the
-        // dispatcher → confirm.) controller.stop() drives the finish via the collector above.
-        if (controller.isEditing()) controller.stop()
+        // HOME → the same "Exit overlay editing?" confirm (not an immediate exit). onUserLeaveHint
+        // fires on Home but NOT on recents/overview — so recents never prompts and never exits
+        // (hard requirement). Home can't be intercepted, so by now we've backgrounded to the
+        // launcher; the controller raises the confirm over it and re-foregrounds us on Cancel.
+        controller.onHomePressed()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

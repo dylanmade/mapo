@@ -351,6 +351,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     scope.launch { drawerState.close() }
                     navController.navigate(MapoRoute.STEAM_SETUP)
                 },
+                onOpenCompactGallery = {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(MapoRoute.COMPACT_GALLERY)
+                },
                 onEditOverlay = {
                     scope.launch { drawerState.close() }
                     viewModel.startLiveOverlayEdit()
@@ -377,10 +381,12 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         MaterialTheme.colorScheme.surfaceContainerLowest
                     },
                 )
-                // Size routes to the area above the (now docked) soft keyboard, so a
-                // focused field scrolls into view instead of hiding behind it. The window
-                // uses FLAG_LAYOUT_NO_LIMITS and won't resize for the IME, so we consume
-                // the IME inset here in Compose. Home has no fields, so it's unaffected.
+                // Size routes to the area above the (now docked) soft keyboard so a focused
+                // field can scroll into view instead of hiding behind it. The window uses
+                // FLAG_LAYOUT_NO_LIMITS and won't resize for the IME, so we consume the IME
+                // inset here. The 16dp breathing room above the keyboard is handled by the
+                // bring-into-view margin in MapoTheme — not a layout gap — so there's no
+                // stripe. Home has no fields, so it's unaffected.
                 .imePadding(),
             // Crossfade at 250 ms with default FastOutSlowInEasing.
             enterTransition = { fadeIn(tween(250)) },
@@ -868,6 +874,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             }
             composable(MapoRoute.SHIZUKU_SETUP) {
                 ShizukuSetupScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MapoRoute.COMPACT_GALLERY) {
+                com.mapo.ui.compact.CompactGalleryScreen(onBack = { navController.popBackStack() })
             }
             composable(MapoRoute.STEAM_SETUP) {
                 SteamSetupScreen(

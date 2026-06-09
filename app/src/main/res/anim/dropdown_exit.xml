@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dropdown/menu close: reverse of dropdown_enter — scale back toward the top-start anchor + fade. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:duration="90"
+    android:interpolator="@android:interpolator/fast_out_linear_in">
+    <scale
+        android:fromXScale="1.0"
+        android:toXScale="0.85"
+        android:fromYScale="1.0"
+        android:toYScale="0.85"
+        android:pivotX="0%"
+        android:pivotY="0%" />
+    <alpha
+        android:fromAlpha="1.0"
+        android:toAlpha="0.0" />
+</set>

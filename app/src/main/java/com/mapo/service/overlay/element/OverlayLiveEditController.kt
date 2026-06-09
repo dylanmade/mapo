@@ -45,7 +45,6 @@ import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.Icon
@@ -55,6 +54,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,7 +64,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.ComposeView
@@ -536,46 +543,100 @@ class OverlayLiveEditController @Inject constructor(
      * would sit *beneath* the edit-mode overlay windows.
      */
     fun handleBack() = runOnMain {
-        if (confirmWindow != null) dismissExitConfirm() else showExitConfirm()
+        if (confirmWindow != null) dismissExitConfirm() else showExitConfirm(reForegroundOnCancel = false)
     }
 
-    private fun showExitConfirm() {
+    /**
+     * Home entry point (from `OverlayEditActivity.onUserLeaveHint`). Home can't be intercepted, so
+     * the activity has already gone to the launcher by the time this fires; we raise the same
+     * confirm over it. Cancel re-foregrounds the editor (resumes the session); Exit tears it down.
+     */
+    fun onHomePressed() = runOnMain {
+        if (_editing.value && confirmWindow == null) showExitConfirm(reForegroundOnCancel = true)
+    }
+
+    /**
+     * "Exit overlay editing?" confirm, drawn as a top overlay window (an activity dialog would sit
+     * *beneath* the edit windows). The window is full-screen for the modal scrim; the card itself
+     * is constrained to a standard dialog width.
+     */
+    private fun showExitConfirm(reForegroundOnCancel: Boolean) {
         if (confirmWindow != null) return
         val owner = OverlayLifecycleOwner()
         val view = ComposeView(context).apply {
             attachOwner(owner)
             setContent {
                 MapoTheme {
+                    val onCancel = {
+                        dismissExitConfirm()
+                        if (reForegroundOnCancel) reForegroundEditActivity()
+                    }
+                    val onExit = { dismissExitConfirm(); stop() }
+                    // Gamepad / key support (the window is focusable): dpad moves between the
+                    // buttons via Compose focus; A activates the focused one; B or Back cancels.
+                    // DPAD-center / Enter are handled by the buttons themselves.
+                    val cancelFocus = remember { FocusRequester() }
+                    var focusedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+                    LaunchedEffect(Unit) { runCatching { cancelFocus.requestFocus() } }
+
+                    // Hand-built to the M3 AlertDialog spec (it can't be a real `AlertDialog`:
+                    // that needs an activity window token, and this renders in a system-overlay
+                    // ComposeView above the editor's overlay windows). All color/type/shape come
+                    // from theme tokens. Scrim = `scrim` token at the standard 0.6 dialog dim.
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color(0x99000000)),
+                            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f))
+                            .onPreviewKeyEvent { event ->
+                                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                when (event.key) {
+                                    Key.Back, Key.ButtonB -> { onCancel(); true }
+                                    Key.ButtonA -> { (focusedAction ?: onCancel).invoke(); true }
+                                    else -> false
+                                }
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
                         Surface(
+                            // M3 dialog: extraLarge shape, surfaceContainerHigh, Level3 (6.dp)
+                            // tonal elevation, clamped to the [280, 560] dp dialog width range.
                             shape = MaterialTheme.shapes.extraLarge,
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             tonalElevation = 6.dp,
+                            modifier = Modifier.widthIn(min = 280.dp, max = 560.dp),
                         ) {
                             Column(modifier = Modifier.padding(24.dp)) {
                                 Text(
-                                    "Exit overlay editing?",
-                                    style = MaterialTheme.typography.titleLarge,
+                                    text = "Exit overlay editing?",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 Text(
-                                    "Your buttons are saved as you edit them.",
+                                    text = "Your buttons are saved as you edit them.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 8.dp),
+                                    modifier = Modifier.padding(top = 16.dp),
                                 )
+                                // Action buttons: text buttons, end-aligned. Sized to content
+                                // (no fillMaxWidth) so the card wraps to the [280, 560] range
+                                // instead of stretching to the full-screen window width.
                                 Row(
                                     modifier = Modifier
-                                        .fillMaxWidth()
+                                        .align(Alignment.End)
                                         .padding(top = 24.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    TextButton(onClick = { dismissExitConfirm() }) { Text("Cancel") }
-                                    Button(onClick = { dismissExitConfirm(); stop() }) { Text("Exit") }
+                                    TextButton(
+                                        onClick = onCancel,
+                                        modifier = Modifier
+                                            .focusRequester(cancelFocus)
+                                            .onFocusChanged { if (it.isFocused) focusedAction = onCancel },
+                                    ) { Text("Cancel") }
+                                    TextButton(
+                                        onClick = onExit,
+                                        modifier = Modifier
+                                            .onFocusChanged { if (it.isFocused) focusedAction = onExit },
+                                    ) { Text("Exit") }
                                 }
                             }
                         }
@@ -584,21 +645,34 @@ class OverlayLiveEditController @Inject constructor(
             }
         }
         owner.resumeTo()
-        // Full-screen + non-focusable: it's touch-modal (a full-screen window absorbs touches so
-        // the editor below is frozen) yet leaves key focus on the activity, so the hardware/back
-        // gesture keeps routing through the activity's back dispatcher to [handleBack].
+        // Full-screen + FOCUSABLE: full-screen absorbs touches (the editor below is frozen), and
+        // focusable so the dialog takes key focus — gamepad dpad/A/B + Back work inside it (see the
+        // onPreviewKeyEvent above; Back is handled there as Cancel). The non-focusable editor
+        // windows still route Back to the activity dispatcher when the dialog ISN'T up.
         val params = layoutParams(
             width = WindowManager.LayoutParams.MATCH_PARENT,
             height = WindowManager.LayoutParams.MATCH_PARENT,
-            focusable = false,
-        )
+            focusable = true,
+        ).apply {
+            // Standard dialog spawn/dismiss motion (fade + scale). The enter plays on addView;
+            // the exit plays only if the window is removed with removeView (see detachAnimated).
+            windowAnimations = android.R.style.Animation_Dialog
+        }
         runCatching { windowManager.addView(view, params) }
             .onFailure { Log.e(TAG, "addView(confirm) failed", it); return }
         confirmWindow = view to owner
     }
 
+    /** Bring the (Home-backgrounded) edit activity back to the front so editing resumes. */
+    private fun reForegroundEditActivity() {
+        val intent = Intent(context, OverlayEditActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        runCatching { context.startActivity(intent) }
+            .onFailure { Log.e(TAG, "reForeground edit activity failed", it) }
+    }
+
     private fun dismissExitConfirm() {
-        confirmWindow?.let { detach(it) }
+        confirmWindow?.let { detachAnimated(it) }
         confirmWindow = null
     }
 
@@ -677,6 +751,9 @@ class OverlayLiveEditController @Inject constructor(
             gravity = Gravity.TOP or Gravity.START
             x = tp.x
             y = tp.y + toolbarView.height
+            // Conventional dropdown motion (scale-from-top-start + fade). Enter plays on addView;
+            // exit plays because dismiss removes via removeView (detachAnimated).
+            windowAnimations = com.mapo.R.style.Animation_Mapo_Dropdown
         }
         runCatching { windowManager.addView(view, params) }
             .onFailure { Log.e(TAG, "addView(scopeMenu) failed", it); return }
@@ -685,7 +762,7 @@ class OverlayLiveEditController @Inject constructor(
     }
 
     private fun dismissScopeMenu() {
-        scopeMenuWindow?.let { detach(it) }
+        scopeMenuWindow?.let { detachAnimated(it) }
         scopeMenuWindow = null
         scopeMenuOpen.value = false
     }
@@ -858,6 +935,21 @@ class OverlayLiveEditController @Inject constructor(
         pair.second.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
     }
 
+    /**
+     * Like [detach] but plays the window's exit animation: `removeView` (not
+     * `removeViewImmediate`) lets the WM animate the surface out, and the lifecycle owner is torn
+     * down only after the animation so the content stays drawn through it.
+     */
+    private fun detachAnimated(pair: Pair<View, OverlayLifecycleOwner>) {
+        runCatching { windowManager.removeView(pair.first) }
+            .onFailure { Log.w(TAG, "removeView failed (already gone?)", it) }
+        mainHandler.postDelayed({
+            pair.second.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+            pair.second.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+            pair.second.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+        }, EXIT_ANIM_TEARDOWN_MS)
+    }
+
     private fun layoutParams(width: Int, height: Int, focusable: Boolean): WindowManager.LayoutParams {
         var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -943,5 +1035,8 @@ class OverlayLiveEditController @Inject constructor(
         private const val TAG = "OverlayLiveEdit"
         private const val SCRIM_COLOR = 0x66000000.toInt() // ~40% black
         private const val CONFIG_DRAWER_WIDTH_DP = 340
+        // Slightly longer than the platform dialog exit animation so the content stays drawn
+        // until the surface has animated out.
+        private const val EXIT_ANIM_TEARDOWN_MS = 300L
     }
 }

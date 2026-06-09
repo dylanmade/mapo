@@ -22,6 +22,10 @@ object MapoRoute {
     const val STEAM_SETUP = "steam_setup"
     const val STEAM_BROWSE = "steam_browse"
 
+    // Design harness: the compact-component density gallery (com.mapo.ui.compact).
+    // Dev-only scratchpad for A/B'ing density presets on-device; not a shipping feature.
+    const val COMPACT_GALLERY = "compact_gallery"
+
     // ── Steam config detail screen ─────────────────────────────────────────────
     //
     // Shows every PublishedFileDetails field for a single Workshop config.

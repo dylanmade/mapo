@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SecurityUpdateGood
@@ -52,6 +53,7 @@ fun ProfileDrawerContent(
     onOpenThemeStudio: () -> Unit,
     onOpenShizukuSetup: () -> Unit,
     onOpenSteamSetup: () -> Unit,
+    onOpenCompactGallery: () -> Unit,
     onEditOverlay: () -> Unit,
     onToggleRemap: () -> Unit,
     onToggleOverlay: () -> Unit,
@@ -158,6 +160,15 @@ fun ProfileDrawerContent(
                         selected = false,
                         onClick = onOpenSteamSetup,
                         icon = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
+                item {
+                    NavigationDrawerItem(
+                        label = { Text("Compact component gallery") },
+                        selected = false,
+                        onClick = onOpenCompactGallery,
+                        icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
                         modifier = Modifier.padding(horizontal = 8.dp),
                     )
                 }

@@ -2,6 +2,9 @@ package com.mapo.ui.theme
 
 import android.os.Build
 import android.view.inputmethod.EditorInfo
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
@@ -19,8 +22,11 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import com.themestudio.core.LocalThemeStudioController
 import com.themestudio.core.LocalThemeStudioVariantOverride
 import com.themestudio.core.applyOverrides
@@ -102,7 +108,11 @@ private val darkScheme = darkColorScheme(
     surfaceContainerHighest = surfaceContainerHighestDark,
 )
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalComposeUiApi::class)
+@OptIn(
+    ExperimentalMaterial3ExpressiveApi::class,
+    ExperimentalComposeUiApi::class,
+    ExperimentalFoundationApi::class,
+)
 @Composable
 fun MapoTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -165,7 +175,38 @@ fun MapoTheme(
             }
         }
         InterceptPlatformTextInput(interceptor = noFullscreenIme) {
-            CompositionLocalProvider(LocalMapoExtraColors provides extraColors, content = content)
+            // Reserve a small margin when a scroll container brings a focused child into
+            // view, so a field scrolled up above the docked keyboard rests just above it
+            // instead of flush against its top edge. This is a scroll offset, not a layout
+            // gap, so there's no visible stripe. It also gives focused items a little
+            // breathing room from any scroll-container edge generally.
+            val bringIntoViewDensity = LocalDensity.current
+            val bringIntoViewSpec = remember(bringIntoViewDensity) {
+                val marginPx = with(bringIntoViewDensity) { 16.dp.toPx() }
+                object : BringIntoViewSpec {
+                    override fun calculateScrollDistance(
+                        offset: Float,
+                        size: Float,
+                        containerSize: Float,
+                    ): Float {
+                        // Same logic as the default spec, but treats the item as [marginPx]
+                        // larger on each edge so the scroll leaves that much margin.
+                        val leadingEdge = offset - marginPx
+                        val trailingEdge = offset + size + marginPx
+                        return when {
+                            leadingEdge >= 0 && trailingEdge <= containerSize -> 0f
+                            leadingEdge < 0 && trailingEdge > containerSize -> 0f
+                            abs(leadingEdge) < abs(trailingEdge - containerSize) -> leadingEdge
+                            else -> trailingEdge - containerSize
+                        }
+                    }
+                }
+            }
+            CompositionLocalProvider(
+                LocalMapoExtraColors provides extraColors,
+                LocalBringIntoViewSpec provides bringIntoViewSpec,
+                content = content,
+            )
         }
     }
 }

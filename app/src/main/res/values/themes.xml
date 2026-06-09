@@ -14,4 +14,13 @@
         <item name="android:windowContentOverlay">@null</item>
         <item name="android:backgroundDimEnabled">false</item>
     </style>
+
+    <!-- Window enter/exit animation for the overlay editor's scope dropdown (its own
+         WindowManager window). Conventional dropdown motion: scale-from-top-start + fade.
+         Set via WindowManager.LayoutParams.windowAnimations; the exit plays only when the
+         window is removed with removeView (not removeViewImmediate). -->
+    <style name="Animation.Mapo.Dropdown" parent="">
+        <item name="android:windowEnterAnimation">@anim/dropdown_enter</item>
+        <item name="android:windowExitAnimation">@anim/dropdown_exit</item>
+    </style>
 </resources>

@@ -147,20 +147,42 @@ class OverlayEditor @Inject constructor(
         }
     }
 
+    /** A normalized rect destined for one element, for [moveResizeAll]. */
+    data class ElementRect(
+        val id: Long,
+        val x: Float,
+        val y: Float,
+        val width: Float,
+        val height: Float,
+    )
+
     /** Persist a new normalized rect for [id]. Inputs are clamped to sane bounds. */
     fun moveResize(id: Long, x: Float, y: Float, width: Float, height: Float) {
+        moveResizeAll(listOf(ElementRect(id, x, y, width, height)))
+    }
+
+    /**
+     * Persist new normalized rects for several elements in a **single** repository write, so the
+     * [elements] flow re-emits exactly once with every new value. Committing a multi-button drag
+     * this way (rather than one [moveResize] per element) avoids an intermediate emission where
+     * some buttons carry their new position and others their old one — which the live editor would
+     * otherwise render as a one-frame "flash" of the un-committed buttons back at their old spots.
+     */
+    fun moveResizeAll(rects: List<ElementRect>) {
+        if (rects.isEmpty()) return
         scope.launch {
-            val current = overlayRepository.getById(id) ?: return@launch
-            val w = width.coerceIn(MIN_SIZE, 1f)
-            val h = height.coerceIn(MIN_SIZE, 1f)
-            overlayRepository.update(
+            val updated = rects.mapNotNull { r ->
+                val current = overlayRepository.getById(r.id) ?: return@mapNotNull null
+                val w = r.width.coerceIn(MIN_SIZE, 1f)
+                val h = r.height.coerceIn(MIN_SIZE, 1f)
                 current.copy(
-                    x = x.coerceIn(0f, 1f - w),
-                    y = y.coerceIn(0f, 1f - h),
+                    x = r.x.coerceIn(0f, 1f - w),
+                    y = r.y.coerceIn(0f, 1f - h),
                     width = w,
                     height = h,
-                ),
-            )
+                )
+            }
+            if (updated.isNotEmpty()) overlayRepository.update(updated)
         }
     }
 

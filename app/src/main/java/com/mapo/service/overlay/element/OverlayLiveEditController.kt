@@ -318,7 +318,7 @@ class OverlayLiveEditController @Inject constructor(
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (!dragging) handleElementTap(element.id)
-                    else groupStart.keys.forEach { onElementDragEnd(it) }
+                    else onElementsDragEnd(groupStart.keys)
                     true
                 }
                 else -> false
@@ -400,16 +400,26 @@ class OverlayLiveEditController @Inject constructor(
         selectedIds.value = emptySet()
     }
 
-    private fun onElementDragEnd(id: Long) {
-        val w = elementWindows[id] ?: return
+    /**
+     * Commit the post-drag positions of [ids] in one batch write. Going through a single
+     * [OverlayEditor.moveResizeAll] (rather than a [OverlayEditor.moveResize] per id) means the
+     * elements flow re-emits once with every new position, so [renderElements] never sees a
+     * partially-committed list and never resets an un-committed window back to its old spot —
+     * which is what produced the one-frame flash on a multi-button drag.
+     */
+    private fun onElementsDragEnd(ids: Set<Long>) {
         val size = displaySizePx()
-        overlayEditor.moveResize(
-            id = id,
-            x = w.params.x.toFloat() / size.x,
-            y = w.params.y.toFloat() / size.y,
-            width = w.params.width.toFloat() / size.x,
-            height = w.params.height.toFloat() / size.y,
-        )
+        val rects = ids.mapNotNull { id ->
+            val w = elementWindows[id] ?: return@mapNotNull null
+            OverlayEditor.ElementRect(
+                id = id,
+                x = w.params.x.toFloat() / size.x,
+                y = w.params.y.toFloat() / size.y,
+                width = w.params.width.toFloat() / size.x,
+                height = w.params.height.toFloat() / size.y,
+            )
+        }
+        overlayEditor.moveResizeAll(rects)
     }
 
     private fun detachElement(id: Long) {
@@ -520,9 +530,10 @@ class OverlayLiveEditController @Inject constructor(
 
     /**
      * Set the toolbar window's width to the toolbar content's *natural* width. We measure the view
-     * with an UNSPECIFIED spec to get the width it WANTS — bypassing the WRAP_CONTENT window's
-     * AT_MOST(display) clamp — then apply it explicitly so the window can grow as wide as the row
-     * needs, even beyond the screen (FLAG_LAYOUT_NO_LIMITS). [center] re-centers on the first pass.
+     * with an UNSPECIFIED spec to get the width it WANTS — bypassing whatever constraint the window
+     * imposes on the WRAP_CONTENT ComposeView — then apply it explicitly so the window can grow as
+     * wide as the row needs, even beyond the screen (FLAG_LAYOUT_NO_LIMITS). [center] re-centers on
+     * the first pass.
      */
     private fun resizeToolbarToContent(center: Boolean) {
         val view = toolbar?.first ?: return
@@ -534,7 +545,7 @@ class OverlayLiveEditController @Inject constructor(
         if (w <= 0) return
         // Guard against a relayout loop: only push an update when the size actually changed.
         if (params.width == w && params.height == h && !center) return
-        Log.i(TAG, "toolbar sized to content: width=$w height=$h (display=${displaySizePx().x})")
+        Log.i(TAG, "toolbar sized to content: ${w}x$h (display=${displaySizePx().x})")
         params.width = w
         params.height = h
         if (center) {

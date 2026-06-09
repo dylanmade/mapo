@@ -157,6 +157,35 @@ class TriggerModeSoftPressTest {
     }
 
     @Test
+    fun hysteresisAtOrAboveThreshold_stillReleasesAtRest() {
+        // Regression for the 2026-06-09 wedge: a settings JSON whose hysteresis is
+        // >= the threshold (here threshold 0.10, hysteresis 0.20) would push the
+        // release point to <= 0, so once latched the soft pull could NEVER clear —
+        // one DOWN, never an UP, and every later pull suppressed. The release point
+        // must be clamped strictly into (0, press) so a trigger returning to rest
+        // always unlatches.
+        val settings = """{"soft_threshold":0.10,"soft_hysteresis":0.20}"""
+        // Cross upward → DOWN.
+        TriggerMode.evaluate(reading(0.50f), ctx(priorLatched = false, settings), emit, MouseEmitter.NOOP)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to true), emits)
+        emits.clear()
+        // Return to rest → must emit UP (would wedge-stick before the fix).
+        TriggerMode.evaluate(reading(0.0f), ctx(priorLatched = true, settings), emit, MouseEmitter.NOOP)
+        assertEquals(listOf(TriggerMode.SOFT_PULL_SUB_INPUT to false), emits)
+    }
+
+    @Test
+    fun zeroThreshold_doesNotLatchAtRest() {
+        // A settings JSON carrying trigger_threshold:0 (partially-seeded group) parses
+        // to softThreshold 0.0. Without a press floor, `magnitude >= 0` is true at rest
+        // and the soft pull latches the instant the mode runs. The press floor must keep
+        // a resting (0.0) trigger un-latched.
+        val settings = """{"trigger_threshold":0}"""
+        TriggerMode.evaluate(reading(0.0f), ctx(priorLatched = false, settings), emit, MouseEmitter.NOOP)
+        assertTrue("A resting trigger must not latch the soft pull, got $emits", emits.isEmpty())
+    }
+
+    @Test
     fun defaultSettings_matchSteamDefaults() {
         // Pins the Steam-Input defaults so a later mode change doesn't silently
         // drift away from parity.

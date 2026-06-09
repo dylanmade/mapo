@@ -32,6 +32,9 @@ class OverlayRepository @Inject constructor(private val dao: OverlayElementDao) 
 
     suspend fun update(element: OverlayElement) = dao.update(element)
 
+    /** Atomic batch update — see [OverlayElementDao.update] (single transaction, one emission). */
+    suspend fun update(elements: List<OverlayElement>) = dao.update(elements)
+
     suspend fun delete(element: OverlayElement) = dao.delete(element)
 
     suspend fun deleteById(id: Long) = dao.deleteById(id)

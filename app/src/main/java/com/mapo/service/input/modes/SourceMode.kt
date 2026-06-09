@@ -1,5 +1,6 @@
 package com.mapo.service.input.modes
 
+import android.util.Log
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.InputSource
 import com.mapo.service.input.AnalogEvent
@@ -675,6 +676,22 @@ object TriggerMode : SourceMode {
     /** Sub-input key for the analog soft-pull row. Steam-verbatim. */
     const val SOFT_PULL_SUB_INPUT: String = "soft_pull"
 
+    /**
+     * Lowest the soft-pull *press* point may sit. A 0 threshold (e.g. a settings
+     * JSON that carries `trigger_threshold:0`, or a hysteresis ≥ threshold) would
+     * otherwise make `magnitude >= press` true at rest and latch the soft pull
+     * permanently — the exact wedge observed 2026-06-09: one DOWN, never an UP.
+     */
+    private const val SOFT_PRESS_FLOOR = 0.04f
+
+    /**
+     * Smallest gap kept between the press and release points (and between release
+     * and rest). Guarantees the release point is strictly in `(0, press)` so a
+     * trigger returning to rest always clears the latch, regardless of the
+     * configured hysteresis.
+     */
+    private const val SOFT_RELEASE_FLOOR = 0.02f
+
     override fun evaluate(
         reading: AnalogEvent,
         ctx: ModeContext,
@@ -684,14 +701,27 @@ object TriggerMode : SourceMode {
         val settings = TriggerSettings.parse(ctx.settingsJson)
         val magnitude = reading.x  // triggers are 0..1 on x; y is always 0
         val priorLatched = ctx.priorLatched[SOFT_PULL_SUB_INPUT] == true
+        // Press point floored above rest so a resting trigger never latches.
+        val press = settings.softThreshold.coerceAtLeast(SOFT_PRESS_FLOOR)
+        // Release point clamped strictly into (0, press): a hysteresis ≥ threshold
+        // would push `press - hysteresis` ≤ 0 and the latch would never clear.
+        val release = (press - settings.softHysteresis)
+            .coerceIn(SOFT_RELEASE_FLOOR, press - SOFT_RELEASE_FLOOR)
         val nowLatched = if (priorLatched) {
             // Stay latched until magnitude drops below the lower hysteresis band.
-            magnitude >= (settings.softThreshold - settings.softHysteresis)
+            magnitude >= release
         } else {
-            // Latch when magnitude crosses the threshold upward.
-            magnitude >= settings.softThreshold
+            // Latch when magnitude crosses the press point upward.
+            magnitude >= press
         }
         if (nowLatched != priorLatched) {
+            Log.d(
+                "InputEvaluator.Motion",
+                "soft_pull edge ${reading.source} mag=${"%.3f".format(magnitude)} " +
+                    "press=${"%.3f".format(press)} release=${"%.3f".format(release)} " +
+                    "(rawThreshold=${"%.3f".format(settings.softThreshold)} " +
+                    "hysteresis=${"%.3f".format(settings.softHysteresis)}) -> ${if (nowLatched) "DOWN" else "UP"}",
+            )
             digitalEmit(SOFT_PULL_SUB_INPUT, nowLatched)
         }
     }

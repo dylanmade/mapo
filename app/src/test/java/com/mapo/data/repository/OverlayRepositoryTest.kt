@@ -136,6 +136,13 @@ private class FakeOverlayElementDao : OverlayElementDao {
         }
     }
 
+    override suspend fun update(elements: List<OverlayElement>) {
+        // Single atomic state swap, mirroring Room's one-transaction / one-emission semantics.
+        rows.value = rows.value + elements
+            .filter { rows.value.containsKey(it.id) }
+            .associateBy { it.id }
+    }
+
     override suspend fun delete(element: OverlayElement) {
         rows.value = rows.value - element.id
     }

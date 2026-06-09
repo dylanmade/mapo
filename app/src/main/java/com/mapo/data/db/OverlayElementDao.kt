@@ -35,6 +35,14 @@ interface OverlayElementDao {
     @Update
     suspend fun update(element: OverlayElement)
 
+    /**
+     * Batch update. Room runs all rows in a single transaction, so the invalidation tracker
+     * fires once and observers ([getBySet] / [getByLayer]) re-emit a single time with every new
+     * value — used to commit a multi-button drag atomically and avoid a per-row reposition flash.
+     */
+    @Update
+    suspend fun update(elements: List<OverlayElement>)
+
     @Delete
     suspend fun delete(element: OverlayElement)
 

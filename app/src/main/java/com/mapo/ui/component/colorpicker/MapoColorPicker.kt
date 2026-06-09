@@ -28,14 +28,14 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,8 +59,12 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import com.mapo.ui.compact.CompactDensity
+import com.mapo.ui.compact.CompactFieldSize
+import com.mapo.ui.compact.CompactTextField
 import kotlin.math.roundToInt
 
 /** The numeric/preset control sets shown to the right of the always-present wheel. */
@@ -132,104 +136,107 @@ fun MapoColorPickerDialog(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
         ) {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = maxHeight)
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                // ── Header: title + live hex field ──
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.heightIn(max = maxHeight)) {
+                // ── Header (sticky): title + mode switcher ──
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         text = title,
                         style = MaterialTheme.typography.headlineSmall,
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(16.dp))
+                    SingleChoiceSegmentedButtonRow {
+                        PickerMode.entries.forEachIndexed { i, m ->
+                            SegmentedButton(
+                                selected = mode == m,
+                                onClick = { mode = m },
+                                shape = SegmentedButtonDefaults.itemShape(i, PickerMode.entries.size),
+                            ) { Text(m.label, style = MaterialTheme.typography.labelMedium) }
+                        }
+                    }
+                }
+                HorizontalDivider()
+
+                // ── Center (scrolls only if it must): driven by the selected mode ──
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                ) {
+                    when (mode) {
+                        // Theme: labeled swatches fill the whole center; no wheel needed.
+                        PickerMode.THEME -> ThemeContent(selected, ::emitColor)
+                        // RGB / HSV: wheel on the left, slider controls on the right — each
+                        // centered in its column, and the two columns centered against each other.
+                        else -> Row(
+                            horizontalArrangement = Arrangement.spacedBy(20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                ColorWheel(
+                                    hue = displayHsv[0],
+                                    saturation = displayHsv[1],
+                                    value = displayHsv[2],
+                                    onChange = { h, s -> emitHsv(h, s, displayHsv[2]) },
+                                    modifier = Modifier.widthIn(max = 260.dp).fillMaxWidth(),
+                                )
+                            }
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                if (mode == PickerMode.RGB) {
+                                    RgbContent(selected, alphaInt, ::emitColor)
+                                } else {
+                                    HsvContent(displayHsv, alphaInt, ::emitHsv)
+                                }
+                                if (supportAlpha) {
+                                    val r = (selected.red * 255f).roundToInt()
+                                    val g = (selected.green * 255f).roundToInt()
+                                    val b = (selected.blue * 255f).roundToInt()
+                                    ChannelSlider(
+                                        label = "A",
+                                        value = alphaInt,
+                                        valueRange = 0..255,
+                                        valueText = alphaInt.toString(),
+                                        gradient = Brush.horizontalGradient(
+                                            listOf(rgb(r, g, b, 0), rgb(r, g, b, 255)),
+                                        ),
+                                        checkerBackdrop = true,
+                                        onChange = { selected = selected.copy(alpha = it / 255f) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+                // ── Footer (sticky): hex + copy on the left, actions on the right ──
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     HexField(
                         selected = selected,
                         onColor = ::emitColor,
-                        modifier = Modifier.widthIn(max = 200.dp),
+                        modifier = Modifier.widthIn(max = 220.dp),
                     )
-                }
-
-                // ── Body: wheel (left) + mode controls (right) ──
-                Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            ColorWheel(
-                                hue = displayHsv[0],
-                                saturation = displayHsv[1],
-                                value = displayHsv[2],
-                                onChange = { h, s -> emitHsv(h, s, displayHsv[2]) },
-                                modifier = Modifier.widthIn(max = 260.dp).fillMaxWidth(),
-                            )
-                        }
-                        ChannelSlider(
-                            label = "V",
-                            value = (displayHsv[2] * 100f).roundToInt(),
-                            valueRange = 0..100,
-                            valueText = "${(displayHsv[2] * 100f).roundToInt()}%",
-                            gradient = Brush.horizontalGradient(
-                                listOf(
-                                    hsvToColor(displayHsv[0], displayHsv[1], 0f, alphaInt),
-                                    hsvToColor(displayHsv[0], displayHsv[1], 1f, alphaInt),
-                                ),
-                            ),
-                            onChange = { emitHsv(displayHsv[0], displayHsv[1], it / 100f) },
-                        )
-                    }
-
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            PickerMode.entries.forEachIndexed { i, m ->
-                                SegmentedButton(
-                                    selected = mode == m,
-                                    onClick = { mode = m },
-                                    shape = SegmentedButtonDefaults.itemShape(i, PickerMode.entries.size),
-                                ) { Text(m.label, style = MaterialTheme.typography.labelMedium) }
-                            }
-                        }
-                        when (mode) {
-                            PickerMode.RGB -> RgbContent(selected, alphaInt, ::emitColor)
-                            PickerMode.HSV -> HsvContent(displayHsv, alphaInt, ::emitHsv)
-                            PickerMode.THEME -> ThemeContent(selected, ::emitColor)
-                        }
-                    }
-                }
-
-                // ── Alpha (full width) ──
-                if (supportAlpha) {
-                    val r = (selected.red * 255f).roundToInt()
-                    val g = (selected.green * 255f).roundToInt()
-                    val b = (selected.blue * 255f).roundToInt()
-                    ChannelSlider(
-                        label = "A",
-                        value = alphaInt,
-                        valueRange = 0..255,
-                        valueText = alphaInt.toString(),
-                        gradient = Brush.horizontalGradient(
-                            listOf(rgb(r, g, b, 0), rgb(r, g, b, 255)),
-                        ),
-                        checkerBackdrop = true,
-                        onChange = { selected = selected.copy(alpha = it / 255f) },
-                    )
-                }
-
-                // ── Actions ──
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                ) {
+                    Spacer(Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text("Cancel") }
-                    TextButton(onClick = { onConfirm(selected) }) { Text("Select") }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { onConfirm(selected) }) { Text("Save") }
                 }
             }
         }
@@ -268,7 +275,7 @@ private fun RgbContent(color: Color, alpha: Int, onColor: (Color) -> Unit) {
     val r = (color.red * 255f).roundToInt()
     val g = (color.green * 255f).roundToInt()
     val b = (color.blue * 255f).roundToInt()
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
         ChannelSlider("R", r, 0..255, r.toString(),
             Brush.horizontalGradient(listOf(rgb(0, g, b, alpha), rgb(255, g, b, alpha)))) {
             onColor(rgb(it, g, b, alpha))
@@ -290,7 +297,7 @@ private fun HsvContent(hsv: FloatArray, alpha: Int, onHsv: (Float, Float, Float)
     val rainbow = remember {
         Brush.horizontalGradient((0..360 step 60).map { hsvToColor(it.toFloat(), 1f, 1f, 255) })
     }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
         ChannelSlider("H", h.roundToInt(), 0..360, "${h.roundToInt()}°", rainbow) {
             onHsv(it.toFloat(), s, v)
         }
@@ -388,19 +395,31 @@ private fun HexField(selected: Color, onColor: (Color) -> Unit, modifier: Modifi
             Box(Modifier.matchParentSize().background(selected))
             Box(Modifier.matchParentSize().border(1.dp, outline, CircleShape))
         }
-        Spacer(Modifier.width(8.dp))
-        OutlinedTextField(
+        Spacer(Modifier.width(16.dp))
+        CompactTextField(
             value = hexText,
             onValueChange = { typed ->
                 hexText = typed
                 parseHexColor(typed)?.let(onColor)
             },
-            label = { Text("Hex", style = MaterialTheme.typography.labelSmall) },
+            size = CompactFieldSize.Slim,
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
             trailingIcon = {
-                IconButton(onClick = { clipboard.setText(AnnotatedString(selected.toHexString())) }) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy hex")
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            clipboard.setText(AnnotatedString(selected.toHexString()))
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "Copy hex",
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
             },
             modifier = Modifier.weight(1f),
@@ -426,16 +445,23 @@ private fun ChannelSlider(
     val trackShape = RoundedCornerShape(8.dp)
     val outline = MaterialTheme.colorScheme.outline
 
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(16.dp))
-        Spacer(Modifier.width(8.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(14.dp))
+        Spacer(Modifier.width(6.dp))
         Slider(
             value = value.toFloat(),
             onValueChange = { onChange(it.roundToInt()) },
             valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
             interactionSource = interactionSource,
             modifier = Modifier.weight(1f),
-            // Native M3 thumb (omitted = SliderDefaults.Thumb): fully vector, crisp.
+            // "Dylan's Cut" variant: the stock M3 line handle, shortened to its 40dp thumb
+            // height so the slider stack packs tighter vertically. Fully vector, crisp.
+            thumb = {
+                SliderDefaults.Thumb(
+                    interactionSource = interactionSource,
+                    thumbSize = DpSize(4.dp, CompactDensity.DylansCut.sliderThumbHeight),
+                )
+            },
             track = {
                 Box(
                     modifier = Modifier
@@ -456,10 +482,12 @@ private fun ChannelSlider(
             },
         )
         Spacer(Modifier.width(8.dp))
+        // Wrap-content (no fixed width) so the weighted Slider expands right up to the readout —
+        // no dead space between the track's right edge and the digits.
         Text(
-            text = valueText.padStart(4, ' '),
+            text = valueText,
             style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.width(44.dp),
+            textAlign = TextAlign.End,
         )
     }
 }

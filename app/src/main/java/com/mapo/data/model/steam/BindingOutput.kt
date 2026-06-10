@@ -125,15 +125,27 @@ sealed class BindingOutput {
 }
 
 /**
- * True if this output can only be produced via the Shizuku virtual gamepad — i.e. it
- * silently no-ops without Shizuku. Currently the analog stick directions; the analog
- * trigger axis output will join when it ships. Drives the Shizuku-required warning
- * surfaces (banner / drawer notification), parallel to `BindingMode.requiresShizuku()`.
+ * True if this output is a virtual-gamepad output ([XInputButton] — incl. the AXIS_L2/R2
+ * analog triggers — or [XInputStick] directions). These only reach a game through the
+ * Mapo Virtual Gamepad (MVG), which is only the game's controller while the physical pad
+ * is grabbed — so binding one forces a grab. Drives both the grab decision
+ * ([com.mapo.service.shizuku.ShizukuMotionCoordinator]) and which outputs need Shizuku.
  */
-fun BindingOutput.requiresShizuku(): Boolean = when (this) {
+fun BindingOutput.isGamepadOutput(): Boolean = when (this) {
+    is BindingOutput.XInputButton -> true
     is BindingOutput.XInputStick -> true
     else -> false
 }
+
+/**
+ * True if this output can only be produced via the Shizuku virtual gamepad — i.e. it
+ * silently no-ops (in games) without Shizuku. All gamepad outputs qualify: the analog
+ * stick directions, and (as of 2026-06-10) gamepad buttons + analog triggers, which are
+ * only seen by a game through the grabbed MVG — a SOURCE_KEYBOARD key inject reaches a
+ * game's menu/overlay layer, never its gamepad layer. Drives the Shizuku-required warning
+ * surfaces (banner / drawer notification), parallel to `BindingMode.requiresShizuku()`.
+ */
+fun BindingOutput.requiresShizuku(): Boolean = isGamepadOutput()
 
 /** One-line display label for a binding output, suitable for trailing row text. */
 fun BindingOutput.displayLabel(): String = when (this) {

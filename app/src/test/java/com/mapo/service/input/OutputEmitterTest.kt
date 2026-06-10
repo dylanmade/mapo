@@ -4,6 +4,7 @@ import com.mapo.data.model.RemapTarget
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.InputSource
 import io.mockk.confirmVerified
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.Assert.assertFalse
@@ -35,10 +36,26 @@ class OutputEmitterTest {
     }
 
     @Test
-    fun pressXInputButton_callsInjectKeyDown_returnsTrue() {
-        val held = subject.emitPress(BindingOutput.XInputButton("BUTTON_A"))
+    fun pressXInputButton_routesToVirtualGamepad_whenMvgAvailable() {
+        // MVG ready → "gamepad B" must drive the real virtual-gamepad button
+        // (BTN_B = 0x131), NOT a SOURCE_KEYBOARD key event (which GameNative read
+        // as a menu/back button instead of in-game gamepad B).
+        every { gamepad.setButton(0x131, true) } returns true
+        val held = subject.emitPress(BindingOutput.XInputButton("BUTTON_B"))
 
         assertTrue("XInputButton has a matching release edge", held)
+        verify(exactly = 1) { gamepad.setButton(0x131, true) }
+        verify(exactly = 0) { dispatcher.injectKeyDown(any()) }
+    }
+
+    @Test
+    fun pressXInputButton_fallsBackToKeyInject_whenMvgUnavailable() {
+        // No Shizuku → setButton returns false → fall back to key inject so digital
+        // remap still does something.
+        every { gamepad.setButton(any(), any()) } returns false
+        val held = subject.emitPress(BindingOutput.XInputButton("BUTTON_A"))
+
+        assertTrue(held)
         verify(exactly = 1) { dispatcher.injectKeyDown("BUTTON_A") }
     }
 
@@ -59,6 +76,26 @@ class OutputEmitterTest {
         verify { gamepad.setLeftStickOutput(1f, 0f) } // only right remains
         subject.emitRelease(BindingOutput.XInputStick("LEFT", "RIGHT"))
         verify { gamepad.setLeftStickOutput(0f, 0f) } // centered
+    }
+
+    @Test
+    fun pressXInputButton_axisL2_drivesAnalogTriggerNotDigitalButton() {
+        // AXIS_L2/R2 are the analog triggers (ABS_Z/RZ). A digital BTN_TL2/TR2 press is
+        // invisible to games reading the trigger axis, so these must drive the trigger
+        // OUTPUT to full — not setButton.
+        val held = subject.emitPress(BindingOutput.XInputButton("AXIS_L2"))
+        assertTrue(held)
+        verify(exactly = 1) { gamepad.setLeftTriggerOutput(1f) }
+        verify(exactly = 0) { gamepad.setButton(any(), any()) }
+        verify(exactly = 0) { dispatcher.injectKeyDown(any()) }
+    }
+
+    @Test
+    fun xInputButton_axisR2_releasesTriggerBackToZero() {
+        subject.emitPress(BindingOutput.XInputButton("AXIS_R2"))
+        verify { gamepad.setRightTriggerOutput(1f) }
+        subject.emitRelease(BindingOutput.XInputButton("AXIS_R2"))
+        verify { gamepad.setRightTriggerOutput(0f) }
     }
 
     @Test
@@ -121,7 +158,16 @@ class OutputEmitterTest {
     }
 
     @Test
-    fun releaseXInputButton_callsInjectKeyUp() {
+    fun releaseXInputButton_routesToVirtualGamepad_whenMvgAvailable() {
+        every { gamepad.setButton(0x131, false) } returns true
+        subject.emitRelease(BindingOutput.XInputButton("BUTTON_B"))
+        verify(exactly = 1) { gamepad.setButton(0x131, false) }
+        verify(exactly = 0) { dispatcher.injectKeyUp(any()) }
+    }
+
+    @Test
+    fun releaseXInputButton_fallsBackToKeyInject_whenMvgUnavailable() {
+        every { gamepad.setButton(any(), any()) } returns false
         subject.emitRelease(BindingOutput.XInputButton("BUTTON_A"))
         verify(exactly = 1) { dispatcher.injectKeyUp("BUTTON_A") }
     }

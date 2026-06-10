@@ -186,6 +186,49 @@ class TriggerModeSoftPressTest {
     }
 
     @Test
+    fun fullPull_synthesizedAtClickThreshold_notMidTravel() {
+        // Steam fires Full Pull at the END of travel. Mapo synthesizes full_pull from
+        // the analog axis at click_threshold (default 0.95), NOT the hardware digital
+        // click (which trips at ~2% on AYN Thor). A mid-travel 0.50 pull must not fire
+        // full_pull; a near-end 0.97 pull must.
+        TriggerMode.evaluate(reading(0.50f), ctx(priorLatched = false), emit, MouseEmitter.NOOP)
+        assertTrue(
+            "full_pull must not fire mid-travel, got $emits",
+            emits.none { it.first == TriggerMode.FULL_PULL_SUB_INPUT },
+        )
+        emits.clear()
+        TriggerMode.evaluate(reading(0.97f), ctx(priorLatched = false), emit, MouseEmitter.NOOP)
+        assertTrue(
+            "full_pull should fire near end of travel, got $emits",
+            emits.contains(TriggerMode.FULL_PULL_SUB_INPUT to true),
+        )
+    }
+
+    @Test
+    fun fullPull_releasesWhenTriggerBacksOff() {
+        // Latched at full (priorLatched only carries soft here; drive full via a high
+        // reading first), then back off below the click hysteresis band → full_pull UP.
+        TriggerMode.evaluate(reading(0.98f), ctx(priorLatched = false), emit, MouseEmitter.NOOP)
+        assertTrue(emits.contains(TriggerMode.FULL_PULL_SUB_INPUT to true))
+        emits.clear()
+        // priorLatched for full_pull must be threaded back in for the release edge.
+        val held = ModeContext(
+            source = InputSource.LEFT_TRIGGER,
+            settingsJson = TriggerMode.defaultSettingsJson(),
+            priorLatched = mapOf(
+                TriggerMode.SOFT_PULL_SUB_INPUT to true,
+                TriggerMode.FULL_PULL_SUB_INPUT to true,
+            ),
+            activeLayerIds = emptyList(),
+        )
+        TriggerMode.evaluate(reading(0.50f), held, emit, MouseEmitter.NOOP)
+        assertTrue(
+            "full_pull should release when trigger backs off the end, got $emits",
+            emits.contains(TriggerMode.FULL_PULL_SUB_INPUT to false),
+        )
+    }
+
+    @Test
     fun defaultSettings_matchSteamDefaults() {
         // Pins the Steam-Input defaults so a later mode change doesn't silently
         // drift away from parity.

@@ -7,6 +7,7 @@ import android.util.Log
 import android.widget.Toast
 import com.mapo.data.model.Profile
 import com.mapo.data.model.steam.InputSource
+import com.mapo.data.model.steam.isGamepadOutput
 import com.mapo.data.model.steam.requiresShizuku
 import com.mapo.data.repository.ProfileRepository
 import com.mapo.di.ApplicationScope
@@ -229,15 +230,21 @@ class ShizukuMotionCoordinator @Inject constructor(
         // the game. EVIOCGRAB is the silencing mechanism: grabbed = OS sees
         // nothing = game only sees what Mapo writes to the virtual gamepad =
         // NONE-mode source contributes zero to its slot = silenced.
-        val grab = breakdown.shouldEnable &&
-            (breakdown.gyroStickModeConfigured || breakdown.analogSourceHasNonDefaultMode)
-        if (prior?.let { p ->
-            (p.shouldEnable && (p.gyroStickModeConfigured || p.analogSourceHasNonDefaultMode)) != grab
-        } != false) {
+        // 2026-06-10: also grab whenever any binding emits a virtual-gamepad output.
+        // The MVG is only the game's controller while the physical pad is grabbed, so a
+        // gamepad-button/stick/trigger output is invisible to games unless we grab and
+        // present the MVG as the sole controller (device-default physical inputs pass
+        // through it). Universalizes gamepad output beyond the analog-source-mode case.
+        val grabClause = { b: PredicateBreakdown ->
+            b.gyroStickModeConfigured || b.analogSourceHasNonDefaultMode || b.gamepadOutputConfigured
+        }
+        val grab = breakdown.shouldEnable && grabClause(breakdown)
+        if (prior?.let { p -> (p.shouldEnable && grabClause(p)) != grab } != false) {
             Log.i(
                 TAG,
                 "grab transition → $grab (gyroStick=${breakdown.gyroStickModeConfigured} " +
-                    "analogNonDefault=${breakdown.analogSourceHasNonDefaultMode})",
+                    "analogNonDefault=${breakdown.analogSourceHasNonDefaultMode} " +
+                    "gamepadOutput=${breakdown.gamepadOutputConfigured})",
             )
         }
         tryToggleGrab(grab)
@@ -336,6 +343,9 @@ class ShizukuMotionCoordinator @Inject constructor(
         analogSourceHasNonDefaultMode = hasNonDefaultModeOnAnalogSource(
             compiled, activeSetId, activeLayers,
         ),
+        gamepadOutputConfigured = hasOutputInScope(compiled, activeSetId, activeLayers) {
+            it.isGamepadOutput()
+        },
         shizukuReady = shizukuReady,
     )
 
@@ -486,11 +496,23 @@ class ShizukuMotionCoordinator @Inject constructor(
          * synthesized output and the raw physical values simultaneously.
          */
         val analogSourceHasNonDefaultMode: Boolean = false,
+        /**
+         * 2026-06-10: true iff any binding in scope emits a virtual-gamepad output
+         * ([com.mapo.data.model.steam.BindingOutput.XInputButton] / `XInputStick`,
+         * incl. the AXIS_L2/R2 analog triggers). A gamepad output only reaches a game
+         * through the MVG, which is only the game's controller while the physical pad
+         * is grabbed — so binding one forces both enumeration (to pass the rest of the
+         * pad through) AND grab (so the MVG is the sole controller the game sees).
+         * Universalizes gamepad output: it now works in pure-digital configs (e.g.
+         * a face button in Button Pad mode bound to "gamepad A"), not just when an
+         * analog source mode happened to already grab.
+         */
+        val gamepadOutputConfigured: Boolean = false,
         val shizukuReady: Boolean,
     ) {
         val shouldEnable: Boolean
             get() = remapEnabled &&
-                (analogModeConfigured || analogSourceHasNonDefaultMode) &&
+                (analogModeConfigured || analogSourceHasNonDefaultMode || gamepadOutputConfigured) &&
                 shizukuReady
     }
 

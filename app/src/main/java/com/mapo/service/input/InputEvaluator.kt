@@ -475,6 +475,25 @@ class InputEvaluator @Inject constructor(
             Log.d(TAG, "handleDigital: NONE-mode source ${address.source} — consuming + silencing")
             return true
         }
+        // Analog TRIGGER mode owns full_pull via the analog axis. The hardware trigger
+        // CLICK (KEYCODE_BUTTON_L2/R2 → full_pull, or BTN_TL2/TR2 under grab) trips at a
+        // device-specific pull depth — ~2% on AYN Thor — which has nothing to do with
+        // Steam's "Full Pull = end of travel". TriggerMode.evaluate synthesizes full_pull
+        // (and soft_pull) from the analog magnitude at the configured thresholds, so
+        // ignore the hardware click here to avoid an early/duplicate fire. The analog
+        // synthesis reaches the engine via dispatchSyntheticEdge → onPress (not
+        // handleDigital), so this suppression doesn't touch it. Device Default keeps the
+        // hardware click (no sentinel/mode); Trigger (Digital)=SINGLE_BUTTON keeps it too.
+        if ((address.source == InputSource.LEFT_TRIGGER || address.source == InputSource.RIGHT_TRIGGER) &&
+            address.inputKey == TriggerMode.FULL_PULL_SUB_INPUT
+        ) {
+            val modeHere = lookupActive(address)?.mode
+                ?: lookupActive(InputAddress(address.source, SOURCE_MODE_SENTINEL_KEY))?.mode
+            if (modeHere == BindingMode.TRIGGER) {
+                Log.d(TAG, "handleDigital: ignoring hardware full_pull click on ${address.source} — analog TRIGGER mode owns it")
+                return true
+            }
+        }
         // Digital → joystick synthesis: a digital cluster (face buttons OR the D-Pad) in
         // JOYSTICK_MOVE mode emits a virtual gamepad stick rather than firing per-button
         // bindings. The sub-inputs aren't bindable in this mode (validInputsFor returns

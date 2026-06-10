@@ -112,6 +112,15 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
 
         private const val TAG = "InputAccessibilityService"
 
+        /**
+         * Name prefix of Mapo's own virtual uinput devices (gamepad / mouse / stylus —
+         * all "Mapo Virtual …"). Key events from these are skipped in [onKeyEvent] to
+         * break the MVG-output → onKeyEvent → re-fire feedback loop. Mirrors the
+         * `MAPO_VIRTUAL_DEVICE_PREFIX` the Shizuku UserService uses to skip them on the
+         * /dev/input read side.
+         */
+        private const val MAPO_VIRTUAL_DEVICE_PREFIX = "Mapo Virtual"
+
         /** Cursor-bounds margins. See field-decl comment for per-edge rationale. */
         private const val CURSOR_MARGIN_SIDE = 30
         private const val CURSOR_MARGIN_TOP = 50
@@ -464,6 +473,19 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     // ── Physical button interception (remap) ──────────────────────────────────
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        // Feedback-loop guard: ignore key events that originate from Mapo's OWN virtual
+        // gamepad (or any "Mapo Virtual …" uinput device). When a binding outputs a
+        // gamepad button, the MVG emits it and the OS dispatches that synthetic press
+        // right back into this accessibility key filter — which would re-run the same
+        // mapping and fire the MVG again, looping forever (e.g. mapping a face button to
+        // "gamepad B" → endless B presses, observed 2026-06-10). The Shizuku raw reader
+        // already skips these devices by this same name prefix; the accessibility filter
+        // must too. Return false so the event still reaches the game (which reads the MVG
+        // as its controller) — we simply don't re-process Mapo's own output.
+        val sourceDeviceName = event.device?.name
+        if (sourceDeviceName != null && sourceDeviceName.startsWith(MAPO_VIRTUAL_DEVICE_PREFIX)) {
+            return false
+        }
         // Log the intercepted event's displayId for diagnostics. Cache refresh happens
         // in injectRawKeyEvent (and via TYPE_WINDOWS_CHANGED) so it also covers virtual
         // button taps, which bypass onKeyEvent entirely.

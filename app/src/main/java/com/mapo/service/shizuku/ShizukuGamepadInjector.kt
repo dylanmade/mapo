@@ -68,6 +68,11 @@ class ShizukuGamepadInjector @Inject constructor(
     // alongside the per-source maps in push().
     private val leftStickOutput = FloatArray(2)
     private val rightStickOutput = FloatArray(2)
+    // Binding-output trigger contributions (not source-keyed) — a single net slot per
+    // trigger driven by AXIS_L2/AXIS_R2 gamepad-button OUTPUTS bound to arbitrary inputs.
+    // Summed alongside the per-source trigger maps in push(). 0.0..1.0.
+    private var leftTriggerOutput = 0f
+    private var rightTriggerOutput = 0f
     private val leftTriggerBySource = mutableMapOf<InputSource, Float>()
     private val rightTriggerBySource = mutableMapOf<InputSource, Float>()
     private val hatBySource = mutableMapOf<InputSource, IntArray>()
@@ -153,22 +158,46 @@ class ShizukuGamepadInjector @Inject constructor(
         push()
     }
 
+    override fun setLeftTriggerOutput(v: Float) {
+        synchronized(lock) { leftTriggerOutput = v }
+        push()
+    }
+
+    override fun setRightTriggerOutput(v: Float) {
+        synchronized(lock) { rightTriggerOutput = v }
+        push()
+    }
+
     override fun clearOutputSticks() {
         synchronized(lock) {
             leftStickOutput[0] = 0f; leftStickOutput[1] = 0f
             rightStickOutput[0] = 0f; rightStickOutput[1] = 0f
+            leftTriggerOutput = 0f; rightTriggerOutput = 0f
         }
         push()
     }
 
-    /** Press or release a gamepad button. `btnCode` is a `UinputGamepad.Buttons.*` int. */
-    override fun setButton(btnCode: Int, pressed: Boolean) {
-        if (!shizukuConnection.isReadyFlow.value) return
-        val service = shizukuConnection.service.value ?: return
-        try {
-            service.setGamepadButton(btnCode, pressed)
+    /**
+     * Press or release a gamepad button. `btnCode` is a `UinputGamepad.Buttons.*` int.
+     * Returns true if the button reached the virtual gamepad, false if Shizuku wasn't
+     * ready (caller should fall back to a key-event inject).
+     */
+    override fun setButton(btnCode: Int, pressed: Boolean): Boolean {
+        if (!shizukuConnection.isReadyFlow.value) {
+            Log.d(TAG, "setButton: Shizuku not ready — caller falls back (btn=0x${btnCode.toString(16)})")
+            return false
+        }
+        val service = shizukuConnection.service.value ?: run {
+            Log.d(TAG, "setButton: service binder null — caller falls back (btn=0x${btnCode.toString(16)})")
+            return false
+        }
+        return try {
+            val ok = service.setGamepadButton(btnCode, pressed)
+            Log.d(TAG, "setButton btn=0x${btnCode.toString(16)} pressed=$pressed → service returned $ok")
+            true
         } catch (t: Throwable) {
             Log.w(TAG, "setGamepadButton threw btnCode=0x${btnCode.toString(16)} pressed=$pressed", t)
+            false
         }
     }
 
@@ -183,9 +212,9 @@ class ShizukuGamepadInjector @Inject constructor(
             for (v in leftStickBySource.values) { lx += v[0]; ly += v[1] }
             var rx = rightStickOutput[0]; var ry = rightStickOutput[1]
             for (v in rightStickBySource.values) { rx += v[0]; ry += v[1] }
-            var lt = 0f
+            var lt = leftTriggerOutput
             for (v in leftTriggerBySource.values) lt += v
-            var rt = 0f
+            var rt = rightTriggerOutput
             for (v in rightTriggerBySource.values) rt += v
             var hx = 0; var hy = 0
             for (v in hatBySource.values) { hx += v[0]; hy += v[1] }

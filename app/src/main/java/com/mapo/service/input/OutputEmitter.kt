@@ -40,6 +40,10 @@ class OutputEmitter @Inject constructor(
     // analog-emulation pulse coroutine.
     private val stickLock = Any()
     private val stickHeld = HashMap<String, Int>()
+    // Held count per trigger side ("LEFT"/"RIGHT") for AXIS_L2/R2 outputs — multiple
+    // inputs can drive the same trigger, so a count keeps the analog axis at full until
+    // the last releases. Shares [stickLock].
+    private val triggerHeld = HashMap<String, Int>()
 
     /**
      * Returns true if [output] has a matching release edge — i.e. the evaluator must hold it.
@@ -57,8 +61,31 @@ class OutputEmitter @Inject constructor(
             true
         }
         is BindingOutput.XInputButton -> {
-            Log.d(TAG, "press XInputButton(${output.button})")
-            dispatcher.injectKeyDown(output.button)
+            // Route real gamepad buttons through the virtual gamepad (MVG) so games
+            // that read a gamepad InputDevice — GameNative / emulators — see an actual
+            // controller button. Injecting them as SOURCE_KEYBOARD KeyEvents (the old
+            // path) reached GameNative's *launcher/overlay* as a menu button (e.g.
+            // "gamepad B" opened its settings) but never the in-game Wine gamepad layer.
+            // Consistent with how XInputStick already drives the MVG. Falls back to key
+            // inject when the MVG is unavailable (no Shizuku) so digital remap still does
+            // something. DPAD_* and any unmapped token take the fallback (dpad output is
+            // a hat axis, not a button — separate path if it's ever needed).
+            val triggerSide = TRIGGER_OUTPUT_SIDES[output.button]
+            if (triggerSide != null) {
+                // AXIS_L2/R2 are the ANALOG triggers (ABS_Z / ABS_RZ) — what games +
+                // testers actually read. A digital BTN_TL2/TR2 press does NOT register
+                // as the trigger axis, so drive the analog output to full instead.
+                Log.d(TAG, "press XInputButton(${output.button}) → MVG analog trigger $triggerSide")
+                adjustTrigger(triggerSide, +1)
+            } else {
+                val btn = GAMEPAD_BUTTON_CODES[output.button]
+                if (btn != null && gamepad.setButton(btn, true)) {
+                    Log.d(TAG, "press XInputButton(${output.button}) → MVG btn=0x${btn.toString(16)}")
+                } else {
+                    Log.d(TAG, "press XInputButton(${output.button}) → key inject (MVG unavailable/unmapped)")
+                    dispatcher.injectKeyDown(output.button)
+                }
+            }
             true
         }
         is BindingOutput.XInputStick -> {
@@ -93,8 +120,20 @@ class OutputEmitter @Inject constructor(
                 dispatcher.injectKeyUp(output.keyCode)
             }
             is BindingOutput.XInputButton -> {
-                Log.d(TAG, "release XInputButton(${output.button})")
-                dispatcher.injectKeyUp(output.button)
+                // Mirror emitPress's routing decision (see there).
+                val triggerSide = TRIGGER_OUTPUT_SIDES[output.button]
+                if (triggerSide != null) {
+                    Log.d(TAG, "release XInputButton(${output.button}) → MVG analog trigger $triggerSide")
+                    adjustTrigger(triggerSide, -1)
+                } else {
+                    val btn = GAMEPAD_BUTTON_CODES[output.button]
+                    if (btn != null && gamepad.setButton(btn, false)) {
+                        Log.d(TAG, "release XInputButton(${output.button}) → MVG btn=0x${btn.toString(16)}")
+                    } else {
+                        Log.d(TAG, "release XInputButton(${output.button}) → key inject")
+                        dispatcher.injectKeyUp(output.button)
+                    }
+                }
             }
             is BindingOutput.XInputStick -> {
                 Log.d(TAG, "release XInputStick(${output.stick}/${output.direction})")
@@ -129,13 +168,50 @@ class OutputEmitter @Inject constructor(
         if (stick == "LEFT") gamepad.setLeftStickOutput(x, y) else gamepad.setRightStickOutput(x, y)
     }
 
-    /** Drop all held stick-output state + zero the slots. Called on mode/config change. */
+    /** Update the held count for [side]'s trigger and re-push its net analog value (0 or full). */
+    private fun adjustTrigger(side: String, delta: Int) {
+        val active = synchronized(stickLock) {
+            val n = (triggerHeld[side] ?: 0) + delta
+            if (n <= 0) triggerHeld.remove(side) else triggerHeld[side] = n
+            (triggerHeld[side] ?: 0) > 0
+        }
+        val v = if (active) 1f else 0f
+        if (side == "LEFT") gamepad.setLeftTriggerOutput(v) else gamepad.setRightTriggerOutput(v)
+    }
+
+    /** Drop all held stick/trigger-output state + zero the slots. Called on mode/config change. */
     fun resetStickOutputs() {
-        synchronized(stickLock) { stickHeld.clear() }
+        synchronized(stickLock) { stickHeld.clear(); triggerHeld.clear() }
         gamepad.clearOutputSticks()
     }
 
     companion object {
         private const val TAG = "OutputEmitter"
+
+        /**
+         * [BindingOutput.XInputButton] token ([DeviceButton] name) → virtual-gamepad
+         * `UinputGamepad.Buttons.*` (Linux `BTN_*`) code. Drives real controller buttons
+         * on the MVG instead of injecting SOURCE_KEYBOARD key events. AXIS_L2/R2 map to
+         * the trigger DIGITAL buttons (BTN_TL2/TR2). DPAD_* is intentionally absent — the
+         * d-pad is a hat axis on the gamepad, so those fall back to key inject.
+         */
+        private val GAMEPAD_BUTTON_CODES: Map<String, Int> = mapOf(
+            "BUTTON_A" to 0x130, "BUTTON_B" to 0x131,
+            "BUTTON_X" to 0x133, "BUTTON_Y" to 0x134,
+            "BUTTON_L1" to 0x136, "BUTTON_R1" to 0x137,
+            "BUTTON_SELECT" to 0x13a, "BUTTON_START" to 0x13b,
+            "BUTTON_THUMBL" to 0x13d, "BUTTON_THUMBR" to 0x13e,
+        )
+
+        /**
+         * [BindingOutput.XInputButton] tokens that are really the ANALOG triggers, not
+         * buttons → which MVG trigger side to drive. The triggers live on ABS_Z / ABS_RZ;
+         * a digital BTN_TL2/TR2 press is invisible to games/testers reading the trigger
+         * axis, so these route to [setLeftTriggerOutput] / [setRightTriggerOutput] instead.
+         */
+        private val TRIGGER_OUTPUT_SIDES: Map<String, String> = mapOf(
+            "AXIS_L2" to "LEFT",
+            "AXIS_R2" to "RIGHT",
+        )
     }
 }

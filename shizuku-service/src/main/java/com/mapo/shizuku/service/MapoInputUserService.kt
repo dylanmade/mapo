@@ -301,7 +301,11 @@ class MapoInputUserService : IMapoInputService.Stub() {
     }
 
     override fun setGamepadButton(btnCode: Int, pressed: Boolean): Boolean {
-        if (!UinputGamepad.isReady && !UinputGamepad.open()) return false
+        if (!UinputGamepad.isReady && !UinputGamepad.open()) {
+            Log.w(TAG, "setGamepadButton: gamepad not open (btn=0x${btnCode.toString(16)})")
+            return false
+        }
+        Log.d(TAG, "setGamepadButton btn=0x${btnCode.toString(16)} pressed=$pressed → uinput")
         return try {
             UinputGamepad.writeButton(btnCode, pressed)
             true
@@ -348,6 +352,25 @@ class MapoInputUserService : IMapoInputService.Stub() {
     override fun setGrabPhysicalControllers(grabbed: Boolean) {
         Log.i(TAG, "setGrabPhysicalControllers($grabbed)")
         grabPhysicalControllers.set(grabbed)
+        // Grabbing the physical controller(s) removes them from the OS entirely —
+        // the virtual gamepad becomes the game's ONLY gamepad. Create + neutralize
+        // it NOW, before the grab, rather than lazily on the first axis write. In a
+        // trigger-only config the triggers inject KEYS and never touch the gamepad,
+        // so without this the MVG wouldn't exist until some stick happened to move —
+        // leaving a window where the physical pad has vanished and no centered
+        // virtual replacement exists yet (observed as phantom stick deflection).
+        // open() is idempotent; writeAxes(0…) centers every stick/trigger/hat.
+        if (grabbed) {
+            if (UinputGamepad.isReady || UinputGamepad.open()) {
+                try {
+                    UinputGamepad.writeAxes(0, 0, 0, 0, 0, 0, 0, 0)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "neutralizing virtual gamepad on grab failed", t)
+                }
+            } else {
+                Log.w(TAG, "could not open virtual gamepad to neutralize before grab")
+            }
+        }
         // Apply to every currently-open classified gamepad. Devices that
         // are still Unknown will be grabbed at classification time (see
         // handleAbsEvent's first-axis-upgrades-classification branch).

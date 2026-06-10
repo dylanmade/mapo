@@ -279,8 +279,13 @@ interface GamepadEmitter {
      * contribution doesn't leak into the summed output.
      */
     fun clearSource(source: InputSource)
-    /** Press or release a gamepad button. `btnCode` is a `UinputGamepad.Buttons.*` int. */
-    fun setButton(btnCode: Int, pressed: Boolean)
+    /**
+     * Press or release a gamepad button. `btnCode` is a `UinputGamepad.Buttons.*` int.
+     * Returns true if the button was actually routed to the virtual gamepad (Shizuku
+     * ready), false if the MVG was unavailable — letting the caller fall back to a
+     * key-event inject so gamepad-button bindings still do *something* without Shizuku.
+     */
+    fun setButton(btnCode: Int, pressed: Boolean): Boolean
 
     /**
      * Binding-output stick contribution — a single non-source-keyed slot per stick for
@@ -290,7 +295,16 @@ interface GamepadEmitter {
      */
     fun setLeftStickOutput(x: Float, y: Float)
     fun setRightStickOutput(x: Float, y: Float)
-    /** Zero both binding-output stick slots (mode/config change cleanup). */
+    /**
+     * Binding-output trigger contribution — a single non-source-keyed slot per trigger
+     * for AXIS_L2/AXIS_R2 gamepad-button OUTPUTS bound to arbitrary inputs. Drives the
+     * analog trigger axis (ABS_Z / ABS_RZ) the way games + testers actually read the
+     * trigger — a digital BTN_TL2/TR2 press does NOT register as the trigger axis.
+     * 0.0..1.0.
+     */
+    fun setLeftTriggerOutput(v: Float)
+    fun setRightTriggerOutput(v: Float)
+    /** Zero both binding-output stick slots + trigger slots (mode/config change cleanup). */
     fun clearOutputSticks()
 
     companion object {
@@ -302,9 +316,11 @@ interface GamepadEmitter {
             override fun setRightTrigger(source: InputSource, v: Float) {}
             override fun setDpadHat(source: InputSource, x: Int, y: Int) {}
             override fun clearSource(source: InputSource) {}
-            override fun setButton(btnCode: Int, pressed: Boolean) {}
+            override fun setButton(btnCode: Int, pressed: Boolean): Boolean = false
             override fun setLeftStickOutput(x: Float, y: Float) {}
             override fun setRightStickOutput(x: Float, y: Float) {}
+            override fun setLeftTriggerOutput(v: Float) {}
+            override fun setRightTriggerOutput(v: Float) {}
             override fun clearOutputSticks() {}
         }
     }
@@ -692,6 +708,13 @@ object TriggerMode : SourceMode {
      */
     private const val SOFT_RELEASE_FLOOR = 0.02f
 
+    /**
+     * Hysteresis band for the analog full-pull edge. Fixed (not user-exposed) —
+     * the full pull sits near the end of travel where a wide dead-band prevents
+     * flutter as the user holds at maximum.
+     */
+    private const val FULL_PULL_HYSTERESIS = 0.05f
+
     override fun evaluate(
         reading: AnalogEvent,
         ctx: ModeContext,
@@ -700,29 +723,61 @@ object TriggerMode : SourceMode {
     ) {
         val settings = TriggerSettings.parse(ctx.settingsJson)
         val magnitude = reading.x  // triggers are 0..1 on x; y is always 0
-        val priorLatched = ctx.priorLatched[SOFT_PULL_SUB_INPUT] == true
-        // Press point floored above rest so a resting trigger never latches.
-        val press = settings.softThreshold.coerceAtLeast(SOFT_PRESS_FLOOR)
-        // Release point clamped strictly into (0, press): a hysteresis ≥ threshold
-        // would push `press - hysteresis` ≤ 0 and the latch would never clear.
-        val release = (press - settings.softHysteresis)
-            .coerceIn(SOFT_RELEASE_FLOOR, press - SOFT_RELEASE_FLOOR)
-        val nowLatched = if (priorLatched) {
-            // Stay latched until magnitude drops below the lower hysteresis band.
-            magnitude >= release
-        } else {
-            // Latch when magnitude crosses the press point upward.
-            magnitude >= press
-        }
+        // Soft pull — analog magnitude crosses the user's soft threshold.
+        evaluateStage(
+            subInput = SOFT_PULL_SUB_INPUT,
+            source = reading.source,
+            magnitude = magnitude,
+            priorLatched = ctx.priorLatched[SOFT_PULL_SUB_INPUT] == true,
+            rawThreshold = settings.softThreshold,
+            hysteresis = settings.softHysteresis,
+            digitalEmit = digitalEmit,
+        )
+        // Full pull — analog magnitude reaches the end-of-travel click threshold.
+        // Steam fires Full Pull at the very end of trigger travel; Mapo synthesizes
+        // it from the analog axis at `click_threshold` rather than the hardware
+        // digital click, which trips at a device-specific (often tiny) pull depth
+        // (~2% on AYN Thor). The hardware click is suppressed upstream in
+        // InputEvaluator.handleDigital while a trigger is in this mode.
+        evaluateStage(
+            subInput = FULL_PULL_SUB_INPUT,
+            source = reading.source,
+            magnitude = magnitude,
+            priorLatched = ctx.priorLatched[FULL_PULL_SUB_INPUT] == true,
+            rawThreshold = settings.clickThreshold,
+            hysteresis = FULL_PULL_HYSTERESIS,
+            digitalEmit = digitalEmit,
+        )
+    }
+
+    /**
+     * One soft/full pull latch stage. Floors the press point above rest so a
+     * resting trigger never latches, and clamps the release point strictly into
+     * `(0, press)` so a trigger returning to rest always clears the latch — a
+     * hysteresis ≥ threshold would otherwise push release ≤ 0 and wedge the latch
+     * on permanently (the 2026-06-09 soft-pull bug).
+     */
+    private fun evaluateStage(
+        subInput: String,
+        source: InputSource,
+        magnitude: Float,
+        priorLatched: Boolean,
+        rawThreshold: Float,
+        hysteresis: Float,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+    ) {
+        val press = rawThreshold.coerceIn(SOFT_PRESS_FLOOR, 1f)
+        val release = (press - hysteresis).coerceIn(SOFT_RELEASE_FLOOR, press - SOFT_RELEASE_FLOOR)
+        val nowLatched = if (priorLatched) magnitude >= release else magnitude >= press
         if (nowLatched != priorLatched) {
             Log.d(
                 "InputEvaluator.Motion",
-                "soft_pull edge ${reading.source} mag=${"%.3f".format(magnitude)} " +
+                "$subInput edge $source mag=${"%.3f".format(magnitude)} " +
                     "press=${"%.3f".format(press)} release=${"%.3f".format(release)} " +
-                    "(rawThreshold=${"%.3f".format(settings.softThreshold)} " +
-                    "hysteresis=${"%.3f".format(settings.softHysteresis)}) -> ${if (nowLatched) "DOWN" else "UP"}",
+                    "(rawThreshold=${"%.3f".format(rawThreshold)} hysteresis=${"%.3f".format(hysteresis)})" +
+                    " -> ${if (nowLatched) "DOWN" else "UP"}",
             )
-            digitalEmit(SOFT_PULL_SUB_INPUT, nowLatched)
+            digitalEmit(subInput, nowLatched)
         }
     }
 }

@@ -27,18 +27,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,11 +54,12 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.mapo.ui.compact.CompactDensity
@@ -71,7 +71,7 @@ import kotlin.math.roundToInt
 private enum class PickerMode(val label: String) {
     RGB("RGB"),
     HSV("HSV"),
-    THEME("Theme"),
+    COLORS("Colors"),
 }
 
 /** Light-grey baseplate shown behind translucent colors so alpha reads. */
@@ -94,7 +94,7 @@ private val CheckerBase = Color(0xFFCCCCCC)
  * `[h, s, v]` locally, because re-deriving HSV from the just-emitted RGB color drifts by ±1
  * each frame. The cache clears the moment an RGB/hex/theme edit redefines the color.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun MapoColorPickerDialog(
     initialColor: Color,
@@ -126,10 +126,15 @@ fun MapoColorPickerDialog(
     BasicAlertDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
+        // Fixed Surface width so the modal is the SAME width on the 4:3 bottom screen and the
+        // wider 16:9 top screen — it no longer stretches to fill 16:9. Order matters: the cap
+        // (widthIn) must precede fillMaxWidth, otherwise fillMaxWidth forces the node to full
+        // screen width and the cap only constrains the inner child. ~384dp ≈ the 4:3 screen minus
+        // its 24dp side margins; narrower screens fill gracefully (the cap simply doesn't bind).
         modifier = Modifier
-            .fillMaxWidth()
-            .widthIn(max = 600.dp)
-            .padding(24.dp),
+            .padding(24.dp)
+            .widthIn(max = 450.dp)
+            .fillMaxWidth(),
     ) {
         Surface(
             shape = RoundedCornerShape(28.dp),
@@ -150,12 +155,18 @@ fun MapoColorPickerDialog(
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(16.dp))
-                    SingleChoiceSegmentedButtonRow {
+                    // M3 expressive single-select connected button group.
+                    Row(horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
                         PickerMode.entries.forEachIndexed { i, m ->
-                            SegmentedButton(
-                                selected = mode == m,
-                                onClick = { mode = m },
-                                shape = SegmentedButtonDefaults.itemShape(i, PickerMode.entries.size),
+                            ToggleButton(
+                                checked = mode == m,
+                                onCheckedChange = { mode = m },
+                                shapes = when (i) {
+                                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                                    PickerMode.entries.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                                },
+                                modifier = Modifier.semantics { role = Role.RadioButton },
                             ) { Text(m.label, style = MaterialTheme.typography.labelMedium) }
                         }
                     }
@@ -170,8 +181,9 @@ fun MapoColorPickerDialog(
                         .padding(horizontal = 24.dp, vertical = 16.dp),
                 ) {
                     when (mode) {
-                        // Theme: labeled swatches fill the whole center; no wheel needed.
-                        PickerMode.THEME -> ThemeContent(selected, ::emitColor)
+                        // Colors: swatch sections (Recent / Theme / Common) fill the whole,
+                        // scrollable center; no wheel needed.
+                        PickerMode.COLORS -> ColorsContent(selected, ::emitColor)
                         // RGB / HSV: wheel on the left, slider controls on the right — each
                         // centered in its column, and the two columns centered against each other.
                         else -> Row(
@@ -187,7 +199,10 @@ fun MapoColorPickerDialog(
                                     saturation = displayHsv[1],
                                     value = displayHsv[2],
                                     onChange = { h, s -> emitHsv(h, s, displayHsv[2]) },
-                                    modifier = Modifier.widthIn(max = 260.dp).fillMaxWidth(),
+                                    // Capped below the narrowest screen's column width so the wheel
+                                    // is the SAME size on the 4:3 and 16:9 screens (no aspect-ratio
+                                    // scaling, no overflow → no center scrolling on the short 16:9).
+                                    modifier = Modifier.widthIn(max = 180.dp).fillMaxWidth(),
                                 )
                             }
                             Column(
@@ -231,12 +246,17 @@ fun MapoColorPickerDialog(
                     HexField(
                         selected = selected,
                         onColor = ::emitColor,
-                        modifier = Modifier.widthIn(max = 220.dp),
+                        modifier = Modifier.widthIn(max = 200.dp),
                     )
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { onConfirm(selected) }) { Text("Save") }
+                    TextButton(
+                        onClick = {
+                            ColorPickerRecents.add(selected)
+                            onConfirm(selected)
+                        },
+                    ) { Text("Save") }
                 }
             }
         }
@@ -255,16 +275,14 @@ fun ColorPickerButton(
     modifier: Modifier = Modifier,
     size: Dp = 36.dp,
 ) {
-    val outline = MaterialTheme.colorScheme.outline
     Box(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
             .clickable(onClick = onClick, role = Role.Button),
     ) {
-        Box(Modifier.matchParentSize().background(CheckerBase))
+        if (color.alpha < 1f) Box(Modifier.matchParentSize().background(CheckerBase))
         Box(Modifier.matchParentSize().background(color))
-        Box(Modifier.matchParentSize().border(1.dp, outline, CircleShape))
     }
 }
 
@@ -312,66 +330,94 @@ private fun HsvContent(hsv: FloatArray, alpha: Int, onHsv: (Float, Float, Float)
     }
 }
 
+/**
+ * The "Colors" tab: Photoshop-style square swatches grouped into labelled sections — Recent
+ * (process-lifetime picks), Theme (the live M3 colorScheme), and Common (per-hue light→dark
+ * ramps). The center area scrolls, so the Common section's many rows are fine.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ThemeContent(selected: Color, onColor: (Color) -> Unit) {
+private fun ColorsContent(selected: Color, onColor: (Color) -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val swatches = listOf(
-        "Primary" to scheme.primary,
-        "Primary\ncontainer" to scheme.primaryContainer,
-        "Secondary" to scheme.secondary,
-        "Secondary\ncontainer" to scheme.secondaryContainer,
-        "Tertiary" to scheme.tertiary,
-        "Tertiary\ncontainer" to scheme.tertiaryContainer,
-        "Error" to scheme.error,
-        "Error\ncontainer" to scheme.errorContainer,
-        "Surface" to scheme.surface,
-        "Surface\nvariant" to scheme.surfaceVariant,
-        "Outline" to scheme.outline,
-        "On surface" to scheme.onSurface,
+    val themeColors = listOf(
+        scheme.primary, scheme.primaryContainer,
+        scheme.secondary, scheme.secondaryContainer,
+        scheme.tertiary, scheme.tertiaryContainer,
+        scheme.error, scheme.errorContainer,
+        scheme.surface, scheme.surfaceVariant,
+        scheme.outline, scheme.onSurface,
     )
-    FlowRow(
+
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        swatches.forEach { (name, color) ->
-            // Compare RGB only (ignore alpha) so a swatch reads as selected regardless of opacity.
-            val isSelected = color.toArgb24() == selected.toArgb24()
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.width(56.dp),
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(color)
-                        .border(
-                            width = if (isSelected) 2.dp else 1.dp,
-                            color = if (isSelected) scheme.primary else scheme.outline,
-                            shape = CircleShape,
-                        )
-                        .clickable(onClick = { onColor(color) }, role = Role.Button),
+        if (ColorPickerRecents.colors.isNotEmpty()) {
+            ColorSection("Recent") {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    if (isSelected) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = null,
-                            tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
-                            modifier = Modifier.size(20.dp),
-                        )
+                    ColorPickerRecents.colors.forEach { Swatch(it, selected, onColor) }
+                }
+            }
+        }
+        ColorSection("Theme") {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                themeColors.forEach { Swatch(it, selected, onColor) }
+            }
+        }
+        ColorSection("Common") {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                CommonSwatches.rows.forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        row.forEach { Swatch(it, selected, onColor) }
                     }
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = scheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
             }
+        }
+    }
+}
+
+/** A section header (titleSmall) over its swatch [content]. */
+@Composable
+private fun ColorSection(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        content()
+    }
+}
+
+/** A square, tappable color chip with a selection ring + check when it matches [selected]. */
+@Composable
+private fun Swatch(color: Color, selected: Color, onColor: (Color) -> Unit, size: Dp = 28.dp) {
+    // Compare RGB only (ignore alpha) so a swatch reads as selected regardless of opacity.
+    val isSelected = color.toArgb24() == selected.toArgb24()
+    val shape = RoundedCornerShape(4.dp)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(size)
+            .clip(shape)
+            .clickable(onClick = { onColor(color) }, role = Role.Button),
+    ) {
+        if (color.alpha < 1f) Box(Modifier.matchParentSize().background(CheckerBase))
+        Box(Modifier.matchParentSize().background(color))
+        if (isSelected) {
+            Box(Modifier.matchParentSize().border(2.dp, MaterialTheme.colorScheme.primary, shape))
+            Icon(
+                Icons.Default.Check,
+                contentDescription = null,
+                tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
+                modifier = Modifier.size(16.dp),
+            )
         }
     }
 }
@@ -382,7 +428,6 @@ private fun ThemeContent(selected: Color, onColor: (Color) -> Unit) {
 @Composable
 private fun HexField(selected: Color, onColor: (Color) -> Unit, modifier: Modifier = Modifier) {
     val clipboard = LocalClipboardManager.current
-    val outline = MaterialTheme.colorScheme.outline
 
     // Decoupled from `selected` so a partial/invalid edit isn't clobbered; a committed (parsed)
     // edit flows through onColor, which re-syncs this via the effect.
@@ -390,10 +435,11 @@ private fun HexField(selected: Color, onColor: (Color) -> Unit, modifier: Modifi
     LaunchedEffect(selected.toArgb()) { hexText = selected.toHexString() }
 
     Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
-        Box(modifier = Modifier.size(28.dp).clip(CircleShape)) {
-            Box(Modifier.matchParentSize().background(CheckerBase))
+        Box(modifier = Modifier.size(34.dp).clip(CircleShape)) {
+            // Checker only when translucent — stacking it behind an opaque color let the grey
+            // peek through the circle's anti-aliased edge as a faint ring.
+            if (selected.alpha < 1f) Box(Modifier.matchParentSize().background(CheckerBase))
             Box(Modifier.matchParentSize().background(selected))
-            Box(Modifier.matchParentSize().border(1.dp, outline, CircleShape))
         }
         Spacer(Modifier.width(16.dp))
         CompactTextField(
@@ -443,7 +489,12 @@ private fun ChannelSlider(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val trackShape = RoundedCornerShape(8.dp)
-    val outline = MaterialTheme.colorScheme.outline
+    val trackHeight = 16.dp
+    val handleHeight = CompactDensity.DylansCut.sliderThumbHeight
+    // Gap fill matches the dialog surface (surfaceContainerHigh) so the strips flanking the
+    // handle read as the M3 track "gaps" around the thumb rather than as opaque blocks.
+    val gapColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    val handleColor = MaterialTheme.colorScheme.primary
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(14.dp))
@@ -454,30 +505,32 @@ private fun ChannelSlider(
             valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
             interactionSource = interactionSource,
             modifier = Modifier.weight(1f),
-            // "Dylan's Cut" variant: the stock M3 line handle, shortened to its 40dp thumb
-            // height so the slider stack packs tighter vertically. Fully vector, crisp.
+            // "Dylan's Cut" line handle (shortened to its 40dp thumb height) with surface-colored
+            // strips on each side — full handle height + a touch wider so the gap matches true M3.
             thumb = {
-                SliderDefaults.Thumb(
-                    interactionSource = interactionSource,
-                    thumbSize = DpSize(4.dp, CompactDensity.DylansCut.sliderThumbHeight),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.width(3.dp).height(handleHeight).background(gapColor))
+                    Box(
+                        Modifier
+                            .width(4.dp)
+                            .height(handleHeight)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(handleColor),
+                    )
+                    Box(Modifier.width(3.dp).height(handleHeight).background(gapColor))
+                }
             },
             track = {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(16.dp)
+                        .height(trackHeight)
                         .clip(trackShape),
                 ) {
                     if (checkerBackdrop) {
                         Box(Modifier.matchParentSize().background(CheckerBase))
                     }
-                    Box(
-                        Modifier
-                            .matchParentSize()
-                            .background(gradient)
-                            .border(1.dp, outline, trackShape),
-                    )
+                    Box(Modifier.matchParentSize().background(gradient))
                 }
             },
         )

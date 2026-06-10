@@ -5,7 +5,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -36,7 +35,6 @@ internal fun ColorWheel(
     onChange: (hue: Float, saturation: Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val outline = MaterialTheme.colorScheme.outline
     val thumbColor = hsvToColor(hue, saturation, value, 255)
 
     Canvas(
@@ -81,8 +79,6 @@ internal fun ColorWheel(
         if (value < 1f) {
             drawCircle(color = Color.Black.copy(alpha = 1f - value), radius = radius, center = c)
         }
-        // Rim outline for definition against the dialog surface.
-        drawCircle(color = outline, radius = radius, center = c, style = Stroke(width = 1.dp.toPx()))
 
         // Thumb at (hue angle, saturation radius).
         val rad = Math.toRadians(hue.toDouble())

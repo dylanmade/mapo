@@ -98,6 +98,41 @@ class ShizukuMotionCoordinatorTest {
     }
 
     @Test
+    fun gamepadStickOutput_inDigitalMode_forcesGrab() {
+        // 2026-06-10 universalization: a gamepad output (here an XInputStick bound under a
+        // digital BUTTON_PAD mode) only reaches a game through the grabbed MVG, so it must
+        // force both shouldEnable (enumeration) AND grab — even with no analog source mode.
+        val b = coordinator.evaluatePredicate(
+            compiled = digitalModeWithShizukuOutputConfig(),
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = true,
+        )
+        assertTrue(b.gamepadOutputConfigured)
+        assertTrue(b.shouldEnable)
+        // grab clause: gyroStick || analogNonDefault || gamepadOutput
+        assertFalse(b.analogSourceHasNonDefaultMode)
+        assertFalse(b.gyroStickModeConfigured)
+    }
+
+    @Test
+    fun gamepadButtonOutput_inDigitalMode_forcesGrabAndNeedsShizuku() {
+        // A face button (Button Pad mode) bound to "gamepad A" — the case the user hit.
+        val b = coordinator.evaluatePredicate(
+            compiled = digitalModeWithGamepadButtonOutputConfig(),
+            activeSetId = 1L,
+            activeLayers = emptyList(),
+            remapEnabled = true,
+            shizukuReady = true,
+        )
+        assertTrue(b.gamepadOutputConfigured)
+        assertTrue(b.shouldEnable)
+        // Drives the Shizuku-wanted alert surfaces too (XInputButton now requiresShizuku).
+        assertTrue(b.anyShizukuModeConfigured)
+    }
+
+    @Test
     fun analogMode_remapEnabled_shizukuReady_enables() {
         val b = coordinator.evaluatePredicate(
             compiled = analogConfig(),
@@ -461,6 +496,26 @@ class ShizukuMotionCoordinatorTest {
                     activatorId = 1L,
                     type = ActivatorType.FULL_PRESS,
                     bindings = listOf(BindingOutput.XInputStick("LEFT", "UP")),
+                ),
+            ),
+            mode = BindingMode.BUTTON_PAD,
+        )
+        val set = CompiledActionSet(
+            actionSetId = 1L,
+            inputs = mapOf(InputAddress(InputSource.BUTTON_DIAMOND, "button_a") to input),
+        )
+        return CompiledConfig(startingActionSetId = 1L, sets = mapOf(1L to set))
+    }
+
+    /** Digital mode (BUTTON_PAD) but a binding outputs a gamepad button ("gamepad A"). */
+    private fun digitalModeWithGamepadButtonOutputConfig(): CompiledConfig {
+        val input = CompiledInput(
+            groupInputId = 21L,
+            activators = listOf(
+                CompiledActivator(
+                    activatorId = 1L,
+                    type = ActivatorType.FULL_PRESS,
+                    bindings = listOf(BindingOutput.XInputButton("BUTTON_A")),
                 ),
             ),
             mode = BindingMode.BUTTON_PAD,

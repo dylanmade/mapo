@@ -19,6 +19,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -33,28 +34,49 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowRight
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
+import androidx.compose.material.icons.filled.AlignHorizontalCenter
+import androidx.compose.material.icons.filled.AlignHorizontalLeft
+import androidx.compose.material.icons.filled.AlignHorizontalRight
+import androidx.compose.material.icons.filled.AlignVerticalBottom
+import androidx.compose.material.icons.filled.AlignVerticalCenter
+import androidx.compose.material.icons.filled.AlignVerticalTop
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.GridOff
+import androidx.compose.material.icons.filled.FilterCenterFocus
+import androidx.compose.material.icons.filled.Grid4x4
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.HighlightAlt
+import androidx.compose.material.icons.filled.HorizontalDistribute
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.SubdirectoryArrowRight
+import androidx.compose.material.icons.filled.Style
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VerticalDistribute
+import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DrawerDefaults
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledIconToggleButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
@@ -72,10 +94,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -83,7 +110,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -173,16 +202,30 @@ class OverlayLiveEditController @Inject constructor(
         (OverlaySettings.SNAP_THRESHOLD_DP * context.resources.displayMetrics.density).roundToInt()
 
     private val elementWindows = mutableMapOf<Long, ElementWindow>()
+    // Resize chrome for the current selection: 4 corner-handle windows (+ a dashed bounding-box
+    // outline window when >1 button is selected). Rebuilt on selection change, repositioned as the
+    // selection moves/resizes. Null when nothing is selected.
+    private var selectionChrome: SelectionChrome? = null
+    private var selectionJob: Job? = null
     private var scrim: Pair<View, OverlayLifecycleOwner>? = null
     private var toolbar: Pair<View, OverlayLifecycleOwner>? = null
     private var toolbarParams: WindowManager.LayoutParams? = null
     private var configWindow: Pair<View, OverlayLifecycleOwner>? = null
     private var confirmWindow: Pair<View, OverlayLifecycleOwner>? = null
-    // Single shared dropdown-menu window (scope picker / copy / paste — only one shows at a time);
-    // kept out of the toolbar window so opening it never resizes the draggable toolbar.
-    private var menuWindow: Pair<View, OverlayLifecycleOwner>? = null
-    // Drives the toolbar's scope-dropdown arrow specifically (true only while the scope menu is up).
-    private val scopeMenuOpen = MutableStateFlow(false)
+    // The editor menu's ROOT is always-visible — it IS the toolbar window (a vertical panel with a
+    // drag handle top + bottom). Its submenus open as cascading fly-out windows, one per open
+    // level, tracked in [menuStack] (depth 1 = a submenu of a root row, 2 = a submenu of that, …).
+    // [menuScrim] is a full-screen catcher present only while a submenu is open, so an outside tap
+    // closes the submenus (the root panel stays put).
+    private val menuStack = mutableListOf<MenuWindow>()
+    private var menuScrim: Pair<View, OverlayLifecycleOwner>? = null
+    // Editor-local toggles surfaced under Options. "Show grid" has no renderer yet (gap); held
+    // here as an inert flag (like clipboardHasContent) so the switch animates. Grid size likewise
+    // displays the snap grid's division count but isn't editable yet.
+    private val showGrid = MutableStateFlow(false)
+    private val gridDivisions = MutableStateFlow(OverlaySettings.GRID_DIVISIONS)
+    // Align submenu's reference (Selection vs Canvas) — gates which align/space buttons are enabled.
+    private val alignTo = MutableStateFlow(AlignTarget.Selection)
 
     fun canShow(): Boolean = Settings.canDrawOverlays(context)
     fun isEditing(): Boolean = _editing.value
@@ -232,6 +275,10 @@ class OverlayLiveEditController @Inject constructor(
             collectJob = scope.launch {
                 overlayEditor.elements.collect { renderElements(it) }
             }
+            // Rebuild the resize chrome whenever the selection changes.
+            selectionJob = scope.launch {
+                selectedIds.collect { onSelectionChanged() }
+            }
             Log.i(TAG, "live edit started")
         }
     }
@@ -240,9 +287,12 @@ class OverlayLiveEditController @Inject constructor(
         runOnMain {
             collectJob?.cancel()
             collectJob = null
+            selectionJob?.cancel()
+            selectionJob = null
+            removeChrome()
             dismissConfig()
             dismissExitConfirm()
-            dismissMenu()
+            dismissSubmenus()
             elementWindows.keys.toList().forEach { detachElement(it) }
             scrim?.let { detach(it) }; scrim = null
             toolbar?.let { detach(it) }; toolbar = null
@@ -263,10 +313,12 @@ class OverlayLiveEditController @Inject constructor(
         val size = displaySizePx()
         val desired = elements.map { it.id }.toSet()
         elementWindows.keys.filter { it !in desired }.forEach { detachElement(it) }
+        var attachedNew = false
         elements.forEach { element ->
             val existing = elementWindows[element.id]
             if (existing == null) {
                 attachElement(element, size)
+                attachedNew = true
             } else {
                 existing.state.value = element
                 val p = existing.params
@@ -280,6 +332,9 @@ class OverlayLiveEditController @Inject constructor(
                 }
             }
         }
+        // A newly attached button window stacks above the chrome; re-raise the chrome so its
+        // handles stay on top and tappable. Otherwise just reposition it to the new geometry.
+        if (attachedNew && selectionChrome != null) onSelectionChanged() else updateSelectionChrome()
     }
 
     private fun attachElement(element: OverlayElement, size: Point) {
@@ -377,6 +432,8 @@ class OverlayLiveEditController @Inject constructor(
             w.params.y = (start.y + appliedDy).coerceIn(0, size.y - w.params.height)
             runCatching { windowManager.updateViewLayout(w.view, w.params) }
         }
+        // Keep the resize chrome glued to the selection as it moves.
+        updateSelectionChrome()
     }
 
     /**
@@ -427,6 +484,199 @@ class OverlayLiveEditController @Inject constructor(
         detach(w.view to w.owner)
     }
 
+    // ── resize chrome (corner handles + group transform box) ─────────────────────
+
+    /**
+     * Rebuild the resize chrome for the current selection. One button → four corner handles that
+     * rest on the button's corners and resize it directly. Several buttons → the same four handles
+     * on the **union** bounding box plus a dashed outline of that box; dragging a corner scales the
+     * whole group about the opposite (fixed) corner, Photoshop-style. Empty selection → no chrome.
+     */
+    private fun onSelectionChanged() {
+        removeChrome()
+        val ids = selectedIds.value
+        if (ids.isEmpty()) return
+        buildChrome(multi = ids.size > 1)
+        updateSelectionChrome()
+    }
+
+    private fun removeChrome() {
+        val chrome = selectionChrome ?: return
+        chrome.handles.values.forEach { detach(it.view to it.owner) }
+        chrome.box?.let { detach(it.view to it.owner) }
+        selectionChrome = null
+    }
+
+    private fun buildChrome(multi: Boolean) {
+        // Add the (passthrough) outline first so the handle windows stack above it.
+        val box = if (multi) addSelectionBoxWindow() else null
+        val handles = Corner.values().associateWith { addHandleWindow(it) }
+        selectionChrome = SelectionChrome(handles, box)
+    }
+
+    /** The selection's union bounding box in screen px, from the live window positions. */
+    private fun selectionBoxPx(): android.graphics.Rect? {
+        val rects = selectedIds.value.mapNotNull { id ->
+            elementWindows[id]?.params?.let { p ->
+                android.graphics.Rect(p.x, p.y, p.x + p.width, p.y + p.height)
+            }
+        }
+        if (rects.isEmpty()) return null
+        return android.graphics.Rect(
+            rects.minOf { it.left }, rects.minOf { it.top },
+            rects.maxOf { it.right }, rects.maxOf { it.bottom },
+        )
+    }
+
+    /** Reposition the chrome windows onto the current selection bounding box. No-op if no chrome. */
+    private fun updateSelectionChrome() {
+        val chrome = selectionChrome ?: return
+        val box = selectionBoxPx() ?: return
+        val half = (HANDLE_TOUCH_DP * context.resources.displayMetrics.density / 2f).roundToInt()
+        chrome.handles.forEach { (corner, h) ->
+            val (cx, cy) = corner.cornerOf(box)
+            h.params.x = cx - half
+            h.params.y = cy - half
+            runCatching { windowManager.updateViewLayout(h.view, h.params) }
+        }
+        chrome.box?.let { b ->
+            b.params.x = box.left; b.params.y = box.top
+            b.params.width = box.width().coerceAtLeast(1); b.params.height = box.height().coerceAtLeast(1)
+            runCatching { windowManager.updateViewLayout(b.view, b.params) }
+        }
+    }
+
+    private fun addHandleWindow(corner: Corner): HandleWindow {
+        val owner = OverlayLifecycleOwner()
+        val onTouch = makeHandleTouch(corner)
+        val view = ComposeView(context).apply {
+            attachOwner(owner)
+            setContent { MapoTheme { HandleDot(onTouch) } }
+        }
+        owner.resumeTo()
+        val sizePx = (HANDLE_TOUCH_DP * context.resources.displayMetrics.density).roundToInt()
+        val params = layoutParams(width = sizePx, height = sizePx, focusable = false).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+        runCatching { windowManager.addView(view, params) }
+            .onFailure { Log.e(TAG, "addView(handle $corner) failed", it) }
+        return HandleWindow(corner, view, owner, params)
+    }
+
+    private fun addSelectionBoxWindow(): BoxWindow {
+        val owner = OverlayLifecycleOwner()
+        val view = ComposeView(context).apply {
+            attachOwner(owner)
+            setContent { MapoTheme { SelectionBoxOutline() } }
+        }
+        owner.resumeTo()
+        // Passthrough (NOT_TOUCHABLE): the dashed outline must never steal a touch from a button.
+        val params = layoutParams(width = 1, height = 1, focusable = false, touchable = false).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+        runCatching { windowManager.addView(view, params) }
+            .onFailure { Log.e(TAG, "addView(selection box) failed", it) }
+        return BoxWindow(view, owner, params)
+    }
+
+    /**
+     * Touch handler for a corner handle. Like the button drag, it works in raw screen coords
+     * anchored at touch-down — essential here because the handle window itself moves under the
+     * finger as the box resizes. Captures the box + each selected button's rect at DOWN, then on
+     * MOVE re-derives the box from the dragged corner and scales every button about the fixed
+     * (opposite) corner. Commits the whole group in one batch on UP (no per-window flash).
+     */
+    private fun makeHandleTouch(corner: Corner): (MotionEvent) -> Boolean {
+        var startRawX = 0f
+        var startRawY = 0f
+        var startBox = android.graphics.Rect()
+        var startRects: Map<Long, android.graphics.Rect> = emptyMap()
+        var dragging = false
+        return { ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startRawX = ev.rawX; startRawY = ev.rawY
+                    dragging = false
+                    startBox = selectionBoxPx() ?: android.graphics.Rect()
+                    startRects = selectedIds.value.mapNotNull { id ->
+                        elementWindows[id]?.params?.let { p ->
+                            id to android.graphics.Rect(p.x, p.y, p.x + p.width, p.y + p.height)
+                        }
+                    }.toMap()
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = ev.rawX - startRawX
+                    val dy = ev.rawY - startRawY
+                    if (!dragging && hypot(dx, dy) > touchSlop) dragging = true
+                    if (dragging && !startBox.isEmpty && startRects.isNotEmpty()) {
+                        resizeSelection(corner, startBox, startRects, dx.roundToInt(), dy.roundToInt())
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (dragging) onElementsDragEnd(startRects.keys)
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** Apply a corner drag: derive the new box, then scale every selected button about the fixed corner. */
+    private fun resizeSelection(
+        corner: Corner,
+        startBox: android.graphics.Rect,
+        startRects: Map<Long, android.graphics.Rect>,
+        dx: Int,
+        dy: Int,
+    ) {
+        if (startBox.width() <= 0 || startBox.height() <= 0) return
+        val size = displaySizePx()
+        val minWpx = (OverlayEditor.MIN_SIZE * size.x).roundToInt().coerceAtLeast(1)
+        val minHpx = (OverlayEditor.MIN_SIZE * size.y).roundToInt().coerceAtLeast(1)
+        // Smallest box that keeps every button at/above MIN_SIZE after scaling.
+        val minBoxW = (startBox.width() * startRects.values.maxOf { minWpx.toFloat() / it.width() })
+            .roundToInt().coerceIn(1, startBox.width())
+        val minBoxH = (startBox.height() * startRects.values.maxOf { minHpx.toFloat() / it.height() })
+            .roundToInt().coerceIn(1, startBox.height())
+
+        val newBox = resizedBox(startBox, corner, dx, dy, minBoxW, minBoxH, size)
+        val sx = newBox.width().toFloat() / startBox.width()
+        val sy = newBox.height().toFloat() / startBox.height()
+        val (anchorX, anchorY) = corner.fixedCornerOf(startBox)
+
+        startRects.forEach { (id, er) ->
+            val w = elementWindows[id] ?: return@forEach
+            w.params.x = (anchorX + (er.left - anchorX) * sx).roundToInt()
+            w.params.y = (anchorY + (er.top - anchorY) * sy).roundToInt()
+            w.params.width = (er.width() * sx).roundToInt().coerceAtLeast(1)
+            w.params.height = (er.height() * sy).roundToInt().coerceAtLeast(1)
+            runCatching { windowManager.updateViewLayout(w.view, w.params) }
+        }
+        updateSelectionChrome()
+    }
+
+    /** New box rect after dragging [corner] by [dx]/[dy], with min-size + screen clamping. */
+    private fun resizedBox(
+        start: android.graphics.Rect,
+        corner: Corner,
+        dx: Int,
+        dy: Int,
+        minW: Int,
+        minH: Int,
+        size: Point,
+    ): android.graphics.Rect {
+        var left = start.left; var top = start.top; var right = start.right; var bottom = start.bottom
+        val leftMoved = corner == Corner.TopLeft || corner == Corner.BottomLeft
+        val topMoved = corner == Corner.TopLeft || corner == Corner.TopRight
+        if (leftMoved) left = (start.left + dx).coerceIn(0, right - minW)
+        else right = (start.right + dx).coerceIn(left + minW, size.x)
+        if (topMoved) top = (start.top + dy).coerceIn(0, bottom - minH)
+        else bottom = (start.bottom + dy).coerceIn(top + minH, size.y)
+        return android.graphics.Rect(left, top, right, bottom)
+    }
+
     // ── scrim + toolbar + config ────────────────────────────────────────────────
 
     private fun addScrim() {
@@ -475,9 +725,9 @@ class OverlayLiveEditController @Inject constructor(
                 MotionEvent.ACTION_DOWN -> {
                     startRawX = ev.rawX; startRawY = ev.rawY
                     startX = p?.x ?: 0; startY = p?.y ?: 0
-                    // Close any open dropdown (its own window, anchored to the toolbar) so it
-                    // doesn't float detached while the toolbar moves.
-                    dismissMenu()
+                    // Close any open submenus (their windows are anchored to the toolbar) so they
+                    // don't float detached while the toolbar moves.
+                    dismissSubmenus()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -854,30 +1104,135 @@ class OverlayLiveEditController @Inject constructor(
         confirmWindow = null
     }
 
-    // ── toolbar dropdown menus (one shared window) ───────────────────────────────
+    // ── editor menu (always-visible root panel + cascading fly-out submenus) ──────
+    //
+    // The ROOT menu IS the toolbar window: an always-visible vertical panel with a drag handle on
+    // top + bottom. A root row with a submenu shows a trailing right arrow and opens a cascading
+    // fly-out window beside it; deeper rows cascade further. Fly-outs are clamped fully on-screen
+    // (worst case overlapping their parent). [menuStack] holds the open fly-out levels (depth 1 =
+    // a submenu of a root row); the root panel is depth 0 and is never in the stack.
 
-    /** A single dropdown-menu row: label + enabled/selected/indent styling + action. */
-    private data class MenuItem(
-        val label: String,
-        val enabled: Boolean = true,
-        val selected: Boolean = false,
-        val indent: Boolean = false,
-        val onClick: () -> Unit,
+    /** A trailing affordance on a menu row. (A submenu's right-arrow is implied by [MenuEntry.Item.submenu].) */
+    private sealed interface MenuTrailing {
+        data object None : MenuTrailing
+        data class Check(val checked: Boolean, val onToggle: (Boolean) -> Unit) : MenuTrailing
+        data class Value(val text: String) : MenuTrailing
+    }
+
+    /** One menu entry: a divider, or an item (leaf action, submenu opener, or a split select+submenu row). */
+    private sealed interface MenuEntry {
+        data object Divider : MenuEntry
+        data class Item(
+            val label: String,
+            val enabled: Boolean = true,
+            val selected: Boolean = false,
+            // Selected rows also show a trailing check (in addition to the theme-color text).
+            val indent: Boolean = false,
+            val leadingIcon: ImageVector? = null,
+            val trailing: MenuTrailing = MenuTrailing.None,
+            // When true a leaf action closes only THIS submenu level (keeps its parent open) — used
+            // by in-menu pickers like Align-to. Default leaves close every open submenu.
+            val closeToParentOnly: Boolean = false,
+            // Non-null → a cascading fly-out submenu (shows a right arrow). @Composable + lazy so a
+            // submenu's contents (e.g. live switch state) recompose when built.
+            val submenu: (@Composable () -> List<MenuEntry>)? = null,
+            // Leaf action. With a [submenu] also present, the row is SPLIT: body = onClick, arrow = open.
+            val onClick: (() -> Unit)? = null,
+        ) : MenuEntry
+    }
+
+    private class MenuWindow(
+        val view: View,
+        val owner: OverlayLifecycleOwner,
+        val params: WindowManager.LayoutParams,
+        val depth: Int,
+        // Label of the row that opened this fly-out, so re-tapping that row toggles it closed.
+        val sourceKey: String,
     )
 
+    /** Geometry (x, width, y) of the parent at [parentDepth]: depth 0 = the always-visible toolbar. */
+    private fun parentMenuGeometry(parentDepth: Int): Triple<Int, Int, Int>? {
+        if (parentDepth == 0) {
+            val v = toolbar?.first ?: return null
+            val p = toolbarParams ?: return null
+            return Triple(p.x, v.width, p.y)
+        }
+        val mw = menuStack.getOrNull(parentDepth - 1) ?: return null
+        return Triple(mw.params.x, mw.view.width, mw.params.y)
+    }
+
+    /** Re-tapping the row that opened the current fly-out at this depth closes it; else (re)open. */
+    private fun toggleSubmenu(
+        parentDepth: Int,
+        rowTop: Int,
+        sourceKey: String,
+        builder: @Composable () -> List<MenuEntry>,
+    ) = runOnMain {
+        // A fly-out opened from a row at [parentDepth] lives at stack index parentDepth.
+        val openHere = menuStack.getOrNull(parentDepth)
+        if (openHere != null && openHere.sourceKey == sourceKey) truncateMenusTo(parentDepth)
+        else openSubmenu(parentDepth, rowTop, sourceKey, builder)
+    }
+
     /**
-     * Show a dropdown menu in its **own** window docked just under the toolbar. Kept out of the
-     * toolbar window so opening it never resizes the toolbar — a resize animated the dragged
-     * toolbar back to its pre-drag spot. Only one menu shows at a time (scope / copy / paste).
+     * Open a submenu of the row at [rowTopInParent] (px from the parent window's top) inside the
+     * level at [parentDepth]. Closes any deeper levels first, then anchors the child to the parent's
+     * right edge at the row's height — clamped on-screen by [pushMenuLevel].
      */
-    private fun showMenu(items: List<MenuItem>) {
-        dismissMenu()
-        val toolbarView = toolbar?.first ?: return
-        val tp = toolbarParams ?: return
+    private fun openSubmenu(
+        parentDepth: Int,
+        rowTopInParent: Int,
+        sourceKey: String,
+        builder: @Composable () -> List<MenuEntry>,
+    ) = runOnMain {
+        truncateMenusTo(parentDepth)
+        // Ensure the outside-tap catcher sits just below the fly-out we're about to add.
+        if (menuScrim == null) addMenuScrim()
+        val (px, pw, py) = parentMenuGeometry(parentDepth) ?: return@runOnMain
+        pushMenuLevel(
+            depth = parentDepth + 1,
+            sourceKey = sourceKey,
+            anchorLeft = px + pw,
+            anchorTop = py + rowTopInParent,
+            builder = builder,
+        )
+    }
+
+    /** Full-screen touch catcher below the fly-out windows: an outside tap closes the submenus. */
+    private fun addMenuScrim() {
         val owner = OverlayLifecycleOwner()
         val view = ComposeView(context).apply {
             attachOwner(owner)
-            setContent { MapoTheme { MenuContent(items) } }
+            setContent {
+                Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { dismissSubmenus() } })
+            }
+        }
+        owner.resumeTo()
+        val params = layoutParams(
+            width = WindowManager.LayoutParams.MATCH_PARENT,
+            height = WindowManager.LayoutParams.MATCH_PARENT,
+            focusable = false,
+        )
+        runCatching { windowManager.addView(view, params) }
+            .onFailure { Log.e(TAG, "addView(menu scrim) failed", it); return }
+        menuScrim = view to owner
+    }
+
+    /**
+     * Add a fly-out window at ([anchorLeft], [anchorTop]), then clamp it fully on-screen once
+     * measured (a ComposeView only composes after it's attached, so we measure post-add and nudge).
+     */
+    private fun pushMenuLevel(
+        depth: Int,
+        sourceKey: String,
+        anchorLeft: Int,
+        anchorTop: Int,
+        builder: @Composable () -> List<MenuEntry>,
+    ) {
+        val owner = OverlayLifecycleOwner()
+        val view = ComposeView(context).apply {
+            attachOwner(owner)
+            setContent { MapoTheme { CascadeMenuLevel(depth, builder) } }
         }
         owner.resumeTo()
         val params = layoutParams(
@@ -886,107 +1241,349 @@ class OverlayLiveEditController @Inject constructor(
             focusable = false,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = tp.x
-            y = tp.y + toolbarView.height
-            // Conventional dropdown motion (scale-from-top-start + fade). Enter plays on addView;
-            // exit plays because dismiss removes via removeView (detachAnimated).
+            x = anchorLeft
+            y = anchorTop
             windowAnimations = com.mapo.R.style.Animation_Mapo_Dropdown
         }
         runCatching { windowManager.addView(view, params) }
-            .onFailure { Log.e(TAG, "addView(menu) failed", it); return }
-        menuWindow = view to owner
+            .onFailure { Log.e(TAG, "addView(menu level $depth) failed", it); return }
+        menuStack.add(MenuWindow(view, owner, params, depth, sourceKey))
+        view.post {
+            val unspec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            view.measure(unspec, unspec)
+            val size = displaySizePx()
+            val nx = anchorLeft.coerceIn(0, maxOf(0, size.x - view.measuredWidth))
+            val ny = anchorTop.coerceIn(0, maxOf(0, size.y - view.measuredHeight))
+            if (nx != params.x || ny != params.y) {
+                params.x = nx; params.y = ny
+                runCatching { windowManager.updateViewLayout(view, params) }
+            }
+        }
     }
 
+    /** Close fly-out levels until only [keep] remain (keep = 0 closes them all; the root panel stays). */
+    private fun truncateMenusTo(keep: Int) {
+        while (menuStack.size > keep) {
+            val mw = menuStack.removeAt(menuStack.size - 1)
+            detachAnimated(mw.view to mw.owner)
+        }
+        // No fly-outs left → drop the outside-tap catcher.
+        if (menuStack.isEmpty()) {
+            menuScrim?.let { detach(it) }
+            menuScrim = null
+        }
+    }
+
+    private fun dismissSubmenus() = truncateMenusTo(0)
+
     @Composable
-    private fun MenuContent(items: List<MenuItem>) {
+    private fun CascadeMenuLevel(depth: Int, builder: @Composable () -> List<MenuEntry>) {
+        // surfaceContainerHighest — menu container (canonical M3 menu surface).
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHighest,
             shape = MaterialTheme.shapes.medium,
             tonalElevation = 6.dp,
         ) {
-            Column(
-                modifier = Modifier
-                    .widthIn(min = 180.dp, max = 300.dp)
-                    .heightIn(max = 320.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                items.forEach { item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = item.enabled) {
-                                item.onClick()
-                                dismissMenu()
-                            }
-                            .padding(
-                                start = if (item.indent) 32.dp else 16.dp,
-                                end = 24.dp,
-                                top = 12.dp,
-                                bottom = 12.dp,
-                            ),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = item.label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = when {
-                                // 0.38 = M3 disabled-content opacity (no dedicated scheme token).
-                                !item.enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                                item.selected -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                    }
+            MenuList(depth = depth, builder = builder, modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT_DP.dp))
+        }
+    }
+
+    /** The column of menu rows shared by the root panel (toolbar) and every fly-out window. */
+    @Composable
+    private fun MenuList(
+        depth: Int,
+        builder: @Composable () -> List<MenuEntry>,
+        modifier: Modifier = Modifier,
+    ) {
+        Column(
+            modifier = modifier
+                .width(MENU_WIDTH_DP.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            builder().forEach { entry ->
+                when (entry) {
+                    is MenuEntry.Divider -> HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                    is MenuEntry.Item -> MenuRow(entry, depth)
                 }
             }
         }
     }
 
-    private fun dismissMenu() {
-        menuWindow?.let { detachAnimated(it) }
-        menuWindow = null
-        scopeMenuOpen.value = false
-    }
-
-    // ── scope picker ─────────────────────────────────────────────────────────────
-
-    private fun toggleScopeMenu() = runOnMain {
-        if (scopeMenuOpen.value) dismissMenu() else showScopeMenu()
-    }
-
-    /** The action-set/layer picker. Layers are indented under their set; current is highlighted. */
-    private fun showScopeMenu() {
-        val current = overlayEditor.editingScope.value
-        val items = overlayEditor.availableScopes.value.map { option ->
-            MenuItem(
-                label = option.label,
-                selected = option.scope == current,
-                indent = option.isLayer,
-                onClick = { overlayEditor.setScope(option.scope) },
-            )
+    @Composable
+    private fun MenuRow(item: MenuEntry.Item, depth: Int) {
+        var rowTop by remember { mutableStateOf(0) }
+        val hasSub = item.submenu != null
+        val trailing = item.trailing
+        // Check row toggles in place; leaf action runs + closes submenus (or just this one if
+        // closeToParentOnly); a pure submenu row toggles its fly-out. (A split row — onClick AND
+        // submenu — selects on the body and exposes the arrow as its own tap target below.)
+        val leafClose: () -> Unit =
+            if (item.closeToParentOnly) ({ truncateMenusTo(depth - 1) }) else ({ dismissSubmenus() })
+        val rowClick: (() -> Unit)? = when {
+            !item.enabled -> null
+            trailing is MenuTrailing.Check -> ({ trailing.onToggle(!trailing.checked) })
+            item.onClick != null -> ({ item.onClick!!.invoke(); leafClose() })
+            hasSub -> ({ toggleSubmenu(depth, rowTop, item.label, item.submenu!!) })
+            else -> null
         }
-        showMenu(items)
-        scopeMenuOpen.value = true // set AFTER showMenu (its dismissMenu resets the flag first)
+        val contentColor = when {
+            // 0.38 = M3 disabled-content opacity (no dedicated scheme token).
+            !item.enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            item.selected -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.onSurface
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .onGloballyPositioned { rowTop = it.positionInWindow().y.roundToInt() }
+                .then(if (rowClick != null) Modifier.clickable(onClick = rowClick) else Modifier)
+                .padding(start = if (item.indent) 28.dp else 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item.leadingIcon?.let {
+                Icon(it, contentDescription = null, tint = contentColor, modifier = Modifier.size(18.dp))
+            }
+            Text(
+                text = item.label,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+                color = contentColor,
+            )
+            // Selected rows get a check (on top of the theme-color label).
+            if (item.selected) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "Selected",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            when (trailing) {
+                is MenuTrailing.Check ->
+                    // onCheckedChange = null so the ROW owns the toggle (whole row is tappable).
+                    Checkbox(checked = trailing.checked, onCheckedChange = null, enabled = item.enabled)
+                is MenuTrailing.Value ->
+                    Text(
+                        trailing.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                MenuTrailing.None -> {}
+            }
+            if (hasSub) {
+                val arrow = Icons.AutoMirrored.Filled.ArrowRight
+                if (item.onClick != null) {
+                    // Split row: arrow is its own tap target so the body can keep its select action.
+                    Icon(
+                        arrow,
+                        contentDescription = "Open submenu",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable(enabled = item.enabled) { toggleSubmenu(depth, rowTop, item.label, item.submenu!!) }
+                            .padding(2.dp)
+                            .size(18.dp),
+                    )
+                } else {
+                    Icon(
+                        arrow,
+                        contentDescription = null,
+                        tint = if (item.enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
     }
 
-    // ── copy / paste menus (UI-only stubs; see clipboardHasContent) ──────────────
+    // ── menu content builders ────────────────────────────────────────────────────
 
-    private fun showCopyMenu() = runOnMain {
-        showMenu(
-            listOf(
-                MenuItem("Copy") { onCopy(styleOnly = false) },
-                MenuItem("Copy style") { onCopy(styleOnly = true) },
-            ),
-        )
+    /** Log-only placeholder for menu actions whose real behavior isn't built yet (see gap list). */
+    private fun menuGap(name: String) {
+        Log.i(TAG, "editor menu action not implemented yet: $name")
     }
 
-    private fun showPasteMenu() = runOnMain {
-        val hasSelection = selectedIds.value.isNotEmpty()
-        showMenu(
-            listOf(
-                MenuItem("Paste as new") { onPaste(asOverride = false) },
-                MenuItem("Paste as override", enabled = hasSelection) { onPaste(asOverride = true) },
-            ),
+    @Composable
+    private fun RootMenuEntries(): List<MenuEntry> {
+        val sel by selectedIds.collectAsStateWithLifecycle()
+        val scopes by overlayEditor.availableScopes.collectAsStateWithLifecycle()
+        val currentScope by overlayEditor.editingScope.collectAsStateWithLifecycle()
+        val hasClipboard by clipboardHasContent.collectAsStateWithLifecycle()
+        val hasSel = sel.isNotEmpty()
+        val singleSel = sel.size == 1
+        val currentLabel = scopes.firstOrNull { it.scope == currentScope }?.label ?: "No action set"
+
+        return buildList {
+            add(MenuEntry.Item(label = currentLabel, leadingIcon = Icons.Default.Layers, submenu = { ScopeSetEntries() }))
+            add(MenuEntry.Divider)
+            add(
+                MenuEntry.Item(
+                    "Add",
+                    leadingIcon = Icons.Default.Add,
+                    submenu = {
+                        listOf(
+                            MenuEntry.Item("Add new", leadingIcon = Icons.Default.Add, onClick = { overlayEditor.addDefaultElement() }),
+                            MenuEntry.Item("Add template", leadingIcon = Icons.Default.Widgets, onClick = { menuGap("Add template") }),
+                        )
+                    },
+                ),
+            )
+            add(
+                MenuEntry.Item(
+                    "Edit",
+                    leadingIcon = Icons.Default.Edit,
+                    enabled = singleSel,
+                    onClick = { sel.singleOrNull()?.let { showConfig(it) } },
+                ),
+            )
+            add(MenuEntry.Item("Copy", leadingIcon = Icons.Default.ContentCopy, enabled = hasSel, onClick = { onCopy(styleOnly = false) }))
+            add(
+                MenuEntry.Item(
+                    "Paste",
+                    leadingIcon = Icons.Default.ContentPaste,
+                    enabled = hasClipboard,
+                    submenu = {
+                        listOf(
+                            MenuEntry.Item("Paste new", leadingIcon = Icons.Default.ContentPaste, onClick = { onPaste(asOverride = false) }),
+                            MenuEntry.Item("Paste style", leadingIcon = Icons.Default.Style, enabled = hasSel, onClick = { onPaste(asOverride = true) }),
+                        )
+                    },
+                ),
+            )
+            add(MenuEntry.Item("Align", leadingIcon = Icons.Default.AlignHorizontalLeft, submenu = { AlignEntries() }))
+            add(
+                MenuEntry.Item(
+                    "Templatize",
+                    leadingIcon = Icons.Default.Widgets,
+                    submenu = {
+                        listOf(
+                            MenuEntry.Item("Whole overlay", leadingIcon = Icons.Default.SelectAll, onClick = { menuGap("Templatize whole overlay") }),
+                            MenuEntry.Item("Selection", leadingIcon = Icons.Default.HighlightAlt, enabled = hasSel, onClick = { menuGap("Templatize selection") }),
+                        )
+                    },
+                ),
+            )
+            add(MenuEntry.Item("Delete", leadingIcon = Icons.Default.Delete, enabled = hasSel, onClick = { deleteSelected() }))
+            add(MenuEntry.Divider)
+            add(MenuEntry.Item("Undo", leadingIcon = Icons.AutoMirrored.Filled.Undo, onClick = { menuGap("Undo") }))
+            add(MenuEntry.Item("Redo", leadingIcon = Icons.AutoMirrored.Filled.Redo, onClick = { menuGap("Redo") }))
+            add(MenuEntry.Divider)
+            add(MenuEntry.Item("Options", leadingIcon = Icons.Default.Tune, submenu = { OptionsEntries() }))
+            add(MenuEntry.Item("Exit", leadingIcon = Icons.AutoMirrored.Filled.ExitToApp, onClick = { stop() }))
+        }
+    }
+
+    /**
+     * Action-set picker, flat + indented: each action set, then its layers as the next rows
+     * (indented, leading a subdirectory arrow), then an indented "Add layer". "Add set" at the end.
+     * The current scope (set or layer) is theme-colored AND gets a trailing check.
+     */
+    @Composable
+    private fun ScopeSetEntries(): List<MenuEntry> {
+        val scopes by overlayEditor.availableScopes.collectAsStateWithLifecycle()
+        val current by overlayEditor.editingScope.collectAsStateWithLifecycle()
+        val sets = scopes.filter { !it.isLayer }
+        return buildList {
+            sets.forEach { setOpt ->
+                val setId = (setOpt.scope as? OverlayScope.Set)?.actionSetId
+                add(
+                    MenuEntry.Item(
+                        label = setOpt.label,
+                        leadingIcon = Icons.Default.Layers,
+                        selected = setOpt.scope == current,
+                        onClick = { overlayEditor.setScope(setOpt.scope) },
+                    ),
+                )
+                scopes.filter { it.isLayer && (it.scope as? OverlayScope.Layer)?.parentActionSetId == setId }
+                    .forEach { layerOpt ->
+                        add(
+                            MenuEntry.Item(
+                                label = layerOpt.label,
+                                indent = true,
+                                leadingIcon = Icons.Default.SubdirectoryArrowRight,
+                                selected = layerOpt.scope == current,
+                                onClick = { overlayEditor.setScope(layerOpt.scope) },
+                            ),
+                        )
+                    }
+                add(
+                    MenuEntry.Item(
+                        "Add layer",
+                        indent = true,
+                        leadingIcon = Icons.Default.SubdirectoryArrowRight,
+                        onClick = { menuGap("Add layer (set ${setOpt.label})") },
+                    ),
+                )
+            }
+            add(MenuEntry.Item("Add set", leadingIcon = Icons.Default.Add, onClick = { menuGap("Add set") }))
+        }
+    }
+
+    /** What Align/Space operate relative to. */
+    private enum class AlignTarget(val label: String) { Selection("Selection"), Canvas("Canvas") }
+
+    /**
+     * Align / space submenu. The "Align to" row picks the reference (Selection vs Canvas); the
+     * align/space buttons enable based on it: Canvas needs ≥1 selected, Selection needs ≥2. All
+     * align/space actions are placeholders for now (see gap list).
+     */
+    @Composable
+    private fun AlignEntries(): List<MenuEntry> {
+        val target by alignTo.collectAsStateWithLifecycle()
+        val sel by selectedIds.collectAsStateWithLifecycle()
+        val canAlign = when (target) {
+            AlignTarget.Canvas -> sel.isNotEmpty()
+            AlignTarget.Selection -> sel.size >= 2
+        }
+        fun align(name: String, icon: ImageVector) =
+            MenuEntry.Item(name, leadingIcon = icon, enabled = canAlign, onClick = { menuGap("$name (to ${target.label})") })
+        return buildList {
+            add(
+                MenuEntry.Item(
+                    "Align to",
+                    leadingIcon = Icons.Default.FilterCenterFocus,
+                    trailing = MenuTrailing.Value(target.label),
+                    submenu = {
+                        AlignTarget.entries.map { t ->
+                            MenuEntry.Item(
+                                t.label,
+                                selected = t == target,
+                                closeToParentOnly = true,
+                                onClick = { alignTo.value = t },
+                            )
+                        }
+                    },
+                ),
+            )
+            add(MenuEntry.Divider)
+            add(align("Align left", Icons.Default.AlignHorizontalLeft))
+            add(align("Align vertically", Icons.Default.AlignHorizontalCenter))
+            add(align("Align right", Icons.Default.AlignHorizontalRight))
+            add(align("Space vertically", Icons.Default.VerticalDistribute))
+            add(MenuEntry.Divider)
+            add(align("Align top", Icons.Default.AlignVerticalTop))
+            add(align("Align horizontally", Icons.Default.AlignVerticalCenter))
+            add(align("Align bottom", Icons.Default.AlignVerticalBottom))
+            add(align("Space horizontally", Icons.Default.HorizontalDistribute))
+        }
+    }
+
+    @Composable
+    private fun OptionsEntries(): List<MenuEntry> {
+        val snap by overlaySettings.snapEnabled.collectAsStateWithLifecycle()
+        val grid by showGrid.collectAsStateWithLifecycle()
+        val divisions by gridDivisions.collectAsStateWithLifecycle()
+        return listOf(
+            MenuEntry.Item("Snapping", leadingIcon = Icons.Default.GridOn, trailing = MenuTrailing.Check(snap) { overlaySettings.setSnapEnabled(it) }),
+            MenuEntry.Item("Show grid", leadingIcon = Icons.Default.Grid4x4, trailing = MenuTrailing.Check(grid) { showGrid.value = it }),
+            MenuEntry.Item("Grid size", leadingIcon = Icons.Default.Straighten, trailing = MenuTrailing.Value(divisions.toString())),
+            MenuEntry.Divider,
+            MenuEntry.Item("Show controller", leadingIcon = Icons.Default.SportsEsports, onClick = { menuGap("Show controller") }),
+            MenuEntry.Item("Rotate menu", leadingIcon = Icons.Default.ScreenRotation, onClick = { menuGap("Rotate menu") }),
         )
     }
 
@@ -1001,101 +1598,49 @@ class OverlayLiveEditController @Inject constructor(
         Log.i(TAG, "paste ${if (asOverride) "as override" else "as new"} — stub")
     }
 
+    /**
+     * The always-visible root menu panel (the "toolbar" window): a narrow vertical M3 menu with a
+     * drag handle on top + bottom (drag either to reposition the whole panel). Submenu rows open
+     * cascading fly-outs beside them. The middle list scrolls if the menu is taller than its cap.
+     */
     @Composable
     private fun ToolbarContent(onHandleTouch: (MotionEvent) -> Boolean) {
-        val sel by selectedIds.collectAsStateWithLifecycle()
-        val snap by overlaySettings.snapEnabled.collectAsStateWithLifecycle()
-        val scopes by overlayEditor.availableScopes.collectAsStateWithLifecycle()
-        val currentScope by overlayEditor.editingScope.collectAsStateWithLifecycle()
-        val menuOpen by scopeMenuOpen.collectAsStateWithLifecycle()
-        val hasClipboard by clipboardHasContent.collectAsStateWithLifecycle()
-        val currentLabel = scopes.firstOrNull { it.scope == currentScope }?.label ?: "No action set"
-        val hasSelection = sel.isNotEmpty()
-
-        // surfaceContainerHigh — floating toolbar (elevated container). Also the overlay's own
-        // settings surface in edit mode (Brick D): snap + the action-set/layer scope live here.
+        // surfaceContainerHigh — floating panel (elevated container).
         Surface(
-            shape = MaterialTheme.shapes.extraLarge,
+            shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
         ) {
-            // One row that sizes to its content — flexbox-style, NO max width and NO scroll. The
-            // window is resized to this row's measured width (resizeToolbarToContent), so the
-            // toolbar grows as wide as its buttons need (off-screen if necessary; drag to reveal).
-            // A drag handle flanks each end.
-            Row(
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 DragHandle(onHandleTouch)
-                TextButton(
-                    onClick = { if (scopes.isNotEmpty()) toggleScopeMenu() },
-                    enabled = scopes.isNotEmpty(),
-                ) {
-                    Icon(
-                        Icons.Default.Layers,
-                        contentDescription = null,
-                        modifier = Modifier.padding(end = 6.dp),
-                    )
-                    Text(
-                        currentLabel,
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 160.dp),
-                    )
-                    Icon(
-                        if (menuOpen) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
-                        contentDescription = "Choose action set or layer",
-                    )
-                }
-                IconButton(onClick = { overlayEditor.addDefaultElement() }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add button")
-                }
-                FilledIconToggleButton(
-                    checked = snap,
-                    onCheckedChange = { overlaySettings.setSnapEnabled(it) },
-                ) {
-                    Icon(
-                        if (snap) Icons.Default.GridOn else Icons.Default.GridOff,
-                        contentDescription = if (snap) "Snapping on" else "Snapping off",
-                    )
-                }
-                // Copy: enabled with a selection → menu of Copy / Copy style.
-                IconButton(onClick = { showCopyMenu() }, enabled = hasSelection) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy")
-                }
-                // Paste: enabled when the clipboard has content → menu of Paste as new / override.
-                IconButton(onClick = { showPasteMenu() }, enabled = hasClipboard) {
-                    Icon(Icons.Default.ContentPaste, contentDescription = "Paste")
-                }
-                // Configure only makes sense for a single button.
-                IconButton(onClick = { sel.singleOrNull()?.let { showConfig(it) } }, enabled = sel.size == 1) {
-                    Icon(Icons.Default.Edit, contentDescription = "Configure")
-                }
-                IconButton(onClick = { deleteSelected() }, enabled = hasSelection) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete")
-                }
-                FilledIconButton(onClick = { stop() }) {
-                    Icon(Icons.Default.Check, contentDescription = "Done")
-                }
+                MenuList(
+                    depth = 0,
+                    builder = { RootMenuEntries() },
+                    modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT_DP.dp),
+                )
                 DragHandle(onHandleTouch)
             }
         }
     }
 
+    /** A horizontal grab bar (drags the whole menu panel). Sits flush at the panel's top + bottom. */
     @OptIn(ExperimentalComposeUiApi::class)
     @Composable
     private fun DragHandle(onHandleTouch: (MotionEvent) -> Boolean) {
-        Icon(
-            Icons.Default.DragIndicator,
-            contentDescription = "Move toolbar",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        Box(
             modifier = Modifier
-                .padding(horizontal = 2.dp)
-                .pointerInteropFilter(onTouchEvent = onHandleTouch),
-        )
+                .width(MENU_WIDTH_DP.dp)
+                .pointerInteropFilter(onTouchEvent = onHandleTouch)
+                .padding(vertical = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .size(width = 28.dp, height = 4.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant),
+            )
+        }
     }
 
     /**
@@ -1130,6 +1675,46 @@ class OverlayLiveEditController @Inject constructor(
                 OverlayElementLabel(element)
             }
         }
+    }
+
+    /** A single corner resize handle: a small primary dot centered in a larger touch area. */
+    @OptIn(ExperimentalComposeUiApi::class)
+    @Composable
+    private fun HandleDot(onTouch: (MotionEvent) -> Boolean) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInteropFilter(onTouchEvent = onTouch),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .size(HANDLE_DOT_DP.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .border(1.5.dp, MaterialTheme.colorScheme.onPrimary, CircleShape),
+            )
+        }
+    }
+
+    /** The dashed bounding-box outline shown around a multi-button selection. */
+    @Composable
+    private fun SelectionBoxOutline() {
+        val color = MaterialTheme.colorScheme.primary
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    drawRect(
+                        color = color,
+                        style = Stroke(
+                            width = 1.5.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(
+                                floatArrayOf(8.dp.toPx(), 6.dp.toPx()), 0f,
+                            ),
+                        ),
+                    )
+                },
+        )
     }
 
     // ── window plumbing ─────────────────────────────────────────────────────────
@@ -1170,7 +1755,12 @@ class OverlayLiveEditController @Inject constructor(
         }, EXIT_ANIM_TEARDOWN_MS)
     }
 
-    private fun layoutParams(width: Int, height: Int, focusable: Boolean): WindowManager.LayoutParams {
+    private fun layoutParams(
+        width: Int,
+        height: Int,
+        focusable: Boolean,
+        touchable: Boolean = true,
+    ): WindowManager.LayoutParams {
         // FLAG_HARDWARE_ACCELERATED is required for WindowManager-added windows: unlike
         // Activity windows it is NOT inherited from the manifest, and without it the
         // ComposeView renders in software, where gradients band and antialiased rounded
@@ -1180,6 +1770,10 @@ class OverlayLiveEditController @Inject constructor(
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         if (!focusable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        // NOT_TOUCHABLE: the window never intercepts touches — they pass straight through to
+        // whatever is below (used for the selection bounding-box outline, so dragging a button
+        // inside the box still reaches the button's own window).
+        if (!touchable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         return WindowManager.LayoutParams(
             width,
             height,
@@ -1257,6 +1851,43 @@ class OverlayLiveEditController @Inject constructor(
         val state: MutableState<OverlayElement>,
     )
 
+    /** The four resize corners. */
+    private enum class Corner { TopLeft, TopRight, BottomLeft, BottomRight }
+
+    /** The corner of [r] this handle sits on (where to draw it). */
+    private fun Corner.cornerOf(r: android.graphics.Rect): Pair<Int, Int> = when (this) {
+        Corner.TopLeft -> r.left to r.top
+        Corner.TopRight -> r.right to r.top
+        Corner.BottomLeft -> r.left to r.bottom
+        Corner.BottomRight -> r.right to r.bottom
+    }
+
+    /** The *opposite* corner of [r] — the fixed anchor a drag from this corner scales about. */
+    private fun Corner.fixedCornerOf(r: android.graphics.Rect): Pair<Int, Int> = when (this) {
+        Corner.TopLeft -> r.right to r.bottom
+        Corner.TopRight -> r.left to r.bottom
+        Corner.BottomLeft -> r.right to r.top
+        Corner.BottomRight -> r.left to r.top
+    }
+
+    private class HandleWindow(
+        val corner: Corner,
+        val view: View,
+        val owner: OverlayLifecycleOwner,
+        val params: WindowManager.LayoutParams,
+    )
+
+    private class BoxWindow(
+        val view: View,
+        val owner: OverlayLifecycleOwner,
+        val params: WindowManager.LayoutParams,
+    )
+
+    private class SelectionChrome(
+        val handles: Map<Corner, HandleWindow>,
+        val box: BoxWindow?,
+    )
+
     companion object {
         private const val TAG = "OverlayLiveEdit"
         private const val SCRIM_COLOR = 0x66000000.toInt() // ~40% black
@@ -1267,5 +1898,11 @@ class OverlayLiveEditController @Inject constructor(
         // Slightly longer than the platform dialog exit animation so the content stays drawn
         // until the surface has animated out.
         private const val EXIT_ANIM_TEARDOWN_MS = 300L
+        // Resize handle: the touchable window is larger than the visible dot for an easy grab.
+        private const val HANDLE_TOUCH_DP = 32
+        private const val HANDLE_DOT_DP = 14
+        // Editor menu sizing: narrow fixed width, capped height (scrolls past it).
+        private const val MENU_WIDTH_DP = 156
+        private const val MENU_MAX_HEIGHT_DP = 360
     }
 }

@@ -252,4 +252,146 @@ class TriggerModeSoftPressTest {
         assertTrue(TriggerMode.accepts(TriggerMode.FULL_PULL_SUB_INPUT))
         assertTrue(TriggerMode.accepts(TriggerMode.SOFT_PULL_SUB_INPUT))
     }
+
+    // ── Analog output (Trigger > Analog Output Trigger + range + curve) ──────────
+
+    /** Records the last value written to each virtual trigger axis. */
+    private class RecordingGamepad : GamepadEmitter {
+        var left: Float? = null
+        var right: Float? = null
+        override fun setLeftTrigger(source: InputSource, v: Float) { left = v }
+        override fun setRightTrigger(source: InputSource, v: Float) { right = v }
+        override fun setLeftStick(source: InputSource, x: Float, y: Float) {}
+        override fun setRightStick(source: InputSource, x: Float, y: Float) {}
+        override fun setDpadHat(source: InputSource, x: Int, y: Int) {}
+        override fun clearSource(source: InputSource) {}
+        override fun setButton(btnCode: Int, pressed: Boolean): Boolean = false
+        override fun setLeftStickOutput(x: Float, y: Float) {}
+        override fun setRightStickOutput(x: Float, y: Float) {}
+        override fun setLeftTriggerOutput(v: Float) {}
+        override fun setRightTriggerOutput(v: Float) {}
+        override fun setHatOutput(x: Int, y: Int) {}
+        override fun clearOutputSticks() {}
+    }
+
+    private fun ctxGamepad(settingsJson: String, gamepad: GamepadEmitter, source: InputSource = InputSource.LEFT_TRIGGER) =
+        ModeContext(
+            source = source,
+            settingsJson = settingsJson,
+            priorLatched = emptyMap(),
+            activeLayerIds = emptyList(),
+            gamepad = gamepad,
+        )
+
+    @Test
+    fun analogOutput_defaultsToMatchingTrigger_andPassesRangedValue() {
+        // Absent analog_output_trigger → matching trigger (left source → left axis).
+        // Default range start≈0.03 / end≈0.98, linear curve. A ~mid pull maps roughly 1:1.
+        val gp = RecordingGamepad()
+        TriggerMode.evaluate(reading(0.50f), ctxGamepad("{}", gp), emit, MouseEmitter.NOOP)
+        assertTrue("left axis should get the analog value, got ${gp.left}", (gp.left ?: -1f) > 0.4f)
+        // Only the target axis is written; the right axis is left untouched (= 0 contribution).
+        assertEquals("right axis untouched for a left-trigger matching default", null, gp.right)
+    }
+
+    @Test
+    fun analogOutput_off_writesZeroToBothAxes() {
+        val gp = RecordingGamepad()
+        TriggerMode.evaluate(reading(0.90f), ctxGamepad("""{"analog_output_trigger":"off"}""", gp), emit, MouseEmitter.NOOP)
+        // Off emits nothing (contribution stays cleared by handleConfigChange).
+        assertEquals(null, gp.left)
+        assertEquals(null, gp.right)
+    }
+
+    @Test
+    fun analogOutput_explicitRight_sendsToRightAxis() {
+        val gp = RecordingGamepad()
+        TriggerMode.evaluate(reading(0.90f), ctxGamepad("""{"analog_output_trigger":"right"}""", gp), emit, MouseEmitter.NOOP)
+        assertTrue("right axis should get the value, got ${gp.right}", (gp.right ?: -1f) > 0.5f)
+        assertEquals(null, gp.left)
+    }
+
+    @Test
+    fun analogOutput_rangeStartDeadzone_belowStartIsZero() {
+        // range start 16000/32767 ≈ 0.49 → a 0.30 pull is inside the start deadzone → 0.
+        val gp = RecordingGamepad()
+        val settings = """{"analog_output_trigger":"left","trigger_range_start":16000,"trigger_range_end":32000}"""
+        TriggerMode.evaluate(reading(0.30f), ctxGamepad(settings, gp), emit, MouseEmitter.NOOP)
+        assertEquals(0f, gp.left ?: -1f, 1e-4f)
+    }
+
+    @Test
+    fun analogOutput_rangeEnd_pastEndIsMax() {
+        val gp = RecordingGamepad()
+        val settings = """{"analog_output_trigger":"left","trigger_range_start":1000,"trigger_range_end":16000}"""
+        // 0.90 magnitude is well past 16000/32767 ≈ 0.49 → clamps to max 1.0.
+        TriggerMode.evaluate(reading(0.90f), ctxGamepad(settings, gp), emit, MouseEmitter.NOOP)
+        assertEquals(1f, gp.left ?: -1f, 1e-4f)
+    }
+
+    // ── Threshold trigger style ──────────────────────────────────────────────
+
+    /** Run a sequence of (magnitude, timeMs) through evaluate, threading the latch state. */
+    private fun runPull(style: String, steps: List<Pair<Float, Long>>): List<Pair<String, Boolean>> {
+        TriggerMode.resetState()
+        val out = mutableListOf<Pair<String, Boolean>>()
+        var soft = false
+        var full = false
+        val cap: (String, Boolean) -> Unit = { sub, down ->
+            out += sub to down
+            if (sub == TriggerMode.SOFT_PULL_SUB_INPUT) soft = down
+            if (sub == TriggerMode.FULL_PULL_SUB_INPUT) full = down
+        }
+        for ((mag, t) in steps) {
+            val ctx = ModeContext(
+                source = InputSource.LEFT_TRIGGER,
+                settingsJson = """{"threshold_trigger_style":"$style"}""",
+                priorLatched = mapOf(
+                    TriggerMode.SOFT_PULL_SUB_INPUT to soft,
+                    TriggerMode.FULL_PULL_SUB_INPUT to full,
+                ),
+                activeLayerIds = emptyList(),
+            )
+            TriggerMode.evaluate(
+                AnalogEvent(source = InputSource.LEFT_TRIGGER, x = mag, y = 0f, timestampMs = t),
+                ctx, cap, MouseEmitter.NOOP,
+            )
+        }
+        return out
+    }
+
+    @Test
+    fun exclusive_softFirst_locksOutFull() {
+        // Cross soft → soft fires + claims the pull; reaching full is locked out.
+        val edges = runPull("hip_fire_exclusive", listOf(0f to 0L, 0.50f to 10L, 0.97f to 20L, 0f to 30L))
+        assertTrue("soft should fire", edges.contains(TriggerMode.SOFT_PULL_SUB_INPUT to true))
+        assertFalse("full must be locked out", edges.any { it.first == TriggerMode.FULL_PULL_SUB_INPUT })
+    }
+
+    @Test
+    fun exclusive_fullFirst_locksOutSoft() {
+        // A single event past both thresholds → full claims the pull; soft is locked out.
+        val edges = runPull("hip_fire_exclusive", listOf(0f to 0L, 0.97f to 10L, 0f to 20L))
+        assertTrue("full should fire", edges.contains(TriggerMode.FULL_PULL_SUB_INPUT to true))
+        assertFalse("soft must be locked out", edges.any { it.first == TriggerMode.SOFT_PULL_SUB_INPUT })
+    }
+
+    @Test
+    fun hipFire_fastPull_skipsSoft() {
+        // Soft crossed then full reached within the aggressive window (120ms) → soft skipped.
+        val edges = runPull("hip_fire_aggressive", listOf(0f to 0L, 0.15f to 10L, 0.97f to 50L, 0f to 120L))
+        assertTrue("full should fire", edges.contains(TriggerMode.FULL_PULL_SUB_INPUT to true))
+        assertFalse("soft should be skipped on a fast pull", edges.any { it.first == TriggerMode.SOFT_PULL_SUB_INPUT })
+    }
+
+    @Test
+    fun hipFire_slowPull_firesSoftThenFull() {
+        // Soft held past the window before reaching full → soft fires first, then full.
+        val edges = runPull("hip_fire_aggressive", listOf(0f to 0L, 0.15f to 10L, 0.20f to 200L, 0.97f to 300L, 0f to 400L))
+        val softDown = edges.indexOf(TriggerMode.SOFT_PULL_SUB_INPUT to true)
+        val fullDown = edges.indexOf(TriggerMode.FULL_PULL_SUB_INPUT to true)
+        assertTrue("soft should fire on a slow pull, got $edges", softDown >= 0)
+        assertTrue("full should fire, got $edges", fullDown >= 0)
+        assertTrue("soft must fire before full, got $edges", softDown < fullDown)
+    }
 }

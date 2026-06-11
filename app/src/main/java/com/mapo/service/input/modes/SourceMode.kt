@@ -304,7 +304,14 @@ interface GamepadEmitter {
      */
     fun setLeftTriggerOutput(v: Float)
     fun setRightTriggerOutput(v: Float)
-    /** Zero both binding-output stick slots + trigger slots (mode/config change cleanup). */
+    /**
+     * Binding-output dpad-hat contribution — a single non-source-keyed net hat for
+     * DPAD_UP/DOWN/LEFT/RIGHT gamepad-button OUTPUTS bound to arbitrary inputs. Drives the
+     * hat axis (ABS_HAT0X/Y) games read for the d-pad — a digital BTN press / KEYCODE_DPAD
+     * inject does NOT register as the gamepad d-pad. Each axis -1 / 0 / +1.
+     */
+    fun setHatOutput(x: Int, y: Int)
+    /** Zero all binding-output slots — sticks, triggers, hat (mode/config change cleanup). */
     fun clearOutputSticks()
 
     companion object {
@@ -321,6 +328,7 @@ interface GamepadEmitter {
             override fun setRightStickOutput(x: Float, y: Float) {}
             override fun setLeftTriggerOutput(v: Float) {}
             override fun setRightTriggerOutput(v: Float) {}
+            override fun setHatOutput(x: Int, y: Int) {}
             override fun clearOutputSticks() {}
         }
     }
@@ -723,62 +731,187 @@ object TriggerMode : SourceMode {
     ) {
         val settings = TriggerSettings.parse(ctx.settingsJson)
         val magnitude = reading.x  // triggers are 0..1 on x; y is always 0
-        // Soft pull — analog magnitude crosses the user's soft threshold.
-        evaluateStage(
-            subInput = SOFT_PULL_SUB_INPUT,
-            source = reading.source,
-            magnitude = magnitude,
-            priorLatched = ctx.priorLatched[SOFT_PULL_SUB_INPUT] == true,
-            rawThreshold = settings.softThreshold,
-            hysteresis = settings.softHysteresis,
-            digitalEmit = digitalEmit,
+        val priorSoft = ctx.priorLatched[SOFT_PULL_SUB_INPUT] == true
+        val priorFull = ctx.priorLatched[FULL_PULL_SUB_INPUT] == true
+
+        // Raw latch decisions (threshold + hysteresis), independent of style.
+        // Soft pull at soft_threshold; full pull at the end-of-travel click_threshold
+        // (Mapo synthesizes full from the analog axis, not the hardware click — which
+        // trips at ~2% on the AYN Thor; that hardware click is suppressed upstream in
+        // InputEvaluator.handleDigital while a trigger is in this mode).
+        val rawSoft = latchWant(magnitude, priorSoft, settings.softThreshold, settings.softHysteresis)
+        val rawFull = latchWant(magnitude, priorFull, settings.clickThreshold, FULL_PULL_HYSTERESIS)
+
+        // Threshold trigger style decides the EFFECTIVE soft/full wants from the raw ones.
+        val state = styleStateBySource.getOrPut(reading.source) { StyleState() }
+        if (magnitude < RELEASED_FLOOR) state.reset() // fully released → fresh next pull
+        val (wantSoft, wantFull) = applyStyle(
+            settings.style, state, reading.timestampMs, rawSoft, rawFull, priorSoft, priorFull,
         )
-        // Full pull — analog magnitude reaches the end-of-travel click threshold.
-        // Steam fires Full Pull at the very end of trigger travel; Mapo synthesizes
-        // it from the analog axis at `click_threshold` rather than the hardware
-        // digital click, which trips at a device-specific (often tiny) pull depth
-        // (~2% on AYN Thor). The hardware click is suppressed upstream in
-        // InputEvaluator.handleDigital while a trigger is in this mode.
-        evaluateStage(
-            subInput = FULL_PULL_SUB_INPUT,
-            source = reading.source,
-            magnitude = magnitude,
-            priorLatched = ctx.priorLatched[FULL_PULL_SUB_INPUT] == true,
-            rawThreshold = settings.clickThreshold,
-            hysteresis = FULL_PULL_HYSTERESIS,
-            digitalEmit = digitalEmit,
-        )
+
+        if (wantSoft != priorSoft) {
+            Log.d(TAG_MOTION, "soft_pull edge ${reading.source} mag=${"%.3f".format(magnitude)} style=${settings.style} -> ${if (wantSoft) "DOWN" else "UP"}")
+            digitalEmit(SOFT_PULL_SUB_INPUT, wantSoft)
+        }
+        if (wantFull != priorFull) {
+            Log.d(TAG_MOTION, "full_pull edge ${reading.source} mag=${"%.3f".format(magnitude)} style=${settings.style} -> ${if (wantFull) "DOWN" else "UP"}")
+            digitalEmit(FULL_PULL_SUB_INPUT, wantFull)
+        }
+
+        emitAnalogOutput(reading, settings, ctx.gamepad)
     }
 
     /**
-     * One soft/full pull latch stage. Floors the press point above rest so a
-     * resting trigger never latches, and clamps the release point strictly into
-     * `(0, press)` so a trigger returning to rest always clears the latch — a
-     * hysteresis ≥ threshold would otherwise push release ≤ 0 and wedge the latch
-     * on permanently (the 2026-06-09 soft-pull bug).
+     * Threshold-cross decision for one stage with press-floor / release-floor + hysteresis.
+     * Floors the press point above rest so a resting trigger never latches, and clamps the
+     * release strictly into `(0, press)` so a returning trigger always clears (a hysteresis
+     * ≥ threshold would otherwise wedge the latch on — the 2026-06-09 soft-pull bug).
      */
-    private fun evaluateStage(
-        subInput: String,
-        source: InputSource,
-        magnitude: Float,
-        priorLatched: Boolean,
-        rawThreshold: Float,
-        hysteresis: Float,
-        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
-    ) {
+    private fun latchWant(magnitude: Float, priorLatched: Boolean, rawThreshold: Float, hysteresis: Float): Boolean {
         val press = rawThreshold.coerceIn(SOFT_PRESS_FLOOR, 1f)
         val release = (press - hysteresis).coerceIn(SOFT_RELEASE_FLOOR, press - SOFT_RELEASE_FLOOR)
-        val nowLatched = if (priorLatched) magnitude >= release else magnitude >= press
-        if (nowLatched != priorLatched) {
-            Log.d(
-                "InputEvaluator.Motion",
-                "$subInput edge $source mag=${"%.3f".format(magnitude)} " +
-                    "press=${"%.3f".format(press)} release=${"%.3f".format(release)} " +
-                    "(rawThreshold=${"%.3f".format(rawThreshold)} hysteresis=${"%.3f".format(hysteresis)})" +
-                    " -> ${if (nowLatched) "DOWN" else "UP"}",
-            )
-            digitalEmit(subInput, nowLatched)
+        return if (priorLatched) magnitude >= release else magnitude >= press
+    }
+
+    /**
+     * Apply the Threshold Trigger Style to the raw soft/full latch wants. Returns the
+     * effective `(soft, full)` to emit.
+     *  - **simple_threshold / hair_trigger** — independent: soft fires at its threshold,
+     *    full at its threshold; both can be active. (The spec's Simple-vs-Hair distinction
+     *    is about feel; treated identically here — current/baseline behavior.)
+     *  - **hip_fire_aggressive / normal / relaxed** — quick pull to full SKIPS the soft
+     *    pull; a slower pull (soft held longer than the window) fires soft first, then full.
+     *    Windows grow across the three. **Approximate window values + an event-driven check**
+     *    (a trigger held *between* soft and full with no further motion fires soft on the
+     *    next event, not exactly at the window) — to tune/verify on device.
+     *  - **hip_fire_exclusive** — once soft OR full fires, the other is locked out until the
+     *    trigger fully releases.
+     */
+    private fun applyStyle(
+        style: String,
+        state: StyleState,
+        nowMs: Long,
+        rawSoft: Boolean,
+        rawFull: Boolean,
+        priorSoft: Boolean,
+        priorFull: Boolean,
+    ): Pair<Boolean, Boolean> = when (style) {
+        "hip_fire_exclusive" -> when (state.owner) {
+            Sub.FULL -> false to rawFull
+            Sub.SOFT -> rawSoft to false
+            Sub.NONE -> when {
+                rawFull -> { state.owner = Sub.FULL; false to true } // full wins if both cross at once
+                rawSoft -> { state.owner = Sub.SOFT; true to false }
+                else -> false to false
+            }
         }
+        "hip_fire_aggressive", "hip_fire_normal", "hip_fire_relaxed" -> {
+            val windowMs = when (style) {
+                "hip_fire_aggressive" -> HIP_FIRE_AGGRESSIVE_MS
+                "hip_fire_normal" -> HIP_FIRE_NORMAL_MS
+                else -> HIP_FIRE_RELAXED_MS
+            }
+            hipFire(state, windowMs, nowMs, rawSoft, rawFull, priorSoft)
+        }
+        else -> rawSoft to rawFull // simple_threshold, hair_trigger
+    }
+
+    private fun hipFire(
+        state: StyleState,
+        windowMs: Long,
+        nowMs: Long,
+        rawSoft: Boolean,
+        rawFull: Boolean,
+        priorSoft: Boolean,
+    ): Pair<Boolean, Boolean> {
+        if (rawFull) {
+            // Reached full pull. Soft keeps whatever it was — already firing (slow pull) stays
+            // on; deferred-and-never-fired (fast pull) stays off (skipped). Full fires.
+            state.fullReached = true
+            return priorSoft to true
+        }
+        if (state.fullReached) {
+            // Been to full this pull, now backing off but not released → never (re)fire soft.
+            // Keep soft only while still above its threshold; release it below.
+            return (if (rawSoft) priorSoft else false) to false
+        }
+        if (rawSoft) {
+            if (priorSoft) return true to false // already firing soft → hold
+            if (state.softCrossTimeMs == 0L) state.softCrossTimeMs = nowMs
+            val elapsed = nowMs - state.softCrossTimeMs
+            return if (elapsed >= windowMs) true to false else false to false // defer until window elapses
+        }
+        state.softCrossTimeMs = 0L
+        return false to false
+    }
+
+    /**
+     * Analog Output Trigger: send the deadzone-mapped, curved analog pull to the virtual
+     * gamepad's chosen trigger axis. Trigger mode can BOTH fire soft/full pull commands
+     * AND pass the raw analog through (Steam-faithful). The output axis is the user's
+     * `analog_output_trigger` choice, defaulting (absent setting) to the MATCHING trigger
+     * so a fresh "Trigger (Analog)" still feels like a real trigger.
+     *
+     * Writes only the target axis (one push per event). Switching the output axis — or to
+     * Off — is a config change, and [InputEvaluator.handleConfigChange] clears both
+     * trigger-source contributions on every config change, so a stale value can't persist
+     * on the old axis even if the trigger isn't moving when the user changes the setting.
+     */
+    private fun emitAnalogOutput(reading: AnalogEvent, settings: TriggerSettings, gamepad: GamepadEmitter) {
+        val toRight = when (settings.analogOutput) {
+            "off" -> return // explicit Off — emit nothing (contribution stays cleared)
+            "left" -> false
+            "right" -> true
+            else -> reading.source == InputSource.RIGHT_TRIGGER // null/unset → matching trigger
+        }
+        val value = analogOutputValue(reading.x, settings)
+        if (toRight) gamepad.setRightTrigger(reading.source, value) else gamepad.setLeftTrigger(reading.source, value)
+    }
+
+    /** Map raw pull magnitude through the range-start/end deadzone window + response curve → 0..1. */
+    private fun analogOutputValue(magnitude: Float, s: TriggerSettings): Float {
+        val span = s.rangeEnd - s.rangeStart
+        val t = if (span <= 0f) {
+            if (magnitude >= s.rangeEnd) 1f else 0f
+        } else {
+            ((magnitude - s.rangeStart) / span).coerceIn(0f, 1f)
+        }
+        return t.pow(s.responseExponent)
+    }
+
+    private const val TAG_MOTION = "InputEvaluator.Motion"
+
+    // Hip-fire soft-skip windows (ms). Approximate — tune/verify on device; Steam's exact
+    // values aren't published. Aggressive < Normal < Relaxed (larger = easier to still get
+    // the soft pull on a moderately-quick pull).
+    private const val HIP_FIRE_AGGRESSIVE_MS = 120L
+    private const val HIP_FIRE_NORMAL_MS = 220L
+    private const val HIP_FIRE_RELAXED_MS = 400L
+
+    /** Magnitude below which a trigger is "fully released" → per-pull style state resets. */
+    private const val RELEASED_FLOOR = 0.02f
+
+    private enum class Sub { NONE, SOFT, FULL }
+
+    /** Per-trigger threshold-style state across the events of one pull (Hip Fire variants). */
+    private class StyleState {
+        /** When the soft threshold was first crossed this pull (hip-fire defer window). */
+        var softCrossTimeMs: Long = 0L
+        /** Set once full pull is reached this pull — soft must not (re)fire on the way down. */
+        var fullReached: Boolean = false
+        /** Exclusive style: which sub-input claimed the pull (locks the other out). */
+        var owner: Sub = Sub.NONE
+        fun reset() { softCrossTimeMs = 0L; fullReached = false; owner = Sub.NONE }
+    }
+
+    private val styleStateBySource = mutableMapOf<InputSource, StyleState>()
+
+    /**
+     * Clear per-pull threshold-style state. Called from [InputEvaluator.flushAnalog] at
+     * profile / action-set boundaries so a stale lock or defer window can't leak across.
+     */
+    fun resetState() {
+        styleStateBySource.clear()
     }
 }
 
@@ -791,11 +924,33 @@ internal data class TriggerSettings(
     val clickThreshold: Float,
     val softThreshold: Float,
     val softHysteresis: Float,
+    /**
+     * Analog Output Trigger: which virtual-gamepad trigger axis to send the raw analog
+     * pull to. `"left"` / `"right"` / `"off"`, or `null` when the setting is absent —
+     * which resolves to the MATCHING trigger at evaluate time (Steam's default: a
+     * "Trigger (Analog)" still passes its analog value through). `null` is distinct from
+     * `"off"` (an explicit user choice to send nothing).
+     */
+    val analogOutput: String?,
+    /** Range start/end as 0..1 magnitudes — the analog output deadzone window. */
+    val rangeStart: Float,
+    val rangeEnd: Float,
+    /** Response-curve power applied to the ranged value before output (1.0 = linear). */
+    val responseExponent: Float,
+    /**
+     * Threshold trigger style: how the soft/full pull commands are timed relative to each
+     * other. One of `simple_threshold` / `hair_trigger` / `hip_fire_aggressive` /
+     * `hip_fire_normal` / `hip_fire_relaxed` / `hip_fire_exclusive`. See [TriggerMode].
+     */
+    val style: String,
 ) {
     companion object {
         const val DEFAULT_CLICK_THRESHOLD = 0.95f
         const val DEFAULT_SOFT_THRESHOLD = 0.10f
         const val DEFAULT_SOFT_HYSTERESIS = 0.05f
+        // Range defaults (Steam units → 0..1): start 1000, end 32000.
+        const val DEFAULT_RANGE_START = 1000f / 32767f
+        const val DEFAULT_RANGE_END = 32000f / 32767f
 
         /** Steam-canonical analog range; the settings UI's "Trigger threshold point" is 0..[STEAM_AXIS_MAX]. */
         private const val STEAM_AXIS_MAX = 32767.0
@@ -817,16 +972,46 @@ internal data class TriggerSettings(
                     clickThreshold = obj.optDouble("click_threshold", DEFAULT_CLICK_THRESHOLD.toDouble()).toFloat(),
                     softThreshold = softThreshold,
                     softHysteresis = obj.optDouble("soft_hysteresis", DEFAULT_SOFT_HYSTERESIS.toDouble()).toFloat(),
+                    analogOutput = if (obj.has("analog_output_trigger")) obj.optString("analog_output_trigger") else null,
+                    rangeStart = (obj.optDouble("trigger_range_start", 1000.0) / STEAM_AXIS_MAX).toFloat().coerceIn(0f, 1f),
+                    rangeEnd = (obj.optDouble("trigger_range_end", 32000.0) / STEAM_AXIS_MAX).toFloat().coerceIn(0f, 1f),
+                    responseExponent = responseExponentFor(
+                        obj.optString("trigger_response_curve", "linear"),
+                        obj.optDouble("trigger_custom_response_curve", 1000.0).toFloat(),
+                    ),
+                    style = obj.optString("threshold_trigger_style", "hair_trigger"),
                 )
             } catch (_: JSONException) {
                 defaults()
             }
         }
 
+        /**
+         * Map the named response-curve option (or the custom slider) to a power-curve
+         * exponent applied as `output = t^exponent`. `<1` reaches max faster (aggressive),
+         * `>1` slower (relaxed/wide). **Approximate** — these are reasonable shapes, not
+         * exact Steam curves (the precise curve values remain an open item). The custom
+         * slider (25..4000, 1000 = linear) is inverse: higher = max sooner = smaller
+         * exponent, per the setting's helper text.
+         */
+        fun responseExponentFor(curve: String, customValue: Float): Float = when (curve) {
+            "aggressive" -> 0.6f
+            "relaxed" -> 1.5f
+            "wide" -> 2.2f
+            "extra_wide" -> 3.0f
+            "custom" -> (1000f / customValue.coerceAtLeast(1f)).coerceIn(0.2f, 5f)
+            else -> 1f // linear
+        }
+
         private fun defaults() = TriggerSettings(
             clickThreshold = DEFAULT_CLICK_THRESHOLD,
             softThreshold = DEFAULT_SOFT_THRESHOLD,
             softHysteresis = DEFAULT_SOFT_HYSTERESIS,
+            analogOutput = null,
+            rangeStart = DEFAULT_RANGE_START,
+            rangeEnd = DEFAULT_RANGE_END,
+            responseExponent = 1f,
+            style = "hair_trigger",
         )
     }
 }

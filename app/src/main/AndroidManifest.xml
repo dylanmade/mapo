@@ -45,9 +45,17 @@
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
 
+        <!-- singleTask: the home IS a drawer over a translucent window, and dismissing it
+             backgrounds the task (moveTaskToBack) rather than finishing. With the default
+             "standard" launch mode, re-tapping the launcher icon — or tapping it on a
+             different display (Thor's second screen) — spawned a SECOND MainActivity on top
+             of the backgrounded one, leaving a stale drawer visible underneath. singleTask
+             pins us to exactly one instance: relaunch routes to onNewIntent → onResume on
+             the existing activity (which reopens the drawer), never a duplicate. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.Mapo.Translucent"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>

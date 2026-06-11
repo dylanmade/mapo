@@ -379,6 +379,21 @@ data class CompiledActivatorSettings(
     }
 }
 
+/**
+ * The Trigger menu's "Hold to Repeat (Turbo)" is a MODE-level setting (in the group's
+ * settingsJson), not an activator setting. Read it here so the compile path can OR it
+ * into the group's activators — reusing the activator turbo machinery instead of a
+ * trigger-specific timer. Harmless for modes without the setting (key absent → false).
+ */
+private fun modeHoldToRepeat(groupSettingsJson: String): Boolean {
+    if (groupSettingsJson.isBlank()) return false
+    return try {
+        JSONObject(groupSettingsJson).optBoolean("hold_to_repeat", false)
+    } catch (_: JSONException) {
+        false
+    }
+}
+
 private fun JSONObject.optLongOrNull(key: String): Long? =
     if (has(key) && !isNull(key)) optLong(key) else null
 
@@ -458,8 +473,14 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                 }
                 val address = InputAddress(preset.inputSource, inputKey)
                 val groupSettingsJson = preset.group.group.settingsJson
+                // Trigger menu's "Hold to Repeat (Turbo)" is a MODE-level setting that
+                // applies turbo to every command the trigger fires (soft + full pull).
+                // OR it into each activator's hold-to-repeat so the existing turbo
+                // machinery (startRepeatJob) drives the pulse — no trigger-specific timer.
+                val modeTurbo = modeHoldToRepeat(groupSettingsJson)
                 val compiledActivators = inputGraph.activators.map { actGraph ->
-                    val settings = CompiledActivatorSettings.parse(actGraph.activator.settingsJson)
+                    val parsed = CompiledActivatorSettings.parse(actGraph.activator.settingsJson)
+                    val settings = if (modeTurbo) parsed.copy(holdToRepeat = true) else parsed
                     CompiledActivator(
                         activatorId = actGraph.activator.id,
                         type = actGraph.activator.type,

@@ -46,7 +46,11 @@ import org.robolectric.annotation.Config
  * Robolectric per `project_compose_ui_test_blocker` — UI tests can't run on the AYN Thor.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+// Landscape-handheld viewport: the Remap header packs the Action set + Layer pickers
+// into one right-aligned row, which needs more than Robolectric's default ~320dp width.
+// This matches the real device (a wide landscape screen) so the pickers + overflows lay
+// out on-screen and stay hit-testable.
+@Config(sdk = [33], qualifiers = "w1280dp-h800dp")
 class RemapControlsScreenTest {
 
     @get:Rule val composeRule = createComposeRule()
@@ -196,10 +200,10 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
     }
 
-    // ── Action set tabs (Brick 4.3) ───────────────────────────────────────────
+    // ── Rail scope fly-out: action sets (the "rail-scope" entry) ──────────────
 
     @Test
-    fun rendersTabsForEverySet_andTappingNonViewedTab_invokesCallback() {
+    fun scopeFlyout_listsEverySet_andSelectingInvokesCallback() {
         var selectedSetId: Long? = null
         composeRule.setContent {
             MaterialTheme {
@@ -219,8 +223,9 @@ class RemapControlsScreenTest {
             }
         }
 
-        // Both tabs render.
-        composeRule.onNodeWithText("Gameplay", useUnmergedTree = true).assertExists()
+        // Open the scope fly-out from the rail entry; every set is listed.
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithText("Menu", useUnmergedTree = true).assertExists()
 
         composeRule.onNodeWithText("Menu", useUnmergedTree = true).performClick()
@@ -228,6 +233,27 @@ class RemapControlsScreenTest {
         assert(selectedSetId == 2L) {
             "Expected onSelectActionSet(2L), got $selectedSetId"
         }
+    }
+
+    @Test
+    fun backRow_invokesOnBack() {
+        var backed = false
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = sampleConfig(),
+                        viewingActionSetId = 1L,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = { backed = true },
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("rail-back").performClick()
+        assert(backed) { "Expected the back / 'Controls' row to invoke onBack()" }
     }
 
     @Test
@@ -280,10 +306,10 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
     }
 
-    // ── Action set management bar (Brick 4.4) ─────────────────────────────────
+    // ── Rail scope fly-out: set management (kebab + add) ──────────────────────
 
     @Test
-    fun addSetButton_opensAddSetDialog() {
+    fun scopeFlyout_addSet_opensAddSetDialog() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -302,12 +328,14 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Add action set").performClick()
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Add set", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Add Action Set", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
-    fun overflowMenu_showsManagementItems_forViewingSet() {
+    fun scopeFlyout_setKebab_showsManagementItems() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -326,21 +354,22 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Action set actions").performClick()
-        // Items titled with the viewing set's name; merged-tree lookups so the
-        // disabled state lives on the same node as the text.
-        composeRule.onNodeWithText("Rename \"Menu\"").assertIsEnabled()
-        composeRule.onNodeWithText("Duplicate \"Menu\"").assertIsEnabled()
-        composeRule.onNodeWithText("Delete \"Menu\"").assertIsEnabled()
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Manage \"Menu\"").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Rename").assertIsEnabled()
+        composeRule.onNodeWithText("Duplicate").assertIsEnabled()
+        composeRule.onNodeWithText("Delete").assertIsEnabled()
     }
 
     @Test
-    fun overflowMenu_deleteDisabled_whenOnlyOneSet() {
+    fun scopeFlyout_setKebab_deleteDisabled_whenOnlyOneSet() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
                     RemapControlsScreen(
-                        config = sampleConfig(),  // single-set
+                        config = sampleConfig(),  // single-set "Default"
                         onOpenInputEditor = { _, _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
@@ -349,8 +378,11 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Action set actions").performClick()
-        composeRule.onNodeWithText("Delete \"Default\"").assertIsNotEnabled()
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Manage \"Default\"").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Delete").assertIsNotEnabled()
     }
 
     @Test
@@ -378,31 +410,10 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("Switch to: Menu").assertIsDisplayed()
     }
 
-    // ── Layers pill row (Brick 5.4) ───────────────────────────────────────────
+    // ── Rail scope fly-out: layers ────────────────────────────────────────────
 
     @Test
-    fun layersRow_emptyState_showsNoneAndAddIsEnabled() {
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = sampleConfig(),
-                        viewingActionSetId = 1L,
-                        onOpenInputEditor = { _, _, _ -> },
-                        onBack = {},
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        composeRule.onNodeWithText("Layers:").assertExists()
-        composeRule.onNodeWithText("(none)").assertExists()
-        composeRule.onNodeWithContentDescription("Add layer").assertIsEnabled()
-    }
-
-    @Test
-    fun layersRow_rendersPillPerLayer_andSelectionFollowsViewingLayerId() {
+    fun scopeFlyout_listsLayers_underTheirSet() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -411,7 +422,7 @@ class RemapControlsScreenTest {
                             layers = listOf(10L to "Scope", 11L to "Vehicle"),
                         ),
                         viewingActionSetId = 1L,
-                        viewingLayerId = 11L,
+                        viewingLayerId = null,  // base view → rail label is the set name, not a layer
                         onOpenInputEditor = { _, _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
@@ -420,14 +431,14 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Scope").assertExists()
-        composeRule.onNodeWithText("Vehicle").assertExists()
-        // Selected FilterChip exposes selected=true via semantics — we don't probe that
-        // (Robolectric's chip semantics are version-noisy); covered by the toggle test.
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Scope", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("Vehicle", useUnmergedTree = true).assertExists()
     }
 
     @Test
-    fun tappingLayerPill_invokesOnSelectLayer_withId() {
+    fun scopeFlyout_selectingLayer_invokesOnSelectLayer_withId() {
         var selectedLayerId: Long? = -1L  // sentinel; null is a meaningful value
         composeRule.setContent {
             MaterialTheme {
@@ -447,7 +458,9 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Vehicle").performClick()
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Vehicle", useUnmergedTree = true).performClick()
 
         assert(selectedLayerId == 11L) {
             "Expected onSelectLayer(11L), got $selectedLayerId"
@@ -455,7 +468,7 @@ class RemapControlsScreenTest {
     }
 
     @Test
-    fun tappingFocusedLayerPill_togglesBackToBase_withNull() {
+    fun scopeFlyout_selectingSetRow_dropsToBase_withNull() {
         var lastSelected: Long? = -1L
         composeRule.setContent {
             MaterialTheme {
@@ -475,15 +488,18 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Scope").performClick()
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
+        // Tapping the set row itself selects the base set (no layer overlay).
+        composeRule.onNodeWithText("Default", useUnmergedTree = true).performClick()
 
         assert(lastSelected == null) {
-            "Expected toggle-off to fire onSelectLayer(null), got $lastSelected"
+            "Expected selecting the set row to fire onSelectLayer(null), got $lastSelected"
         }
     }
 
     @Test
-    fun addLayerButton_opensAddLayerDialog() {
+    fun scopeFlyout_addLayer_opensAddLayerDialog() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -498,12 +514,14 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Add layer").performClick()
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Add layer", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Add Layer", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
-    fun layerOverflowMenu_showsManagementItems_forFocusedLayer() {
+    fun scopeFlyout_layerKebab_showsManagementItems() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -521,59 +539,17 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Layer actions").performClick()
-        composeRule.onNodeWithText("Rename \"Scope\"").assertIsEnabled()
-        composeRule.onNodeWithText("Duplicate \"Scope\"").assertIsEnabled()
-        composeRule.onNodeWithText("Delete \"Scope\"").assertIsEnabled()
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Manage \"Scope\"").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Rename").assertIsEnabled()
+        composeRule.onNodeWithText("Duplicate").assertIsEnabled()
+        composeRule.onNodeWithText("Delete").assertIsEnabled()
     }
 
     @Test
-    fun layerOverflowMenu_disabled_whenNoLayerFocused() {
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = singleSetConfigWithLayers(
-                            layers = listOf(10L to "Scope"),
-                        ),
-                        viewingActionSetId = 1L,
-                        viewingLayerId = null,  // editing the base set
-                        onOpenInputEditor = { _, _, _ -> },
-                        onBack = {},
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        // Button is disabled — assertIsNotEnabled is enough; we don't need to expand.
-        composeRule.onNodeWithContentDescription("Layer actions").assertIsNotEnabled()
-    }
-
-    @Test
-    fun layerOverflowMenu_absent_whenZeroLayers() {
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = sampleConfig(),  // no layers
-                        viewingActionSetId = 1L,
-                        onOpenInputEditor = { _, _, _ -> },
-                        onBack = {},
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        // The overflow [⋮] only renders once layers exist — otherwise the empty-state
-        // layout just shows "(none)" + [+]. The corresponding contentDescription must
-        // therefore have zero matches in the merged tree.
-        composeRule.onAllNodesWithText("Layer actions").assertCountEquals(0)
-    }
-
-    @Test
-    fun layerRow_perSet_pillsReflectViewingSet() {
+    fun scopeFlyout_listsAllSetsLayers_notJustViewing() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -591,8 +567,12 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("ScopeB").assertExists()
-        composeRule.onAllNodesWithText("ScopeA").assertCountEquals(0)
+        // The fly-out is a global switcher: every set's layers are listed, not just the
+        // viewing set's (unlike the old per-set pill row).
+        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("ScopeA", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("ScopeB", useUnmergedTree = true).assertExists()
     }
 
     // ── Overlay editing mode (Brick 5.5.c) ────────────────────────────────────

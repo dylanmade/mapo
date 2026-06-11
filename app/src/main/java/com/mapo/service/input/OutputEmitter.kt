@@ -44,6 +44,9 @@ class OutputEmitter @Inject constructor(
     // inputs can drive the same trigger, so a count keeps the analog axis at full until
     // the last releases. Shares [stickLock].
     private val triggerHeld = HashMap<String, Int>()
+    // Held count per dpad direction ("UP"/"DOWN"/"LEFT"/"RIGHT") for DPAD_* outputs.
+    // Net hat is recomputed on each change. Shares [stickLock].
+    private val hatHeld = HashMap<String, Int>()
 
     /**
      * Returns true if [output] has a matching release edge — i.e. the evaluator must hold it.
@@ -71,12 +74,17 @@ class OutputEmitter @Inject constructor(
             // something. DPAD_* and any unmapped token take the fallback (dpad output is
             // a hat axis, not a button — separate path if it's ever needed).
             val triggerSide = TRIGGER_OUTPUT_SIDES[output.button]
+            val hatDir = HAT_OUTPUT_DIRS[output.button]
             if (triggerSide != null) {
                 // AXIS_L2/R2 are the ANALOG triggers (ABS_Z / ABS_RZ) — what games +
                 // testers actually read. A digital BTN_TL2/TR2 press does NOT register
                 // as the trigger axis, so drive the analog output to full instead.
                 Log.d(TAG, "press XInputButton(${output.button}) → MVG analog trigger $triggerSide")
                 adjustTrigger(triggerSide, +1)
+            } else if (hatDir != null) {
+                // DPAD_* are the hat axis (ABS_HAT0X/Y), not buttons — drive the hat.
+                Log.d(TAG, "press XInputButton(${output.button}) → MVG dpad hat $hatDir")
+                adjustHat(hatDir, +1)
             } else {
                 val btn = GAMEPAD_BUTTON_CODES[output.button]
                 if (btn != null && gamepad.setButton(btn, true)) {
@@ -122,9 +130,13 @@ class OutputEmitter @Inject constructor(
             is BindingOutput.XInputButton -> {
                 // Mirror emitPress's routing decision (see there).
                 val triggerSide = TRIGGER_OUTPUT_SIDES[output.button]
+                val hatDir = HAT_OUTPUT_DIRS[output.button]
                 if (triggerSide != null) {
                     Log.d(TAG, "release XInputButton(${output.button}) → MVG analog trigger $triggerSide")
                     adjustTrigger(triggerSide, -1)
+                } else if (hatDir != null) {
+                    Log.d(TAG, "release XInputButton(${output.button}) → MVG dpad hat $hatDir")
+                    adjustHat(hatDir, -1)
                 } else {
                     val btn = GAMEPAD_BUTTON_CODES[output.button]
                     if (btn != null && gamepad.setButton(btn, false)) {
@@ -179,9 +191,22 @@ class OutputEmitter @Inject constructor(
         if (side == "LEFT") gamepad.setLeftTriggerOutput(v) else gamepad.setRightTriggerOutput(v)
     }
 
-    /** Drop all held stick/trigger-output state + zero the slots. Called on mode/config change. */
+    /** Update the held count for [dir] and re-push the net dpad hat. */
+    private fun adjustHat(dir: String, delta: Int) {
+        val (x, y) = synchronized(stickLock) {
+            val n = (hatHeld[dir] ?: 0) + delta
+            if (n <= 0) hatHeld.remove(dir) else hatHeld[dir] = n
+            // Hat: +x = right, +y = down (ABS_HAT0Y down = +1, up = -1).
+            val hx = (if ((hatHeld["RIGHT"] ?: 0) > 0) 1 else 0) - (if ((hatHeld["LEFT"] ?: 0) > 0) 1 else 0)
+            val hy = (if ((hatHeld["DOWN"] ?: 0) > 0) 1 else 0) - (if ((hatHeld["UP"] ?: 0) > 0) 1 else 0)
+            hx to hy
+        }
+        gamepad.setHatOutput(x, y)
+    }
+
+    /** Drop all held stick/trigger/hat-output state + zero the slots. Called on mode/config change. */
     fun resetStickOutputs() {
-        synchronized(stickLock) { stickHeld.clear(); triggerHeld.clear() }
+        synchronized(stickLock) { stickHeld.clear(); triggerHeld.clear(); hatHeld.clear() }
         gamepad.clearOutputSticks()
     }
 
@@ -212,6 +237,19 @@ class OutputEmitter @Inject constructor(
         private val TRIGGER_OUTPUT_SIDES: Map<String, String> = mapOf(
             "AXIS_L2" to "LEFT",
             "AXIS_R2" to "RIGHT",
+        )
+
+        /**
+         * [BindingOutput.XInputButton] tokens that are really the dpad hat, not buttons →
+         * which hat direction to drive. The d-pad lives on ABS_HAT0X/Y; a digital BTN or
+         * KEYCODE_DPAD inject doesn't register as the gamepad d-pad, so these route to
+         * [adjustHat] / [setHatOutput].
+         */
+        private val HAT_OUTPUT_DIRS: Map<String, String> = mapOf(
+            "DPAD_UP" to "UP",
+            "DPAD_DOWN" to "DOWN",
+            "DPAD_LEFT" to "LEFT",
+            "DPAD_RIGHT" to "RIGHT",
         )
     }
 }

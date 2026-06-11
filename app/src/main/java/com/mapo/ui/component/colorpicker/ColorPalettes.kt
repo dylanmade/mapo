@@ -44,30 +44,32 @@ internal object CommonSwatches {
         return tints + base + shades
     }
 
+    // Order: blue-grey, then red → violet in spectrum order (ROYGBIV with interim hues), then
+    // brown as a trailing earth tone. The neutral grayscale row is prepended in [rows].
     private val bases = listOf(
-        Color(0xFFF44336), // red
-        Color(0xFFE91E63), // pink
-        Color(0xFF9C27B0), // purple
-        Color(0xFF673AB7), // deep purple
-        Color(0xFF3F51B5), // indigo
-        Color(0xFF2196F3), // blue
-        Color(0xFF03A9F4), // light blue
-        Color(0xFF00BCD4), // cyan
-        Color(0xFF009688), // teal
-        Color(0xFF4CAF50), // green
-        Color(0xFF8BC34A), // light green
-        Color(0xFFCDDC39), // lime
-        Color(0xFFFFEB3B), // yellow
-        Color(0xFFFFC107), // amber
-        Color(0xFFFF9800), // orange
-        Color(0xFFFF5722), // deep orange
-        Color(0xFF795548), // brown
         Color(0xFF607D8B), // blue grey
+        Color(0xFFF44336), // red
+        Color(0xFFFF5722), // deep orange
+        Color(0xFFFF9800), // orange
+        Color(0xFFFFC107), // amber
+        Color(0xFFFFEB3B), // yellow
+        Color(0xFFCDDC39), // lime
+        Color(0xFF8BC34A), // light green
+        Color(0xFF4CAF50), // green
+        Color(0xFF009688), // teal
+        Color(0xFF00BCD4), // cyan
+        Color(0xFF03A9F4), // light blue
+        Color(0xFF2196F3), // blue
+        Color(0xFF3F51B5), // indigo
+        Color(0xFF673AB7), // deep purple
+        Color(0xFF9C27B0), // purple
+        Color(0xFFE91E63), // pink
+        Color(0xFF795548), // brown
     )
 
     private val grayscaleRow =
         listOf(1f, 0.88f, 0.74f, 0.60f, 0.46f, 0.32f, 0.20f, 0.10f, 0f).map { Color(it, it, it, 1f) }
 
-    /** All rows, light→dark per hue, with the neutral ramp last. */
-    val rows: List<List<Color>> = bases.map { ramp(it) } + listOf(grayscaleRow)
+    /** Neutral grayscale first, then one light→dark ramp per hue. */
+    val rows: List<List<Color>> = listOf(grayscaleRow) + bases.map { ramp(it) }
 }

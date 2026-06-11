@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -68,11 +69,11 @@ import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Straighten
-import androidx.compose.material.icons.filled.SubdirectoryArrowRight
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VerticalDistribute
 import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DrawerDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -82,6 +83,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -101,7 +103,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -115,6 +119,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -226,6 +231,15 @@ class OverlayLiveEditController @Inject constructor(
     private val gridDivisions = MutableStateFlow(OverlaySettings.GRID_DIVISIONS)
     // Align submenu's reference (Selection vs Canvas) — gates which align/space buttons are enabled.
     private val alignTo = MutableStateFlow(AlignTarget.Selection)
+    // Core menu orientation: false = vertical panel, true = horizontal icon-only bar ("Rotate menu").
+    private val menuHorizontal = MutableStateFlow(false)
+    // Center the panel only on its very first sizing; afterwards (incl. rotate) keep its position.
+    private var centerToolbarPending = true
+    // Captured just before a rotate so the new orientation preserves the old bottom-left corner.
+    private var pendingBottomLeft: Point? = null
+    // Per-window tap router for the (interop-dragged) core menu — routes a tap to the row/icon under
+    // it, since the raw-coord drag filter consumes all touches and children can't use `clickable`.
+    private val toolbarRouter = MenuTapRouter()
 
     fun canShow(): Boolean = Settings.canDrawOverlays(context)
     fun isEditing(): Boolean = _editing.value
@@ -332,9 +346,35 @@ class OverlayLiveEditController @Inject constructor(
                 }
             }
         }
-        // A newly attached button window stacks above the chrome; re-raise the chrome so its
-        // handles stay on top and tappable. Otherwise just reposition it to the new geometry.
+        // A newly attached button window stacks above everything added earlier. Re-raise the
+        // resize chrome (so its handles stay grabbable) and the editor menus (so the core menu +
+        // any open submenus always draw above the buttons). Otherwise just reposition the chrome.
         if (attachedNew && selectionChrome != null) onSelectionChanged() else updateSelectionChrome()
+        if (attachedNew) raiseEditorMenusAboveButtons()
+    }
+
+    /**
+     * Re-add (raise) the core menu window and any open submenu/scrim windows so they sit above
+     * button windows that were just attached. WindowManager has no z-order field for app-overlay
+     * windows — a window is raised only by removing and re-adding it (which keeps its content; the
+     * ComposeView re-composes on re-attach). Re-added in z-order: toolbar → scrim → submenus.
+     */
+    private fun raiseEditorMenusAboveButtons() {
+        // The always-visible core menu is raised blink-free (add-new-then-remove-old). Submenus +
+        // scrim are transient and usually closed during a button add, so the simpler raise is fine.
+        raiseToolbar()
+        menuScrim?.let { (v, _) ->
+            (v.layoutParams as? WindowManager.LayoutParams)?.let { p -> raiseWindow(v, p) }
+        }
+        menuStack.toList().forEach { mw -> raiseWindow(mw.view, mw.params) }
+    }
+
+    /** Bring [view]'s overlay window to the top by re-adding it (keeps [params], hence its position). */
+    private fun raiseWindow(view: View, params: WindowManager.LayoutParams) {
+        runCatching {
+            windowManager.removeViewImmediate(view)
+            windowManager.addView(view, params)
+        }.onFailure { Log.w(TAG, "raiseWindow failed", it) }
     }
 
     private fun attachElement(element: OverlayElement, size: Point) {
@@ -710,40 +750,51 @@ class OverlayLiveEditController @Inject constructor(
         // "Exit overlay editing?" confirm — an escape hatch, with a guard against accidents.
     }
 
-    private fun addToolbar() {
+    /**
+     * Build a core-menu ComposeView with its own raw-coord touch handler. The WHOLE menu is
+     * grab-and-draggable like the buttons: raw coords anchored at touch-down (immune to the window
+     * moving under the finger); past the touch slop it drags, and a tap that never moves is routed
+     * to the row/icon under it via [toolbarRouter] (the filter consumes all touches, so children
+     * can't use `clickable`).
+     */
+    private fun createToolbarView(): Pair<View, OverlayLifecycleOwner> {
         val owner = OverlayLifecycleOwner()
-        // Drag handler for the toolbar's grip — same raw-coord technique as the buttons
-        // (anchored to the window position at touch-down so the moving window doesn't fight
-        // the finger). Lets the user shove the toolbar aside to edit what's beneath it.
         var startRawX = 0f
         var startRawY = 0f
         var startX = 0
         var startY = 0
-        val onHandleTouch: (MotionEvent) -> Boolean = { ev ->
+        var dragging = false
+        val onTouch: (MotionEvent) -> Boolean = { ev ->
             val p = toolbarParams
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     startRawX = ev.rawX; startRawY = ev.rawY
                     startX = p?.x ?: 0; startY = p?.y ?: 0
-                    // Close any open submenus (their windows are anchored to the toolbar) so they
-                    // don't float detached while the toolbar moves.
-                    dismissSubmenus()
+                    dragging = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (p != null) {
-                        val size = displaySizePx()
-                        val v = toolbar?.first
-                        val w = v?.width ?: 0
-                        val h = v?.height ?: 0
-                        // When the toolbar is wider/taller than the screen, allow NEGATIVE offsets
-                        // so it can be slid off the edge to reveal the part that's off-screen.
-                        p.x = (startX + (ev.rawX - startRawX)).roundToInt()
-                            .coerceIn(minOf(0, size.x - w), maxOf(0, size.x - w))
-                        p.y = (startY + (ev.rawY - startRawY)).roundToInt()
-                            .coerceIn(minOf(0, size.y - h), maxOf(0, size.y - h))
-                        runCatching { windowManager.updateViewLayout(v, p) }
+                        val dx = ev.rawX - startRawX
+                        val dy = ev.rawY - startRawY
+                        if (!dragging && hypot(dx, dy) > touchSlop) {
+                            dragging = true
+                            dismissSubmenus() // starting a drag closes submenus (anchored to the toolbar)
+                        }
+                        if (dragging) {
+                            val size = displaySizePx()
+                            val v = toolbar?.first
+                            val w = v?.width ?: 0
+                            val h = v?.height ?: 0
+                            p.x = (startX + dx).roundToInt().coerceIn(minOf(0, size.x - w), maxOf(0, size.x - w))
+                            p.y = (startY + dy).roundToInt().coerceIn(minOf(0, size.y - h), maxOf(0, size.y - h))
+                            runCatching { windowManager.updateViewLayout(v, p) }
+                        }
                     }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!dragging) toolbarRouter.route(ev.x, ev.y)
                     true
                 }
                 else -> true
@@ -751,14 +802,23 @@ class OverlayLiveEditController @Inject constructor(
         }
         val view = ComposeView(context).apply {
             attachOwner(owner)
-            setContent { MapoTheme { ToolbarContent(onHandleTouch = onHandleTouch) } }
+            setContent { MapoTheme { ToolbarContent(onTouch = onTouch) } }
         }
         owner.resumeTo()
-        // Compact, free-positioned, draggable window anchored top-left. Its width is set
-        // explicitly to the toolbar's measured CONTENT width (see resizeToolbarToContent) rather
-        // than WRAP_CONTENT — a WRAP_CONTENT overlay window is measured AT_MOST the display width,
-        // which caps the row at the screen and hides the overflow. Explicit width + NO_LIMITS lets
-        // the toolbar flex as wide as its buttons need, even past the screen edge.
+        return view to owner
+    }
+
+    /** Wire up the size-to-content + position passes for a (freshly added) toolbar view. */
+    private fun wireToolbarResize(view: View) {
+        view.post { resizeToolbarToContent() }
+        view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> resizeToolbarToContent() }
+    }
+
+    private fun addToolbar() {
+        val (view, owner) = createToolbarView()
+        // WRAP_CONTENT here, but the window size is then driven EXPLICITLY by resizeToolbarToContent
+        // (measures UNSPECIFIED) so the menu can flex as wide as its content needs, even past the
+        // screen edge (NO_LIMITS) — a plain WRAP_CONTENT overlay window caps at the display width.
         val params = layoutParams(
             width = WindowManager.LayoutParams.WRAP_CONTENT,
             height = WindowManager.LayoutParams.WRAP_CONTENT,
@@ -772,36 +832,73 @@ class OverlayLiveEditController @Inject constructor(
             .onFailure { Log.e(TAG, "addView(toolbar) failed", it); return }
         toolbar = view to owner
         toolbarParams = params
-        // Size the window to the content's true width once laid out, and re-size whenever the
-        // content's intrinsic width changes (e.g. a longer action-set label).
-        view.post { resizeToolbarToContent(center = true) }
-        view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> resizeToolbarToContent(center = false) }
+        wireToolbarResize(view)
     }
 
     /**
-     * Set the toolbar window's width to the toolbar content's *natural* width. We measure the view
-     * with an UNSPECIFIED spec to get the width it WANTS — bypassing whatever constraint the window
-     * imposes on the WRAP_CONTENT ComposeView — then apply it explicitly so the window can grow as
-     * wide as the row needs, even beyond the screen (FLAG_LAYOUT_NO_LIMITS). [center] re-centers on
-     * the first pass.
+     * Raise the core menu above newly-added button windows WITHOUT the one-frame blink of a plain
+     * remove+re-add: build a fresh toolbar view, add it on top (the old one stays visible beneath
+     * until the new one has rendered the identical content at the same spot), then remove the old.
      */
-    private fun resizeToolbarToContent(center: Boolean) {
+    private fun raiseToolbar() {
+        val old = toolbar ?: return
+        val oldParams = toolbarParams ?: return
+        val (newView, newOwner) = createToolbarView()
+        val newParams = WindowManager.LayoutParams().apply { copyFrom(oldParams) }
+        runCatching { windowManager.addView(newView, newParams) }
+            .onFailure { Log.e(TAG, "raiseToolbar addView failed", it); return }
+        toolbar = newView to newOwner
+        toolbarParams = newParams
+        wireToolbarResize(newView)
+        // Remove the OLD view only AFTER the new one has rendered a frame (double-post → past at
+        // least one layout/draw), so the old stays visible underneath until then — no gap, no blink.
+        newView.post { newView.post { detach(old) } }
+    }
+
+    /**
+     * Size the toolbar window to its content's *natural* size, then position it. We measure with an
+     * UNSPECIFIED spec (so the window can flex as wide as the content needs, even past the screen —
+     * WRAP_CONTENT overlay windows instead cap at the display width and clip the overflow) and set
+     * the size EXPLICITLY. [View.forceLayout] before measuring bypasses the spec-keyed measure cache
+     * so a rotate re-measures the NEW orientation instead of returning the stale size.
+     *
+     * Position: first sizing → default (left edge, vertically centered); on a rotate → preserve the
+     * bottom-left corner ([pendingBottomLeft]) so it converts roughly in place (and the horizontal
+     * bar lands at the vertical menu's bottom-left). Finally clamp on-screen.
+     */
+    private fun resizeToolbarToContent() {
         val view = toolbar?.first ?: return
         val params = toolbarParams ?: return
-        val unspecified = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        view.measure(unspecified, unspecified)
+        view.forceLayout()
+        val unspec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        view.measure(unspec, unspec)
         val w = view.measuredWidth
         val h = view.measuredHeight
-        if (w <= 0) return
-        // Guard against a relayout loop: only push an update when the size actually changed.
-        if (params.width == w && params.height == h && !center) return
-        Log.i(TAG, "toolbar sized to content: ${w}x$h (display=${displaySizePx().x})")
-        params.width = w
-        params.height = h
-        if (center) {
-            val size = displaySizePx()
-            params.x = ((size.x - w) / 2).coerceAtLeast(0)
+        if (w <= 0 || h <= 0) return
+        val size = displaySizePx()
+        var nx = params.x
+        var ny = params.y
+        val bl = pendingBottomLeft
+        when {
+            bl != null -> {
+                pendingBottomLeft = null
+                // New top-left so the bottom-left corner stays put across the rotation.
+                nx = bl.x
+                ny = bl.y - h
+            }
+            centerToolbarPending -> {
+                centerToolbarPending = false
+                // Default: docked to the left, vertically centered. (The window carries the shadow
+                // margin, so x = 0 leaves the visible menu a hair in from the screen's left edge.)
+                nx = 0
+                ny = (size.y - h) / 2
+            }
         }
+        // Keep on-screen. Allow negative offsets only when the menu genuinely exceeds the screen.
+        nx = nx.coerceIn(minOf(0, size.x - w), maxOf(0, size.x - w))
+        ny = ny.coerceIn(minOf(0, size.y - h), maxOf(0, size.y - h))
+        if (params.width == w && params.height == h && params.x == nx && params.y == ny) return
+        params.width = w; params.height = h; params.x = nx; params.y = ny
         runCatching { windowManager.updateViewLayout(view, params) }
     }
 
@@ -1150,6 +1247,26 @@ class OverlayLiveEditController @Inject constructor(
         val sourceKey: String,
     )
 
+    /**
+     * Routes a tap (window-local x/y) to the row/icon under it for the interop-dragged core menu.
+     * Rows register their current bounds + action keyed by label (unique per window) as they lay out.
+     */
+    private class MenuTapRouter {
+        private class Target(val bounds: android.graphics.Rect, val onTap: () -> Unit)
+        private val targets = LinkedHashMap<String, Target>()
+
+        fun put(key: String, bounds: android.graphics.Rect, onTap: () -> Unit) {
+            targets[key] = Target(bounds, onTap)
+        }
+
+        fun route(x: Float, y: Float): Boolean {
+            val xi = x.roundToInt()
+            val yi = y.roundToInt()
+            targets.values.forEach { t -> if (t.bounds.contains(xi, yi)) { t.onTap(); return true } }
+            return false
+        }
+    }
+
     /** Geometry (x, width, y) of the parent at [parentDepth]: depth 0 = the always-visible toolbar. */
     private fun parentMenuGeometry(parentDepth: Int): Triple<Int, Int, Int>? {
         if (parentDepth == 0) {
@@ -1198,6 +1315,54 @@ class OverlayLiveEditController @Inject constructor(
         )
     }
 
+    /**
+     * Open/close (toggle) a submenu of a ROOT item, anchored by its bounds in the toolbar window.
+     * Orientation-aware (see [rootSubmenuAnchor]): vertical menu → fly-out to the right; horizontal
+     * menu → fly-out below or above depending on which screen half the menu sits in.
+     */
+    private fun toggleRootSubmenu(
+        sourceKey: String,
+        itemBounds: android.graphics.Rect,
+        builder: @Composable () -> List<MenuEntry>,
+    ) = runOnMain {
+        val openHere = menuStack.getOrNull(0)
+        if (openHere != null && openHere.sourceKey == sourceKey) {
+            truncateMenusTo(0)
+            return@runOnMain
+        }
+        truncateMenusTo(0)
+        if (menuScrim == null) addMenuScrim()
+        val tp = toolbarParams ?: return@runOnMain
+        val tv = toolbar?.first ?: return@runOnMain
+        val (left, top, growUp) = rootSubmenuAnchor(tp, tv.width, tv.height, itemBounds)
+        pushMenuLevel(depth = 1, sourceKey = sourceKey, anchorLeft = left, anchorTop = top, growUp = growUp, builder = builder)
+    }
+
+    /**
+     * (anchorLeft, anchorTop, growUp) for a root item's fly-out. The toolbar window carries a
+     * transparent [MENU_SHADOW_MARGIN] inset for its shadow, so the VISIBLE menu edges are inset by
+     * [margin] from the window edges — we anchor to the visible edge so the fly-out sits flush
+     * against the menu, not [margin] away from it.
+     */
+    private fun rootSubmenuAnchor(
+        tp: WindowManager.LayoutParams,
+        toolbarW: Int,
+        toolbarH: Int,
+        itemBounds: android.graphics.Rect,
+    ): Triple<Int, Int, Boolean> {
+        val margin = (MENU_SHADOW_MARGIN * context.resources.displayMetrics.density).roundToInt()
+        if (!menuHorizontal.value) {
+            // Vertical menu: fly-out to the right of the visible menu, aligned to the row's top.
+            return Triple(tp.x + toolbarW - margin, tp.y + itemBounds.top, false)
+        }
+        // Horizontal menu: fly-out below (menu in top half) or above (menu in bottom half), aligned
+        // to the icon's left edge. Anchor to the visible bottom/top (inset by the shadow margin).
+        val left = tp.x + itemBounds.left
+        val inTopHalf = (tp.y + toolbarH / 2) < (displaySizePx().y / 2)
+        return if (inTopHalf) Triple(left, tp.y + toolbarH - margin, false)
+        else Triple(left, tp.y + margin, true)
+    }
+
     /** Full-screen touch catcher below the fly-out windows: an outside tap closes the submenus. */
     private fun addMenuScrim() {
         val owner = OverlayLifecycleOwner()
@@ -1227,6 +1392,7 @@ class OverlayLiveEditController @Inject constructor(
         sourceKey: String,
         anchorLeft: Int,
         anchorTop: Int,
+        growUp: Boolean = false,
         builder: @Composable () -> List<MenuEntry>,
     ) {
         val owner = OverlayLifecycleOwner()
@@ -1243,7 +1409,11 @@ class OverlayLiveEditController @Inject constructor(
             gravity = Gravity.TOP or Gravity.START
             x = anchorLeft
             y = anchorTop
-            windowAnimations = com.mapo.R.style.Animation_Mapo_Dropdown
+            // Start INVISIBLE: a ComposeView only composes after attach, so we don't know the size
+            // until a frame later. Showing it at the un-measured anchor (and worse, growing UP from
+            // it) made the fly-out flash in at the wrong spot then jump. We position it while hidden
+            // and reveal it once placed (the content fades in via CascadeMenuLevel).
+            alpha = 0f
         }
         runCatching { windowManager.addView(view, params) }
             .onFailure { Log.e(TAG, "addView(menu level $depth) failed", it); return }
@@ -1252,12 +1422,13 @@ class OverlayLiveEditController @Inject constructor(
             val unspec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
             view.measure(unspec, unspec)
             val size = displaySizePx()
-            val nx = anchorLeft.coerceIn(0, maxOf(0, size.x - view.measuredWidth))
-            val ny = anchorTop.coerceIn(0, maxOf(0, size.y - view.measuredHeight))
-            if (nx != params.x || ny != params.y) {
-                params.x = nx; params.y = ny
-                runCatching { windowManager.updateViewLayout(view, params) }
-            }
+            // growUp: [anchorTop] is the menu's TOP edge and the fly-out opens upward, so its BOTTOM
+            // sits at anchorTop (used by the horizontal menu when it's in the screen's bottom half).
+            val baseY = if (growUp) anchorTop - view.measuredHeight else anchorTop
+            params.x = anchorLeft.coerceIn(0, maxOf(0, size.x - view.measuredWidth))
+            params.y = baseY.coerceIn(0, maxOf(0, size.y - view.measuredHeight))
+            params.alpha = 1f
+            runCatching { windowManager.updateViewLayout(view, params) }
         }
     }
 
@@ -1278,11 +1449,16 @@ class OverlayLiveEditController @Inject constructor(
 
     @Composable
     private fun CascadeMenuLevel(depth: Int, builder: @Composable () -> List<MenuEntry>) {
-        // surfaceContainerHighest — menu container (canonical M3 menu surface).
+        // Content fade-in (the window is positioned-while-hidden then revealed; no window animation).
+        val appear = remember { Animatable(0f) }
+        LaunchedEffect(Unit) { appear.animateTo(1f, tween(110)) }
+        // surfaceContainerHighest — menu container (canonical M3 menu surface). No shadow margin here
+        // (submenus anchor flush to the core menu; their own margin would re-open the gap).
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHighest,
             shape = MaterialTheme.shapes.medium,
             tonalElevation = 6.dp,
+            modifier = Modifier.graphicsLayer { alpha = appear.value },
         ) {
             MenuList(depth = depth, builder = builder, modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT_DP.dp))
         }
@@ -1504,7 +1680,7 @@ class OverlayLiveEditController @Inject constructor(
                             MenuEntry.Item(
                                 label = layerOpt.label,
                                 indent = true,
-                                leadingIcon = Icons.Default.SubdirectoryArrowRight,
+                                leadingIcon = Icons.Outlined.Layers,
                                 selected = layerOpt.scope == current,
                                 onClick = { overlayEditor.setScope(layerOpt.scope) },
                             ),
@@ -1514,7 +1690,7 @@ class OverlayLiveEditController @Inject constructor(
                     MenuEntry.Item(
                         "Add layer",
                         indent = true,
-                        leadingIcon = Icons.Default.SubdirectoryArrowRight,
+                        leadingIcon = Icons.Default.Add,
                         onClick = { menuGap("Add layer (set ${setOpt.label})") },
                     ),
                 )
@@ -1544,9 +1720,9 @@ class OverlayLiveEditController @Inject constructor(
         return buildList {
             add(
                 MenuEntry.Item(
+                    // Current value is intentionally NOT shown here — it would crowd out "Align to".
                     "Align to",
                     leadingIcon = Icons.Default.FilterCenterFocus,
-                    trailing = MenuTrailing.Value(target.label),
                     submenu = {
                         AlignTarget.entries.map { t ->
                             MenuEntry.Item(
@@ -1583,7 +1759,7 @@ class OverlayLiveEditController @Inject constructor(
             MenuEntry.Item("Grid size", leadingIcon = Icons.Default.Straighten, trailing = MenuTrailing.Value(divisions.toString())),
             MenuEntry.Divider,
             MenuEntry.Item("Show controller", leadingIcon = Icons.Default.SportsEsports, onClick = { menuGap("Show controller") }),
-            MenuEntry.Item("Rotate menu", leadingIcon = Icons.Default.ScreenRotation, onClick = { menuGap("Rotate menu") }),
+            MenuEntry.Item("Rotate menu", leadingIcon = Icons.Default.ScreenRotation, onClick = { rotateMenu() }),
         )
     }
 
@@ -1598,48 +1774,179 @@ class OverlayLiveEditController @Inject constructor(
         Log.i(TAG, "paste ${if (asOverride) "as override" else "as new"} — stub")
     }
 
+    /** Flip the core menu between the vertical panel and the horizontal icon bar, preserving the
+     *  bottom-left corner (so vertical→horizontal drops the bar to the vertical menu's bottom-left). */
+    private fun rotateMenu() = runOnMain {
+        dismissSubmenus()
+        toolbar?.first?.let { v -> toolbarParams?.let { p -> pendingBottomLeft = Point(p.x, p.y + v.height) } }
+        menuHorizontal.value = !menuHorizontal.value
+    }
+
     /**
-     * The always-visible root menu panel (the "toolbar" window): a narrow vertical M3 menu with a
-     * drag handle on top + bottom (drag either to reposition the whole panel). Submenu rows open
-     * cascading fly-outs beside them. The middle list scrolls if the menu is taller than its cap.
+     * The always-visible core menu (the "toolbar" window). Grab-and-draggable anywhere (the whole
+     * window owns a raw-coord touch filter via [onTouch]; a tap that doesn't move is routed by
+     * [toolbarRouter] to the row/icon under it). Renders as a vertical panel, or a horizontal
+     * icon-only bar when [menuHorizontal] is set ("Rotate menu").
      */
+    @OptIn(ExperimentalComposeUiApi::class)
     @Composable
-    private fun ToolbarContent(onHandleTouch: (MotionEvent) -> Boolean) {
-        // surfaceContainerHigh — floating panel (elevated container).
-        Surface(
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
+    private fun ToolbarContent(onTouch: (MotionEvent) -> Boolean) {
+        val horizontal by menuHorizontal.collectAsStateWithLifecycle()
+        // Re-size the window when the orientation flips. The window keeps its old explicit size while
+        // the new content composes (the layout-change listener won't fire — the clipped view keeps
+        // its old bounds), so trigger the resize here; forceLayout in resizeToolbarToContent makes
+        // the re-measure fresh (no stale cached size).
+        LaunchedEffect(horizontal) { resizeToolbarToContent() }
+        // Pill ends when horizontal; rounded when vertical. Drop shadow needs room, so the window's
+        // content is inset by MENU_SHADOW_MARGIN (the visible Surface is that much in from the window
+        // edge) and the shadow is drawn into that margin.
+        val shape = if (horizontal) CircleShape else MaterialTheme.shapes.large
+        val shadowCorner = if (horizontal) 100.dp else 16.dp
+        Box(
+            // Interop filter OUTERMOST so its ev.x/ev.y share the window origin with the rows'
+            // positionInWindow() used for tap routing; the shadow-margin padding is inside it.
+            modifier = Modifier
+                .pointerInteropFilter(onTouchEvent = onTouch)
+                .padding(MENU_SHADOW_MARGIN.dp),
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                DragHandle(onHandleTouch)
-                MenuList(
-                    depth = 0,
-                    builder = { RootMenuEntries() },
-                    modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT_DP.dp),
-                )
-                DragHandle(onHandleTouch)
+            // Shadow on a wrapper Box (sized to the Surface) so it can't be clipped by the Surface's
+            // shape; surfaceContainerHigh — floating panel (elevated container).
+            Box(Modifier.menuDropShadow(shadowCorner)) {
+            Surface(
+                shape = shape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+            ) {
+                // Rows re-register their current bounds (keyed by label) as they lay out; same labels
+                // across vertical/horizontal so entries overwrite rather than going stale.
+                if (horizontal) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RootMenuEntries().forEach { entry ->
+                            when (entry) {
+                                is MenuEntry.Divider ->
+                                    VerticalDivider(Modifier.height(26.dp).padding(horizontal = 2.dp))
+                                is MenuEntry.Item -> RoutedIcon(entry)
+                            }
+                        }
+                    }
+                } else {
+                    // No scroll: the raw-coord drag filter consumes touches (so a scroll couldn't work
+                    // anyway), and the core menu is meant to fit all its rows. The window sizes to it;
+                    // if it ever exceeds the screen the user drags it (the drag allows sliding off).
+                    Column(modifier = Modifier.width(MENU_WIDTH_DP.dp).padding(vertical = 6.dp)) {
+                        RootMenuEntries().forEach { entry ->
+                            when (entry) {
+                                is MenuEntry.Divider -> HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                                is MenuEntry.Item -> RoutedRow(entry)
+                            }
+                        }
+                    }
+                }
+            }
             }
         }
     }
 
-    /** A horizontal grab bar (drags the whole menu panel). Sits flush at the panel's top + bottom. */
-    @OptIn(ExperimentalComposeUiApi::class)
+    /**
+     * A soft, blurred drop shadow for the menu panel, drawn with [android.graphics.BlurMaskFilter]
+     * rather than `Modifier.shadow` — Android elevation shadows shift direction with the window's
+     * screen position, which looks wrong on a draggable overlay (mirrors `MainScreen.softDropShadow`).
+     * Draws into the surrounding [MENU_SHADOW_MARGIN] inset.
+     */
+    private fun Modifier.menuDropShadow(cornerRadius: Dp): Modifier = drawBehind {
+        val blurPx = 8.dp.toPx()
+        val offsetYPx = 2.dp.toPx()
+        val cornerPx = cornerRadius.toPx()
+        val paint = android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(72, 0, 0, 0)
+            // NORMAL (not OUTER) so the shadow hugs the edge — the inner half is covered by the
+            // opaque Surface drawn on top, leaving just the soft outer halo with no detached gap.
+            maskFilter = android.graphics.BlurMaskFilter(blurPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
+            isAntiAlias = true
+        }
+        drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawRoundRect(
+                0f, offsetYPx, size.width, size.height + offsetYPx, cornerPx, cornerPx, paint,
+            )
+        }
+    }
+
+    /** Tap action for a ROOT item with the latest [bounds] (window-local): open its submenu, or act. */
+    private fun rootItemTap(item: MenuEntry.Item, bounds: android.graphics.Rect) {
+        if (!item.enabled) return
+        val sub = item.submenu
+        if (sub != null) toggleRootSubmenu(item.label, bounds, sub)
+        else { item.onClick?.invoke(); dismissSubmenus() }
+    }
+
+    /** A routed root row (vertical menu): like a menu row, but registers into [toolbarRouter] (no clickable). */
     @Composable
-    private fun DragHandle(onHandleTouch: (MotionEvent) -> Boolean) {
+    private fun RoutedRow(item: MenuEntry.Item) {
+        val contentColor =
+            if (item.enabled) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .onGloballyPositioned { c ->
+                    val p = c.positionInWindow()
+                    val b = android.graphics.Rect(
+                        p.x.roundToInt(), p.y.roundToInt(),
+                        p.x.roundToInt() + c.size.width, p.y.roundToInt() + c.size.height,
+                    )
+                    toolbarRouter.put(item.label, b) { rootItemTap(item, b) }
+                }
+                .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item.leadingIcon?.let {
+                Icon(it, contentDescription = null, tint = contentColor, modifier = Modifier.size(18.dp))
+            }
+            Text(
+                text = item.label,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+                color = contentColor,
+            )
+            if (item.submenu != null) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowRight,
+                    contentDescription = null,
+                    tint = contentColor,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+
+    /** A routed root icon (horizontal menu): icon only, registers into [toolbarRouter]. */
+    @Composable
+    private fun RoutedIcon(item: MenuEntry.Item) {
+        val tint =
+            if (item.enabled) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         Box(
             modifier = Modifier
-                .width(MENU_WIDTH_DP.dp)
-                .pointerInteropFilter(onTouchEvent = onHandleTouch)
-                .padding(vertical = 6.dp),
+                .size(40.dp)
+                .onGloballyPositioned { c ->
+                    val p = c.positionInWindow()
+                    val b = android.graphics.Rect(
+                        p.x.roundToInt(), p.y.roundToInt(),
+                        p.x.roundToInt() + c.size.width, p.y.roundToInt() + c.size.height,
+                    )
+                    toolbarRouter.put(item.label, b) { rootItemTap(item, b) }
+                },
             contentAlignment = Alignment.Center,
         ) {
-            Box(
-                Modifier
-                    .size(width = 28.dp, height = 4.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant),
-            )
+            item.leadingIcon?.let {
+                Icon(it, contentDescription = item.label, tint = tint, modifier = Modifier.size(22.dp))
+            }
         }
     }
 
@@ -1904,5 +2211,7 @@ class OverlayLiveEditController @Inject constructor(
         // Editor menu sizing: narrow fixed width, capped height (scrolls past it).
         private const val MENU_WIDTH_DP = 156
         private const val MENU_MAX_HEIGHT_DP = 360
+        // Transparent inset around the menu Surface inside its window, giving the drop shadow room.
+        private const val MENU_SHADOW_MARGIN = 10
     }
 }

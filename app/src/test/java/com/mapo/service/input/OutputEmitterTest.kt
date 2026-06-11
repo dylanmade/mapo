@@ -99,6 +99,27 @@ class OutputEmitterTest {
     }
 
     @Test
+    fun pressXInputButton_dpadUp_drivesHatNotButton() {
+        // DPAD_* are the hat axis (ABS_HAT0X/Y), not buttons. Up = hat (0, -1).
+        val held = subject.emitPress(BindingOutput.XInputButton("DPAD_UP"))
+        assertTrue(held)
+        verify(exactly = 1) { gamepad.setHatOutput(0, -1) }
+        verify(exactly = 0) { gamepad.setButton(any(), any()) }
+        verify(exactly = 0) { dispatcher.injectKeyDown(any()) }
+    }
+
+    @Test
+    fun xInputButton_dpad_accumulatesDiagonal_andReleasesToCenter() {
+        subject.emitPress(BindingOutput.XInputButton("DPAD_UP"))
+        subject.emitPress(BindingOutput.XInputButton("DPAD_RIGHT"))
+        verify { gamepad.setHatOutput(1, -1) } // up-right
+        subject.emitRelease(BindingOutput.XInputButton("DPAD_UP"))
+        verify { gamepad.setHatOutput(1, 0) } // only right
+        subject.emitRelease(BindingOutput.XInputButton("DPAD_RIGHT"))
+        verify { gamepad.setHatOutput(0, 0) } // centered
+    }
+
+    @Test
     fun xInputStick_opposingDirectionsCancel() {
         subject.emitPress(BindingOutput.XInputStick("RIGHT", "UP"))
         subject.emitPress(BindingOutput.XInputStick("RIGHT", "DOWN"))

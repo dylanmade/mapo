@@ -67,6 +67,8 @@ private val SlimFieldContentPadding = PaddingValues(horizontal = 16.dp, vertical
  * @param size [CompactFieldSize.Standard] takes its height + padding from the ambient density;
  *   [CompactFieldSize.Slim] forces the always-compact (~40dp) field regardless of density, for
  *   when a particular call site wants a tighter field than the screen's default.
+ * @param contentPadding overrides the size-derived inner padding when non-null — e.g. to trim the
+ *   padding on the icon side of a trailing-icon field.
  */
 @Composable
 fun CompactTextField(
@@ -81,6 +83,7 @@ fun CompactTextField(
     placeholder: String? = null,
     leadingIcon: (@Composable () -> Unit)? = null,
     trailingIcon: (@Composable () -> Unit)? = null,
+    contentPadding: PaddingValues? = null,
     isError: Boolean = false,
     singleLine: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
@@ -100,7 +103,9 @@ fun CompactTextField(
         CompactFieldSize.Standard -> density.fieldMinHeight
         CompactFieldSize.Slim -> SlimFieldMinHeight
     }
-    val fieldContentPadding = when (size) {
+    // [contentPadding] overrides the size-derived inset when a call site needs to tune it (e.g.
+    // a trailing-icon field that wants less padding on the icon side).
+    val fieldContentPadding = contentPadding ?: when (size) {
         CompactFieldSize.Standard -> density.fieldContentPadding
         CompactFieldSize.Slim -> SlimFieldContentPadding
     }

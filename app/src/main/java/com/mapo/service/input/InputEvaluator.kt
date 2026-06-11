@@ -355,6 +355,13 @@ class InputEvaluator @Inject constructor(
         dpadHeldOrder.clear()
         // Drop any held directional stick-OUTPUT bindings so they don't stick across change.
         emitter.resetStickOutputs()
+        // Clear the analog trigger-OUTPUT contributions (TriggerMode "Analog output trigger").
+        // The output axis / on-off is a setting, so changing it is a config change that
+        // doesn't flip the source's mode — without this, switching the output axis (or to
+        // Off) while the trigger is at rest would strand the old axis's value. The next
+        // trigger reading re-establishes the target axis.
+        gamepadEmitter.clearSource(InputSource.LEFT_TRIGGER)
+        gamepadEmitter.clearSource(InputSource.RIGHT_TRIGGER)
         val startingSetId = compiled.startingActionSetId
         val set = compiled.sets[startingSetId] ?: return
         for (source in GAMEPAD_EMITTING_SOURCES) {
@@ -520,7 +527,36 @@ class InputEvaluator @Inject constructor(
                 }
             }
         }
+        // Device-default digital passthrough → MVG (only while grabbed). When the
+        // controller is grabbed the game reads the MVG, not the physical pad — so a
+        // digital button that would otherwise pass through physically (a device-default
+        // source with no compiled input, or an Unbound binding) lands on the physical
+        // controller, which the game ignores. Forward it to the MVG's matching button so
+        // "[Device default]" genuinely passes through. handleRawKeyReading already does
+        // this for buttons on the GRABBED node before reaching handleDigital; this covers
+        // buttons on a SEPARATE un-grabbed node (e.g. the AYN Thor's face buttons) that
+        // arrive via onKeyEvent. Remapped buttons (a real, non-Unbound binding) fall
+        // through to onPress and fire their remap as before.
+        if (physicalPassthroughEnabled.get()) {
+            val btn = ADDRESS_TO_GAMEPAD_BUTTON[address]
+            if (btn != null && wouldPassThrough(address)) {
+                gamepadEmitter.setButton(btn, isDown)
+                Log.d(TAG, "handleDigital: device-default ${address.source}.${address.inputKey} → MVG btn passthrough (grabbed)")
+                return true
+            }
+        }
         return if (isDown) onPress(address) else onRelease(address)
+    }
+
+    /**
+     * True if [address] has no real remap to fire — either its source is device-default
+     * (no compiled input) or every binding on it is [BindingOutput.Unbound]. Used to
+     * decide whether a grabbed digital button should be forwarded to the MVG as a
+     * passthrough rather than firing a remap.
+     */
+    private fun wouldPassThrough(address: InputAddress): Boolean {
+        val input = lookupActive(address) ?: return true
+        return input.activators.all { a -> a.bindings.all { it is BindingOutput.Unbound } }
     }
 
     /** Press-ordered held directions per source, for single-active dpad layouts (4-way/cross-gate). */
@@ -1860,6 +1896,9 @@ class InputEvaluator @Inject constructor(
         // per-source reference orientation. Reset so the next event
         // recalibrates against the user's new natural holding angle.
         com.mapo.service.input.modes.GyroToJoystickDeflectionMode.resetState()
+        // TriggerMode caches per-pull threshold-style state (hip-fire defer window,
+        // exclusive lock); reset so it can't leak across a profile / action-set switch.
+        com.mapo.service.input.modes.TriggerMode.resetState()
         if (analogLatched.isEmpty()) return
         Log.d(TAG, "flushAnalog: releasing ${analogLatched.size} latched synthetic edge(s)")
         // Snapshot before mutation — dispatchSyntheticEdge writes back into
@@ -1982,6 +2021,28 @@ class InputEvaluator @Inject constructor(
             // DPAD codes (0x220-0x223) deliberately omitted — dpad goes
             // through the HAT axis, not BTN_*. The analog passthrough path
             // already handles ABS_HAT0X/Y for the dpad.
+        )
+
+        /**
+         * [InputAddress] → virtual-gamepad BTN_* code for the DEVICE_DEFAULT digital
+         * passthrough on the `onKeyEvent` side (see handleDigital). Mirrors
+         * [LINUX_KEY_TO_GAMEPAD_BUTTON] but keyed by the resolved address rather than the
+         * raw Linux code, since buttons that arrive via the accessibility key filter
+         * (un-grabbed node) are already classified to (source, sub-input). Triggers + dpad
+         * are intentionally absent — those are analog (hat / ABS_Z/RZ) and pass through via
+         * [passthroughAnalogToGamepad], not as buttons.
+         */
+        private val ADDRESS_TO_GAMEPAD_BUTTON: Map<InputAddress, Int> = mapOf(
+            InputAddress(InputSource.BUTTON_DIAMOND, "button_a") to 0x130,
+            InputAddress(InputSource.BUTTON_DIAMOND, "button_b") to 0x131,
+            InputAddress(InputSource.BUTTON_DIAMOND, "button_x") to 0x133,
+            InputAddress(InputSource.BUTTON_DIAMOND, "button_y") to 0x134,
+            InputAddress(InputSource.LEFT_BUMPER, "click") to 0x136,
+            InputAddress(InputSource.RIGHT_BUMPER, "click") to 0x137,
+            InputAddress(InputSource.SWITCH_SELECT, "click") to 0x13a,
+            InputAddress(InputSource.SWITCH_START, "click") to 0x13b,
+            InputAddress(InputSource.LEFT_JOYSTICK, "click") to 0x13d,
+            InputAddress(InputSource.RIGHT_JOYSTICK, "click") to 0x13e,
         )
 
         /** Sources that can contribute to the virtual XInput gamepad — used by flushAnalog. */

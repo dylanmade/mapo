@@ -1,0 +1,530 @@
+﻿MAPPO - SOURCE MODE SETTINGS (WORKING DRAFT)
+
+
+Format legend (depth = number of leading hyphens):
+=== X ===   input type
+plain line  one settings menu, written "Source - Mode Settings"
+-           category
+--          setting name
+---         a setting detail: a "conditional: ..." line, a helper-text line, and/or the control type word (dropdown / slider / toggle)
+----        a dropdown option (default marked "(default)"), OR a slider's "min X, max Y, def Z" line, OR "default on" for a toggle
+-----       a dropdown option's helper text
+Reuse points at another block with a "same as <menu> > <setting>" line at the matching depth.
+
+
+
+
+=== BUTTON PAD ===
+
+
+Button Pad - Button Pad Settings
+
+
+- Haptics
+-- Haptic Intensity Override
+--- dropdown
+---- Use Activator Settings (default)
+---- Off
+---- Low
+---- Medium
+---- High
+
+
+Button Pad - Joystick Settings
+
+
+- Sensitivity
+-- Horizontal Scale
+--- slider
+---- min 0%, max 100%, def 100%
+-- Vertical Scale
+--- slider
+---- min 0%, max 100%, def 100%
+-- Invert Horizontal Axis
+--- toggle
+-- Invert Vertical Axis
+--- toggle
+-- Stick Response Curve
+--- This determines the mapping of analog input to output. By default a linear 1:1 mapping is used. This curve can be altered so there is more or less room for fine controls.
+--- dropdown
+---- Linear (default)
+----- A linear response curve maps the input directly to the output in a 1:1 fashion. At 50% deflection, 50% output will be sent.
+---- Aggressive
+----- An aggressive response curve gets to 100% output faster. This gives less of a slow range and more quickly hits the upper range of output, with faster response.
+---- Relaxed
+----- A relaxed response curve gets to 100% output slower. There is slightly more slow range where fine control can be used and the upper range is pushed further towards the edges.
+---- Wide
+----- A wide response curve gets to 100% output much more slowly than default. There is a wide range of low values which ramps up quickly at the outer edges. This allows for a wide amount of small values in the inner range while ramping to full at the outside.
+---- Extra Wide
+----- An extra wide response curve provides a large range of lower values over a wide band, only reaching 100% at the extremes.
+---- Custom Curve
+----- A custom curve can be defined using the response curve slider.
+-- Custom Response Curve
+--- conditional: only appears when Stick Response Curve is set to Custom Curve
+--- slider
+---- min 25, max 375, def 200
+-- Response Axis Style
+--- Apply the response curve per axis, or based on the distance from the deadzone.
+--- dropdown
+---- Per Axis
+----- The response curve is applied separately to each axis. Moving the stick in a circle will bias movement toward the axes.
+---- Circular (default)
+----- The response curve is applied using the distance of the stick from the deadzone. Moving the stick in a circle will have no directional bias.
+- Output
+-- Output Joystick
+--- Determines whether analog joystick commands are sent as a left or right joystick.
+--- dropdown
+---- Left Joystick
+---- Right Joystick (default)
+---- Relative Mouse
+-- Output Axis
+--- Output can be limited to a single axis if desired. For example, steering with the Gyro in a racing game where you don't want to also scroll through vertical menus.
+--- dropdown
+---- Horizontal Only
+---- Vertical Only
+---- Both Horizontal & Vertical (default)
+-- Rotate Output
+--- Rotates the output of the joystick. For example, with a setting of 90 degrees, a stick pushed forward would output as pushed right.
+--- slider
+---- min -180 degrees, max 180 degrees, def 0 degrees
+- Deadzones
+-- Deadzone Source
+--- dropdown
+---- No Deadzone (default)
+----- The raw input of the joystick will be sent.
+---- Controller Preference
+----- The deadzone's value comes from this specific controller's deadzone, which you can set in Settings > Controller > Calibration & Advanced Settings.
+---- Custom
+----- Set up a custom deadzone for this game's configuration.
+-- Deadzone Threshold
+--- Two draggable handles; handle 1 cannot pass handle 2. Input below handle 1 = no output; between the handles = output ramp; at or beyond handle 2 = max output.
+--- slider
+---- min 0, max 100, dual handle; def handle 1 = 0, handle 2 = 50
+-- Deadzone Shape
+--- dropdown
+---- Cross
+----- A cross shaped deadzone treats each axis separately with the inner deadzone being a band along that axis. This creates a + shaped cross of deadzone along the axis. This is often best for navigation where holding primarily in a single direction won't cause drift for a less-than-perfect alignment.
+---- Circle (default)
+----- A simple circle shaped deadzone. Input between the inner and outer deadzones is ramped (i.e. mapped to its relative distance between the two). Any input inside the inner deadzone is not sent, while input outside the outer deadzone registers as full output.
+---- Square
+----- The square deadzone uses a cross for determining the inner deadzone, but also maps the output from a circle into a square. This quickens the rate at which the diagonals reach maximum output.
+- Outer Ring
+-- Command Radius
+--- When outside this radius on the joystick, the assigned button or key will be sent. For example, the 'Run' or 'Sprint' button could be assigned when holding at the edge. The slider can be visualized as extending a radius from the center outward, with the point being where the outer ring begins.
+--- slider
+---- min 1, max 32767, def 25000
+-- Command Invert
+--- If set, the command will be sent when inside the radius instead of outside. For example, 'Walk' or 'Sneak' could be sent when inside a certain zone.
+--- toggle
+- Haptics
+-- Haptic Intensity
+--- dropdown
+---- Off (default)
+---- Low
+---- Medium
+---- High
+
+
+Button Pad - Directional Pad Settings
+
+
+- General
+-- Directional Pad Layout
+--- dropdown
+---- 8 Way (Overlap) (default)
+----- A pie shaped layout with diagonals that activate both directional commands.
+---- 4 Way (No Overlap)
+----- A four way pie shaped layout with diagonals that only activate the single nearest directional command.
+---- Analog Emulation
+----- The directional commands are sent to the game in pulses to simulate an analog stick.
+---- Cross Gate
+----- A cross-shaped pad layout that prioritizes horizontal and vertical movement over the diagonals.
+- Haptics
+-- Haptic Intensity Override
+--- dropdown
+---- Use Activator Settings (default)
+---- Off
+---- Low
+---- Medium
+---- High
+
+
+
+
+=== DPAD ===
+
+
+DPad - Directional Pad Settings
+- same as Button Pad - Directional Pad Settings
+
+
+DPad - Joystick Settings
+- same as Button Pad - Joystick Settings
+
+
+DPad - Button Pad Settings
+- same as Button Pad - Button Pad Settings
+
+
+
+
+=== TRIGGERS ===
+
+
+Triggers - Trigger Settings
+(one menu each for the left and right trigger mode respectively)
+
+
+- General
+-- Threshold Trigger Style
+--- dropdown
+---- Simple Threshold
+----- Good for mouse clicks and drags. As the trigger is pulled, the Soft Pull command is sent first, followed by the Full Pull.
+---- Hair Trigger (default)
+----- Good for action games where you want to be able to rapidly send the Soft Pull command with quick pulls & releases.
+---- Hip Fire Aggressive
+----- Good for action games with both Full Pull and Soft Pull commands assigned. Quick pulls will only send the Full Pull, whereas slower pulls will send the Soft Pull first, followed by the Full Pull.
+---- Hip Fire Normal
+----- Same as Hip Fire Aggressive, but with a larger time window in which the Soft Pull can be skipped.
+---- Hip Fire Relaxed
+----- An even larger time window in which the Soft Pull can be skipped.
+---- Hip Fire Exclusive
+----- Like the above options, except that once either of the Full Pull or Soft Pull commands have been sent, the other cannot be sent until the trigger has been fully released.
+-- Trigger Threshold Point
+--- The Soft Pull command will be sent when the trigger is pulled past this point. For a light press, move the slider to the left. For a heavy press (requires more pull), move the slider to the right.
+--- slider
+---- min 0, max 32767, def 10000
+-- Trigger Response Curve
+--- same as Button Pad - Joystick Settings > Stick Response Curve
+-- Custom Response Curve
+--- conditional: only appears when Trigger Response Curve is set to Custom Curve
+--- slider
+---- min 25, max 4000, def 1000
+-- Hold to Repeat (Turbo)
+--- toggle
+- Analog Output
+-- Analog Output Trigger
+--- When enabled, the analog value of the specified trigger will be sent to the game. Only possible if the game recognizes XInput compatible gamepad values.
+--- dropdown
+---- Left Trigger (default if settings are for Left Trigger)
+---- Right Trigger  (default if settings are for Right Trigger)
+---- Analog Off
+-- Trigger Range Start
+--- This sets the deadzone for the analog trigger. A greater value will create more of a 'deadzone' where no analog value will be sent when initially pressing the trigger down.
+--- slider
+---- min 0, max 32767, def 1000
+-- Trigger Range End
+--- This sets the deadzone for the analog trigger. A smaller value will create more of a 'deadzone' at the end of the range where the maximum analog value will be sent once past this point in the throw.
+--- slider
+---- min 0, max 32767, def 1000
+
+
+
+
+=== JOYSTICKS ===
+
+
+Joysticks - Joystick Settings
+(one menu each for the left and right joystick respectively)
+- same as Button Pad - Joystick Settings, except Output Joystick defaults to the matching stick: Left Joystick for the left stick, Right Joystick for the right stick
+
+
+Joysticks - Joystick Mouse Settings
+
+
+- General
+-- Mouse Sensitivity
+--- slider
+---- min 10%, max 10000%, def 275%
+-- Horizontal Scale
+--- slider
+---- min 0%, max 100%, def 100%
+-- Vertical Scale
+--- slider
+---- min 0%, max 100%, def 100%
+-- Stick Response Curve
+--- same as Button Pad - Joystick Settings > Stick Response Curve, except default is Wide
+-- Response Axis Style
+--- Apply the response curve per axis, or based on the distance from the deadzone.
+--- dropdown
+---- Per Axis (default)
+----- The response curve is applied separately to each axis. Moving the stick in a circle will produce a square mouse path.
+---- Circular
+----- The response curve is applied using the distance of the stick from the deadzone. Moving the stick in a circle will produce a circular mouse path.
+- Output
+-- same as Button Pad - Joystick Settings > Output
+- Deadzones
+-- same as Button Pad - Joystick Settings > Deadzones
+- Outer Ring
+-- same as Button Pad - Joystick Settings > Outer Ring
+- Haptics
+-- same as Button Pad - Joystick Settings > Haptics
+
+
+Joysticks - Flick Stick Settings
+
+
+- Angle Calibration
+-- Flick Stick degrees to Mouse Pixels (Dots Per 360)
+--- This value is shared with the Gyro to Mouse mode's "Dots Per 360" (in this Action Set). One full 360 'Sweep' on the Flick Stick will result in this many pixels of horizontal mouse movement. Tuning tip: temporarily bind a button to the "Turn Camera 360" action in the Mouse Actions tab to help calibrate the Flick Stick's angles with in-game angles.
+--- slider
+---- min 1px, max 32000px, def 6545px
+- Flick Stick Sensitivity
+-- Flick Stick Sweep Sensitivity
+--- Multiplier for 'Sweeping' the Flick Stick around the outer edge. Tweak this only after you have tweaked Dots Per 360.
+--- slider
+---- min 0x, max 6x, def 1x, increments .125
+-- Rotation Offset
+--- Rotate the Flick Stick inputs. This can be useful if an initial forward Flick consistently rotates you to one side of your expected direction.
+--- slider
+---- min -180 degrees, max 180 degrees, def 0 degrees
+- Snapping
+-- Snap Angle
+--- dropdown
+---- No Snapping
+---- 180 Degrees
+---- 90 Degrees
+---- Sixths
+---- Eighths
+---- Forward Only (default)
+-- Front Angle Deadzone
+--- The flick turn will not occur if the stick is pointed north within this angle. Useful if you want to sweep without a flick turn.
+--- slider
+---- min 0 degrees, max 180 degrees, def 7 degrees
+- Smoothing
+-- Flick Turn Tightness
+--- Flick Turn smoothing. Higher values mean quicker turns, lower values mean slower turns.
+--- slider
+---- min 0%, max 100%, def 80%
+-- Sweep Tightness
+--- Smooths out the noise from sweeping the stick. Higher values mean quicker responses, lower values mean smoothed/slower responses.
+--- slider
+---- min 0%, max 100%, def 70%
+-- Release Dampening Speed
+--- When releasing the Flick Stick, the stick may bounce off your thumb, causing unintentional sweeping. To mitigate this, sweep turning is reduced while the stick is moving home. The faster the stick is moving toward home, the more the sweep is dampened. If this value is low, the stick only has to return slowly to reduce all sweep turning. If the value is high, the stick must return quickly to reduce sweep turning.
+--- slider
+---- min 0u/s, max 10u/s, def 2.5u/s, increments .25u/s
+- Deadzones
+-- Inner Deadzone
+--- Push the stick as far as this threshold to see the flick turn begin. The flick turn speed will scale depending on how far it is between the inner and outer deadzones. Higher than normal inner deadzone values are recommended, as they help calculate more accurate initial angles.
+--- slider
+---- min 0%, max 100%, def 50%
+-- Outer Deadzone
+--- Push the stick this far to get the maximum flick turn rate.
+--- slider
+---- min 0%, max 100%, def 90%
+- Output
+-- Output Axis
+--- Output the flick stick to horizontal (typical use) or vertical.
+--- dropdown
+---- Horizontal Only (default)
+---- Vertical Only
+-- Invert Output
+--- toggle
+- Outer Ring
+-- Command Radius
+--- Moving the Joystick past this radius will trigger the 'Outer Ring Command' (assigned on the Joystick settings menu).
+--- slider
+---- min 0%, max 100%, def 80%
+-- Command Invert
+--- If set, the command will be sent when inside the radius instead of outside. For example, 'Walk' or 'Sneak' could be sent when inside a certain zone.
+--- toggle
+- Action Set Activation
+-- Allow Flick on Awake
+--- If the stick is past the inner deadzone when the current action set is activated, the flick turn will begin immediately. If this is off, the stick must be moved inside the inner deadzone and back out to start the flick turn.
+--- toggle
+- Haptics
+-- Rotational Haptics
+--- How intense the haptic bumps are when sweeping the flick stick.
+--- dropdown
+---- Off
+---- Low
+---- Medium (default)
+---- High
+-- Degrees Per Rotational Haptic Bump
+--- The number of degrees required to trigger a rotational haptic bump.
+--- slider
+---- min 0 degrees, max 360 degrees, def 5 degrees
+
+
+Joysticks - Directional Pad Settings
+
+
+- General
+-- Directional Pad Layout
+--- same as Button Pad - Directional Pad Settings > Directional Pad Layout
+-- Overlap Region
+--- Defines how much space in the diagonals applies to both directions. At the lowest setting overlap is nearly removed, acting almost like a 4-way control. At the highest setting overlap is almost always applied unless the stick is precisely on a cardinal direction.
+--- slider
+---- min 2000, max 16000, def 4000
+- Deadzones
+-- Deadzone
+--- slider
+---- min 0, max 32767, def 10000
+- Outer Ring
+-- same as Joysticks - Joystick Settings > Outer Ring 
+- Haptics
+-- same as Button Pad - Directional Pad Settings > Haptics
+
+
+Joysticks - Scroll Wheel Settings
+
+
+- General
+-- Sensitivity
+--- slider
+---- min 1, max 180, def 90
+-- Spin Friction
+--- dropdown
+---- Off
+---- Low
+---- Medium (default)
+---- High
+-- Swipe Direction
+--- dropdown
+---- Horizontal
+---- Vertical
+---- Circular (default)
+----- Make circular motions to move forward or backward in the Scroll Wheel's command list.
+-- Invert Swipe Direction
+--- Inverts the direction that you need to swipe to move 'forward' in the set of commands for this Scroll Wheel.
+--- toggle
+-- Wrap List
+--- When enabled, scrolling past either end of this Scroll Wheel's command list will cause it to wrap to the other end of the list. Otherwise, scrolling past an end won't generate any command.
+--- toggle
+---- default on
+- Haptics
+-- Haptic Intensity
+--- dropdown
+---- Off
+---- Low
+---- Medium (default)
+---- High
+
+
+
+
+=== GYRO ===
+
+
+Gyro - Gyro to Mouse Settings
+
+
+- General
+-- Choose Gyro Button(s)
+--- Selected buttons will Enable/Suppress/Toggle gyro output. If no buttons are selected, the gyro will always be on.
+--- Enter our input selection flow; should also allow multiple inputs to be added
+---- If no buttons are selected, show “None (Gyro Always On)”
+-- Gyro Enable/Suppress/Toggle
+--- conditional: only visible if at least one button is selected for Choose Gyro Buttons
+- Angle Calibration
+-- Gyro Angles to Mouse Pixels (Dots Per 360)
+--- For Natural Angles Calibration. One full 360 turn of the gyro will generate this many mouse pixels (when at 1x sensitivity). This value is shared with the Flick Stick Dots Per 360 (in this Action Set). Tuning tip: temporarily bind a button to the "Turn Camera 360" action in the Mouse Actions tab to help calibrate the gyro's real world angles with in-game angles.
+--- slider
+---- min 1px, max 32000px, def 6545px
+- Gyro Sensitivity
+-- Gyro Sensitivity
+--- When "Dots Per 360" is correctly calibrated in-game, this will multiply the output of the gyro to the mouse. 1x will give 1:1 real world gyro rotation to in-game rotation. 2x will turn the in-game camera twice as fast as the controller's rotation.
+--- slider
+---- min 0x, max 30x, def 2.5x
+-- Invert Y Output
+--- toggle
+-- Invert X Output
+--- toggle
+-- Acceleration
+--- dropdown
+---- Off (default)
+---- Linear
+---- Relaxed
+---- Aggressive
+-- Vertical/Horizontal Output Mixer
+--- Reduce vertical sensitivity by moving the slider to the left, or reduce horizontal sensitivity by moving the slider to the right. At 0% output, the horizontal to vertical ratio is 1:1.
+--- slider
+---- min -100%, max 100%, def 0%
+-- Gyro Speed Deadzone
+--- The minimum amount of speed that the gyro must be moved before there is a reaction on screen. This is useful for mitigating hand shake or the natural bounce back after a flick. Rotation output lost to the deadzone will be recovered when moving the device at high speeds.
+--- slider
+---- min 0 deg/s, max 1 deg/s, def 0.36 deg/s
+-- Gyro Precision Speed
+--- When rotating the device below this speed, sensitivity is reduced relative to the speed and motion will be even smaller in-game. This may be preferable to a deadzone for adept users. Rotation output filtered by the precision setting will be recovered when moving the controller at high speeds.
+--- slider
+---- min 0 deg/s, max 15 deg/s, def 0.75 deg/s
+- Momentum
+-- Enable Momentum
+--- When the gyro is disabled by the gyro enable button, the gyro will continue to output for a short time. Use friction settings to control how quickly the gyro slows down.
+--- toggle
+-- Horizontal Momentum Friction
+--- conditional: only appears when Enable Momentum is on
+--- How quickly the gyro momentum reduces on the horizontal axis.
+--- slider
+---- min 0 deg/s, max 720 deg/s, def 100 deg/s
+-- Vertical Momentum Friction
+--- conditional: only appears when Enable Momentum is on
+--- How quickly the gyro momentum reduces on the vertical axis. Set this very high if you want momentum to only turn the camera horizontally.
+--- slider
+---- min 0 deg/s, max 720 deg/s, def 200 deg/s
+- Gyro Orientation
+-- 3DOF to 2D Conversion Style
+--- dropdown
+---- Yaw
+----- Turn the controller around its own vertical axis for horizontal output. Tilt the controller up and down around its own lateral axis for vertical output. (Local Space Preset)
+---- Roll
+----- Lean the controller around its forward axis for horizontal output. Tilt the controller up and down around its own lateral axis for vertical output. (Local Space Preset)
+---- Yaw + Roll (default)
+----- Combines Lean and Turn for horizontal output. Tilting the controller up and down around its own lateral axis still moves the mouse up and down. (Local Space Preset)
+---- Local Space
+----- Similar to Yaw + Roll, but gives full control over the pitch angle of the principle axis. You can also adjust the contribution of the complementary axis, which is at 90 degrees to the principal axis.
+---- Player Space
+----- Uses Yaw + Roll around the gravity axis for horizontal output, and Local Pitch for vertical output.
+---- World Space
+----- Uses all rotation around the gravity axis for horizontal output, and World Pitch for vertical output, but does not move vertically when the controller is tilted on its side.
+---- Laser Pointer
+----- Acts similarly to a laser pointer. Great for cursor control of light gun games on a standalone controller.
+-- Roll Axis Contribution
+--- conditional: only appears when 3DOF to 2D Conversion Style is set to Yaw + Roll
+--- Turning the controller like a steering wheel (“Roll”) will cause the gyro to output horizontally, as well as turning it in “Yaw”. This setting allows you to tune how much Roll contributes to the horizontal output. Negative values will invert the contribution.
+--- slider
+---- min -100%, max 100%, def 100%
+-- Primary Axis Offset
+--- conditional: only appears when 3DOF to 2D Conversion Style is set to Local Space
+--- Tilt the Primary Axis (“Yaw”) up and down around the device’s x-axis. A setting of 0 degrees samples from in front of the device and is equivalent to “Yaw” mode. A setting of 90 degrees samples from above the device and is equivalent to “Roll” mode. A setting of 45 degrees samples from above the device’s local horizon, while a setting of -45 degrees samples from below the device’s local horizon. The full 360 degree range is available for completeness, but settings between 0 degrees and 90 degrees cover most needs.
+--- slider
+---- min -180 degrees, max 180 degrees, def 0 degrees
+-- Complementary Axis Contribution (Roll)
+--- conditional: only appears when 3DOF to 2D Conversion Style is set to Local Space
+--- Tune the complementary axis’s contribution to the horizontal output. This is the axis perpendicular to your tilted Primary Axis; for example, “Roll” is the complementary axis to “Yaw”.
+--- slider
+---- min -100%, max 100%, def 100%
+-- Rotate Output
+--- Adjust the gyroscope’s 2D output clockwise or counterclockwise.
+--- slider
+---- min -180 degrees, max 180 degrees, def 0 degrees
+- Trigger Dampening
+-- Trigger Press Mouse Dampening
+--- The mouse movement can be dampened while the trigger is being pulled. This can help to correct for accidental movement while pulling the trigger.
+--- dropdown
+---- Off (default)
+---- Left Trigger Soft Pull Dampening
+---- Right Trigger Soft Pull Dampening
+---- Both Triggers Soft Pull Dampening
+---- Left Trigger Soft + Full Pull Dampening
+---- Right Trigger Soft + Full Pull Dampening
+---- Both Triggers Soft + Full Pull Dampening
+-- Trigger Dampening Amount
+--- conditional: only visible if Trigger Press Mouse Dampening is not set to Off
+--- Determines how much the mouse movement should be dampened by the trigger(s). Higher values suppress mouse movement, lower values allow more mouse movement.
+--- slider
+---- min 0, max 100, def 90
+- Mouse Output
+-- Movement Threshold
+--- Some games aggressively filter small mouse movements. This setting batches up smaller movements and only sends the batch output when it gets large enough to be accepted by the game. When tuning the slider, try to keep the value as small as possible while still preserving mouse movement.
+--- slider
+---- min 0, max 40, def 0
+- Haptics
+-- Rotational Haptics
+--- How intense the haptic bumps are when rotating the gyroscope.
+--- dropdown
+---- Off (default)
+---- Low
+---- Medium
+---- High

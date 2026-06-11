@@ -26,21 +26,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,8 +69,8 @@ import com.mapo.service.input.modes.SourceModeCatalog
 import com.mapo.data.model.steam.requiresShizuku as outputRequiresShizuku
 import com.mapo.service.input.modes.requiresShizuku
 import com.mapo.service.input.modes.requiresShizukuOnSource
-import com.mapo.ui.component.layout.SectionedListDetailPane
 import com.mapo.ui.screen.remap.RemapPaneItem
+import com.mapo.ui.screen.remap.RemapRail
 import com.mapo.ui.screen.remap.RemapSections
 import com.mapo.ui.screen.remap.settings.SourceModeSettingsSchema
 
@@ -199,76 +193,68 @@ fun RemapControlsScreen(
             }
     } == true
 
-    Scaffold(
-        modifier = modifier,
-        topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text("Remap Controls") },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                )
-                if (hasAnalogModeInConfig && !shizukuReady) {
-                    ShizukuUnavailableBanner(onOpenSetup = onOpenShizukuSetup)
-                }
-                ActionSetAndLayersBar(
-                    config = config,
-                    viewingSetId = viewingSet?.actionSet?.id,
-                    onSelectActionSet = onSelectActionSet,
-                    onRequestAddSet = { dialog = ActionSetDialogState.Add },
-                    onRequestRenameSet = { dialog = ActionSetDialogState.Rename },
-                    onRequestDuplicateSet = { dialog = ActionSetDialogState.Duplicate },
-                    onRequestDeleteSet = { dialog = ActionSetDialogState.Delete },
-                    layers = viewingSet?.layers?.map { it.layer } ?: emptyList(),
-                    viewingLayerId = viewingLayerId,
-                    onSelectLayer = onSelectLayer,
-                    onRequestAddLayer = { layerDialog = LayerDialogState.Add },
-                    onRequestRenameLayer = { layerDialog = LayerDialogState.Rename },
-                    onRequestDuplicateLayer = { layerDialog = LayerDialogState.Duplicate },
-                    onRequestDeleteLayer = { layerDialog = LayerDialogState.Delete },
-                )
-            }
-        },
-    ) { innerPadding ->
-        SectionedListDetailPane(
-            sections = RemapSections.rail,
-            selectedSectionId = selectedSectionId,
-            onSectionSelected = { selectedSectionId = it },
+    Scaffold(modifier = modifier) { innerPadding ->
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-        ) { sectionId, firstRowFocusRequester ->
-            RemapDetailPane(
-                sectionId = sectionId,
-                viewingSet = viewingSet,
-                viewingLayer = viewingLayer,
-                onlyOverrides = onlyOverrides,
-                onSetOnlyOverrides = { onlyOverrides = it },
+        ) {
+            if (hasAnalogModeInConfig && !shizukuReady) {
+                ShizukuUnavailableBanner(onOpenSetup = onOpenShizukuSetup)
+            }
+            RemapRail(
+                sections = RemapSections.rail,
+                selectedSectionId = selectedSectionId,
+                onSectionSelected = { selectedSectionId = it },
+                onBack = onBack,
+                scopeLabel = viewingLayer?.layer?.title
+                    ?: viewingSet?.actionSet?.title
+                    ?: "—",
                 config = config,
-                firstRowFocusRequester = firstRowFocusRequester,
-                onOpenInputEditor = onOpenInputEditor,
-                onClearOverride = { inputSource, groupInputKey ->
-                    val layerId = viewingLayer?.layer?.id ?: return@RemapDetailPane
-                    onClearLayerOverride(layerId, inputSource, groupInputKey)
-                },
-                onSetBindingGroupMode = gatedSetBindingGroupMode,
-                onOpenModeSettings = onOpenModeSettings,
-                onAddModeShift = { ownerSource ->
-                    val layerId = viewingLayer?.layer?.id
-                    val setId = viewingSet?.actionSet?.id
-                    if (layerId != null) {
-                        onAddModeShift(null, layerId, ownerSource)
-                    } else if (setId != null) {
-                        onAddModeShift(setId, null, ownerSource)
-                    }
-                },
-                onRemoveModeShift = onRemoveModeShift,
-                onSetModeShiftTrigger = onSetModeShiftTrigger,
-                onOpenModeShiftInputEditor = onOpenModeShiftInputEditor,
-            )
+                viewingSetId = viewingSet?.actionSet?.id,
+                viewingLayerId = viewingLayerId,
+                canDeleteSet = (config?.actionSets?.size ?: 0) > 1,
+                onSelectActionSet = onSelectActionSet,
+                onSelectLayer = onSelectLayer,
+                onAddSet = { dialog = ActionSetDialogState.Add },
+                onAddLayer = { setId -> layerDialog = LayerDialogState.Add(setId) },
+                onRenameSet = { setId -> dialog = ActionSetDialogState.Rename(setId) },
+                onDuplicateSet = { setId -> dialog = ActionSetDialogState.Duplicate(setId) },
+                onDeleteSet = { setId -> dialog = ActionSetDialogState.Delete(setId) },
+                onRenameLayer = { layerId -> layerDialog = LayerDialogState.Rename(layerId) },
+                onDuplicateLayer = { layerId -> layerDialog = LayerDialogState.Duplicate(layerId) },
+                onDeleteLayer = { layerId -> layerDialog = LayerDialogState.Delete(layerId) },
+                modifier = Modifier.fillMaxSize(),
+            ) { sectionId, firstRowFocusRequester ->
+                RemapDetailPane(
+                    sectionId = sectionId,
+                    viewingSet = viewingSet,
+                    viewingLayer = viewingLayer,
+                    onlyOverrides = onlyOverrides,
+                    onSetOnlyOverrides = { onlyOverrides = it },
+                    config = config,
+                    firstRowFocusRequester = firstRowFocusRequester,
+                    onOpenInputEditor = onOpenInputEditor,
+                    onClearOverride = { inputSource, groupInputKey ->
+                        val layerId = viewingLayer?.layer?.id ?: return@RemapDetailPane
+                        onClearLayerOverride(layerId, inputSource, groupInputKey)
+                    },
+                    onSetBindingGroupMode = gatedSetBindingGroupMode,
+                    onOpenModeSettings = onOpenModeSettings,
+                    onAddModeShift = { ownerSource ->
+                        val layerId = viewingLayer?.layer?.id
+                        val setId = viewingSet?.actionSet?.id
+                        if (layerId != null) {
+                            onAddModeShift(null, layerId, ownerSource)
+                        } else if (setId != null) {
+                            onAddModeShift(setId, null, ownerSource)
+                        }
+                    },
+                    onRemoveModeShift = onRemoveModeShift,
+                    onSetModeShiftTrigger = onSetModeShiftTrigger,
+                    onOpenModeShiftInputEditor = onOpenModeShiftInputEditor,
+                )
+            }
         }
     }
 
@@ -290,11 +276,11 @@ fun RemapControlsScreen(
         )
     }
 
-    // Brick 4.4: management dialogs. Rendered outside the Scaffold so they overlay
-    // everything (M3 AlertDialog uses a Dialog window, but we still hoist the state
-    // here so it survives Scaffold recompositions).
-    val viewingActionSet = viewingSet?.actionSet
-    when (dialog) {
+    // Management dialogs. Rendered outside the Scaffold so they overlay everything (M3
+    // AlertDialog uses a Dialog window, but we still hoist the state here so it survives
+    // Scaffold recompositions). Each dialog state carries the target id, so the rail's
+    // per-row kebab can rename/duplicate/delete *any* set or layer, not just the viewed one.
+    when (val d = dialog) {
         ActionSetDialogState.None -> Unit
         ActionSetDialogState.Add -> AddSetDialog(
             existingSets = config?.actionSets.orEmpty(),
@@ -304,7 +290,7 @@ fun RemapControlsScreen(
             },
             onDismiss = { dialog = ActionSetDialogState.None },
         )
-        ActionSetDialogState.Rename -> viewingActionSet?.let { target ->
+        is ActionSetDialogState.Rename -> setEntityById(config, d.setId)?.let { target ->
             RenameSetDialog(
                 target = target,
                 onConfirm = { newTitle ->
@@ -314,7 +300,7 @@ fun RemapControlsScreen(
                 onDismiss = { dialog = ActionSetDialogState.None },
             )
         } ?: run { dialog = ActionSetDialogState.None }
-        ActionSetDialogState.Duplicate -> viewingActionSet?.let { source ->
+        is ActionSetDialogState.Duplicate -> setEntityById(config, d.setId)?.let { source ->
             DuplicateSetDialog(
                 source = source,
                 onConfirm = { newTitle ->
@@ -324,7 +310,7 @@ fun RemapControlsScreen(
                 onDismiss = { dialog = ActionSetDialogState.None },
             )
         } ?: run { dialog = ActionSetDialogState.None }
-        ActionSetDialogState.Delete -> viewingActionSet?.let { target ->
+        is ActionSetDialogState.Delete -> setEntityById(config, d.setId)?.let { target ->
             DeleteSetConfirmDialog(
                 target = target,
                 onConfirm = {
@@ -336,15 +322,10 @@ fun RemapControlsScreen(
         } ?: run { dialog = ActionSetDialogState.None }
     }
 
-    // Brick 5.4: layer management dialogs. Same hoisting pattern as action sets.
-    // Layer operations are scoped to the currently-focused layer (viewingLayerId)
-    // within the currently-viewing set — the overflow button is disabled when no
-    // layer is focused (handled in LayersPillRow), so a non-null viewing layer is
-    // a precondition for Rename/Duplicate/Delete here.
-    val viewingLayerEntity = viewingLayer?.layer
-    when (layerDialog) {
+    // Layer management dialogs. Same hoisting + id-targeting pattern as action sets.
+    when (val d = layerDialog) {
         LayerDialogState.None -> Unit
-        LayerDialogState.Add -> viewingActionSet?.let { parentSet ->
+        is LayerDialogState.Add -> setEntityById(config, d.parentSetId)?.let { parentSet ->
             AddLayerDialog(
                 onConfirm = { title ->
                     onAddLayer(parentSet.id, title)
@@ -353,7 +334,7 @@ fun RemapControlsScreen(
                 onDismiss = { layerDialog = LayerDialogState.None },
             )
         } ?: run { layerDialog = LayerDialogState.None }
-        LayerDialogState.Rename -> viewingLayerEntity?.let { target ->
+        is LayerDialogState.Rename -> layerEntityById(config, d.layerId)?.let { target ->
             RenameLayerDialog(
                 target = target,
                 onConfirm = { newTitle ->
@@ -363,7 +344,7 @@ fun RemapControlsScreen(
                 onDismiss = { layerDialog = LayerDialogState.None },
             )
         } ?: run { layerDialog = LayerDialogState.None }
-        LayerDialogState.Duplicate -> viewingLayerEntity?.let { source ->
+        is LayerDialogState.Duplicate -> layerEntityById(config, d.layerId)?.let { source ->
             DuplicateLayerDialog(
                 source = source,
                 onConfirm = { newTitle ->
@@ -373,7 +354,7 @@ fun RemapControlsScreen(
                 onDismiss = { layerDialog = LayerDialogState.None },
             )
         } ?: run { layerDialog = LayerDialogState.None }
-        LayerDialogState.Delete -> viewingLayerEntity?.let { target ->
+        is LayerDialogState.Delete -> layerEntityById(config, d.layerId)?.let { target ->
             DeleteLayerConfirmDialog(
                 target = target,
                 onConfirm = {
@@ -386,306 +367,32 @@ fun RemapControlsScreen(
     }
 }
 
-/** Which management dialog is currently open. Hoisted in [RemapControlsScreen]. */
+/** Resolve an [com.mapo.data.model.steam.ActionSet] entity by id across the config. */
+private fun setEntityById(config: ControllerConfig?, id: Long) =
+    config?.actionSets?.firstOrNull { it.actionSet.id == id }?.actionSet
+
+/** Resolve an [com.mapo.data.model.steam.ActionLayer] entity by id across all sets. */
+private fun layerEntityById(config: ControllerConfig?, id: Long) =
+    config?.actionSets?.firstNotNullOfOrNull { s -> s.layers.firstOrNull { it.layer.id == id }?.layer }
+
+/** Which management dialog is currently open. Hoisted in [RemapControlsScreen]; carries the
+ *  target set id so the rail's per-row kebab can act on any set. */
 private sealed class ActionSetDialogState {
     object None : ActionSetDialogState()
     object Add : ActionSetDialogState()
-    object Rename : ActionSetDialogState()
-    object Duplicate : ActionSetDialogState()
-    object Delete : ActionSetDialogState()
+    data class Rename(val setId: Long) : ActionSetDialogState()
+    data class Duplicate(val setId: Long) : ActionSetDialogState()
+    data class Delete(val setId: Long) : ActionSetDialogState()
 }
 
-/** Layer-management dialog state. Parallel sealed class to [ActionSetDialogState]. */
+/** Layer-management dialog state. Parallel to [ActionSetDialogState]; Add carries the parent
+ *  set id, the rest the target layer id. */
 private sealed class LayerDialogState {
     object None : LayerDialogState()
-    object Add : LayerDialogState()
-    object Rename : LayerDialogState()
-    object Duplicate : LayerDialogState()
-    object Delete : LayerDialogState()
-}
-
-/**
- * Top bar: action-set tabs + layer pill row. Brick 4.3 made the tabs live; Brick 5.4
- * makes the layer row live — tapping a pill flips the editor's focused layer (5.5
- * will fill in overlay-edit visuals). Re-tapping the focused pill drops back to base
- * (`viewingLayerId == null`). The runtime-active set/layer stack is *not* what these
- * controls touch — that's evaluator-side, swapped by `CHANGE_PRESET` / `add_layer`
- * bindings (Bricks 4.2, 5.1).
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ActionSetAndLayersBar(
-    config: ControllerConfig?,
-    viewingSetId: Long?,
-    onSelectActionSet: (Long) -> Unit,
-    onRequestAddSet: () -> Unit,
-    onRequestRenameSet: () -> Unit,
-    onRequestDuplicateSet: () -> Unit,
-    onRequestDeleteSet: () -> Unit,
-    layers: List<com.mapo.data.model.steam.ActionLayer>,
-    viewingLayerId: Long?,
-    onSelectLayer: (Long?) -> Unit,
-    onRequestAddLayer: () -> Unit,
-    onRequestRenameLayer: () -> Unit,
-    onRequestDuplicateLayer: () -> Unit,
-    onRequestDeleteLayer: () -> Unit,
-) {
-    val sets = config?.actionSets.orEmpty()
-    val viewingIndex = sets.indexOfFirst { it.actionSet.id == viewingSetId }.coerceAtLeast(0)
-    val viewingSet = sets.firstOrNull { it.actionSet.id == viewingSetId }
-    val canDelete = sets.size > 1
-
-    // M3 role: surfaceContainer — same plane as the rail below.
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column {
-            if (sets.isNotEmpty()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    PrimaryTabRow(
-                        selectedTabIndex = viewingIndex,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        sets.forEach { setGraph ->
-                            Tab(
-                                selected = setGraph.actionSet.id == viewingSetId,
-                                onClick = { onSelectActionSet(setGraph.actionSet.id) },
-                                text = {
-                                    Text(
-                                        text = setGraph.actionSet.title,
-                                        style = MaterialTheme.typography.labelLarge,
-                                    )
-                                },
-                            )
-                        }
-                    }
-                    IconButton(
-                        onClick = onRequestAddSet,
-                        modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
-                    ) {
-                        Icon(
-                            Icons.Filled.Add,
-                            contentDescription = "Add action set",
-                            modifier = Modifier.size(IconButtonDefaults.smallIconSize),
-                        )
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    ActionSetOverflowMenu(
-                        viewingSetTitle = viewingSet?.actionSet?.title,
-                        canDelete = canDelete,
-                        onRename = onRequestRenameSet,
-                        onDuplicate = onRequestDuplicateSet,
-                        onDelete = onRequestDeleteSet,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                }
-            }
-            LayersPillRow(
-                layers = layers,
-                viewingLayerId = viewingLayerId,
-                hasViewingSet = viewingSetId != null,
-                onSelectLayer = onSelectLayer,
-                onRequestAddLayer = onRequestAddLayer,
-                onRequestRenameLayer = onRequestRenameLayer,
-                onRequestDuplicateLayer = onRequestDuplicateLayer,
-                onRequestDeleteLayer = onRequestDeleteLayer,
-            )
-        }
-    }
-}
-
-/**
- * Horizontal pill row beside the action-set tabs (Brick 5.4).
- *
- * Empty-state ([layers] empty): shows "Layers: (none)" + a `[+]` button — keeps the
- * affordance discoverable even before any layers exist.
- *
- * Populated state: FilterChip per layer + `[+]` + an overflow `[⋮]` that operates on
- * the currently-focused layer. Mirrors the action-set row's deviation from the parity
- * plan's "long-press a pill" design — row-level overflow is more discoverable and
- * avoids gesture conflicts (the action-set tabs hit a `Tab` selectable wrapper issue
- * that doesn't apply to FilterChips, but consistency with the set row wins).
- *
- * Tapping the focused pill re-fires `onSelectLayer(null)` — explicit toggle back to
- * base-set editing. There's no separate "Base" pill (Steam doesn't have one; the set
- * is the base).
- */
-@Composable
-private fun LayersPillRow(
-    layers: List<com.mapo.data.model.steam.ActionLayer>,
-    viewingLayerId: Long?,
-    hasViewingSet: Boolean,
-    onSelectLayer: (Long?) -> Unit,
-    onRequestAddLayer: () -> Unit,
-    onRequestRenameLayer: () -> Unit,
-    onRequestDuplicateLayer: () -> Unit,
-    onRequestDeleteLayer: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "Layers:",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(8.dp))
-        if (layers.isEmpty()) {
-            Text(
-                text = "(none)",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-        } else {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                layers.forEach { layer ->
-                    val selected = layer.id == viewingLayerId
-                    FilterChip(
-                        selected = selected,
-                        onClick = {
-                            // Toggle: tapping the focused pill drops focus back to base.
-                            onSelectLayer(if (selected) null else layer.id)
-                        },
-                        label = {
-                            Text(
-                                text = layer.title,
-                                style = MaterialTheme.typography.labelLarge,
-                            )
-                        },
-                    )
-                }
-            }
-        }
-        IconButton(
-            onClick = onRequestAddLayer,
-            enabled = hasViewingSet,
-            modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
-        ) {
-            Icon(
-                Icons.Filled.Add,
-                contentDescription = "Add layer",
-                modifier = Modifier.size(IconButtonDefaults.smallIconSize),
-            )
-        }
-        if (layers.isNotEmpty()) {
-            Spacer(Modifier.width(4.dp))
-            LayerOverflowMenu(
-                focusedLayerTitle = layers.firstOrNull { it.id == viewingLayerId }?.title,
-                onRename = onRequestRenameLayer,
-                onDuplicate = onRequestDuplicateLayer,
-                onDelete = onRequestDeleteLayer,
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-    }
-}
-
-/**
- * Overflow menu for the layer row (Brick 5.4). Operates on the currently-focused
- * layer; disabled when none is focused (the items themselves are gated separately
- * for redundancy). Parallel to `ActionSetOverflowMenu`.
- */
-@Composable
-private fun LayerOverflowMenu(
-    focusedLayerTitle: String?,
-    onRename: () -> Unit,
-    onDuplicate: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val titleSuffix = focusedLayerTitle?.let { " \"$it\"" }.orEmpty()
-    val enabled = focusedLayerTitle != null
-    IconButton(
-        onClick = { expanded = true },
-        modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
-        enabled = enabled,
-    ) {
-        Icon(
-            Icons.Filled.MoreVert,
-            contentDescription = "Layer actions",
-            modifier = Modifier.size(IconButtonDefaults.smallIconSize),
-        )
-    }
-    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        DropdownMenuItem(
-            text = { Text("Rename$titleSuffix") },
-            enabled = enabled,
-            onClick = { expanded = false; onRename() },
-        )
-        DropdownMenuItem(
-            text = { Text("Duplicate$titleSuffix") },
-            enabled = enabled,
-            onClick = { expanded = false; onDuplicate() },
-        )
-        DropdownMenuItem(
-            text = { Text("Delete$titleSuffix") },
-            enabled = enabled,
-            onClick = { expanded = false; onDelete() },
-        )
-    }
-}
-
-/**
- * Trailing overflow menu on the action-set tab row (Brick 4.4). Operates on the
- * **currently-viewing** set. Item titles include the set name to make the target
- * unambiguous ("Delete 'Menu'"); "Delete" is disabled when only one set remains
- * (the repo refuses to delete the last set anyway, but disabling the affordance is
- * the M3-conventional way to communicate that).
- *
- * Long-press on individual tabs was the design proposed in the parity plan but
- * conflicts with `Tab`'s built-in selectable wrapper and is poorly discoverable on
- * M3; an explicit overflow is more discoverable and avoids gesture conflicts.
- *
- * Brick 4.4.1: no "Set as default" — Steam has no exposed default concept; the
- * starting set is just the first set by orderIndex (creation order).
- */
-@Composable
-private fun ActionSetOverflowMenu(
-    viewingSetTitle: String?,
-    canDelete: Boolean,
-    onRename: () -> Unit,
-    onDuplicate: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val titleSuffix = viewingSetTitle?.let { " \"$it\"" }.orEmpty()
-    IconButton(
-        onClick = { expanded = true },
-        modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
-        enabled = viewingSetTitle != null,
-    ) {
-        Icon(
-            Icons.Filled.MoreVert,
-            contentDescription = "Action set actions",
-            modifier = Modifier.size(IconButtonDefaults.smallIconSize),
-        )
-    }
-    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        DropdownMenuItem(
-            text = { Text("Rename$titleSuffix") },
-            onClick = { expanded = false; onRename() },
-        )
-        DropdownMenuItem(
-            text = { Text("Duplicate$titleSuffix") },
-            onClick = { expanded = false; onDuplicate() },
-        )
-        DropdownMenuItem(
-            text = { Text("Delete$titleSuffix") },
-            enabled = canDelete,
-            onClick = { expanded = false; onDelete() },
-        )
-    }
+    data class Add(val parentSetId: Long) : LayerDialogState()
+    data class Rename(val layerId: Long) : LayerDialogState()
+    data class Duplicate(val layerId: Long) : LayerDialogState()
+    data class Delete(val layerId: Long) : LayerDialogState()
 }
 
 @Composable

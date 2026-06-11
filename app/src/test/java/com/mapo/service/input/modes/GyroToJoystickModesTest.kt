@@ -50,6 +50,7 @@ class GyroToJoystickModesTest {
         override fun setRightStickOutput(x: Float, y: Float) {}
         override fun setLeftTriggerOutput(v: Float) {}
         override fun setRightTriggerOutput(v: Float) {}
+        override fun setHatOutput(x: Int, y: Int) {}
         override fun clearOutputSticks() {}
     }
 

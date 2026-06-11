@@ -6,11 +6,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -70,7 +72,7 @@ import kotlin.math.roundToInt
 /** The numeric/preset control sets shown to the right of the always-present wheel. */
 private enum class PickerMode(val label: String) {
     RGB("RGB"),
-    HSV("HSV"),
+    HSL("HSL"),
     COLORS("Colors"),
 }
 
@@ -80,19 +82,17 @@ private val CheckerBase = Color(0xFFCCCCCC)
 /**
  * The canonical Mapo color picker, presented as a conventional M3 dialog. Layout:
  *
- *   [ Title ..................... ◔ #RRGGBB [copy] ]   ← header
- *   [  hue/sat WHEEL   │  ( RGB | HSV | Theme )     ]   ← body: wheel left, controls right
- *   [  brightness ───  │  …channel controls…        ]
- *   [ A ─────────────────────────────────────────── ]  ← alpha (full width)
- *   [                              Cancel   Select   ]  ← actions
+ *   [ Title ............ ( RGB | HSL | Colors ) ]   ← header (sticky)
+ *   [  hue/sat WHEEL    │   …channel controls…   ]   ← center: wheel left, controls right
+ *   [  hex + copy ........... Cancel    Save     ]   ← footer (sticky)
  *
  * Built on [BasicAlertDialog] + [Surface] (M3 dialog tokens) so the two-column body and the
- * hex-in-header layout are expressible. This is the **only** entry point — the picker is never
+ * sticky header/footer are expressible. This is the **only** entry point — the picker is never
  * embedded inline; callers spawn it on tap (typically from a [ColorPickerButton] in a list row).
  *
- * **HSV cache.** While the user works the wheel/HSV controls we hold their intended
- * `[h, s, v]` locally, because re-deriving HSV from the just-emitted RGB color drifts by ±1
- * each frame. The cache clears the moment an RGB/hex/theme edit redefines the color.
+ * **HSL cache.** While the user works the wheel/HSL controls we hold their intended
+ * `[h, s, l]` locally, because re-deriving HSL from the just-emitted RGB color drifts by ±1
+ * each frame. The cache clears the moment an RGB/hex/swatch edit redefines the color.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -105,23 +105,27 @@ fun MapoColorPickerDialog(
 ) {
     var mode by remember { mutableStateOf(PickerMode.RGB) }
     var selected by remember { mutableStateOf(initialColor) }
-    var hsvCache by remember { mutableStateOf<FloatArray?>(null) }
+    var hslCache by remember { mutableStateOf<FloatArray?>(null) }
 
-    val displayHsv = hsvCache ?: selected.toHsv()
+    val displayHsl = hslCache ?: selected.toHsl()
     val alphaInt = (selected.alpha * 255f).roundToInt()
 
-    // Emit from HSV-family controls (wheel + HSV sliders): cache the intent, derive the color.
-    fun emitHsv(h: Float, s: Float, v: Float) {
-        hsvCache = floatArrayOf(h, s, v)
-        selected = hsvToColor(h, s, v, alphaInt)
+    // Emit from HSL-family controls (wheel + HSL sliders): cache the intent, derive the color.
+    fun emitHsl(h: Float, s: Float, l: Float) {
+        hslCache = floatArrayOf(h, s, l)
+        selected = hslToColor(h, s, l, alphaInt)
     }
-    // Emit a concrete color (RGB sliders, hex, theme swatch): the cache no longer applies.
+    // Emit a concrete color (RGB sliders, hex, swatch): the cache no longer applies.
     fun emitColor(c: Color) {
-        hsvCache = null
+        hslCache = null
         selected = c
     }
 
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.92f).dp
+    // Locked modal height (estimated for the 4:3 RGB/HSL page) so the dialog is a constant size
+    // the way its width is — RGB/HSL fill it; the taller Colors tab scrolls within it. Capped to
+    // the screen so it can't overflow a short display. Tune this constant to taste.
+    val lockedHeight = 380.dp
 
     BasicAlertDialog(
         onDismissRequest = onDismiss,
@@ -141,7 +145,7 @@ fun MapoColorPickerDialog(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
         ) {
-            Column(modifier = Modifier.heightIn(max = maxHeight)) {
+            Column(modifier = Modifier.height(lockedHeight.coerceAtMost(maxHeight))) {
                 // ── Header (sticky): title + mode switcher ──
                 Row(
                     modifier = Modifier
@@ -173,19 +177,25 @@ fun MapoColorPickerDialog(
                 }
                 HorizontalDivider()
 
-                // ── Center (scrolls only if it must): driven by the selected mode ──
-                Column(
+                // ── Center: RGB/HSL centered in the locked area; Colors fills + scrolls ──
+                Box(
                     modifier = Modifier
-                        .weight(1f, fill = false)
-                        .verticalScroll(rememberScrollState())
+                        .weight(1f)
+                        .fillMaxWidth()
                         .padding(horizontal = 24.dp, vertical = 16.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
                     when (mode) {
-                        // Colors: swatch sections (Recent / Theme / Common) fill the whole,
-                        // scrollable center; no wheel needed.
-                        PickerMode.COLORS -> ColorsContent(selected, ::emitColor)
-                        // RGB / HSV: wheel on the left, slider controls on the right — each
-                        // centered in its column, and the two columns centered against each other.
+                        // Colors: swatch sections (Recent / Theme / Common) fill + scroll.
+                        PickerMode.COLORS -> Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            ColorsContent(selected, ::emitColor)
+                        }
+                        // RGB / HSL: wheel on the left, slider controls on the right — the pair
+                        // vertically centered in the locked center area.
                         else -> Row(
                             horizontalArrangement = Arrangement.spacedBy(20.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -195,14 +205,15 @@ fun MapoColorPickerDialog(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 ColorWheel(
-                                    hue = displayHsv[0],
-                                    saturation = displayHsv[1],
-                                    value = displayHsv[2],
-                                    onChange = { h, s -> emitHsv(h, s, displayHsv[2]) },
+                                    hue = displayHsl[0],
+                                    saturation = displayHsl[1],
+                                    lightness = displayHsl[2],
+                                    onChange = { h, s -> emitHsl(h, s, displayHsl[2]) },
                                     // Capped below the narrowest screen's column width so the wheel
                                     // is the SAME size on the 4:3 and 16:9 screens (no aspect-ratio
                                     // scaling, no overflow → no center scrolling on the short 16:9).
                                     modifier = Modifier.widthIn(max = 180.dp).fillMaxWidth(),
+                                    alpha = selected.alpha,
                                 )
                             }
                             Column(
@@ -212,7 +223,7 @@ fun MapoColorPickerDialog(
                                 if (mode == PickerMode.RGB) {
                                     RgbContent(selected, alphaInt, ::emitColor)
                                 } else {
-                                    HsvContent(displayHsv, alphaInt, ::emitHsv)
+                                    HslContent(displayHsl, alphaInt, ::emitHsl)
                                 }
                                 if (supportAlpha) {
                                     val r = (selected.red * 255f).roundToInt()
@@ -310,22 +321,29 @@ private fun RgbContent(color: Color, alpha: Int, onColor: (Color) -> Unit) {
 }
 
 @Composable
-private fun HsvContent(hsv: FloatArray, alpha: Int, onHsv: (Float, Float, Float) -> Unit) {
-    val h = hsv[0]; val s = hsv[1]; val v = hsv[2]
-    val rainbow = remember {
-        Brush.horizontalGradient((0..360 step 60).map { hsvToColor(it.toFloat(), 1f, 1f, 255) })
+private fun HslContent(hsl: FloatArray, alpha: Int, onHsl: (Float, Float, Float) -> Unit) {
+    val h = hsl[0]; val s = hsl[1]; val l = hsl[2]
+    val rainbow = remember(alpha) {
+        Brush.horizontalGradient((0..360 step 60).map { hslToColor(it.toFloat(), 1f, 0.5f, alpha) })
     }
     Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
         ChannelSlider("H", h.roundToInt(), 0..360, "${h.roundToInt()}°", rainbow) {
-            onHsv(it.toFloat(), s, v)
+            onHsl(it.toFloat(), s, l)
         }
         ChannelSlider("S", (s * 100f).roundToInt(), 0..100, "${(s * 100f).roundToInt()}%",
-            Brush.horizontalGradient(listOf(hsvToColor(h, 0f, v, alpha), hsvToColor(h, 1f, v, alpha)))) {
-            onHsv(h, it / 100f, v)
+            Brush.horizontalGradient(listOf(hslToColor(h, 0f, l, alpha), hslToColor(h, 1f, l, alpha)))) {
+            onHsl(h, it / 100f, l)
         }
-        ChannelSlider("V", (v * 100f).roundToInt(), 0..100, "${(v * 100f).roundToInt()}%",
-            Brush.horizontalGradient(listOf(hsvToColor(h, s, 0f, alpha), hsvToColor(h, s, 1f, alpha)))) {
-            onHsv(h, s, it / 100f)
+        // Lightness runs black → vivid → white (3-stop), so max L is always pure white.
+        ChannelSlider("L", (l * 100f).roundToInt(), 0..100, "${(l * 100f).roundToInt()}%",
+            Brush.horizontalGradient(
+                listOf(
+                    hslToColor(h, s, 0f, alpha),
+                    hslToColor(h, s, 0.5f, alpha),
+                    hslToColor(h, s, 1f, alpha),
+                ),
+            )) {
+            onHsl(h, s, it / 100f)
         }
     }
 }
@@ -451,6 +469,8 @@ private fun HexField(selected: Color, onColor: (Color) -> Unit, modifier: Modifi
             size = CompactFieldSize.Slim,
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+            // Trim the inset on the copy-icon side so it doesn't sit so far from the border.
+            contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 6.dp, bottom = 8.dp),
             trailingIcon = {
                 Box(
                     modifier = Modifier

@@ -6,24 +6,57 @@ import androidx.compose.ui.graphics.toArgb
 /**
  * Color conversion + hex helpers for the Mapo color picker.
  *
- * HSV conversions delegate to `android.graphics.Color` (battle-tested platform math) rather
- * than re-deriving the algorithm by hand, so the wheel/HSV controls stay numerically exact.
+ * The picker uses the **HSL** model (hue / saturation / lightness): the third channel runs
+ * black → full color → white, so maximum lightness is always pure white regardless of hue.
  */
 
-/** HSV components of this color: `[hue 0..360, saturation 0..1, value 0..1]`. Alpha ignored. */
-internal fun Color.toHsv(): FloatArray {
-    val hsv = FloatArray(3)
-    android.graphics.Color.colorToHSV(toArgb(), hsv)
-    return hsv
+/** HSL components of this color: `[hue 0..360, saturation 0..1, lightness 0..1]`. Alpha ignored. */
+internal fun Color.toHsl(): FloatArray {
+    val r = red
+    val g = green
+    val b = blue
+    val max = maxOf(r, g, b)
+    val min = minOf(r, g, b)
+    val l = (max + min) / 2f
+    if (max == min) return floatArrayOf(0f, 0f, l)
+    val d = max - min
+    val s = if (l > 0.5f) d / (2f - max - min) else d / (max + min)
+    val h = when (max) {
+        r -> (g - b) / d + if (g < b) 6f else 0f
+        g -> (b - r) / d + 2f
+        else -> (r - g) / d + 4f
+    } * 60f
+    return floatArrayOf(h, s, l)
 }
 
-/** Build a color from HSV (hue 0..360, sat/value 0..1) plus an 0..255 alpha. */
-internal fun hsvToColor(hue: Float, saturation: Float, value: Float, alpha: Int): Color {
-    val argb = android.graphics.Color.HSVToColor(
-        alpha.coerceIn(0, 255),
-        floatArrayOf(hue.coerceIn(0f, 360f), saturation.coerceIn(0f, 1f), value.coerceIn(0f, 1f)),
+/** Build a color from HSL (hue 0..360, sat/lightness 0..1) plus an 0..255 alpha. */
+internal fun hslToColor(hue: Float, saturation: Float, lightness: Float, alpha: Int): Color {
+    val h = ((hue % 360f) + 360f) % 360f
+    val s = saturation.coerceIn(0f, 1f)
+    val l = lightness.coerceIn(0f, 1f)
+    val a = alpha.coerceIn(0, 255) / 255f
+    if (s == 0f) return Color(red = l, green = l, blue = l, alpha = a)
+    val q = if (l < 0.5f) l * (1f + s) else l + s - l * s
+    val p = 2f * l - q
+    val hk = h / 360f
+    return Color(
+        red = hueToRgb(p, q, hk + 1f / 3f),
+        green = hueToRgb(p, q, hk),
+        blue = hueToRgb(p, q, hk - 1f / 3f),
+        alpha = a,
     )
-    return Color(argb)
+}
+
+private fun hueToRgb(p: Float, q: Float, tIn: Float): Float {
+    var t = tIn
+    if (t < 0f) t += 1f
+    if (t > 1f) t -= 1f
+    return when {
+        t < 1f / 6f -> p + (q - p) * 6f * t
+        t < 1f / 2f -> q
+        t < 2f / 3f -> p + (q - p) * (2f / 3f - t) * 6f
+        else -> p
+    }
 }
 
 /** `#RRGGBB` when fully opaque, otherwise `#AARRGGBB`. Uppercase, leading `#`. */

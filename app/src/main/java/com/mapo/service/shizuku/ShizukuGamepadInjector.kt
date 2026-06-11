@@ -73,6 +73,10 @@ class ShizukuGamepadInjector @Inject constructor(
     // Summed alongside the per-source trigger maps in push(). 0.0..1.0.
     private var leftTriggerOutput = 0f
     private var rightTriggerOutput = 0f
+    // Binding-output hat contribution (not source-keyed) — net dpad hat driven by
+    // DPAD_UP/DOWN/LEFT/RIGHT gamepad-button OUTPUTS bound to arbitrary inputs. Each axis
+    // is -1/0/+1; summed alongside hatBySource in push().
+    private val hatOutput = IntArray(2)
     private val leftTriggerBySource = mutableMapOf<InputSource, Float>()
     private val rightTriggerBySource = mutableMapOf<InputSource, Float>()
     private val hatBySource = mutableMapOf<InputSource, IntArray>()
@@ -168,11 +172,17 @@ class ShizukuGamepadInjector @Inject constructor(
         push()
     }
 
+    override fun setHatOutput(x: Int, y: Int) {
+        synchronized(lock) { hatOutput[0] = x.coerceIn(-1, 1); hatOutput[1] = y.coerceIn(-1, 1) }
+        push()
+    }
+
     override fun clearOutputSticks() {
         synchronized(lock) {
             leftStickOutput[0] = 0f; leftStickOutput[1] = 0f
             rightStickOutput[0] = 0f; rightStickOutput[1] = 0f
             leftTriggerOutput = 0f; rightTriggerOutput = 0f
+            hatOutput[0] = 0; hatOutput[1] = 0
         }
         push()
     }
@@ -216,7 +226,7 @@ class ShizukuGamepadInjector @Inject constructor(
             for (v in leftTriggerBySource.values) lt += v
             var rt = rightTriggerOutput
             for (v in rightTriggerBySource.values) rt += v
-            var hx = 0; var hy = 0
+            var hx = hatOutput[0]; var hy = hatOutput[1]
             for (v in hatBySource.values) { hx += v[0]; hy += v[1] }
             MergedAxes(
                 leftX = floatToInt16(lx),

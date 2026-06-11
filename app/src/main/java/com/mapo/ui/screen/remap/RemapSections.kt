@@ -1,10 +1,15 @@
 package com.mapo.ui.screen.remap
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ControlCamera
+import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Straighten
 import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.InputSource
 import com.mapo.service.input.modes.StubMode
 import com.mapo.service.input.modes.handler
-import com.mapo.ui.component.layout.SectionedPaneItem
 
 /**
  * One item rendered into the detail pane of `RemapControlsScreen`.
@@ -84,13 +89,16 @@ object RemapSections {
     const val SECTION_JOYSTICKS = "joysticks"
     const val SECTION_GYRO = "gyro"
 
-    /** Rail entries in display order. */
+    /**
+     * Rail entries in display order. Icons are best-fit Material glyphs (Triggers has no
+     * dedicated symbol — `Straighten` stands in for the analog pull); easy to swap.
+     */
     val rail: List<SectionedPaneItem> = listOf(
-        SectionedPaneItem(SECTION_BUTTONS, "Buttons"),
-        SectionedPaneItem(SECTION_DPAD, "D-Pad"),
-        SectionedPaneItem(SECTION_TRIGGERS, "Triggers"),
-        SectionedPaneItem(SECTION_JOYSTICKS, "Joysticks"),
-        SectionedPaneItem(SECTION_GYRO, "Gyro"),
+        SectionedPaneItem(SECTION_BUTTONS, "Buttons", icon = Icons.Filled.SportsEsports),
+        SectionedPaneItem(SECTION_DPAD, "D-Pad", icon = Icons.Filled.ControlCamera),
+        SectionedPaneItem(SECTION_TRIGGERS, "Triggers", icon = Icons.Filled.Straighten),
+        SectionedPaneItem(SECTION_JOYSTICKS, "Joysticks", icon = Icons.Filled.Gamepad),
+        SectionedPaneItem(SECTION_GYRO, "Gyro", icon = Icons.Filled.ScreenRotation),
     )
 
     /**

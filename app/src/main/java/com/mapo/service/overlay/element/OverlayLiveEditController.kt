@@ -220,10 +220,9 @@ class OverlayLiveEditController @Inject constructor(
     // The editor menu's ROOT is always-visible — it IS the toolbar window (a vertical panel with a
     // drag handle top + bottom). Its submenus open as cascading fly-out windows, one per open
     // level, tracked in [menuStack] (depth 1 = a submenu of a root row, 2 = a submenu of that, …).
-    // [menuScrim] is a full-screen catcher present only while a submenu is open, so an outside tap
-    // closes the submenus (the root panel stays put).
+    // Outside taps dismiss submenus via each fly-out window's FLAG_WATCH_OUTSIDE_TOUCH (no scrim, so
+    // the tap also lands on whatever's underneath — another menu button, a virtual button, etc.).
     private val menuStack = mutableListOf<MenuWindow>()
-    private var menuScrim: Pair<View, OverlayLifecycleOwner>? = null
     // Editor-local toggles surfaced under Options. "Show grid" has no renderer yet (gap); held
     // here as an inert flag (like clipboardHasContent) so the switch animates. Grid size likewise
     // displays the snap grid's division count but isn't editable yet.
@@ -354,18 +353,15 @@ class OverlayLiveEditController @Inject constructor(
     }
 
     /**
-     * Re-add (raise) the core menu window and any open submenu/scrim windows so they sit above
-     * button windows that were just attached. WindowManager has no z-order field for app-overlay
-     * windows — a window is raised only by removing and re-adding it (which keeps its content; the
-     * ComposeView re-composes on re-attach). Re-added in z-order: toolbar → scrim → submenus.
+     * Re-add (raise) the core menu window and any open submenu windows so they sit above button
+     * windows that were just attached. WindowManager has no z-order field for app-overlay windows —
+     * a window is raised only by removing and re-adding it (which keeps its content; the ComposeView
+     * re-composes on re-attach). Re-added in z-order: toolbar → submenus.
      */
     private fun raiseEditorMenusAboveButtons() {
-        // The always-visible core menu is raised blink-free (add-new-then-remove-old). Submenus +
-        // scrim are transient and usually closed during a button add, so the simpler raise is fine.
+        // The always-visible core menu is raised blink-free (add-new-then-remove-old). Submenus are
+        // transient and usually closed during a button add, so the simpler raise is fine.
         raiseToolbar()
-        menuScrim?.let { (v, _) ->
-            (v.layoutParams as? WindowManager.LayoutParams)?.let { p -> raiseWindow(v, p) }
-        }
         menuStack.toList().forEach { mw -> raiseWindow(mw.view, mw.params) }
     }
 
@@ -1267,6 +1263,25 @@ class OverlayLiveEditController @Inject constructor(
         }
     }
 
+    /**
+     * A host that surfaces ACTION_OUTSIDE (delivered to the window root via FLAG_WATCH_OUTSIDE_TOUCH).
+     * ComposeView is final, so we wrap it in this FrameLayout and override dispatchTouchEvent —
+     * reliable where a plain View.OnTouchListener isn't (Compose consumes inside touches first, but
+     * ACTION_OUTSIDE has no Compose hit target so it reaches here).
+     */
+    private class OutsideAwareHost(
+        context: Context,
+        private val onOutside: (View, MotionEvent) -> Unit,
+    ) : android.widget.FrameLayout(context) {
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+            if (ev.actionMasked == MotionEvent.ACTION_OUTSIDE) {
+                onOutside(this, ev)
+                return false
+            }
+            return super.dispatchTouchEvent(ev)
+        }
+    }
+
     /** Geometry (x, width, y) of the parent at [parentDepth]: depth 0 = the always-visible toolbar. */
     private fun parentMenuGeometry(parentDepth: Int): Triple<Int, Int, Int>? {
         if (parentDepth == 0) {
@@ -1303,8 +1318,6 @@ class OverlayLiveEditController @Inject constructor(
         builder: @Composable () -> List<MenuEntry>,
     ) = runOnMain {
         truncateMenusTo(parentDepth)
-        // Ensure the outside-tap catcher sits just below the fly-out we're about to add.
-        if (menuScrim == null) addMenuScrim()
         val (px, pw, py) = parentMenuGeometry(parentDepth) ?: return@runOnMain
         pushMenuLevel(
             depth = parentDepth + 1,
@@ -1331,7 +1344,6 @@ class OverlayLiveEditController @Inject constructor(
             return@runOnMain
         }
         truncateMenusTo(0)
-        if (menuScrim == null) addMenuScrim()
         val tp = toolbarParams ?: return@runOnMain
         val tv = toolbar?.first ?: return@runOnMain
         val (left, top, growUp) = rootSubmenuAnchor(tp, tv.width, tv.height, itemBounds)
@@ -1363,24 +1375,18 @@ class OverlayLiveEditController @Inject constructor(
         else Triple(left, tp.y + margin, true)
     }
 
-    /** Full-screen touch catcher below the fly-out windows: an outside tap closes the submenus. */
-    private fun addMenuScrim() {
-        val owner = OverlayLifecycleOwner()
-        val view = ComposeView(context).apply {
-            attachOwner(owner)
-            setContent {
-                Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { dismissSubmenus() } })
-            }
+    /**
+     * Handle an outside tap reported (via FLAG_WATCH_OUTSIDE_TOUCH) by an open fly-out: close
+     * everything DEEPER than the level the tap landed inside (or all of them if it landed outside
+     * every fly-out). The tap itself still reaches whatever window is underneath, so it isn't eaten.
+     */
+    private fun handleMenuOutsideTap(rawX: Int, rawY: Int) = runOnMain {
+        var keep = 0
+        menuStack.forEachIndexed { i, mw ->
+            val l = mw.params.x; val t = mw.params.y
+            if (rawX in l until (l + mw.view.width) && rawY in t until (t + mw.view.height)) keep = i + 1
         }
-        owner.resumeTo()
-        val params = layoutParams(
-            width = WindowManager.LayoutParams.MATCH_PARENT,
-            height = WindowManager.LayoutParams.MATCH_PARENT,
-            focusable = false,
-        )
-        runCatching { windowManager.addView(view, params) }
-            .onFailure { Log.e(TAG, "addView(menu scrim) failed", it); return }
-        menuScrim = view to owner
+        truncateMenusTo(keep)
     }
 
     /**
@@ -1396,15 +1402,26 @@ class OverlayLiveEditController @Inject constructor(
         builder: @Composable () -> List<MenuEntry>,
     ) {
         val owner = OverlayLifecycleOwner()
-        val view = ComposeView(context).apply {
-            attachOwner(owner)
+        val composeView = ComposeView(context).apply {
+            defaultFocusHighlightEnabled = false
             setContent { MapoTheme { CascadeMenuLevel(depth, builder) } }
+        }
+        // Host catches ACTION_OUTSIDE; only the TOP-most open fly-out acts on it (others get it too).
+        // ViewTree owners live on the host so the child ComposeView resolves them up the tree.
+        val view = OutsideAwareHost(context) { self, ev ->
+            if (menuStack.lastOrNull()?.view === self) handleMenuOutsideTap(ev.rawX.roundToInt(), ev.rawY.roundToInt())
+        }.apply {
+            setViewTreeLifecycleOwner(owner)
+            setViewTreeViewModelStoreOwner(owner)
+            setViewTreeSavedStateRegistryOwner(owner)
+            addView(composeView)
         }
         owner.resumeTo()
         val params = layoutParams(
             width = WindowManager.LayoutParams.WRAP_CONTENT,
             height = WindowManager.LayoutParams.WRAP_CONTENT,
             focusable = false,
+            watchOutside = true,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = anchorLeft
@@ -1438,11 +1455,6 @@ class OverlayLiveEditController @Inject constructor(
             val mw = menuStack.removeAt(menuStack.size - 1)
             detachAnimated(mw.view to mw.owner)
         }
-        // No fly-outs left → drop the outside-tap catcher.
-        if (menuStack.isEmpty()) {
-            menuScrim?.let { detach(it) }
-            menuScrim = null
-        }
     }
 
     private fun dismissSubmenus() = truncateMenusTo(0)
@@ -1474,7 +1486,9 @@ class OverlayLiveEditController @Inject constructor(
         Column(
             modifier = modifier
                 .width(MENU_WIDTH_DP.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                // Same top/bottom breathing room the vertical core menu has.
+                .padding(vertical = 6.dp),
         ) {
             builder().forEach { entry ->
                 when (entry) {
@@ -2067,6 +2081,7 @@ class OverlayLiveEditController @Inject constructor(
         height: Int,
         focusable: Boolean,
         touchable: Boolean = true,
+        watchOutside: Boolean = false,
     ): WindowManager.LayoutParams {
         // FLAG_HARDWARE_ACCELERATED is required for WindowManager-added windows: unlike
         // Activity windows it is NOT inherited from the manifest, and without it the
@@ -2081,6 +2096,10 @@ class OverlayLiveEditController @Inject constructor(
         // whatever is below (used for the selection bounding-box outline, so dragging a button
         // inside the box still reaches the button's own window).
         if (!touchable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        // WATCH_OUTSIDE_TOUCH: get an ACTION_OUTSIDE for taps outside the window WHILE the tap is
+        // still delivered to the window behind (NOT_TOUCH_MODAL) — so a submenu can dismiss on an
+        // outside tap without eating it. The tap also lands on whatever is underneath.
+        if (watchOutside) flags = flags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
         return WindowManager.LayoutParams(
             width,
             height,

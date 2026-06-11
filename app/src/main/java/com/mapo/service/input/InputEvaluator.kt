@@ -1524,18 +1524,31 @@ class InputEvaluator @Inject constructor(
      */
     private fun startRepeatJob(activator: CompiledActivator, st: ActivatorRuntimeState) {
         st.repeatJob?.cancel()
-        val rate = activator.settings.repeatRateMs.coerceAtLeast(10L)
+        // Split the repeat period into a real ON phase + OFF phase. A 0ms press→release
+        // (the old behavior) is dropped by POLLED consumers — notably the virtual gamepad:
+        // a game samples the pad at 60-250Hz and never sees a sub-frame button press, so
+        // turbo on any MVG-routed output (gamepad button / dpad / trigger) registered as
+        // nothing. Holding for onMs guarantees the press straddles at least one poll.
+        val rate = activator.settings.repeatRateMs.coerceAtLeast(MIN_TURBO_PERIOD_MS)
+        val onMs = (rate / 2).coerceAtLeast(TURBO_MIN_PHASE_MS)
+        val offMs = (rate - onMs).coerceAtLeast(TURBO_MIN_PHASE_MS)
         val bindings = activator.bindings
+        val sendAsGesture = activator.settings.sendAsGesture
+        Log.d(TAG, "startRepeatJob: turbo activator=${activator.activatorId} rate=${rate}ms (on=$onMs/off=$offMs) bindings=${bindings.size}")
         st.repeatJob = scope.launch {
             while (isActive) {
-                delay(rate)
+                // ON: press (the initial doEmitPress press overlaps the first ON harmlessly).
+                val held = ArrayList<BindingOutput>(bindings.size)
                 for (binding in bindings) {
                     // Repeat path: no owning address. `hold_layer` skips with a warning;
                     // `add_layer` / `remove_layer` repeat harmlessly (already-active is a no-op).
                     if (tryHandleControllerAction(binding, address = null)) continue
-                    val holdable = emitter.emitPress(binding, activator.settings.sendAsGesture)
-                    if (holdable) emitter.emitRelease(binding)
+                    if (emitter.emitPress(binding, sendAsGesture)) held += binding
                 }
+                delay(onMs)
+                // OFF: release the held outputs, then wait out the rest of the period.
+                for (binding in held) emitter.emitRelease(binding)
+                delay(offMs)
             }
         }
     }
@@ -1954,6 +1967,13 @@ class InputEvaluator @Inject constructor(
         // Tunable; true variable magnitude isn't possible from a single digital full-press.
         private const val DPAD_PULSE_ON_MS = 20L
         private const val DPAD_PULSE_OFF_MS = 20L
+
+        // Hold-to-repeat (turbo) duty cycle. The period (repeat_rate_ms) is split into an
+        // ON phase (press held) + OFF phase, each ≥ TURBO_MIN_PHASE_MS, so a polled
+        // consumer (the virtual gamepad) reliably samples the press — a 0ms press→release
+        // would fall between gamepad polls and register as nothing.
+        private const val MIN_TURBO_PERIOD_MS = 40L
+        private const val TURBO_MIN_PHASE_MS = 20L
 
         /**
          * Magnitude floor for treating a hat-axis reading as a held direction

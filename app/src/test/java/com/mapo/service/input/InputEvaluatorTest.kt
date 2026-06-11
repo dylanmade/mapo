@@ -859,10 +859,12 @@ class InputEvaluatorTest {
         subject.handleDigital(BUTTON_A, isDown = true)
         verify(exactly = 1) { emitter.emitPress(ENTER) }  // initial press
 
-        advanceTimeBy(350L)  // expect 3 pulses (100, 200, 300)
+        // New duty-cycle turbo (rate 100 → on 50 / off 50, no leading delay): repeat
+        // presses at t0, t100, t200 and releases at t50, t150, t250. Advance to 260 to
+        // capture 3 turbo pulses without crossing the t300 press.
+        advanceTimeBy(260L)
         runCurrent()
-        // initial + 3 turbo pulses = 4 total press calls. Each turbo pulse is a tap, so
-        // emitPress count == 1 (initial held) + 3 (turbo) = 4; emitRelease == 3 (turbo).
+        // initial + 3 turbo presses = 4; 3 turbo releases.
         verify(exactly = 4) { emitter.emitPress(ENTER) }
         verify(exactly = 3) { emitter.emitRelease(ENTER) }
         assertEquals(1, subject.activeRepeatJobCount())

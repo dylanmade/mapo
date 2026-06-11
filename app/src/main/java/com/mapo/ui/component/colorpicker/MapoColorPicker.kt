@@ -257,7 +257,7 @@ fun MapoColorPickerDialog(
                     HexField(
                         selected = selected,
                         onColor = ::emitColor,
-                        modifier = Modifier.widthIn(max = 200.dp),
+                        modifier = Modifier.widthIn(max = 190.dp),
                     )
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text("Cancel") }
@@ -470,7 +470,7 @@ private fun HexField(selected: Color, onColor: (Color) -> Unit, modifier: Modifi
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
             // Trim the inset on the copy-icon side so it doesn't sit so far from the border.
-            contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 6.dp, bottom = 8.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 7.dp, end = 8.dp, bottom = 8.dp),
             trailingIcon = {
                 Box(
                     modifier = Modifier
@@ -555,13 +555,21 @@ private fun ChannelSlider(
             },
         )
         Spacer(Modifier.width(8.dp))
-        // Wrap-content (no fixed width) so the weighted Slider expands right up to the readout —
-        // no dead space between the track's right edge and the digits.
-        Text(
-            text = valueText,
-            style = MaterialTheme.typography.labelMedium,
-            textAlign = TextAlign.End,
-        )
+        // Constant-width readout. Without a reserved width the readout sizes to its glyph
+        // count ("5" vs "255" vs "100%"), and because the Slider is weight(1f) it absorbs the
+        // difference — so the slider visibly resized as the value changed. Reserve the widest
+        // value any channel shows ("360°" / "100%") via invisible sizing siblings (so it adapts
+        // to font + scale rather than a brittle dp): the box width is now value-independent, the
+        // slider width is static, and every slider shares one right edge.
+        Box(contentAlignment = Alignment.CenterEnd) {
+            Text("360°", style = MaterialTheme.typography.labelMedium, color = Color.Transparent)
+            Text("100%", style = MaterialTheme.typography.labelMedium, color = Color.Transparent)
+            Text(
+                text = valueText,
+                style = MaterialTheme.typography.labelMedium,
+                textAlign = TextAlign.End,
+            )
+        }
     }
 }
 

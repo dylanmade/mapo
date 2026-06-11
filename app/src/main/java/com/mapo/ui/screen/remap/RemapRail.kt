@@ -1,51 +1,48 @@
 package com.mapo.ui.screen.remap
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuOpen
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.WideNavigationRail
+import androidx.compose.material3.WideNavigationRailItem
+import androidx.compose.material3.WideNavigationRailValue
+import androidx.compose.material3.rememberWideNavigationRailState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
@@ -54,15 +51,14 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mapo.data.model.steam.ControllerConfig
+import kotlinx.coroutines.launch
 
 /**
- * One section in the Remap rail. [icon] drives the M3-expressive item glyph; null falls
- * back to a neutral dot. Disabled sections render dimmed, are skipped by gamepad focus
- * wraparound, and are inert to tap — for surfacing "coming soon" sections.
+ * One section in the Remap rail. [icon] drives the nav-item glyph; null falls back to a
+ * neutral dot. Disabled sections render dimmed and are inert to tap.
  */
 data class SectionedPaneItem(
     val id: String,
@@ -71,26 +67,21 @@ data class SectionedPaneItem(
     val icon: ImageVector? = null,
 )
 
-private const val BACK_KEY = "__back__"
-private const val LAYER_KEY = "__layer__"
-private const val DISABLED_ALPHA = 0.38f
-private val RailWidth = 240.dp
-
 /**
- * The Remap screen's left control surface, re-imagined as a single M3-expressive navigation
- * rail (replacing the old `TopAppBar` + section list). Top to bottom:
+ * The Remap screen's left control surface, built on the real M3-expressive
+ * [WideNavigationRail] (collapsed-by-default-able, with built-in width + label transitions).
+ * The homespun "left 30% / right content" pane it replaced is gone.
  *
- *  - **Back / "Controls"** — tap (or D-pad A/→) navigates home.
- *  - **Scope entry** — the current action set / layer; tap opens a fly-out of all sets with
- *    their layers indented (modeled on the Edit Overlay scope picker), each row carrying a
- *    kebab → Rename / Duplicate / Delete, plus "Add layer" per set and "Add set".
- *  - **Sections** — Buttons / D-Pad / Triggers / Joysticks / Gyro; focusing one selects it
- *    (drives the detail pane), D-pad → enters the detail pane.
+ * Layout: a collapse/expand button in the rail header, then the back / "Controls" entry, the
+ * scope (action set / layer) entry whose fly-out lists all sets with layers indented
+ * (kebab → Rename/Duplicate/Delete per row, plus Add layer/Add set), then the section items
+ * (Buttons / D-Pad / Triggers / Joysticks / Gyro). The whole right pane is [detailPane].
  *
- * Gamepad model (ported from the prior section rail): Up/Down wrap through the focusable
- * rows (skipping disabled sections); →/A/Enter activates the focused row; focus on a section
- * *is* its selection. The whole right pane is reserved for [detailPane].
+ * Starts **expanded** (labels visible) since this is the screen's primary surface; the header
+ * button toggles to the collapsed icon-only rail. Gamepad: focusing a section selects it (via
+ * its [MutableInteractionSource]); D-pad → from the rail jumps into the detail pane.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun RemapRail(
     sections: List<SectionedPaneItem>,
@@ -115,108 +106,82 @@ fun RemapRail(
     modifier: Modifier = Modifier,
     detailPane: @Composable (selectedId: String, firstDetailFocusRequester: FocusRequester) -> Unit,
 ) {
-    val rowOrder = remember(sections) { listOf(BACK_KEY, LAYER_KEY) + sections.map { it.id } }
-    val requesters = remember(rowOrder) { rowOrder.associateWith { FocusRequester() } }
+    val railState = rememberWideNavigationRailState(WideNavigationRailValue.Expanded)
+    val scope = rememberCoroutineScope()
+    val expanded = railState.targetValue == WideNavigationRailValue.Expanded
     val detailRequester = remember(selectedSectionId) { FocusRequester() }
-    // Ordered list of focusable rows for wraparound (disabled sections excluded).
-    val focusOrder = remember(sections) {
-        listOf(BACK_KEY, LAYER_KEY) + sections.filter { it.enabled }.map { it.id }
-    }
-    fun neighbor(fromKey: String, dir: Int): String? {
-        val idx = focusOrder.indexOf(fromKey)
-        if (idx < 0 || focusOrder.isEmpty()) return null
-        val n = ((idx + dir) % focusOrder.size + focusOrder.size) % focusOrder.size
-        return focusOrder[n]
-    }
-    fun focus(key: String?) = key?.let { requesters[it]?.tryRequestFocus() }
-
-    // Land focus on the active section so the rail is gamepad-ready and the detail matches.
-    LaunchedEffect(Unit) { requesters[selectedSectionId]?.tryRequestFocus() }
 
     Row(modifier = modifier.fillMaxSize()) {
-        // M3 role: surfaceContainer — the nav-rail plane.
-        Surface(
-            modifier = Modifier.width(RailWidth).fillMaxHeight(),
-            color = MaterialTheme.colorScheme.surfaceContainer,
+        WideNavigationRail(
+            state = railState,
+            // D-pad → from anywhere in the rail jumps into the detail pane's first row.
+            modifier = Modifier.onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
+                    detailRequester.tryRequestFocus(); true
+                } else false
+            },
+            header = {
+                IconButton(onClick = { scope.launch { railState.toggle() } }) {
+                    Icon(
+                        imageVector = if (expanded) Icons.AutoMirrored.Filled.MenuOpen else Icons.Filled.Menu,
+                        contentDescription = if (expanded) "Collapse rail" else "Expand rail",
+                    )
+                }
+            },
         ) {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                // Back / title row.
-                RailRow(
-                    selected = false,
-                    enabled = true,
-                    testTag = "rail-back",
-                    focusRequester = requesters[BACK_KEY]!!,
-                    onFocused = {},
-                    onClick = onBack,
-                    onActivateRight = onBack,
-                    onUp = { focus(neighbor(BACK_KEY, -1)) },
-                    onDown = { focus(neighbor(BACK_KEY, +1)) },
-                ) { contentColor ->
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = contentColor)
-                    Spacer(Modifier.width(16.dp))
-                    Text("Controls", style = MaterialTheme.typography.titleLarge, color = contentColor, maxLines = 1)
-                }
+            // Back / "Controls" — navigates home.
+            WideNavigationRailItem(
+                selected = false,
+                onClick = onBack,
+                icon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") },
+                label = { Text("Controls") },
+                railExpanded = expanded,
+                modifier = Modifier.testTag("rail-back"),
+            )
 
-                // Scope (action set / layer) entry + its fly-out.
-                ScopeRailEntry(
-                    scopeLabel = scopeLabel,
-                    focusRequester = requesters[LAYER_KEY]!!,
-                    onUp = { focus(neighbor(LAYER_KEY, -1)) },
-                    onDown = { focus(neighbor(LAYER_KEY, +1)) },
-                    config = config,
-                    viewingSetId = viewingSetId,
-                    viewingLayerId = viewingLayerId,
-                    canDeleteSet = canDeleteSet,
-                    onSelectActionSet = onSelectActionSet,
-                    onSelectLayer = onSelectLayer,
-                    onAddSet = onAddSet,
-                    onAddLayer = onAddLayer,
-                    onRenameSet = onRenameSet,
-                    onDuplicateSet = onDuplicateSet,
-                    onDeleteSet = onDeleteSet,
-                    onRenameLayer = onRenameLayer,
-                    onDuplicateLayer = onDuplicateLayer,
-                    onDeleteLayer = onDeleteLayer,
+            // Scope (action set / layer) entry + its fly-out.
+            ScopeRailItem(
+                scopeLabel = scopeLabel,
+                railExpanded = expanded,
+                config = config,
+                viewingSetId = viewingSetId,
+                viewingLayerId = viewingLayerId,
+                canDeleteSet = canDeleteSet,
+                onSelectActionSet = onSelectActionSet,
+                onSelectLayer = onSelectLayer,
+                onAddSet = onAddSet,
+                onAddLayer = onAddLayer,
+                onRenameSet = onRenameSet,
+                onDuplicateSet = onDuplicateSet,
+                onDeleteSet = onDeleteSet,
+                onRenameLayer = onRenameLayer,
+                onDuplicateLayer = onDuplicateLayer,
+                onDeleteLayer = onDeleteLayer,
+            )
+
+            // Section items.
+            sections.forEach { section ->
+                val interaction = remember(section.id) { MutableInteractionSource() }
+                val focused by interaction.collectIsFocusedAsState()
+                // Focus == selection: arrowing onto a section previews it in the detail pane.
+                LaunchedEffect(focused) {
+                    if (focused && section.enabled) onSectionSelected(section.id)
+                }
+                WideNavigationRailItem(
+                    selected = section.id == selectedSectionId,
+                    onClick = { onSectionSelected(section.id) },
+                    icon = {
+                        Icon(section.icon ?: Icons.Filled.Circle, contentDescription = null)
+                    },
+                    label = { Text(section.label) },
+                    railExpanded = expanded,
+                    enabled = section.enabled,
+                    interactionSource = interaction,
+                    modifier = Modifier.testTag("section-rail-item:${section.id}"),
                 )
-
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
-                Spacer(Modifier.height(8.dp))
-
-                // Section rows.
-                sections.forEach { section ->
-                    RailRow(
-                        selected = section.id == selectedSectionId,
-                        enabled = section.enabled,
-                        testTag = "section-rail-item:${section.id}",
-                        focusRequester = requesters[section.id]!!,
-                        onFocused = { onSectionSelected(section.id) },
-                        onClick = { onSectionSelected(section.id) },
-                        onActivateRight = {
-                            onSectionSelected(section.id)
-                            detailRequester.tryRequestFocus()
-                        },
-                        onUp = { focus(neighbor(section.id, -1)) },
-                        onDown = { focus(neighbor(section.id, +1)) },
-                    ) { contentColor ->
-                        Icon(
-                            section.icon ?: Icons.Filled.Circle,
-                            contentDescription = null,
-                            tint = contentColor,
-                            modifier = Modifier.size(24.dp),
-                        )
-                        Spacer(Modifier.width(16.dp))
-                        Text(
-                            section.label,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = contentColor,
-                            maxLines = 1,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
             }
         }
+
         // M3 role: surface — primary content plane (reserved for input assignments).
         Surface(
             modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -228,73 +193,17 @@ fun RemapRail(
 }
 
 /**
- * Shared shell for a rail row: the expressive active-indicator background, focus + gamepad
- * key handling, and ripple, with the icon/label supplied by [content]. Keeping the
- * `focusRequester` + `clickable` on one modifier chain is what lets the cross-row
- * wraparound + cross-pane focus work (a stock `NavigationRailItem` hides its focus target
- * internally, which would break it).
- */
-@Composable
-private fun RailRow(
-    selected: Boolean,
-    enabled: Boolean,
-    testTag: String?,
-    focusRequester: FocusRequester,
-    onFocused: () -> Unit,
-    onClick: () -> Unit,
-    onActivateRight: () -> Unit,
-    onUp: () -> Unit,
-    onDown: () -> Unit,
-    content: @Composable androidx.compose.foundation.layout.RowScope.(contentColor: Color) -> Unit,
-) {
-    val colors = MaterialTheme.colorScheme
-    val containerColor by animateColorAsState(
-        targetValue = if (selected && enabled) colors.secondaryContainer else Color.Transparent,
-        label = "railRowContainer",
-    )
-    val contentColor = when {
-        !enabled -> colors.onSurface.copy(alpha = DISABLED_ALPHA)
-        selected -> colors.onSecondaryContainer
-        else -> colors.onSurfaceVariant
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(containerColor)
-            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
-            .focusRequester(focusRequester)
-            .onFocusChanged { if (it.isFocused && enabled) onFocused() }
-            .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when (event.key) {
-                    Key.DirectionRight, Key.Enter, Key.ButtonA, Key.NumPadEnter -> { onActivateRight(); true }
-                    Key.DirectionDown -> { onDown(); false }
-                    Key.DirectionUp -> { onUp(); false }
-                    else -> false
-                }
-            }
-            .clickable(enabled = enabled, role = Role.Tab, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        content = { content(contentColor) },
-    )
-}
-
-/**
- * The scope (action set / layer) rail row plus its fly-out [DropdownMenu]. The menu lists
- * every action set (filled [Icons.Filled.Layers]) with its layers indented beneath
+ * The scope (action set / layer) entry: a [WideNavigationRailItem] anchoring a fly-out
+ * [DropdownMenu] of every action set (filled [Icons.Filled.Layers]) with its layers indented
  * (outlined [Icons.Outlined.Layers]); the current scope is primary-tinted + checked. Each
  * set/layer row carries a kebab → Rename / Duplicate / Delete; "Add layer" trails each set,
  * "Add set" the whole list. Any action closes the fly-out.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun ScopeRailEntry(
+private fun ScopeRailItem(
     scopeLabel: String,
-    focusRequester: FocusRequester,
-    onUp: () -> Unit,
-    onDown: () -> Unit,
+    railExpanded: Boolean,
     config: ControllerConfig?,
     viewingSetId: Long?,
     viewingLayerId: Long?,
@@ -312,29 +221,16 @@ private fun ScopeRailEntry(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Box {
-        RailRow(
+        WideNavigationRailItem(
             selected = false,
-            enabled = true,
-            testTag = "rail-scope",
-            focusRequester = focusRequester,
-            onFocused = {},
             onClick = { menuOpen = true },
-            onActivateRight = { menuOpen = true },
-            onUp = onUp,
-            onDown = onDown,
-        ) { contentColor ->
-            Icon(Icons.Filled.Layers, contentDescription = null, tint = contentColor, modifier = Modifier.size(24.dp))
-            Spacer(Modifier.width(16.dp))
-            Text(
-                scopeLabel,
-                style = MaterialTheme.typography.labelLarge,
-                color = contentColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = contentColor)
-        }
+            icon = { Icon(Icons.Filled.Layers, contentDescription = null) },
+            label = {
+                Text(scopeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            },
+            railExpanded = railExpanded,
+            modifier = Modifier.testTag("rail-scope"),
+        )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             val sets = config?.actionSets.orEmpty()
             sets.forEach { setGraph ->
@@ -437,7 +333,7 @@ private fun ScopeMenuRow(
     )
 }
 
-/** Try-best focus request — swallows the "not laid out yet" race on first composition. */
+/** Try-best focus request — swallows the "not laid out yet" race. */
 private fun FocusRequester.tryRequestFocus() {
     runCatching { requestFocus() }
 }

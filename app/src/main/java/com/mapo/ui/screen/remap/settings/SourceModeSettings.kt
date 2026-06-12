@@ -303,6 +303,13 @@ object SourceModeSettingsSchema {
         helper = "Repeatedly fire the command while the trigger is held past the threshold.",
         control = SettingControl.Toggle(),
     )
+    private val TRIGGER_REPEAT_RATE = SettingSpec(
+        key = "repeat_rate_ms",
+        label = "Repeat rate",
+        helper = "Time between turbo pulses — lower fires faster.",
+        control = SettingControl.Slider(20f, 1000f, default = 150f, unitSuffix = " ms"),
+        visibleWhen = { it.raw("hold_to_repeat") == "true" },
+    )
     private val TRIGGER_RANGE_START = SettingSpec(
         key = "trigger_range_start",
         label = "Trigger range start",
@@ -335,7 +342,7 @@ object SourceModeSettingsSchema {
             "General",
             listOf(
                 THRESHOLD_TRIGGER_STYLE, TRIGGER_THRESHOLD_POINT, TRIGGER_RESPONSE_CURVE,
-                TRIGGER_CUSTOM_RESPONSE_CURVE, TRIGGER_HOLD_TO_REPEAT,
+                TRIGGER_CUSTOM_RESPONSE_CURVE, TRIGGER_HOLD_TO_REPEAT, TRIGGER_REPEAT_RATE,
             ),
         ),
         SettingCategory(

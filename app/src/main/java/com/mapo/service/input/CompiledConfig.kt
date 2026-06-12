@@ -394,6 +394,21 @@ private fun modeHoldToRepeat(groupSettingsJson: String): Boolean {
     }
 }
 
+/**
+ * Mode-level turbo repeat rate (ms) from the group's settingsJson — the Trigger menu's
+ * conditional "Repeat rate" slider. Null when absent (caller falls back to the activator's
+ * own rate / the default).
+ */
+private fun modeRepeatRateMs(groupSettingsJson: String): Long? {
+    if (groupSettingsJson.isBlank()) return null
+    return try {
+        val obj = JSONObject(groupSettingsJson)
+        if (obj.has("repeat_rate_ms")) obj.optLong("repeat_rate_ms") else null
+    } catch (_: JSONException) {
+        null
+    }
+}
+
 private fun JSONObject.optLongOrNull(key: String): Long? =
     if (has(key) && !isNull(key)) optLong(key) else null
 
@@ -477,10 +492,17 @@ fun ControllerConfig.toCompiled(): CompiledConfig {
                 // applies turbo to every command the trigger fires (soft + full pull).
                 // OR it into each activator's hold-to-repeat so the existing turbo
                 // machinery (startRepeatJob) drives the pulse — no trigger-specific timer.
+                // The trigger menu's conditional "Repeat rate" slider (also `repeat_rate_ms`,
+                // but in the GROUP json) overrides the per-activator rate when on.
                 val modeTurbo = modeHoldToRepeat(groupSettingsJson)
+                val modeTurboRate = if (modeTurbo) modeRepeatRateMs(groupSettingsJson) else null
                 val compiledActivators = inputGraph.activators.map { actGraph ->
                     val parsed = CompiledActivatorSettings.parse(actGraph.activator.settingsJson)
-                    val settings = if (modeTurbo) parsed.copy(holdToRepeat = true) else parsed
+                    val settings = if (modeTurbo) {
+                        parsed.copy(holdToRepeat = true, repeatRateMs = modeTurboRate ?: parsed.repeatRateMs)
+                    } else {
+                        parsed
+                    }
                     CompiledActivator(
                         activatorId = actGraph.activator.id,
                         type = actGraph.activator.type,

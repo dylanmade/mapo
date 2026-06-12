@@ -16,6 +16,9 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -38,6 +41,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -117,10 +121,13 @@ import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.AndroidUiDispatcher
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -144,7 +151,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
@@ -232,6 +242,14 @@ class OverlayLiveEditController @Inject constructor(
     private val alignTo = MutableStateFlow(AlignTarget.Selection)
     // Core menu orientation: false = vertical panel, true = horizontal icon-only bar ("Rotate menu").
     private val menuHorizontal = MutableStateFlow(false)
+    // Rotate animation: null = not animating; 0..1 progress while morphing vertical↔horizontal.
+    private val rotateProgress = MutableStateFlow<Float?>(null)
+    // Reported natural (unbounded) sizes of each orientation's content, used to drive the rotate.
+    private val verticalMenuSize = MutableStateFlow(IntSize.Zero)
+    private val horizontalMenuSize = MutableStateFlow(IntSize.Zero)
+    // The target orientation during a rotate (for the content crossfade direction).
+    private var rotateToHorizontal = false
+    private var rotateJob: Job? = null
     // Center the panel only on its very first sizing; afterwards (incl. rotate) keep its position.
     private var centerToolbarPending = true
     // Captured just before a rotate so the new orientation preserves the old bottom-left corner.
@@ -863,6 +881,7 @@ class OverlayLiveEditController @Inject constructor(
      * bar lands at the vertical menu's bottom-left). Finally clamp on-screen.
      */
     private fun resizeToolbarToContent() {
+        if (rotateProgress.value != null) return // the rotate animation owns the window size
         val view = toolbar?.first ?: return
         val params = toolbarParams ?: return
         view.forceLayout()
@@ -1788,78 +1807,174 @@ class OverlayLiveEditController @Inject constructor(
         Log.i(TAG, "paste ${if (asOverride) "as override" else "as new"} — stub")
     }
 
-    /** Flip the core menu between the vertical panel and the horizontal icon bar, preserving the
-     *  bottom-left corner (so vertical→horizontal drops the bar to the vertical menu's bottom-left). */
-    private fun rotateMenu() = runOnMain {
-        dismissSubmenus()
-        toolbar?.first?.let { v -> toolbarParams?.let { p -> pendingBottomLeft = Point(p.x, p.y + v.height) } }
-        menuHorizontal.value = !menuHorizontal.value
+    /** Flip the core menu between vertical and horizontal with a choreographed two-phase animation. */
+    private fun rotateMenu() {
+        if (rotateJob?.isActive == true) return
+        rotateJob = scope.launch { animateRotate() }
     }
 
     /**
-     * The always-visible core menu (the "toolbar" window). Grab-and-draggable anywhere (the whole
-     * window owns a raw-coord touch filter via [onTouch]; a tap that doesn't move is routed by
-     * [toolbarRouter] to the row/icon under it). Renders as a vertical panel, or a horizontal
-     * icon-only bar when [menuHorizontal] is set ("Rotate menu").
+     * Animate vertical↔horizontal. Phase 1 (first half) collapses the SHRINKING dimension with the
+     * bottom-left corner pinned (vertical→horizontal eases the top straight down to the bar height);
+     * the content crossfades at the midpoint; phase 2 grows the OTHER dimension out to the side.
+     * Falls back to an instant flip if the target size can't be measured.
+     */
+    private suspend fun animateRotate() {
+        dismissSubmenus()
+        val params = toolbarParams ?: return
+        val view = toolbar?.first ?: return
+        val toHorizontal = !menuHorizontal.value
+        val marginPx = (MENU_SHADOW_MARGIN * context.resources.displayMetrics.density).roundToInt()
+        val fromSize = IntSize(
+            (params.width - 2 * marginPx).coerceAtLeast(1),
+            (params.height - 2 * marginPx).coerceAtLeast(1),
+        )
+        val anchorX = params.x
+        val anchorBottom = params.y + params.height
+        pendingBottomLeft = Point(anchorX, anchorBottom) // keep bottom-left on the settle resize
+        // Enter animation mode (ToolbarContent renders BOTH layouts) and read the target's true size
+        // (reported UNBOUNDED, so it's the full width even though the window is still the old size).
+        rotateToHorizontal = toHorizontal
+        rotateProgress.value = 0f
+        val toFlow = if (toHorizontal) horizontalMenuSize else verticalMenuSize
+        val toSize = withTimeoutOrNull(400) { toFlow.first { it.width > 0 && it.height > 0 } }
+        if (toSize == null) {
+            rotateProgress.value = null
+            menuHorizontal.value = toHorizontal
+            return
+        }
+        // Animatable.animateTo needs a MonotonicFrameClock to drive frames; `scope` is a plain
+        // Main.immediate scope with no frame clock (that's supplied by the composition when you
+        // animate from rememberCoroutineScope/LaunchedEffect). AndroidUiDispatcher.Main carries the
+        // Choreographer-based clock in its context, so run the animation there.
+        withContext(AndroidUiDispatcher.Main) {
+            Animatable(0f).animateTo(1f, tween(ROTATE_TOTAL_MS, easing = LinearEasing)) {
+                rotateProgress.value = value
+                val ls = interpolateRotateSize(value, fromSize, toSize, toHorizontal)
+                params.width = ls.width + 2 * marginPx
+                params.height = ls.height + 2 * marginPx
+                params.x = anchorX
+                params.y = anchorBottom - params.height
+                runCatching { windowManager.updateViewLayout(view, params) }
+            }
+        }
+        // Settle into the single target orientation (LaunchedEffect re-sizes to the exact content).
+        menuHorizontal.value = toHorizontal
+        rotateProgress.value = null
+    }
+
+    /** Window content size during a rotate: phase 1 animates the shrinking axis, phase 2 the growing one. */
+    private fun interpolateRotateSize(t: Float, from: IntSize, to: IntSize, toHorizontal: Boolean): IntSize {
+        val p1 = FastOutLinearInEasing.transform((t * 2f).coerceIn(0f, 1f))          // ease-in (phase 1)
+        val p2 = LinearOutSlowInEasing.transform(((t - 0.5f) * 2f).coerceIn(0f, 1f)) // ease-out (phase 2)
+        return if (toHorizontal) {
+            // vertical→horizontal: height shrinks first, then width grows.
+            IntSize(lerp(from.width, to.width, p2), lerp(from.height, to.height, p1))
+        } else {
+            // horizontal→vertical: width shrinks first, then height grows.
+            IntSize(lerp(from.width, to.width, p1), lerp(from.height, to.height, p2))
+        }
+    }
+
+    /**
+     * The always-visible core menu (the "toolbar" window). Grab-and-draggable anywhere (raw-coord
+     * filter via [onTouch]; a non-moving tap is routed by [toolbarRouter]). Renders a vertical panel
+     * or a horizontal icon bar; during a rotate it renders BOTH overlaid (bottom-left aligned) and
+     * crossfades while [animateRotate] drives the window size frame-by-frame.
      */
     @OptIn(ExperimentalComposeUiApi::class)
     @Composable
     private fun ToolbarContent(onTouch: (MotionEvent) -> Boolean) {
         val horizontal by menuHorizontal.collectAsStateWithLifecycle()
-        // Re-size the window when the orientation flips. The window keeps its old explicit size while
-        // the new content composes (the layout-change listener won't fire — the clipped view keeps
-        // its old bounds), so trigger the resize here; forceLayout in resizeToolbarToContent makes
-        // the re-measure fresh (no stale cached size).
-        LaunchedEffect(horizontal) { resizeToolbarToContent() }
-        // Pill ends when horizontal; rounded when vertical. Drop shadow needs room, so the window's
-        // content is inset by MENU_SHADOW_MARGIN (the visible Surface is that much in from the window
-        // edge) and the shadow is drawn into that margin.
-        val shape = if (horizontal) CircleShape else MaterialTheme.shapes.large
-        val shadowCorner = if (horizontal) 100.dp else 16.dp
+        val progress by rotateProgress.collectAsStateWithLifecycle()
+        val animating = progress != null
+        // Outside a rotate, size the window to the active content (the layout-change listener won't
+        // fire on an orientation flip — the old explicit size clips the new content). During a rotate
+        // the animation owns the window size, so skip it.
+        LaunchedEffect(horizontal, animating) { if (!animating) resizeToolbarToContent() }
+
+        // Pill ends + tight shadow corner once settled horizontal; rounded otherwise. The shadow
+        // needs room, so the visible Surface is inset by MENU_SHADOW_MARGIN within the window.
+        val shape = if (horizontal && !animating) CircleShape else MaterialTheme.shapes.large
+        val shadowCorner = if (horizontal && !animating) 100.dp else 16.dp
+        // While animating, fill the animation-driven window; otherwise wrap content so the window
+        // measures to it (resizeToolbarToContent).
+        val fill = if (animating) Modifier.fillMaxSize() else Modifier
         Box(
             // Interop filter OUTERMOST so its ev.x/ev.y share the window origin with the rows'
             // positionInWindow() used for tap routing; the shadow-margin padding is inside it.
             modifier = Modifier
                 .pointerInteropFilter(onTouchEvent = onTouch)
-                .padding(MENU_SHADOW_MARGIN.dp),
+                .padding(MENU_SHADOW_MARGIN.dp)
+                .then(fill),
         ) {
-            // Shadow on a wrapper Box (sized to the Surface) so it can't be clipped by the Surface's
-            // shape; surfaceContainerHigh — floating panel (elevated container).
-            Box(Modifier.menuDropShadow(shadowCorner)) {
-            Surface(
-                shape = shape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 6.dp,
-            ) {
-                // Rows re-register their current bounds (keyed by label) as they lay out; same labels
-                // across vertical/horizontal so entries overwrite rather than going stale.
-                if (horizontal) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RootMenuEntries().forEach { entry ->
-                            when (entry) {
-                                is MenuEntry.Divider ->
-                                    VerticalDivider(Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                is MenuEntry.Item -> RoutedIcon(entry)
-                            }
+            // Shadow on a wrapper Box so it can't be clipped by the Surface's shape.
+            Box(Modifier.menuDropShadow(shadowCorner).then(fill)) {
+                Surface(
+                    shape = shape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 6.dp,
+                    modifier = fill,
+                ) {
+                    if (animating) {
+                        val t = progress ?: 0f
+                        val toAlpha = ((t - 0.45f) / 0.1f).coerceIn(0f, 1f)
+                        val fromAlpha = ((0.55f - t) / 0.1f).coerceIn(0f, 1f)
+                        val vAlpha = if (rotateToHorizontal) fromAlpha else toAlpha
+                        val hAlpha = if (rotateToHorizontal) toAlpha else fromAlpha
+                        // Both overlaid, pinned bottom-start, measured UNBOUNDED (each reports its true
+                        // size); the window clips them to the animating bounds.
+                        Box(contentAlignment = Alignment.BottomStart) {
+                            VerticalPanel(
+                                register = false,
+                                modifier = Modifier
+                                    .wrapContentSize(Alignment.BottomStart, unbounded = true)
+                                    .onSizeChanged { verticalMenuSize.value = it }
+                                    .graphicsLayer { alpha = vAlpha },
+                            )
+                            HorizontalBar(
+                                register = false,
+                                modifier = Modifier
+                                    .wrapContentSize(Alignment.BottomStart, unbounded = true)
+                                    .onSizeChanged { horizontalMenuSize.value = it }
+                                    .graphicsLayer { alpha = hAlpha },
+                            )
                         }
-                    }
-                } else {
-                    // No scroll: the raw-coord drag filter consumes touches (so a scroll couldn't work
-                    // anyway), and the core menu is meant to fit all its rows. The window sizes to it;
-                    // if it ever exceeds the screen the user drags it (the drag allows sliding off).
-                    Column(modifier = Modifier.width(MENU_WIDTH_DP.dp).padding(vertical = 6.dp)) {
-                        RootMenuEntries().forEach { entry ->
-                            when (entry) {
-                                is MenuEntry.Divider -> HorizontalDivider(Modifier.padding(vertical = 2.dp))
-                                is MenuEntry.Item -> RoutedRow(entry)
-                            }
-                        }
+                    } else if (horizontal) {
+                        HorizontalBar(register = true, modifier = Modifier.onSizeChanged { horizontalMenuSize.value = it })
+                    } else {
+                        VerticalPanel(register = true, modifier = Modifier.onSizeChanged { verticalMenuSize.value = it })
                     }
                 }
             }
+        }
+    }
+
+    /** The vertical core menu: a column of routed rows. */
+    @Composable
+    private fun VerticalPanel(register: Boolean, modifier: Modifier = Modifier) {
+        Column(modifier = modifier.width(MENU_WIDTH_DP.dp).padding(vertical = 6.dp)) {
+            RootMenuEntries().forEach { entry ->
+                when (entry) {
+                    is MenuEntry.Divider -> HorizontalDivider(Modifier.padding(vertical = 2.dp))
+                    is MenuEntry.Item -> RoutedRow(entry, register = register)
+                }
+            }
+        }
+    }
+
+    /** The horizontal core menu: a row of routed icon buttons with vertical dividers. */
+    @Composable
+    private fun HorizontalBar(register: Boolean, modifier: Modifier = Modifier) {
+        Row(
+            modifier = modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RootMenuEntries().forEach { entry ->
+                when (entry) {
+                    is MenuEntry.Divider -> VerticalDivider(Modifier.height(26.dp).padding(horizontal = 2.dp))
+                    is MenuEntry.Item -> RoutedIcon(entry, register = register)
+                }
             }
         }
     }
@@ -1898,21 +2013,24 @@ class OverlayLiveEditController @Inject constructor(
 
     /** A routed root row (vertical menu): like a menu row, but registers into [toolbarRouter] (no clickable). */
     @Composable
-    private fun RoutedRow(item: MenuEntry.Item) {
+    private fun RoutedRow(item: MenuEntry.Item, register: Boolean = true) {
         val contentColor =
             if (item.enabled) MaterialTheme.colorScheme.onSurface
             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .onGloballyPositioned { c ->
-                    val p = c.positionInWindow()
-                    val b = android.graphics.Rect(
-                        p.x.roundToInt(), p.y.roundToInt(),
-                        p.x.roundToInt() + c.size.width, p.y.roundToInt() + c.size.height,
-                    )
-                    toolbarRouter.put(item.label, b) { rootItemTap(item, b) }
-                }
+                // register = false during the rotate animation (both layouts render; taps ignored).
+                .then(
+                    if (register) Modifier.onGloballyPositioned { c ->
+                        val p = c.positionInWindow()
+                        val b = android.graphics.Rect(
+                            p.x.roundToInt(), p.y.roundToInt(),
+                            p.x.roundToInt() + c.size.width, p.y.roundToInt() + c.size.height,
+                        )
+                        toolbarRouter.put(item.label, b) { rootItemTap(item, b) }
+                    } else Modifier,
+                )
                 .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1941,21 +2059,23 @@ class OverlayLiveEditController @Inject constructor(
 
     /** A routed root icon (horizontal menu): icon only, registers into [toolbarRouter]. */
     @Composable
-    private fun RoutedIcon(item: MenuEntry.Item) {
+    private fun RoutedIcon(item: MenuEntry.Item, register: Boolean = true) {
         val tint =
             if (item.enabled) MaterialTheme.colorScheme.onSurface
             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         Box(
             modifier = Modifier
                 .size(40.dp)
-                .onGloballyPositioned { c ->
-                    val p = c.positionInWindow()
-                    val b = android.graphics.Rect(
-                        p.x.roundToInt(), p.y.roundToInt(),
-                        p.x.roundToInt() + c.size.width, p.y.roundToInt() + c.size.height,
-                    )
-                    toolbarRouter.put(item.label, b) { rootItemTap(item, b) }
-                },
+                .then(
+                    if (register) Modifier.onGloballyPositioned { c ->
+                        val p = c.positionInWindow()
+                        val b = android.graphics.Rect(
+                            p.x.roundToInt(), p.y.roundToInt(),
+                            p.x.roundToInt() + c.size.width, p.y.roundToInt() + c.size.height,
+                        )
+                        toolbarRouter.put(item.label, b) { rootItemTap(item, b) }
+                    } else Modifier,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             item.leadingIcon?.let {
@@ -2232,5 +2352,7 @@ class OverlayLiveEditController @Inject constructor(
         private const val MENU_MAX_HEIGHT_DP = 360
         // Transparent inset around the menu Surface inside its window, giving the drop shadow room.
         private const val MENU_SHADOW_MARGIN = 10
+        // Rotate animation: ~half collapsing the shrinking axis (ease-in), ~half growing the other (ease-out).
+        private const val ROTATE_TOTAL_MS = 200
     }
 }

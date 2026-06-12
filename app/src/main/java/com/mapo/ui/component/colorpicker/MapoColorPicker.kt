@@ -257,7 +257,7 @@ fun MapoColorPickerDialog(
                     HexField(
                         selected = selected,
                         onColor = ::emitColor,
-                        modifier = Modifier.widthIn(max = 190.dp),
+                        modifier = Modifier.widthIn(max = 200.dp),
                     )
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text("Cancel") }
@@ -470,7 +470,7 @@ private fun HexField(selected: Color, onColor: (Color) -> Unit, modifier: Modifi
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
             // Trim the inset on the copy-icon side so it doesn't sit so far from the border.
-            contentPadding = PaddingValues(start = 16.dp, top = 7.dp, end = 8.dp, bottom = 8.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 7.dp, end = 9.dp, bottom = 8.dp),
             trailingIcon = {
                 Box(
                     modifier = Modifier

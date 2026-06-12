@@ -236,27 +236,6 @@ class RemapControlsScreenTest {
     }
 
     @Test
-    fun backRow_invokesOnBack() {
-        var backed = false
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = sampleConfig(),
-                        viewingActionSetId = 1L,
-                        onOpenInputEditor = { _, _, _ -> },
-                        onBack = { backed = true },
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        composeRule.onNodeWithTag("rail-back").performClick()
-        assert(backed) { "Expected the back / 'Controls' row to invoke onBack()" }
-    }
-
-    @Test
     fun bindingRowReflectsViewingSet_notDefaultSet() {
         composeRule.setContent {
             MaterialTheme {

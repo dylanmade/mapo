@@ -206,7 +206,6 @@ fun RemapControlsScreen(
                 sections = RemapSections.rail,
                 selectedSectionId = selectedSectionId,
                 onSectionSelected = { selectedSectionId = it },
-                onBack = onBack,
                 scopeLabel = viewingLayer?.layer?.title
                     ?: viewingSet?.actionSet?.title
                     ?: "—",

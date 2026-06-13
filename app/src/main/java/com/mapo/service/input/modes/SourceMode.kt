@@ -1575,13 +1575,50 @@ object JoystickMoveMode : SourceMode {
         digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
         mouse: MouseEmitter,
     ) {
-        val settings = StickToAxisSettings.parse(ctx.settingsJson)
-        val (ax, ay) = settings.toAxis(reading.x, reading.y)
+        // Joystick Move only handles the two analog stick sources. (The "click"
+        // sub-input is the physical stick press — it arrives as a digital event
+        // through onKeyEvent, not here.)
         when (reading.source) {
-            InputSource.LEFT_JOYSTICK -> ctx.gamepad.setLeftStick(reading.source, ax, ay)
-            InputSource.RIGHT_JOYSTICK -> ctx.gamepad.setRightStick(reading.source, ax, ay)
-            else -> Unit  // Joystick Move on non-stick sources is a no-op
+            InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK -> Unit
+            else -> return
         }
+        // Analog-specific shaping (deadzone + response curve + outer ring).
+        val analog = StickToAxisSettings.parse(ctx.settingsJson)
+        // Output-knob shaping (scale / invert / rotate / axis-limit) — the SAME
+        // tested path the digital Button-Pad/D-Pad → joystick synthesis uses, so
+        // these knobs feel identical across digital and analog joystick sources.
+        val shaping = JoystickOutputSettings.parse(ctx.settingsJson)
+
+        // ── Analog stick output ──────────────────────────────────────────────
+        // 1. Deadzone + response curve → a post-shaped vector in the raw +Y-down
+        //    convention. 2. Hand to JoystickOutputSettings.apply, which works in
+        //    +Y-up, so negate y on the way in and back out.
+        val (dx, dyDown) = analog.toShaped(reading.x, reading.y)
+        val (ox, oyUp) = shaping.apply(dx, -dyDown)
+        val ax = ox
+        val ay = -oyUp // back to +Y-down for the gamepad emitter
+
+        // Output Joystick: which virtual stick this source emits as. Defaults to
+        // the matching stick (Left source → left, Right source → right) when the
+        // setting is unset (JoystickOutputSettings defaults non-source-awarely to
+        // right, so resolve the source-aware default here).
+        val toRight = when (analog.outputJoystick) {
+            "left" -> false
+            "right" -> true
+            else -> reading.source == InputSource.RIGHT_JOYSTICK
+        }
+        if (toRight) ctx.gamepad.setRightStick(reading.source, ax, ay)
+        else ctx.gamepad.setLeftStick(reading.source, ax, ay)
+
+        // ── Outer Ring command ───────────────────────────────────────────────
+        // Edge-detected on the raw stick radius vs. the command radius. With
+        // Command Invert the command fires *inside* the radius instead of
+        // outside (Steam's "Walk/Sneak in the center" use case).
+        val radius = sqrt(reading.x * reading.x + reading.y * reading.y).coerceIn(0f, 1f)
+        val want = if (analog.commandInvert) radius < analog.commandRadius
+                   else radius >= analog.commandRadius
+        val prior = ctx.priorLatched["outer_ring"] ?: false
+        if (want != prior) digitalEmit("outer_ring", want)
     }
 }
 
@@ -2418,55 +2455,186 @@ internal data class GyroToStickSettings(
 }
 
 /**
- * Parsed settings for [JoystickMoveMode]. Applies a radial deadzone + optional
- * response curve and outputs a normalized `(ax, ay)` in -1..+1. The
- * [GamepadEmitter] handles the final int16 mapping (-32768..+32767).
+ * The **analog-specific** subset of the "Joystick" mode settings for
+ * [JoystickMoveMode] — deadzone (source / shape / threshold), response curve,
+ * outer-ring command, plus the source-aware Output Joystick resolution. The
+ * remaining output knobs (scale / invert / rotate / axis-limit / output-stick)
+ * are owned by [JoystickOutputSettings] and applied *after* this, so those
+ * knobs behave identically across the digital Button-Pad/D-Pad → joystick path
+ * and this analog path. Keys mirror
+ * [com.mapo.ui.screen.remap.settings.SourceModeSettingsSchema]'s
+ * `JOYSTICK_CATEGORIES`.
  *
- * Tolerant of missing keys; defaults match a stock Xbox-controller feel.
+ * [toShaped] outputs a deadzone- and curve-shaped `(x, y)` in the raw **+Y-down**
+ * convention (no scale/invert/rotate yet); the caller hands it to
+ * [JoystickOutputSettings.apply] for the rest. Tolerant of missing keys.
+ *
+ * **Shaping pipeline** (each setting independently observable when tested):
+ *  1. Deadzone by [deadzoneShape] → dead band rescaled out so a stick just past
+ *     the inner edge produces non-zero output.
+ *  2. Response curve by [responseAxisStyle] (per-axis vs. circular distance).
+ *
+ * Units as stored by the schema's sliders: deadzone handles are percentages
+ * (0..100); [commandRadius] is the raw Steam 0..32767 radius. Normalized at
+ * parse time.
+ *
+ * Note: [hapticIntensity] is parsed for VDF round-trip but not yet actuated —
+ * the [SourceMode.evaluate] path has no haptic sink. Documented to the user.
  */
 internal data class StickToAxisSettings(
-    val deadzone: Float,
-    val exponent: Float,
-    val invertY: Boolean,
+    val curve: String,             // linear/aggressive/relaxed/wide/extra_wide/custom
+    val customCurve: Float,        // raw 25..375
+    val responseAxisStyle: String, // per_axis / circular
+    val outputJoystick: String?,   // "left" / "right" / null (= match source)
+    val deadzoneSource: String,    // device_default / none / custom
+    val deadzoneInner: Float,      // 0..1
+    val deadzoneOuter: Float,      // 0..1
+    val deadzoneShape: String,     // cross / circle / square
+    val commandRadius: Float,      // 0..1 (normalized from 0..32767)
+    val commandInvert: Boolean,
+    val hapticIntensity: String,   // off / low / medium / high (not yet actuated)
 ) {
-    /** Returns (ax, ay) normalized to -1..+1, with deadzone + curve applied. */
-    fun toAxis(x: Float, y: Float): Pair<Float, Float> {
-        val magnitude = sqrt(x * x + y * y).coerceIn(0f, 1f)
-        if (magnitude <= deadzone) return 0f to 0f
-        val rescaled = ((magnitude - deadzone) / (1f - deadzone)).coerceIn(0f, 1f)
-        val shaped = rescaled.toDouble().pow(exponent.toDouble()).toFloat()
-        val ux = x / magnitude
-        val uy = y / magnitude
-        val ax = ux * shaped
-        val ay = uy * shaped * if (invertY) -1f else 1f
-        return ax to ay
+    /** Response-curve exponent — higher = more low-end fine control. */
+    private val exponent: Float
+        get() = when (curve) {
+            "aggressive" -> 0.6f
+            "relaxed" -> 1.5f
+            "wide" -> 2.2f
+            "extra_wide" -> 3.0f
+            // Custom: 200 (slider default) → 1.0 exponent; higher slider = reaches
+            // max sooner (lower exponent), lower slider = more low-end (higher exponent).
+            "custom" -> (200f / customCurve.coerceAtLeast(1f)).coerceIn(0.2f, 10f)
+            else -> 1.0f // linear
+        }
+
+    /** Effective (inner, outer) radial deadzone in 0..1. */
+    private fun innerOuter(): Pair<Float, Float> = when (deadzoneSource) {
+        "none" -> 0f to 1f
+        "custom" -> deadzoneInner to deadzoneOuter.coerceAtLeast(deadzoneInner + 1e-3f)
+        else -> DEFAULT_INNER_DEADZONE to 1f // device_default
+    }
+
+    /**
+     * Apply deadzone + response curve to a raw stick reading. Returns the shaped
+     * vector in the raw +Y-down convention; scale/invert/rotate/axis-limit are
+     * applied afterward by [JoystickOutputSettings.apply].
+     */
+    fun toShaped(rawX: Float, rawY: Float): Pair<Float, Float> {
+        val (inner, outer) = innerOuter()
+        // 1. Deadzone by shape → gated (gx, gy) in -1..1 (dead band rescaled out).
+        val (gx, gy) = when (deadzoneShape) {
+            "cross" -> axisGate(rawX, inner, outer) to axisGate(rawY, inner, outer)
+            "square" -> squareGate(rawX, rawY, inner, outer)
+            else -> circleGate(rawX, rawY, inner, outer) // circle (default)
+        }
+        // 2. Response curve, per the response-axis style.
+        return if (responseAxisStyle == "per_axis") {
+            curveAxis(gx) to curveAxis(gy)
+        } else { // circular: curve the distance from center, preserve direction
+            curveRadial(gx, gy)
+        }
+    }
+
+    /** Apply the response exponent to a single signed axis value. */
+    private fun curveAxis(v: Float): Float {
+        val a = abs(v).coerceIn(0f, 1f)
+        val shaped = a.toDouble().pow(exponent.toDouble()).toFloat()
+        return if (v < 0f) -shaped else shaped
+    }
+
+    /** Apply the response exponent to the vector's magnitude, keeping direction. */
+    private fun curveRadial(gx: Float, gy: Float): Pair<Float, Float> {
+        val m = sqrt(gx * gx + gy * gy).coerceIn(0f, 1f)
+        if (m <= 0f) return 0f to 0f
+        val shaped = m.toDouble().pow(exponent.toDouble()).toFloat()
+        val k = shaped / m
+        return gx * k to gy * k
     }
 
     companion object {
-        const val DEFAULT_DEADZONE = 0.10f
-        // Linear (1.0) by default — XInput games typically apply their own curves
-        // and expect the raw axis to be linear-ish. Set higher to attenuate near
-        // center, lower for amplified small movements.
-        const val DEFAULT_EXPONENT = 1.0f
+        // A modest inner deadzone for "device default" — we read raw /dev/input,
+        // which doesn't apply the device's own deadzone, so a small floor avoids
+        // resting-stick drift. Matches the prior JoystickMove default feel.
+        const val DEFAULT_INNER_DEADZONE = 0.10f
 
         val DEFAULTS = StickToAxisSettings(
-            deadzone = DEFAULT_DEADZONE,
-            exponent = DEFAULT_EXPONENT,
-            invertY = false,
+            curve = "linear",
+            customCurve = 200f,
+            responseAxisStyle = "circular",
+            outputJoystick = null,
+            deadzoneSource = "device_default",
+            deadzoneInner = 0f,
+            deadzoneOuter = 0.5f,
+            deadzoneShape = "circle",
+            commandRadius = 25000f / 32767f,
+            commandInvert = false,
+            hapticIntensity = "off",
         )
-        val DEFAULT_JSON =
-            """{"deadzone":$DEFAULT_DEADZONE,"exponent":$DEFAULT_EXPONENT,"invert_y":false}"""
+
+        // All keys tolerant of absence → "{}" seeds a stock-feel left/right stick.
+        val DEFAULT_JSON = "{}"
+
+        /**
+         * Radial (circle) deadzone gate: input below [inner] = 0, between =
+         * ramped, at/above [outer] = full. Returns the rescaled vector.
+         */
+        private fun circleGate(x: Float, y: Float, inner: Float, outer: Float): Pair<Float, Float> {
+            val m = sqrt(x * x + y * y).coerceIn(0f, 1f)
+            if (m <= inner) return 0f to 0f
+            val rm = ((m - inner) / (outer - inner)).coerceIn(0f, 1f)
+            val k = rm / m
+            return x * k to y * k
+        }
+
+        /**
+         * Per-axis (cross) deadzone gate for one axis: a + shaped band along
+         * each axis. Best for navigation where a near-cardinal hold shouldn't
+         * drift on the off-axis.
+         */
+        private fun axisGate(v: Float, inner: Float, outer: Float): Float {
+            val a = abs(v).coerceIn(0f, 1f)
+            if (a <= inner) return 0f
+            val r = ((a - inner) / (outer - inner)).coerceIn(0f, 1f)
+            return if (v < 0f) -r else r
+        }
+
+        /**
+         * Square deadzone: cross inner deadzone, with the circular extent mapped
+         * out toward a square so diagonals reach max sooner. Approximated by
+         * cross-gating each axis then pushing the vector toward the square by the
+         * larger unit component.
+         */
+        private fun squareGate(x: Float, y: Float, inner: Float, outer: Float): Pair<Float, Float> {
+            val gx = axisGate(x, inner, outer)
+            val gy = axisGate(y, inner, outer)
+            val maxComp = maxOf(abs(gx), abs(gy))
+            if (maxComp <= 0f) return 0f to 0f
+            val m = sqrt(gx * gx + gy * gy).coerceIn(0f, 1f)
+            // Scale the radial magnitude out to the square boundary.
+            val k = (m / maxComp).coerceAtMost(1f / maxComp)
+            return (gx * k).coerceIn(-1f, 1f) to (gy * k).coerceIn(-1f, 1f)
+        }
 
         fun parse(json: String): StickToAxisSettings {
             if (json.isBlank()) return DEFAULTS
             return try {
                 val obj = JSONObject(json)
                 StickToAxisSettings(
-                    deadzone = obj.optDouble("deadzone", DEFAULT_DEADZONE.toDouble()).toFloat()
-                        .coerceIn(0f, 0.95f),
-                    exponent = obj.optDouble("exponent", DEFAULT_EXPONENT.toDouble()).toFloat()
-                        .coerceIn(0.1f, 10f),
-                    invertY = obj.optBoolean("invert_y", false),
+                    curve = obj.optString("stick_response_curve", "linear"),
+                    customCurve = obj.optDouble("custom_response_curve", 200.0).toFloat()
+                        .coerceIn(25f, 375f),
+                    responseAxisStyle = obj.optString("response_axis_style", "circular"),
+                    outputJoystick = if (obj.has("output_joystick")) obj.optString("output_joystick") else null,
+                    deadzoneSource = obj.optString("deadzone_source", "device_default"),
+                    deadzoneInner = (obj.optDouble("deadzone_inner", 0.0).toFloat() / 100f)
+                        .coerceIn(0f, 1f),
+                    deadzoneOuter = (obj.optDouble("deadzone_outer", 50.0).toFloat() / 100f)
+                        .coerceIn(0f, 1f),
+                    deadzoneShape = obj.optString("deadzone_shape", "circle"),
+                    commandRadius = (obj.optDouble("command_radius", 25000.0).toFloat() / 32767f)
+                        .coerceIn(0f, 1f),
+                    commandInvert = obj.optBoolean("command_invert", false),
+                    hapticIntensity = obj.optString("haptic_intensity", "off"),
                 )
             } catch (_: JSONException) {
                 DEFAULTS

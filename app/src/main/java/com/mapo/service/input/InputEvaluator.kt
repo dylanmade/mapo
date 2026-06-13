@@ -362,6 +362,13 @@ class InputEvaluator @Inject constructor(
         // trigger reading re-establishes the target axis.
         gamepadEmitter.clearSource(InputSource.LEFT_TRIGGER)
         gamepadEmitter.clearSource(InputSource.RIGHT_TRIGGER)
+        // Same rationale for the joysticks: Output Joystick (which virtual stick a
+        // source emits as) is a JOYSTICK_MOVE setting, not a mode flip. Without an
+        // unconditional clear, flipping it (or any stick setting) while the stick is
+        // deflected would strand the previously-targeted stick's value. The next
+        // stick reading re-establishes the correct target.
+        gamepadEmitter.clearSource(InputSource.LEFT_JOYSTICK)
+        gamepadEmitter.clearSource(InputSource.RIGHT_JOYSTICK)
         val startingSetId = compiled.startingActionSetId
         val set = compiled.sets[startingSetId] ?: return
         for (source in GAMEPAD_EMITTING_SOURCES) {

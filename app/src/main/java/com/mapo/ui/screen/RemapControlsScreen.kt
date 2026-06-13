@@ -1,5 +1,6 @@
 package com.mapo.ui.screen
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -114,6 +115,11 @@ fun RemapControlsScreen(
     onAcknowledgeShizukuRequired: () -> Unit = {},
     onOpenShizukuSetup: () -> Unit = {},
 ) {
+    // Physical/gesture back navigates home (the rail's back affordance was removed; this keeps
+    // the Thor hardware back button + the touch back gesture working). Open menus/dialogs install
+    // their own (more-recent) back handlers, so this only fires when nothing else is dismissable.
+    BackHandler { onBack() }
+
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
 
     // Brick 4.4: which management dialog is currently open. Plain `remember` —

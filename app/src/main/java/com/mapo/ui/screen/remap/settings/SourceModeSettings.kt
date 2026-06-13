@@ -391,6 +391,30 @@ object SourceModeSettingsSchema {
         SettingCategory("Haptics", listOf(HAPTIC_INTENSITY)),
     )
 
+    /** Output Joystick defaults to the matching stick for an analog joystick source. */
+    private fun outputJoystick(source: InputSource) = SettingSpec(
+        key = "output_joystick",
+        label = "Output joystick",
+        helper = "Which gamepad stick this source emits as.",
+        control = SettingControl.Dropdown(
+            OUTPUT_JOYSTICK_OPTIONS,
+            defaultId = if (source == InputSource.LEFT_JOYSTICK) "left" else "right",
+        ),
+    )
+
+    /**
+     * The "Joystick" mode menu for an analog joystick source. Identical to
+     * [JOYSTICK_CATEGORIES] except Output Joystick defaults to the matching
+     * stick (Left for the left stick, Right for the right) per the spec.
+     */
+    private fun joystickSourceCategories(source: InputSource) = listOf(
+        JOYSTICK_CATEGORIES[0],
+        SettingCategory("Output", listOf(outputJoystick(source), OUTPUT_AXIS, ROTATE_OUTPUT)),
+        JOYSTICK_CATEGORIES[2],
+        JOYSTICK_CATEGORIES[3],
+        JOYSTICK_CATEGORIES[4],
+    )
+
     /**
      * The settings menu for a given (source, mode). Empty list = no cog shown.
      * Filled in menu-by-menu as each slice lands.
@@ -409,6 +433,11 @@ object SourceModeSettingsSchema {
         // on Analog Output Trigger).
         (source == InputSource.LEFT_TRIGGER || source == InputSource.RIGHT_TRIGGER) &&
             mode == BindingMode.TRIGGER -> triggerCategories(source)
+
+        // Analog joysticks in Joystick (Joystick Move) mode (one menu each for L/R;
+        // source-aware default on Output Joystick — the matching stick).
+        (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) &&
+            mode == BindingMode.JOYSTICK_MOVE -> joystickSourceCategories(source)
 
         else -> emptyList()
     }

@@ -4,25 +4,28 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.ArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,6 +33,7 @@ import androidx.compose.material3.WideNavigationRail
 import androidx.compose.material3.WideNavigationRailDefaults
 import androidx.compose.material3.WideNavigationRailItem
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,18 +43,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.mapo.data.model.steam.ControllerConfig
+import com.mapo.ui.compact.CompactDropdownMenuItem
 
 /**
  * One section in the Remap rail. [icon] drives the nav-item glyph; null falls back to a
@@ -63,24 +71,18 @@ data class SectionedPaneItem(
     val icon: ImageVector? = null,
 )
 
-/** Where the scope fly-out lands relative to its rail item, so it opens to the *right* of the
- *  (permanently collapsed) rail rather than on top of it. Tuned for the M3 collapsed width. */
-private val ScopeMenuOffset = DpOffset(x = 80.dp, y = (-64).dp)
-
 /**
  * The Remap screen's left control surface, built on the real M3-expressive
- * [WideNavigationRail], held **permanently collapsed** (icon + label-under, no expand
- * button — an intentional, slightly unconventional use that suits this screen). The homespun
- * "left 30% / right content" pane it replaced is gone.
+ * [WideNavigationRail], held **permanently collapsed** so it reads as a simple vertical
+ * toolbar: the scope (action set / layer) entry occupies the first slot, a thin divider sits
+ * at the bottom of that slot, and the section items (Buttons / D-Pad / Triggers / Joysticks /
+ * Gyro) fill the equally-spaced slots beneath it. The whole right pane is [detailPane].
  *
- * Top→bottom: the scope (action set / layer) entry — a nav item with a trailing ▸ whose
- * fly-out (all sets, layers indented; per-row kebab → Rename/Duplicate/Delete; Add layer per
- * set, Add set) opens to the right of the rail — a divider, then the section items (Buttons /
- * D-Pad / Triggers / Joysticks / Gyro). The whole right pane is [detailPane].
- *
- * The rail sits one surface step up (`surfaceContainer`) from the `surface` detail pane.
- * Gamepad: focusing a section selects it (via its [MutableInteractionSource]); D-pad → from
- * the rail jumps into the detail pane.
+ * The scope entry lives in the **content** (not the header) so the rail clamps it to the
+ * collapsed item width — otherwise it balloons to the loose max width (which also threw the
+ * fly-out far off to the right). `windowInsets` is zeroed because the enclosing Scaffold
+ * already applies the status-bar inset. Rail container is `surfaceContainer`, one step up from
+ * the `surface` detail pane. Gamepad: focusing a section selects it; D-pad → enters detail.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -114,6 +116,9 @@ fun RemapRail(
             colors = WideNavigationRailDefaults.colors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
             ),
+            // Scaffold already applies the status-bar inset; don't double it.
+            windowInsets = WindowInsets(0, 0, 0, 0),
+            contentPadding = PaddingValues(vertical = 4.dp),
             // D-pad → from anywhere in the rail jumps into the detail pane's first row.
             modifier = Modifier.onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
@@ -121,7 +126,7 @@ fun RemapRail(
                 } else false
             },
         ) {
-            // Scope (action set / layer) entry + its right-side fly-out.
+            // First slot: the scope entry, with its own bottom divider.
             ScopeRailItem(
                 scopeLabel = scopeLabel,
                 config = config,
@@ -140,9 +145,7 @@ fun RemapRail(
                 onDeleteLayer = onDeleteLayer,
             )
 
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-
-            // Section items.
+            // Section slots.
             sections.forEach { section ->
                 val interaction = remember(section.id) { MutableInteractionSource() }
                 val focused by interaction.collectIsFocusedAsState()
@@ -176,11 +179,14 @@ fun RemapRail(
 }
 
 /**
- * The scope (action set / layer) entry: a [WideNavigationRailItem] with a trailing ▸ arrow,
- * anchoring a fly-out [DropdownMenu] (offset to open to the right of the rail) of every action
- * set (filled [Icons.Filled.Layers]) with its layers indented (outlined [Icons.Outlined.Layers]).
- * The current scope is shown with a pill highlight; each set/layer row carries a horizontal
- * kebab → Rename / Duplicate / Delete; "Add layer" trails each set, "Add set" the whole list.
+ * The scope (action set / layer) entry: a [WideNavigationRailItem] with a trailing ▸ (the same
+ * [Icons.AutoMirrored.Filled.ArrowRight] the Edit Overlay submenu rows use) and a thin divider
+ * pinned to the bottom of its slot (so it separates scope from sections without consuming an
+ * extra 64dp rail slot). Tapping it opens a fly-out [DropdownMenu] just past the rail's right
+ * edge — offset computed from the item's measured bounds. The menu lists every action set
+ * (filled [Icons.Filled.Layers]) with layers indented (outlined [Icons.Outlined.Layers]); the
+ * current scope is pill-highlighted; each row's horizontal kebab opens Rename / Duplicate /
+ * Delete; "Add layer" trails each set, "Add set" the whole list. Rows are [CompactDropdownMenuItem].
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -202,7 +208,9 @@ private fun ScopeRailItem(
     onDeleteLayer: (layerId: Long) -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    Box {
+    var anchorSize by remember { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
+    Box(modifier = Modifier.onGloballyPositioned { anchorSize = it.size }) {
         WideNavigationRailItem(
             selected = false,
             onClick = { menuOpen = true },
@@ -211,20 +219,26 @@ private fun ScopeRailItem(
             railExpanded = false,
             modifier = Modifier.testTag("rail-scope"),
         )
-        // Submenu affordance, matching the Edit Overlay rows that open a fly-out.
+        // Submenu affordance, matching the Edit Overlay rows; nudged up to sit by the icon.
         Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            Icons.AutoMirrored.Filled.ArrowRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
+                .offset(y = (-12).dp)
                 .padding(end = 4.dp)
-                .size(16.dp),
+                .size(18.dp),
         )
+        // Thin divider at the bottom of the scope's slot — like the Edit Overlay menu divider.
+        HorizontalDivider(Modifier.align(Alignment.BottomCenter))
         DropdownMenu(
             expanded = menuOpen,
             onDismissRequest = { menuOpen = false },
-            offset = ScopeMenuOffset,
+            // Computed from real bounds: nudge right past the rail's edge, up to the item's top.
+            offset = with(density) {
+                DpOffset(anchorSize.width.toDp(), -anchorSize.height.toDp())
+            },
         ) {
             val sets = config?.actionSets.orEmpty()
             sets.forEach { setGraph ->
@@ -262,16 +276,16 @@ private fun ScopeRailItem(
                         onDelete = { onDeleteLayer(layerId); menuOpen = false },
                     )
                 }
-                DropdownMenuItem(
+                CompactDropdownMenuItem(
+                    text = "Add layer",
                     leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    text = { Text("Add layer") },
                     onClick = { onAddLayer(setId); menuOpen = false },
                     modifier = Modifier.padding(start = 16.dp),
                 )
             }
-            DropdownMenuItem(
+            CompactDropdownMenuItem(
+                text = "Add set",
                 leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("Add set") },
                 onClick = { onAddSet(); menuOpen = false },
             )
         }
@@ -279,9 +293,9 @@ private fun ScopeRailItem(
 }
 
 /**
- * One set/layer row inside the scope fly-out: a standard [DropdownMenuItem] (default M3
- * spacing), selected via a pill background rather than a check, managed via the trailing
- * horizontal kebab which opens a standard sub-menu (Rename / Duplicate / Delete).
+ * One set/layer row inside the scope fly-out: a [CompactDropdownMenuItem] (denser than the
+ * stock 48dp item), selected via a pill background rather than a check, managed via a trailing
+ * horizontal kebab (sized down from the 48dp default) that opens a compact sub-menu.
  */
 @Composable
 private fun ScopeMenuRow(
@@ -306,30 +320,30 @@ private fun ScopeMenuRow(
                     .background(colors.secondaryContainer)
             } else Modifier,
         )
-    val tint = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant
-    DropdownMenuItem(
+    CompactDropdownMenuItem(
+        text = label,
+        onClick = onSelect,
         modifier = rowModifier,
-        leadingIcon = { Icon(icon, contentDescription = null, tint = tint) },
-        text = {
-            Text(label, color = if (selected) colors.onSecondaryContainer else Color.Unspecified, maxLines = 1)
-        },
+        leadingIcon = { Icon(icon, contentDescription = null) },
         trailingIcon = {
             Box {
-                IconButton(onClick = { kebabOpen = true }) {
-                    Icon(Icons.Filled.MoreHoriz, contentDescription = "Manage \"$label\"", tint = tint)
+                // Tighter than the 48dp default so the kebab hugs the row's trailing edge.
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                    IconButton(onClick = { kebabOpen = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Filled.MoreHoriz, contentDescription = "Manage \"$label\"")
+                    }
                 }
                 DropdownMenu(expanded = kebabOpen, onDismissRequest = { kebabOpen = false }) {
-                    DropdownMenuItem(text = { Text("Rename") }, onClick = { kebabOpen = false; onRename() })
-                    DropdownMenuItem(text = { Text("Duplicate") }, onClick = { kebabOpen = false; onDuplicate() })
-                    DropdownMenuItem(
-                        text = { Text("Delete") },
+                    CompactDropdownMenuItem(text = "Rename", onClick = { kebabOpen = false; onRename() })
+                    CompactDropdownMenuItem(text = "Duplicate", onClick = { kebabOpen = false; onDuplicate() })
+                    CompactDropdownMenuItem(
+                        text = "Delete",
                         enabled = canDelete,
                         onClick = { kebabOpen = false; onDelete() },
                     )
                 }
             }
         },
-        onClick = onSelect,
     )
 }
 

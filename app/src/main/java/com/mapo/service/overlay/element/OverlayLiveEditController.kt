@@ -252,8 +252,9 @@ class OverlayLiveEditController @Inject constructor(
     private var rotateJob: Job? = null
     // Center the panel only on its very first sizing; afterwards (incl. rotate) keep its position.
     private var centerToolbarPending = true
-    // Captured just before a rotate so the new orientation preserves the old bottom-left corner.
-    private var pendingBottomLeft: Point? = null
+    // True while a rotate animates from the TOP half of the screen: pin the TOP-left corner and grow
+    // downward (so the content aligns to the top); false = pin the BOTTOM-left and grow upward.
+    private var rotateGrowFromTop = false
     // Per-window tap router for the (interop-dragged) core menu — routes a tap to the row/icon under
     // it, since the raw-coord drag filter consumes all touches and children can't use `clickable`.
     private val toolbarRouter = MenuTapRouter()
@@ -876,9 +877,9 @@ class OverlayLiveEditController @Inject constructor(
      * the size EXPLICITLY. [View.forceLayout] before measuring bypasses the spec-keyed measure cache
      * so a rotate re-measures the NEW orientation instead of returning the stale size.
      *
-     * Position: first sizing → default (left edge, vertically centered); on a rotate → preserve the
-     * bottom-left corner ([pendingBottomLeft]) so it converts roughly in place (and the horizontal
-     * bar lands at the vertical menu's bottom-left). Finally clamp on-screen.
+     * Position: first sizing → default (left edge, vertically centered); otherwise (incl. a rotate
+     * settle) → preserve the corner on the menu's screen-half (top-left in the top half, bottom-left in
+     * the bottom half) so it converts roughly in place. Finally clamp on-screen.
      */
     private fun resizeToolbarToContent() {
         if (rotateProgress.value != null) return // the rotate animation owns the window size
@@ -893,20 +894,24 @@ class OverlayLiveEditController @Inject constructor(
         val size = displaySizePx()
         var nx = params.x
         var ny = params.y
-        val bl = pendingBottomLeft
         when {
-            bl != null -> {
-                pendingBottomLeft = null
-                // New top-left so the bottom-left corner stays put across the rotation.
-                nx = bl.x
-                ny = bl.y - h
-            }
             centerToolbarPending -> {
                 centerToolbarPending = false
                 // Default: docked to the left, vertically centered. (The window carries the shadow
                 // margin, so x = 0 leaves the visible menu a hair in from the screen's left edge.)
                 nx = 0
                 ny = (size.y - h) / 2
+            }
+            else -> {
+                // Any content-driven resize (incl. the rotate settle): preserve the corner on the
+                // menu's screen-half — TOP-left if its center is in the top half (it grew downward),
+                // BOTTOM-left otherwise. This matches the rotate's own anchor AND is idempotent, so the
+                // layout-change listener firing a SECOND resize right after a rotate can't drift the
+                // edge (the earlier "vertical menu appears under the horizontal bar" flicker came from a
+                // follow-up resize keeping the top fixed while the bottom — clamped on-screen — dropped).
+                nx = params.x
+                ny = if (params.y + params.height / 2 < size.y / 2) params.y
+                else (params.y + params.height) - h
             }
         }
         // Keep on-screen. Allow negative offsets only when the menu genuinely exceeds the screen.
@@ -1814,9 +1819,11 @@ class OverlayLiveEditController @Inject constructor(
     }
 
     /**
-     * Animate vertical↔horizontal. Phase 1 (first half) collapses the SHRINKING dimension with the
-     * bottom-left corner pinned (vertical→horizontal eases the top straight down to the bar height);
-     * the content crossfades at the midpoint; phase 2 grows the OTHER dimension out to the side.
+     * Animate vertical↔horizontal. Phase 1 (first half) collapses the SHRINKING dimension; the content
+     * crossfades at the midpoint; phase 2 grows the OTHER dimension. The corner that stays put depends
+     * on which screen-half the menu is in: TOP half → pin the TOP-left and grow downward; BOTTOM half →
+     * pin the BOTTOM-left and grow upward — so it always morphs *into* the empty space, never off-screen
+     * (which would force the settle clamp to shove it back, the old under-the-bar flicker).
      * Falls back to an instant flip if the target size can't be measured.
      */
     private suspend fun animateRotate() {
@@ -1830,8 +1837,11 @@ class OverlayLiveEditController @Inject constructor(
             (params.height - 2 * marginPx).coerceAtLeast(1),
         )
         val anchorX = params.x
+        val anchorTop = params.y
         val anchorBottom = params.y + params.height
-        pendingBottomLeft = Point(anchorX, anchorBottom) // keep bottom-left on the settle resize
+        // Pin top-left when the menu sits in the top half of the screen (grow down), else bottom-left.
+        val growFromTop = (params.y + params.height / 2) < displaySizePx().y / 2
+        rotateGrowFromTop = growFromTop
         // Enter animation mode (ToolbarContent renders BOTH layouts) and read the target's true size
         // (reported UNBOUNDED, so it's the full width even though the window is still the old size).
         rotateToHorizontal = toHorizontal
@@ -1854,7 +1864,7 @@ class OverlayLiveEditController @Inject constructor(
                 params.width = ls.width + 2 * marginPx
                 params.height = ls.height + 2 * marginPx
                 params.x = anchorX
-                params.y = anchorBottom - params.height
+                params.y = if (growFromTop) anchorTop else anchorBottom - params.height
                 runCatching { windowManager.updateViewLayout(view, params) }
             }
         }
@@ -1922,20 +1932,25 @@ class OverlayLiveEditController @Inject constructor(
                         val fromAlpha = ((0.55f - t) / 0.1f).coerceIn(0f, 1f)
                         val vAlpha = if (rotateToHorizontal) fromAlpha else toAlpha
                         val hAlpha = if (rotateToHorizontal) toAlpha else fromAlpha
-                        // Both overlaid, pinned bottom-start, measured UNBOUNDED (each reports its true
-                        // size); the window clips them to the animating bounds.
-                        Box(contentAlignment = Alignment.BottomStart) {
+                        // Align content to the PINNED corner so it reveals from that edge: top-start when
+                        // growing down (menu in the top half), bottom-start when growing up. Otherwise a
+                        // bottom-aligned panel in a top-anchored (downward-growing) window would slide
+                        // down with the moving bottom edge instead of unrolling from the fixed top.
+                        val cornerAlign = if (rotateGrowFromTop) Alignment.TopStart else Alignment.BottomStart
+                        // Both overlaid at that corner, measured UNBOUNDED (each reports its true size);
+                        // the window clips them to the animating bounds.
+                        Box(contentAlignment = cornerAlign) {
                             VerticalPanel(
                                 register = false,
                                 modifier = Modifier
-                                    .wrapContentSize(Alignment.BottomStart, unbounded = true)
+                                    .wrapContentSize(cornerAlign, unbounded = true)
                                     .onSizeChanged { verticalMenuSize.value = it }
                                     .graphicsLayer { alpha = vAlpha },
                             )
                             HorizontalBar(
                                 register = false,
                                 modifier = Modifier
-                                    .wrapContentSize(Alignment.BottomStart, unbounded = true)
+                                    .wrapContentSize(cornerAlign, unbounded = true)
                                     .onSizeChanged { horizontalMenuSize.value = it }
                                     .graphicsLayer { alpha = hAlpha },
                             )

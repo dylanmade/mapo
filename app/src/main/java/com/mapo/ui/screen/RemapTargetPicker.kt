@@ -43,6 +43,7 @@ import com.mapo.data.defaults.InputOption
 import com.mapo.data.defaults.RemapInputOptions
 import com.mapo.data.model.RemapTarget
 import com.mapo.data.model.steam.BindingOutput
+import com.mapo.ui.component.gamepad.GamepadDiagram
 import kotlinx.collections.immutable.ImmutableList
 
 /**
@@ -106,10 +107,9 @@ fun RemapTargetPickerScreen(
                     onPickSwitchActionSet = { pickerState = RemapPickerState.SwitchActionSetList },
                     onPickLayer = { pickerState = RemapPickerState.LayerVerbList },
                 )
-                is RemapPickerState.GamepadList -> FilteredInputList(
+                is RemapPickerState.GamepadList -> GamepadPicker(
                     options = RemapInputOptions.gamepadOptions,
                     filter = state.filter,
-                    showFilter = true,
                     current = current,
                     onFilterChange = { pickerState = state.copy(filter = it) },
                     onSelect = { target -> onSelect(BindingOutput.fromRemapTarget(target)) },
@@ -239,7 +239,6 @@ private fun CategoryRow(
     ) { Text(label) }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun FilteredInputList(
     options: ImmutableList<InputOption>,
@@ -253,46 +252,87 @@ private fun FilteredInputList(
     else options.filter { it.label.contains(filter, ignoreCase = true) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (showFilter) {
-            OutlinedTextField(
-                value = filter,
-                onValueChange = onFilterChange,
-                label = { Text("Filter") },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+        if (showFilter) InputFilterField(filter, onFilterChange)
+        InputOptionList(filtered = filtered, current = current, onSelect = onSelect)
+    }
+}
+
+/**
+ * Gamepad category: a search-first visual picker. The filter field is always present; with it
+ * empty the tappable [GamepadDiagram] is shown, and typing replaces the diagram with the matching
+ * name list. The 8 analog stick-direction tokens live only in the list (the diagram covers the 16
+ * physical buttons), so the filter is the path to them — hence it's always visible.
+ */
+@Composable
+private fun GamepadPicker(
+    options: ImmutableList<InputOption>,
+    filter: String,
+    current: BindingOutput,
+    onFilterChange: (String) -> Unit,
+    onSelect: (RemapTarget) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        InputFilterField(filter, onFilterChange)
+        if (filter.isBlank()) {
+            GamepadDiagram(
+                current = current,
+                onSelect = onSelect,
+                modifier = Modifier.fillMaxSize(),
             )
+        } else {
+            val filtered = options.filter { it.label.contains(filter, ignoreCase = true) }
+            InputOptionList(filtered = filtered, current = current, onSelect = onSelect)
         }
-        Box(modifier = Modifier.fillMaxSize()) {
-            val listState = rememberLazyListState()
-            LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
-                itemsIndexed(filtered) { index, option ->
-                    val asOutput = BindingOutput.fromRemapTarget(option.target)
-                    val isSelected = asOutput == current
-                    ListItem(
-                        onClick = { onSelect(option.target) },
-                        leadingContent = if (isSelected) {
-                            { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
-                        } else null,
-                        colors = ListItemDefaults.colors(
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                             else Color.Transparent,
-                        ),
-                    ) { Text(option.label) }
-                    if (index < filtered.lastIndex) HorizontalDivider()
-                }
+    }
+}
+
+@Composable
+private fun InputFilterField(filter: String, onFilterChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = filter,
+        onValueChange = onFilterChange,
+        label = { Text("Filter") },
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun InputOptionList(
+    filtered: List<InputOption>,
+    current: BindingOutput,
+    onSelect: (RemapTarget) -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        val listState = rememberLazyListState()
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
+            itemsIndexed(filtered) { index, option ->
+                val asOutput = BindingOutput.fromRemapTarget(option.target)
+                val isSelected = asOutput == current
+                ListItem(
+                    onClick = { onSelect(option.target) },
+                    leadingContent = if (isSelected) {
+                        { Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary) }
+                    } else null,
+                    colors = ListItemDefaults.colors(
+                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                         else Color.Transparent,
+                    ),
+                ) { Text(option.label) }
+                if (index < filtered.lastIndex) HorizontalDivider()
             }
-            ScrollFade(visible = listState.canScrollBackward, alignment = Alignment.TopCenter, fromTop = true)
-            ScrollFade(visible = listState.canScrollForward, alignment = Alignment.BottomCenter, fromTop = false)
         }
+        ScrollFade(visible = listState.canScrollBackward, alignment = Alignment.TopCenter, fromTop = true)
+        ScrollFade(visible = listState.canScrollForward, alignment = Alignment.BottomCenter, fromTop = false)
         if (filtered.isEmpty()) {
-            Spacer(Modifier.height(8.dp))
             Text(
                 "No matches",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(16.dp),
             )
         }
     }

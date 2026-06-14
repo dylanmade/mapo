@@ -28,8 +28,8 @@ import org.junit.Test
  * begin / end, presence of `injectMouseMove` calls, no calls when velocity
  * is zero. Exact pixel deltas are sensitive to dispatcher implementation
  * choices (truncation, residual accumulation) and aren't pinned here; those
- * live in [com.mapo.service.input.modes.StickToMouseSettingsTest] which
- * exercises the pure math.
+ * live in [com.mapo.service.input.modes.MouseOutputSettingsTest] which
+ * exercises the pure velocity math.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MouseEmitterImplTest {

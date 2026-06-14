@@ -9,7 +9,7 @@ import org.robolectric.annotation.Config
 
 /**
  * Pure-math tests for [GyroToMouseSettings.toVelocity] (Brick D.3). Mirrors
- * [StickToMouseSettingsTest]'s shape; key differences from the stick-to-mouse
+ * [MouseOutputSettingsTest]'s shape; key differences from the stick-to-mouse
  * settings:
  *  - Inputs are rad/sec, not normalized -1..+1.
  *  - Deadzone is per-axis (not radial) — drift on one axis must not let the

@@ -890,6 +890,7 @@ class OverlayLiveEditController @Inject constructor(
     private fun recreateToolbarWindow(
         contentW: Int, contentH: Int, marginPx: Int,
         anchorX: Int, anchorTop: Int, anchorBottom: Int, growFromTop: Boolean,
+        onOldDetached: (() -> Unit)? = null,
     ): Pair<View, WindowManager.LayoutParams>? {
         val old = toolbar ?: return null
         val (newView, newOwner) = createToolbarView()
@@ -905,7 +906,10 @@ class OverlayLiveEditController @Inject constructor(
         toolbar = newView to newOwner
         toolbarParams = newParams
         wireToolbarResize(newView)
-        newView.post { newView.post { detach(old) } }
+        // Detach the old window only after the new one has drawn (no blink); [onOldDetached] then runs
+        // so callers can flip out of the animating state ONLY once the old (possibly union-tall) window
+        // is gone — otherwise it would recompose to its static layout and flash the bar at its top edge.
+        newView.post { newView.post { detach(old); onOldDetached?.invoke() } }
         return newView to newParams
     }
 
@@ -1884,7 +1888,7 @@ class OverlayLiveEditController @Inject constructor(
     private suspend fun animateRotate() {
         dismissSubmenus()
         val params = toolbarParams ?: return
-        val view = toolbar?.first ?: return
+        if (toolbar == null) return
         val toHorizontal = !menuHorizontal.value
         val marginPx = (MENU_SHADOW_MARGIN * context.resources.displayMetrics.density).roundToInt()
         val fromSize = IntSize(
@@ -1919,9 +1923,7 @@ class OverlayLiveEditController @Inject constructor(
         // resize it. The end collapse is a pure SHRINK (toSize ≤ union in both axes), which is safe.
         val unionW = maxOf(fromSize.width, toSize.width)
         val unionH = maxOf(fromSize.height, toSize.height)
-        val fresh = recreateToolbarWindow(unionW, unionH, marginPx, anchorX, anchorTop, anchorBottom, growFromTop)
-        val animView = fresh?.first ?: view
-        val animParams = fresh?.second ?: params
+        recreateToolbarWindow(unionW, unionH, marginPx, anchorX, anchorTop, anchorBottom, growFromTop)
         // Animatable.animateTo needs a MonotonicFrameClock; `scope` (Main.immediate) has none — it's
         // supplied by the composition when animating from rememberCoroutineScope/LaunchedEffect. Run on
         // AndroidUiDispatcher.Main, which carries the Choreographer clock. Only Compose state changes
@@ -1931,36 +1933,25 @@ class OverlayLiveEditController @Inject constructor(
                 rotateProgress.value = value
             }
         }
-        // Collapse the window to the exact final content size (still pinned at the anchor corner) and
-        // settle into the single target orientation. The pending anchor makes the LaunchedEffect resize
-        // keep this corner instead of re-deriving it from the center heuristic.
-        setToolbarWindow(animView, animParams, toSize.width, toSize.height, marginPx, anchorX, anchorTop, anchorBottom, growFromTop)
-        pendingRotateAnchor = PendingRotateAnchor(
-            x = anchorX,
-            edgeY = if (growFromTop) anchorTop else anchorBottom,
-            top = growFromTop,
+        // Collapse to the final size by RECREATING a fresh window (a shrink+move of the union window
+        // desyncs the surface just like the grow — most visibly when bottom-pinned, where the window's
+        // top drops far while the bottom stays put). Stay in the animating state (Surface still pinned
+        // to the anchor corner) until the old union window is detached, THEN flip to the static layout —
+        // clearing it earlier makes the lingering union-tall window flash the bar at its top edge.
+        val settle: () -> Unit = {
+            pendingRotateAnchor = PendingRotateAnchor(
+                x = anchorX,
+                edgeY = if (growFromTop) anchorTop else anchorBottom,
+                top = growFromTop,
+            )
+            menuHorizontal.value = toHorizontal
+            rotateProgress.value = null
+        }
+        val collapsed = recreateToolbarWindow(
+            toSize.width, toSize.height, marginPx, anchorX, anchorTop, anchorBottom, growFromTop,
+            onOldDetached = settle,
         )
-        menuHorizontal.value = toHorizontal
-        rotateProgress.value = null
-    }
-
-    /** Apply a content-sized window (px, +shadow margin) pinned at the rotate anchor corner. */
-    private fun setToolbarWindow(
-        view: View,
-        params: WindowManager.LayoutParams,
-        contentW: Int,
-        contentH: Int,
-        marginPx: Int,
-        anchorX: Int,
-        anchorTop: Int,
-        anchorBottom: Int,
-        growFromTop: Boolean,
-    ) {
-        params.width = contentW + 2 * marginPx
-        params.height = contentH + 2 * marginPx
-        params.x = anchorX
-        params.y = if (growFromTop) anchorTop else anchorBottom - params.height
-        runCatching { windowManager.updateViewLayout(view, params) }
+        if (collapsed == null) settle() // recreate failed — settle now so we don't hang animating
     }
 
     /** Window content size during a rotate: phase 1 animates the shrinking axis, phase 2 the growing one. */

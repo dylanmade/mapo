@@ -4,12 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -210,87 +210,80 @@ private fun ScopeRailItem(
     var menuOpen by remember { mutableStateOf(false) }
     var anchorSize by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
-    Box(modifier = Modifier.onGloballyPositioned { anchorSize = it.size }) {
-        WideNavigationRailItem(
-            selected = false,
-            onClick = { menuOpen = true },
-            icon = { Icon(Icons.Filled.Layers, contentDescription = null) },
-            label = { Text(scopeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            railExpanded = false,
-            modifier = Modifier
-                .padding(top = 2.dp)
-                .testTag("rail-scope"),
-        )
-        // Submenu affordance, matching the Edit Overlay rows; sits just by the icon/label.
-        // Icon(
-        //     Icons.AutoMirrored.Filled.ArrowRight,
-        //     contentDescription = null,
-        //     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        //     modifier = Modifier
-        //         .align(Alignment.CenterEnd)
-        //         .offset(y = (-8).dp)
-        //         .padding(end = 6.dp)
-        //         .size(18.dp),
-        // )
-        // Thin divider at the bottom of the scope's slot — like the Edit Overlay menu divider.
-        HorizontalDivider(Modifier.align(Alignment.BottomCenter))
-        DropdownMenu(
-            expanded = menuOpen,
-            onDismissRequest = { menuOpen = false },
-            // Computed from real bounds: nudge right past the rail's edge, up to the item's top.
-            offset = with(density) {
-                DpOffset(anchorSize.width.toDp(), -anchorSize.height.toDp())
-            },
-        ) {
-            val sets = config?.actionSets.orEmpty()
-            sets.forEach { setGraph ->
-                val setId = setGraph.actionSet.id
-                ScopeMenuRow(
-                    label = setGraph.actionSet.title,
-                    icon = Icons.Filled.Layers,
-                    indent = false,
-                    selected = viewingLayerId == null && viewingSetId == setId,
-                    canDelete = canDeleteSet,
-                    onSelect = {
-                        onSelectActionSet(setId)
-                        onSelectLayer(null)
-                        menuOpen = false
-                    },
-                    onRename = { onRenameSet(setId); menuOpen = false },
-                    onDuplicate = { onDuplicateSet(setId); menuOpen = false },
-                    onDelete = { onDeleteSet(setId); menuOpen = false },
-                )
-                setGraph.layers.forEach { layerGraph ->
-                    val layerId = layerGraph.layer.id
+    Column {
+        // The item + its fly-out anchor; the divider is a real flow element below (the item
+        // re-centers its own padding, so the gap above the divider has to live outside it).
+        Box(modifier = Modifier.onGloballyPositioned { anchorSize = it.size }) {
+            WideNavigationRailItem(
+                selected = false,
+                onClick = { menuOpen = true },
+                icon = { Icon(Icons.Filled.Layers, contentDescription = null) },
+                label = { Text(scopeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                railExpanded = false,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .testTag("rail-scope"),
+            )
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                // Computed from real bounds: open just past the rail's right edge, at the item's top.
+                offset = with(density) {
+                    DpOffset(anchorSize.width.toDp(), -anchorSize.height.toDp())
+                },
+            ) {
+                val sets = config?.actionSets.orEmpty()
+                sets.forEach { setGraph ->
+                    val setId = setGraph.actionSet.id
                     ScopeMenuRow(
-                        label = layerGraph.layer.title,
-                        icon = Icons.Outlined.Layers,
-                        indent = true,
-                        selected = viewingLayerId == layerId,
-                        canDelete = true,
+                        label = setGraph.actionSet.title,
+                        icon = Icons.Filled.Layers,
+                        indent = false,
+                        selected = viewingLayerId == null && viewingSetId == setId,
+                        canDelete = canDeleteSet,
                         onSelect = {
                             onSelectActionSet(setId)
-                            onSelectLayer(layerId)
+                            onSelectLayer(null)
                             menuOpen = false
                         },
-                        onRename = { onRenameLayer(layerId); menuOpen = false },
-                        onDuplicate = { onDuplicateLayer(layerId); menuOpen = false },
-                        onDelete = { onDeleteLayer(layerId); menuOpen = false },
+                        onRename = { onRenameSet(setId); menuOpen = false },
+                        onDuplicate = { onDuplicateSet(setId); menuOpen = false },
+                        onDelete = { onDeleteSet(setId); menuOpen = false },
+                    )
+                    setGraph.layers.forEach { layerGraph ->
+                        val layerId = layerGraph.layer.id
+                        ScopeMenuRow(
+                            label = layerGraph.layer.title,
+                            icon = Icons.Outlined.Layers,
+                            indent = true,
+                            selected = viewingLayerId == layerId,
+                            canDelete = true,
+                            onSelect = {
+                                onSelectActionSet(setId)
+                                onSelectLayer(layerId)
+                                menuOpen = false
+                            },
+                            onRename = { onRenameLayer(layerId); menuOpen = false },
+                            onDuplicate = { onDuplicateLayer(layerId); menuOpen = false },
+                            onDelete = { onDeleteLayer(layerId); menuOpen = false },
+                        )
+                    }
+                    CompactDropdownMenuItem(
+                        text = "Add layer",
+                        leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                        onClick = { onAddLayer(setId); menuOpen = false },
+                        modifier = Modifier.padding(start = 16.dp),
                     )
                 }
                 CompactDropdownMenuItem(
-                    text = "Add layer",
+                    text = "Add set",
                     leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    onClick = { onAddLayer(setId); menuOpen = false },
-                    modifier = Modifier.padding(start = 16.dp),
+                    onClick = { onAddSet(); menuOpen = false },
                 )
             }
-            CompactDropdownMenuItem(
-                text = "Add set",
-                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                onClick = { onAddSet(); menuOpen = false },
-            )
         }
+        // Thin divider in normal flow — real space above (9dp) and below (6dp), ~1.5 : 1.
+        HorizontalDivider(Modifier.padding(top = 9.dp, bottom = 6.dp))
     }
 }
 

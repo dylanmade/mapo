@@ -1032,35 +1032,25 @@ internal data class TriggerSettings(
  * Steam-canonical for this mode but Mapo's target hardware lacks
  * capacitive sticks, so it's omitted from the local picker.
  *
- * **Settings — Steam-shaped defaults, tuned for cursor precision:**
- *  - `deadzone` (0..1, default 0.10) — radial inner deadzone applied
- *    in normalized stick units.
- *  - `sensitivity` (px/sec at full deflection, default 800) — velocity at
- *    the outer edge of stick travel. Cursor-friendly default; FPS camera
- *    work can pick the "camera" preset which uses
- *    [StickToMouseSettings.JOYSTICK_CAMERA_DEFAULTS] as its base.
- *  - `exponent` (response curve power, default 1.6) — `>1` makes near-center
- *    deflection slower (precision), `<1` makes it faster (snap). Steam
- *    Input's "Sensitivity Curve" maps roughly to this.
- *  - `invert_y` (bool, default false) — flips the y axis; FPS conventions
- *    vary by player.
- *
- * **Camera tuning preset.** Phase 6's `JoystickCameraMode` collapsed into this
- * mode in Phase 7 — same primitive (velocity into [MouseEmitter]), just
- * different default settings. Users who want camera feel pick the "camera"
- * preset in the Cog menu (Phase 7 Brick F); the underlying math is the same.
+ * **Settings — the full "Joystick Mouse" menu.** Shares the deadzone, response
+ * curve, outer-ring, and haptic machinery with [JoystickMoveMode] via
+ * [StickToAxisSettings] (curve / axis-style default to Wide / Per axis here, per
+ * the spec), then converts the deadzone-+-curve-shaped vector into a cursor
+ * velocity through [MouseOutputSettings] (mouse sensitivity %, per-axis scale,
+ * rotate, axis-limit). The outer-ring command + movement haptic run through the
+ * shared [StickOuterRingHaptics].
  *
  * **What gets emitted.** Each [evaluate] call samples the stick's normalized
- * (x, y), applies radial deadzone + curve + sensitivity, and writes the
- * resulting (vx, vy) pixels-per-second into the [MouseEmitter] for this
- * source. The emitter's integration loop keeps the cursor moving while the
- * stick is held.
+ * (x, y), produces a (vx, vy) pixels-per-second velocity, and writes it into the
+ * [MouseEmitter] for this source. The emitter's integration loop keeps the
+ * cursor moving while the stick is held.
  */
 object JoystickMouseMode : SourceMode {
     override val mode: BindingMode = BindingMode.JOYSTICK_MOUSE
     override fun validInputs(): Set<String> = INPUTS
-    override fun defaultSettingsJson(): String = StickToMouseSettings.MOUSE_JOYSTICK_DEFAULT_JSON
+    override fun defaultSettingsJson(): String = "{}"
     private val INPUTS = setOf("click", "outer_ring")
+    private const val TAG = "JoystickMouseMode"
 
     override fun evaluate(
         reading: AnalogEvent,
@@ -1068,9 +1058,24 @@ object JoystickMouseMode : SourceMode {
         digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
         mouse: MouseEmitter,
     ) {
-        val settings = StickToMouseSettings.parse(ctx.settingsJson, StickToMouseSettings.MOUSE_JOYSTICK_DEFAULTS)
-        val (vx, vy) = settings.toVelocity(reading.x, reading.y)
+        // Joystick Mouse only handles the two analog stick sources (gyro mouse is
+        // a separate mode). "click" arrives as a digital event via onKeyEvent.
+        when (reading.source) {
+            InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK -> Unit
+            else -> return
+        }
+        // Deadzone + response curve (Wide / Per-axis defaults per spec), shared
+        // with Joystick Move.
+        val analog = StickToAxisSettings.parse(
+            ctx.settingsJson, curveDefault = "wide", axisStyleDefault = "per_axis",
+        )
+        val out = MouseOutputSettings.parse(ctx.settingsJson)
+        val (sx, sy) = analog.toShaped(reading.x, reading.y)
+        val (vx, vy) = out.toVelocity(sx, sy)
         mouse.setStickVelocity(reading.source, vx, vy)
+
+        // Outer-ring command + travel-based haptic (shared with Joystick Move).
+        StickOuterRingHaptics.process(reading, analog, ctx, digitalEmit, TAG)
     }
 }
 
@@ -1578,32 +1583,8 @@ object JoystickMoveMode : SourceMode {
     private val INPUTS = setOf("click", "outer_ring")
     private const val TAG = "JoystickMoveMode"
 
-    /**
-     * Stick travel (in normalized units) between haptic "texture" buzzes. The
-     * Joystick Haptic Intensity setting fires one buzz per this much accumulated
-     * movement as the stick is moved around — Steam's joystick-haptic feel. ~0.12
-     * gives a handful of bumps across a full center→edge sweep. Tunable.
-     */
-    private const val HAPTIC_TRAVEL_STEP = 0.12f
-
-    /** Per-source travel accumulator for the movement-driven haptic. */
-    private class HapticState {
-        var lastX = 0f
-        var lastY = 0f
-        var travel = 0f
-        var initialized = false
-    }
-    private val hapticStateBySource = mutableMapOf<InputSource, HapticState>()
-
-    /**
-     * Clear per-source haptic travel state. Called from
-     * [com.mapo.service.input.InputEvaluator.handleConfigChange] so a stale
-     * last-position doesn't produce a spurious travel spike (and buzz) after a
-     * mode/config change.
-     */
-    fun resetState() {
-        synchronized(hapticStateBySource) { hapticStateBySource.clear() }
-    }
+    /** Delegates to the shared outer-ring/haptic state (see [StickOuterRingHaptics]). */
+    fun resetState() = StickOuterRingHaptics.resetState()
 
     override fun evaluate(
         reading: AnalogEvent,
@@ -1646,6 +1627,49 @@ object JoystickMoveMode : SourceMode {
         if (toRight) ctx.gamepad.setRightStick(reading.source, ax, ay)
         else ctx.gamepad.setLeftStick(reading.source, ax, ay)
 
+        // Outer-ring command + travel-based haptic (shared with Joystick Mouse).
+        StickOuterRingHaptics.process(reading, analog, ctx, digitalEmit, TAG)
+    }
+}
+
+/**
+ * Shared outer-ring command + movement-driven ("texture") haptic for the
+ * analog-stick modes (Joystick Move, Joystick Mouse). Both modes carry the same
+ * [StickToAxisSettings] outer-ring + haptic fields and want identical behavior,
+ * so the logic — and its per-source travel state — lives here once.
+ *
+ * A source is only ever in one of these modes at a time, so a single per-source
+ * state map keyed by [InputSource] is safe; a mode/config change clears it via
+ * [resetState] (called from [com.mapo.service.input.InputEvaluator.handleConfigChange]).
+ */
+internal object StickOuterRingHaptics {
+    /**
+     * Stick travel (in normalized units) between haptic buzzes. The Joystick
+     * Haptic Intensity setting fires one buzz per this much accumulated movement
+     * as the stick is moved — Steam's joystick-haptic feel. ~0.12 gives a handful
+     * of bumps across a full center→edge sweep. Tunable.
+     */
+    private const val HAPTIC_TRAVEL_STEP = 0.12f
+
+    private class HapticState {
+        var lastX = 0f
+        var lastY = 0f
+        var travel = 0f
+        var initialized = false
+    }
+    private val hapticStateBySource = mutableMapOf<InputSource, HapticState>()
+
+    fun resetState() {
+        synchronized(hapticStateBySource) { hapticStateBySource.clear() }
+    }
+
+    fun process(
+        reading: AnalogEvent,
+        analog: StickToAxisSettings,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        tag: String,
+    ) {
         // ── Outer Ring command ───────────────────────────────────────────────
         // Distance metric = Chebyshev (max axis), i.e. the fraction of the way to
         // the stick's travel edge. The axes are each calibrated to ±1 independently,
@@ -1663,11 +1687,8 @@ object JoystickMoveMode : SourceMode {
         if (want != prior) {
             digitalEmit("outer_ring", want)
             // Diagnostic: logs the reported stick values at the boundary crossing.
-            // If `radius` reaches the threshold while the stick is well short of its
-            // physical furthest, the axis value is saturating early (hardware /
-            // calibration), not an outer-ring bug.
             Log.d(
-                TAG,
+                tag,
                 "outer_ring ${if (want) "DOWN" else "UP"} " +
                     "radius=%.3f thr=%.3f x=%.3f y=%.3f".format(
                         radius, analog.commandRadius, reading.x, reading.y,
@@ -1676,10 +1697,9 @@ object JoystickMoveMode : SourceMode {
         }
 
         // ── Travel-based haptic ──────────────────────────────────────────────
-        // Joystick "Haptic Intensity": a texture buzz every HAPTIC_TRAVEL_STEP
-        // units of stick travel as the stick is moved (Steam's joystick-haptic
-        // feel). Accumulates only on actual movement; at rest there's no travel
-        // and no buzz. Skipped entirely when Off.
+        // A texture buzz every HAPTIC_TRAVEL_STEP units of stick travel as the
+        // stick is moved. Accumulates only on actual movement; at rest there's no
+        // travel and no buzz. Skipped entirely when Off.
         val intensity = HapticIntensity.fromId(analog.hapticIntensity) ?: HapticIntensity.OFF
         if (intensity != HapticIntensity.OFF) {
             val st = hapticStateBySource.getOrPut(reading.source) { HapticState() }
@@ -2558,8 +2578,11 @@ internal data class GyroToStickSettings(
  * (0..100); [commandRadius] is the raw Steam 0..32767 radius. Normalized at
  * parse time.
  *
- * Note: [hapticIntensity] is parsed for VDF round-trip but not yet actuated —
- * the [SourceMode.evaluate] path has no haptic sink. Documented to the user.
+ * [hapticIntensity] + the outer-ring fields are consumed by [StickOuterRingHaptics]
+ * (the outer-ring command edge + the movement-driven joystick haptic), shared
+ * with Joystick Mouse. [parse] takes per-mode defaults for the response curve +
+ * axis style because Joystick Mouse defaults them differently (Wide / Per axis)
+ * than Joystick Move (Linear / Circular).
  */
 internal data class StickToAxisSettings(
     val curve: String,             // linear/aggressive/relaxed/wide/extra_wide/custom
@@ -2695,15 +2718,21 @@ internal data class StickToAxisSettings(
             return (gx * k).coerceIn(-1f, 1f) to (gy * k).coerceIn(-1f, 1f)
         }
 
-        fun parse(json: String): StickToAxisSettings {
-            if (json.isBlank()) return DEFAULTS
+        fun parse(
+            json: String,
+            curveDefault: String = "linear",
+            axisStyleDefault: String = "circular",
+        ): StickToAxisSettings {
+            if (json.isBlank()) {
+                return DEFAULTS.copy(curve = curveDefault, responseAxisStyle = axisStyleDefault)
+            }
             return try {
                 val obj = JSONObject(json)
                 StickToAxisSettings(
-                    curve = obj.optString("stick_response_curve", "linear"),
+                    curve = obj.optString("stick_response_curve", curveDefault),
                     customCurve = obj.optDouble("custom_response_curve", 200.0).toFloat()
                         .coerceIn(25f, 375f),
-                    responseAxisStyle = obj.optString("response_axis_style", "circular"),
+                    responseAxisStyle = obj.optString("response_axis_style", axisStyleDefault),
                     outputJoystick = if (obj.has("output_joystick")) obj.optString("output_joystick") else null,
                     deadzoneSource = obj.optString("deadzone_source", "device_default"),
                     deadzoneInner = (obj.optDouble("deadzone_inner", 0.0).toFloat() / 100f)
@@ -2724,84 +2753,85 @@ internal data class StickToAxisSettings(
 }
 
 /**
- * Parsed settings + math for [JoystickMouseMode]. Tolerant of missing keys;
- * falls back to the caller-supplied defaults. [MOUSE_JOYSTICK_DEFAULTS] is
- * the cursor-tuned preset (Phase 7 Brick A default); [JOYSTICK_CAMERA_DEFAULTS]
- * is the camera-tuned preset preserved from Phase 6's removed `JoystickCameraMode`.
- * The Cog menu (Phase 7 Brick F) will let users pick between presets.
+ * The mouse-output stage of the "Joystick Mouse" menu — converts the
+ * deadzone-+-curve-shaped stick vector from [StickToAxisSettings.toShaped] into a
+ * cursor velocity (pixels/sec). Owns the knobs that are mouse-specific: overall
+ * mouse sensitivity (%), per-axis scale (%), output-axis limit, and rotation.
+ * (Deadzone / response curve / outer-ring / haptics live in [StickToAxisSettings]
+ * and are shared with Joystick Move.)
  *
- * **toVelocity math:**
- *  1. Magnitude `m = sqrt(x² + y²)`, clamped to [0, 1].
- *  2. If `m <= deadzone` → return (0, 0). Cursor halts cleanly at rest.
- *  3. Rescale `m' = (m - deadzone) / (1 - deadzone)` so a stick just past
- *     the deadzone produces non-zero velocity (avoids dead-band stutter).
- *  4. Apply curve: `m'' = m'^exponent`.
- *  5. Direction is the original `(x, y) / m` unit vector; scale to
- *     `m'' * sensitivity` pixels/sec on each axis.
- *  6. `invert_y` flips the y output sign (UI flag, user preference).
+ * Per the spec, this menu has no invert toggles and no Output-Joystick entry
+ * (the output is the cursor) — inversion is achievable via Rotate output.
+ *
+ * **toVelocity** takes the already-shaped `(sx, sy)` (magnitude 0..1, +Y-down):
+ *  1. Rotate the vector by [rotateRadians] (same convention as Joystick Move:
+ *     +90° maps forward → right).
+ *  2. Multiply by [sensitivityPxPerSec] and the per-axis scale.
+ *  3. Apply the output-axis limit.
  */
-internal data class StickToMouseSettings(
-    val deadzone: Float,
-    val sensitivity: Float,
-    val exponent: Float,
-    val invertY: Boolean,
+internal data class MouseOutputSettings(
+    val sensitivityPxPerSec: Float,
+    val horizontalScale: Float, // 0..1
+    val verticalScale: Float,   // 0..1
+    val rotateRadians: Float,
+    val outputAxis: String,     // horizontal / vertical / both
 ) {
-    fun toVelocity(x: Float, y: Float): Pair<Float, Float> {
-        val magnitude = sqrt(x * x + y * y).coerceIn(0f, 1f)
-        if (magnitude <= deadzone) return 0f to 0f
-        val rescaled = ((magnitude - deadzone) / (1f - deadzone)).coerceIn(0f, 1f)
-        val shaped = rescaled.toDouble().pow(exponent.toDouble()).toFloat()
-        val outputMag = shaped * sensitivity
-        // Direction from raw (x, y); divide by raw magnitude (not rescaled) so
-        // direction is preserved across the deadzone rescale.
-        val ux = x / magnitude
-        val uy = y / magnitude
-        val vx = ux * outputMag
-        val vy = uy * outputMag * if (invertY) -1f else 1f
+    fun toVelocity(shapedX: Float, shapedY: Float): Pair<Float, Float> {
+        var x = shapedX
+        var y = shapedY
+        if (rotateRadians != 0f) {
+            val c = kotlin.math.cos(rotateRadians)
+            val s = kotlin.math.sin(rotateRadians)
+            val nx = x * c - y * s
+            val ny = x * s + y * c
+            x = nx
+            y = ny
+        }
+        var vx = x * sensitivityPxPerSec * horizontalScale
+        var vy = y * sensitivityPxPerSec * verticalScale
+        when (outputAxis) {
+            "horizontal" -> vy = 0f
+            "vertical" -> vx = 0f
+        }
         return vx to vy
     }
 
     companion object {
-        const val DEFAULT_DEADZONE_MOUSE = 0.10f
-        const val DEFAULT_SENSITIVITY_MOUSE = 800f
-        const val DEFAULT_EXPONENT_MOUSE = 1.6f
+        /**
+         * Pixels/sec at full deflection per 100% mouse sensitivity. Chosen so the
+         * spec default of 275% yields ~800 px/sec — the cursor-tuned feel the prior
+         * Joystick Mouse default shipped with.
+         */
+        const val PX_PER_SEC_AT_100 = 291f
+        const val DEFAULT_SENSITIVITY_PCT = 275f
 
-        const val DEFAULT_DEADZONE_CAMERA = 0.15f
-        const val DEFAULT_SENSITIVITY_CAMERA = 1400f
-        const val DEFAULT_EXPONENT_CAMERA = 2.0f
-
-        val MOUSE_JOYSTICK_DEFAULTS = StickToMouseSettings(
-            deadzone = DEFAULT_DEADZONE_MOUSE,
-            sensitivity = DEFAULT_SENSITIVITY_MOUSE,
-            exponent = DEFAULT_EXPONENT_MOUSE,
-            invertY = false,
+        val DEFAULTS = MouseOutputSettings(
+            sensitivityPxPerSec = PX_PER_SEC_AT_100 * (DEFAULT_SENSITIVITY_PCT / 100f),
+            horizontalScale = 1f,
+            verticalScale = 1f,
+            rotateRadians = 0f,
+            outputAxis = "both",
         )
-        val JOYSTICK_CAMERA_DEFAULTS = StickToMouseSettings(
-            deadzone = DEFAULT_DEADZONE_CAMERA,
-            sensitivity = DEFAULT_SENSITIVITY_CAMERA,
-            exponent = DEFAULT_EXPONENT_CAMERA,
-            invertY = false,
-        )
-        val MOUSE_JOYSTICK_DEFAULT_JSON =
-            """{"deadzone":$DEFAULT_DEADZONE_MOUSE,"sensitivity":$DEFAULT_SENSITIVITY_MOUSE,"exponent":$DEFAULT_EXPONENT_MOUSE,"invert_y":false}"""
-        val JOYSTICK_CAMERA_DEFAULT_JSON =
-            """{"deadzone":$DEFAULT_DEADZONE_CAMERA,"sensitivity":$DEFAULT_SENSITIVITY_CAMERA,"exponent":$DEFAULT_EXPONENT_CAMERA,"invert_y":false}"""
 
-        fun parse(json: String, defaults: StickToMouseSettings): StickToMouseSettings {
-            if (json.isBlank()) return defaults
+        fun parse(json: String): MouseOutputSettings {
+            if (json.isBlank()) return DEFAULTS
             return try {
                 val obj = JSONObject(json)
-                StickToMouseSettings(
-                    deadzone = obj.optDouble("deadzone", defaults.deadzone.toDouble()).toFloat()
-                        .coerceIn(0f, 0.95f),
-                    sensitivity = obj.optDouble("sensitivity", defaults.sensitivity.toDouble()).toFloat()
-                        .coerceAtLeast(0f),
-                    exponent = obj.optDouble("exponent", defaults.exponent.toDouble()).toFloat()
-                        .coerceIn(0.1f, 10f),
-                    invertY = obj.optBoolean("invert_y", defaults.invertY),
+                val pct = obj.optDouble("mouse_sensitivity", DEFAULT_SENSITIVITY_PCT.toDouble())
+                    .toFloat().coerceIn(10f, 10000f)
+                MouseOutputSettings(
+                    sensitivityPxPerSec = PX_PER_SEC_AT_100 * (pct / 100f),
+                    horizontalScale = (obj.optDouble("horizontal_scale", 100.0).toFloat() / 100f)
+                        .coerceIn(0f, 1f),
+                    verticalScale = (obj.optDouble("vertical_scale", 100.0).toFloat() / 100f)
+                        .coerceIn(0f, 1f),
+                    rotateRadians = Math.toRadians(
+                        obj.optDouble("rotate_output", 0.0).coerceIn(-180.0, 180.0),
+                    ).toFloat(),
+                    outputAxis = obj.optString("output_axis", "both"),
                 )
             } catch (_: JSONException) {
-                defaults
+                DEFAULTS
             }
         }
     }

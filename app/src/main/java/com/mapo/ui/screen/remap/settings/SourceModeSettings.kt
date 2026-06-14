@@ -391,6 +391,30 @@ object SourceModeSettingsSchema {
         SettingCategory("Haptics", listOf(HAPTIC_INTENSITY)),
     )
 
+    // ── Joystick Mouse specs (Joysticks → Joystick Mouse) ────────────────────────
+    private val MOUSE_SENSITIVITY = SettingSpec(
+        key = "mouse_sensitivity",
+        label = "Mouse sensitivity",
+        helper = "Overall cursor speed at full stick deflection.",
+        control = SettingControl.Slider(10f, 10000f, default = 275f, unitSuffix = "%"),
+    )
+
+    /** Stick response curve, defaulting to Wide (the Joystick Mouse default per spec). */
+    private val MOUSE_STICK_RESPONSE_CURVE = SettingSpec(
+        key = "stick_response_curve",
+        label = "Stick response curve",
+        helper = "How analog input maps to cursor speed.",
+        control = SettingControl.Dropdown(RESPONSE_CURVE_OPTIONS, defaultId = "wide"),
+    )
+
+    /** Response axis style, defaulting to Per axis (the Joystick Mouse default per spec). */
+    private val MOUSE_RESPONSE_AXIS_STYLE = SettingSpec(
+        key = "response_axis_style",
+        label = "Response axis style",
+        helper = "Per axis = a circle traces a square cursor path; circular = a round path.",
+        control = SettingControl.Dropdown(RESPONSE_AXIS_OPTIONS, defaultId = "per_axis"),
+    )
+
     /** Output Joystick defaults to the matching stick for an analog joystick source. */
     private fun outputJoystick(source: InputSource) = SettingSpec(
         key = "output_joystick",
@@ -416,6 +440,27 @@ object SourceModeSettingsSchema {
     )
 
     /**
+     * The "Joystick Mouse" mode menu (analog stick → cursor). Shares Deadzones /
+     * Outer ring / Haptics with the Joystick menu; its General section swaps in a
+     * Mouse sensitivity slider and defaults the response curve / axis style to
+     * Wide / Per axis. Per the spec the Output section has no Output Joystick
+     * entry (the output is the cursor) — only axis-limit + rotate.
+     */
+    private val JOYSTICK_MOUSE_CATEGORIES = listOf(
+        SettingCategory(
+            "General",
+            listOf(
+                MOUSE_SENSITIVITY, HORIZONTAL_SCALE, VERTICAL_SCALE,
+                MOUSE_STICK_RESPONSE_CURVE, CUSTOM_RESPONSE_CURVE, MOUSE_RESPONSE_AXIS_STYLE,
+            ),
+        ),
+        SettingCategory("Output", listOf(OUTPUT_AXIS, ROTATE_OUTPUT)),
+        SettingCategory("Deadzones", listOf(DEADZONE_SOURCE, DEADZONE_THRESHOLD, DEADZONE_SHAPE)),
+        SettingCategory("Outer ring", listOf(COMMAND_RADIUS, COMMAND_INVERT)),
+        SettingCategory("Haptics", listOf(HAPTIC_INTENSITY)),
+    )
+
+    /**
      * The settings menu for a given (source, mode). Empty list = no cog shown.
      * Filled in menu-by-menu as each slice lands.
      */
@@ -438,6 +483,10 @@ object SourceModeSettingsSchema {
         // source-aware default on Output Joystick — the matching stick).
         (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) &&
             mode == BindingMode.JOYSTICK_MOVE -> joystickSourceCategories(source)
+
+        // Analog joysticks in Joystick Mouse mode (stick → cursor).
+        (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) &&
+            mode == BindingMode.JOYSTICK_MOUSE -> JOYSTICK_MOUSE_CATEGORIES
 
         else -> emptyList()
     }

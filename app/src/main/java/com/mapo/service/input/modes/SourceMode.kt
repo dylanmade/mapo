@@ -4,6 +4,7 @@ import android.util.Log
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.InputSource
 import com.mapo.service.input.AnalogEvent
+import com.mapo.service.input.HapticIntensity
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.pow
@@ -118,6 +119,13 @@ data class ModeContext(
     val priorLatched: Map<String, Boolean>,
     val activeLayerIds: List<Long>,
     val gamepad: GamepadEmitter = GamepadEmitter.NOOP,
+    /**
+     * Fire-and-forget haptic sink for modes that produce discrete tactile
+     * feedback (e.g. a joystick's outer-ring detent buzz). Wired by
+     * [com.mapo.service.input.InputEvaluator] to [com.mapo.service.input.HapticEmitter.buzz];
+     * defaults to no-op so test fixtures don't need to provide one.
+     */
+    val haptic: (HapticIntensity) -> Unit = {},
 )
 
 /**
@@ -1568,6 +1576,34 @@ object JoystickMoveMode : SourceMode {
     override fun validInputs(): Set<String> = INPUTS
     override fun defaultSettingsJson(): String = StickToAxisSettings.DEFAULT_JSON
     private val INPUTS = setOf("click", "outer_ring")
+    private const val TAG = "JoystickMoveMode"
+
+    /**
+     * Stick travel (in normalized units) between haptic "texture" buzzes. The
+     * Joystick Haptic Intensity setting fires one buzz per this much accumulated
+     * movement as the stick is moved around — Steam's joystick-haptic feel. ~0.12
+     * gives a handful of bumps across a full center→edge sweep. Tunable.
+     */
+    private const val HAPTIC_TRAVEL_STEP = 0.12f
+
+    /** Per-source travel accumulator for the movement-driven haptic. */
+    private class HapticState {
+        var lastX = 0f
+        var lastY = 0f
+        var travel = 0f
+        var initialized = false
+    }
+    private val hapticStateBySource = mutableMapOf<InputSource, HapticState>()
+
+    /**
+     * Clear per-source haptic travel state. Called from
+     * [com.mapo.service.input.InputEvaluator.handleConfigChange] so a stale
+     * last-position doesn't produce a spurious travel spike (and buzz) after a
+     * mode/config change.
+     */
+    fun resetState() {
+        synchronized(hapticStateBySource) { hapticStateBySource.clear() }
+    }
 
     override fun evaluate(
         reading: AnalogEvent,
@@ -1611,14 +1647,58 @@ object JoystickMoveMode : SourceMode {
         else ctx.gamepad.setLeftStick(reading.source, ax, ay)
 
         // ── Outer Ring command ───────────────────────────────────────────────
-        // Edge-detected on the raw stick radius vs. the command radius. With
-        // Command Invert the command fires *inside* the radius instead of
-        // outside (Steam's "Walk/Sneak in the center" use case).
-        val radius = sqrt(reading.x * reading.x + reading.y * reading.y).coerceIn(0f, 1f)
+        // Distance metric = Chebyshev (max axis), i.e. the fraction of the way to
+        // the stick's travel edge. The axes are each calibrated to ±1 independently,
+        // so the reachable region is a square; clamped Euclidean magnitude would
+        // read the entire corner region (everything outside the inscribed unit
+        // circle, from ~71% diagonal travel onward) as a flat 1.0 — a too-wide ring
+        // that fires well before the stick reaches its furthest point. Chebyshev
+        // removes that band: the max radius setting now requires an axis to actually
+        // reach its edge. With Command Invert the command fires *inside* the radius
+        // instead of outside (Steam's "Walk/Sneak in the center" use case).
+        val radius = maxOf(abs(reading.x), abs(reading.y)).coerceIn(0f, 1f)
         val want = if (analog.commandInvert) radius < analog.commandRadius
                    else radius >= analog.commandRadius
         val prior = ctx.priorLatched["outer_ring"] ?: false
-        if (want != prior) digitalEmit("outer_ring", want)
+        if (want != prior) {
+            digitalEmit("outer_ring", want)
+            // Diagnostic: logs the reported stick values at the boundary crossing.
+            // If `radius` reaches the threshold while the stick is well short of its
+            // physical furthest, the axis value is saturating early (hardware /
+            // calibration), not an outer-ring bug.
+            Log.d(
+                TAG,
+                "outer_ring ${if (want) "DOWN" else "UP"} " +
+                    "radius=%.3f thr=%.3f x=%.3f y=%.3f".format(
+                        radius, analog.commandRadius, reading.x, reading.y,
+                    ),
+            )
+        }
+
+        // ── Travel-based haptic ──────────────────────────────────────────────
+        // Joystick "Haptic Intensity": a texture buzz every HAPTIC_TRAVEL_STEP
+        // units of stick travel as the stick is moved (Steam's joystick-haptic
+        // feel). Accumulates only on actual movement; at rest there's no travel
+        // and no buzz. Skipped entirely when Off.
+        val intensity = HapticIntensity.fromId(analog.hapticIntensity) ?: HapticIntensity.OFF
+        if (intensity != HapticIntensity.OFF) {
+            val st = hapticStateBySource.getOrPut(reading.source) { HapticState() }
+            if (!st.initialized) {
+                st.lastX = reading.x
+                st.lastY = reading.y
+                st.initialized = true
+            } else {
+                val mdx = reading.x - st.lastX
+                val mdy = reading.y - st.lastY
+                st.lastX = reading.x
+                st.lastY = reading.y
+                st.travel += sqrt(mdx * mdx + mdy * mdy)
+                if (st.travel >= HAPTIC_TRAVEL_STEP) {
+                    st.travel = 0f // drop sub-step remainder to avoid buzz bursts on big jumps
+                    ctx.haptic(intensity)
+                }
+            }
+        }
     }
 }
 

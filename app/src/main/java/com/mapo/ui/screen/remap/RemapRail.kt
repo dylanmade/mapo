@@ -118,7 +118,7 @@ fun RemapRail(
             ),
             // Scaffold already applies the status-bar inset; don't double it.
             windowInsets = WindowInsets(0, 0, 0, 0),
-            contentPadding = PaddingValues(vertical = 4.dp),
+            contentPadding = PaddingValues(top = 14.dp, bottom = 4.dp),
             // D-pad → from anywhere in the rail jumps into the detail pane's first row.
             modifier = Modifier.onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
@@ -217,19 +217,21 @@ private fun ScopeRailItem(
             icon = { Icon(Icons.Filled.Layers, contentDescription = null) },
             label = { Text(scopeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             railExpanded = false,
-            modifier = Modifier.testTag("rail-scope"),
-        )
-        // Submenu affordance, matching the Edit Overlay rows; nudged up to sit by the icon.
-        Icon(
-            Icons.AutoMirrored.Filled.ArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .offset(y = (-12).dp)
-                .padding(end = 4.dp)
-                .size(18.dp),
+                .padding(top = 2.dp)
+                .testTag("rail-scope"),
         )
+        // Submenu affordance, matching the Edit Overlay rows; sits just by the icon/label.
+        // Icon(
+        //     Icons.AutoMirrored.Filled.ArrowRight,
+        //     contentDescription = null,
+        //     tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        //     modifier = Modifier
+        //         .align(Alignment.CenterEnd)
+        //         .offset(y = (-8).dp)
+        //         .padding(end = 6.dp)
+        //         .size(18.dp),
+        // )
         // Thin divider at the bottom of the scope's slot — like the Edit Overlay menu divider.
         HorizontalDivider(Modifier.align(Alignment.BottomCenter))
         DropdownMenu(

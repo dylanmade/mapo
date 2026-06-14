@@ -369,6 +369,9 @@ class InputEvaluator @Inject constructor(
         // stick reading re-establishes the correct target.
         gamepadEmitter.clearSource(InputSource.LEFT_JOYSTICK)
         gamepadEmitter.clearSource(InputSource.RIGHT_JOYSTICK)
+        // Reset JoystickMove travel-haptic state so a stale last-position doesn't
+        // produce a spurious travel spike (and buzz) after the config change.
+        com.mapo.service.input.modes.JoystickMoveMode.resetState()
         val startingSetId = compiled.startingActionSetId
         val set = compiled.sets[startingSetId] ?: return
         for (source in GAMEPAD_EMITTING_SOURCES) {
@@ -961,6 +964,7 @@ class InputEvaluator @Inject constructor(
                 priorLatched = priors,
                 activeLayerIds = activeLayers.toList(),
                 gamepad = gamepadEmitter,
+                haptic = { intensity -> haptics.buzz(intensity) },
             )
             handler.evaluate(
                 reading,

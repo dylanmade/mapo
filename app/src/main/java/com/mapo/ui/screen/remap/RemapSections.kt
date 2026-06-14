@@ -95,9 +95,9 @@ object RemapSections {
      */
     val rail: List<SectionedPaneItem> = listOf(
         SectionedPaneItem(SECTION_BUTTONS, "Buttons", icon = Icons.Filled.SportsEsports),
-        SectionedPaneItem(SECTION_DPAD, "D-Pad", icon = Icons.Filled.ControlCamera),
+        SectionedPaneItem(SECTION_DPAD, "D-Pad", icon = Icons.Filled.Gamepad),
         SectionedPaneItem(SECTION_TRIGGERS, "Triggers", icon = Icons.Filled.Straighten),
-        SectionedPaneItem(SECTION_JOYSTICKS, "Joysticks", icon = Icons.Filled.Gamepad),
+        SectionedPaneItem(SECTION_JOYSTICKS, "Joysticks", icon = Icons.Filled.ControlCamera),
         SectionedPaneItem(SECTION_GYRO, "Gyro", icon = Icons.Filled.ScreenRotation),
     )
 

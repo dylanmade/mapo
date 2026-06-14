@@ -123,6 +123,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.AndroidUiDispatcher
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
@@ -255,6 +256,15 @@ class OverlayLiveEditController @Inject constructor(
     // True while a rotate animates from the TOP half of the screen: pin the TOP-left corner and grow
     // downward (so the content aligns to the top); false = pin the BOTTOM-left and grow upward.
     private var rotateGrowFromTop = false
+    // Content sizes (px, excluding shadow margin) of the from/to orientations during a rotate. The
+    // window is held at the UNION size and the Surface morphs between these IN COMPOSE — we must NOT
+    // resize the overlay window per frame (rapid updateViewLayout on a NO_LIMITS overlay desyncs the
+    // SurfaceFlinger buffer, drawing the menu at a stale geometry — see the morph-jump bug).
+    private var rotateFromSize = IntSize.Zero
+    private var rotateToSize = IntSize.Zero
+    // Exact final placement to apply on the post-rotate settle resize (so it doesn't re-derive the
+    // corner from the center heuristic, which mismatches between a short bar and a tall panel).
+    private var pendingRotateAnchor: PendingRotateAnchor? = null
     // Per-window tap router for the (interop-dragged) core menu — routes a tap to the row/icon under
     // it, since the raw-coord drag filter consumes all touches and children can't use `clickable`.
     private val toolbarRouter = MenuTapRouter()
@@ -871,6 +881,35 @@ class OverlayLiveEditController @Inject constructor(
     }
 
     /**
+     * Replace the toolbar window with a FRESH one at the given content geometry, double-buffered (add
+     * new on top, then remove old) so there's no blink. Used to GROW the window for a rotate: resizing
+     * an existing `FLAG_LAYOUT_NO_LIMITS` overlay to a larger size reuses a stale SurfaceFlinger buffer
+     * from when the window was last that big (often at a different position) — a fresh window has no
+     * prior buffer, so it always paints at the correct geometry. Returns the new view + params.
+     */
+    private fun recreateToolbarWindow(
+        contentW: Int, contentH: Int, marginPx: Int,
+        anchorX: Int, anchorTop: Int, anchorBottom: Int, growFromTop: Boolean,
+    ): Pair<View, WindowManager.LayoutParams>? {
+        val old = toolbar ?: return null
+        val (newView, newOwner) = createToolbarView()
+        val newParams = WindowManager.LayoutParams().apply {
+            toolbarParams?.let { copyFrom(it) }
+            width = contentW + 2 * marginPx
+            height = contentH + 2 * marginPx
+            x = anchorX
+            y = if (growFromTop) anchorTop else anchorBottom - height
+        }
+        runCatching { windowManager.addView(newView, newParams) }
+            .onFailure { Log.e(TAG, "recreateToolbarWindow addView failed", it); return null }
+        toolbar = newView to newOwner
+        toolbarParams = newParams
+        wireToolbarResize(newView)
+        newView.post { newView.post { detach(old) } }
+        return newView to newParams
+    }
+
+    /**
      * Size the toolbar window to its content's *natural* size, then position it. We measure with an
      * UNSPECIFIED spec (so the window can flex as wide as the content needs, even past the screen —
      * WRAP_CONTENT overlay windows instead cap at the display width and clip the overflow) and set
@@ -894,7 +933,15 @@ class OverlayLiveEditController @Inject constructor(
         val size = displaySizePx()
         var nx = params.x
         var ny = params.y
+        val pa = pendingRotateAnchor
         when {
+            pa != null -> {
+                pendingRotateAnchor = null
+                // Exact placement captured by the rotate: keep the same pinned corner (top or bottom
+                // edge), deriving the top-left from the freshly-measured height so the edge stays put.
+                nx = pa.x
+                ny = if (pa.top) pa.edgeY else pa.edgeY - h
+            }
             centerToolbarPending -> {
                 centerToolbarPending = false
                 // Default: docked to the left, vertically centered. (The window carries the shadow
@@ -1818,13 +1865,21 @@ class OverlayLiveEditController @Inject constructor(
         rotateJob = scope.launch { animateRotate() }
     }
 
+    /** Fixed final placement applied on the post-rotate settle resize (bypasses the center heuristic). */
+    private data class PendingRotateAnchor(val x: Int, val edgeY: Int, val top: Boolean)
+
     /**
      * Animate vertical↔horizontal. Phase 1 (first half) collapses the SHRINKING dimension; the content
      * crossfades at the midpoint; phase 2 grows the OTHER dimension. The corner that stays put depends
      * on which screen-half the menu is in: TOP half → pin the TOP-left and grow downward; BOTTOM half →
-     * pin the BOTTOM-left and grow upward — so it always morphs *into* the empty space, never off-screen
-     * (which would force the settle clamp to shove it back, the old under-the-bar flicker).
-     * Falls back to an instant flip if the target size can't be measured.
+     * pin the BOTTOM-left and grow upward — so it always morphs *into* the empty space.
+     *
+     * The overlay WINDOW is sized ONCE to the union of both orientations (pinned at the anchor corner)
+     * and the morph is animated purely in Compose (the Surface grows/shrinks inside the stationary
+     * window). We deliberately do NOT resize the window every frame: rapid `updateViewLayout` on a
+     * `FLAG_LAYOUT_NO_LIMITS` overlay desyncs the SurfaceFlinger buffer and paints the menu at a stale
+     * geometry (the snap-to-last-position-then-fly bug). Falls back to an instant flip if the target
+     * size can't be measured.
      */
     private suspend fun animateRotate() {
         dismissSubmenus()
@@ -1842,8 +1897,10 @@ class OverlayLiveEditController @Inject constructor(
         // Pin top-left when the menu sits in the top half of the screen (grow down), else bottom-left.
         val growFromTop = (params.y + params.height / 2) < displaySizePx().y / 2
         rotateGrowFromTop = growFromTop
+        rotateFromSize = fromSize
+        rotateToSize = fromSize // placeholder until measured; at progress≈0 the morph == fromSize anyway
         // Enter animation mode (ToolbarContent renders BOTH layouts) and read the target's true size
-        // (reported UNBOUNDED, so it's the full width even though the window is still the old size).
+        // (reported UNBOUNDED, so it's the full size even though the window is still the old size).
         rotateToHorizontal = toHorizontal
         rotateProgress.value = 0f
         val toFlow = if (toHorizontal) horizontalMenuSize else verticalMenuSize
@@ -1853,24 +1910,57 @@ class OverlayLiveEditController @Inject constructor(
             menuHorizontal.value = toHorizontal
             return
         }
-        // Animatable.animateTo needs a MonotonicFrameClock to drive frames; `scope` is a plain
-        // Main.immediate scope with no frame clock (that's supplied by the composition when you
-        // animate from rememberCoroutineScope/LaunchedEffect). AndroidUiDispatcher.Main carries the
-        // Choreographer-based clock in its context, so run the animation there.
+        rotateToSize = toSize
+        // Hold the window at the union of both orientations (pinned at the anchor corner) so the Surface
+        // can morph between from/to inside it without the window resizing mid-animation. The union is a
+        // GROW from the current orientation — and growing an existing NO_LIMITS overlay reuses a stale
+        // SurfaceFlinger buffer (drawn at the last position it was that big), the snap-back-then-fly bug.
+        // So we RECREATE the window fresh at the union (a new window has no prior buffer) rather than
+        // resize it. The end collapse is a pure SHRINK (toSize ≤ union in both axes), which is safe.
+        val unionW = maxOf(fromSize.width, toSize.width)
+        val unionH = maxOf(fromSize.height, toSize.height)
+        val fresh = recreateToolbarWindow(unionW, unionH, marginPx, anchorX, anchorTop, anchorBottom, growFromTop)
+        val animView = fresh?.first ?: view
+        val animParams = fresh?.second ?: params
+        // Animatable.animateTo needs a MonotonicFrameClock; `scope` (Main.immediate) has none — it's
+        // supplied by the composition when animating from rememberCoroutineScope/LaunchedEffect. Run on
+        // AndroidUiDispatcher.Main, which carries the Choreographer clock. Only Compose state changes
+        // here — NO per-frame updateViewLayout.
         withContext(AndroidUiDispatcher.Main) {
             Animatable(0f).animateTo(1f, tween(ROTATE_TOTAL_MS, easing = LinearEasing)) {
                 rotateProgress.value = value
-                val ls = interpolateRotateSize(value, fromSize, toSize, toHorizontal)
-                params.width = ls.width + 2 * marginPx
-                params.height = ls.height + 2 * marginPx
-                params.x = anchorX
-                params.y = if (growFromTop) anchorTop else anchorBottom - params.height
-                runCatching { windowManager.updateViewLayout(view, params) }
             }
         }
-        // Settle into the single target orientation (LaunchedEffect re-sizes to the exact content).
+        // Collapse the window to the exact final content size (still pinned at the anchor corner) and
+        // settle into the single target orientation. The pending anchor makes the LaunchedEffect resize
+        // keep this corner instead of re-deriving it from the center heuristic.
+        setToolbarWindow(animView, animParams, toSize.width, toSize.height, marginPx, anchorX, anchorTop, anchorBottom, growFromTop)
+        pendingRotateAnchor = PendingRotateAnchor(
+            x = anchorX,
+            edgeY = if (growFromTop) anchorTop else anchorBottom,
+            top = growFromTop,
+        )
         menuHorizontal.value = toHorizontal
         rotateProgress.value = null
+    }
+
+    /** Apply a content-sized window (px, +shadow margin) pinned at the rotate anchor corner. */
+    private fun setToolbarWindow(
+        view: View,
+        params: WindowManager.LayoutParams,
+        contentW: Int,
+        contentH: Int,
+        marginPx: Int,
+        anchorX: Int,
+        anchorTop: Int,
+        anchorBottom: Int,
+        growFromTop: Boolean,
+    ) {
+        params.width = contentW + 2 * marginPx
+        params.height = contentH + 2 * marginPx
+        params.x = anchorX
+        params.y = if (growFromTop) anchorTop else anchorBottom - params.height
+        runCatching { windowManager.updateViewLayout(view, params) }
     }
 
     /** Window content size during a rotate: phase 1 animates the shrinking axis, phase 2 the growing one. */
@@ -1889,8 +1979,10 @@ class OverlayLiveEditController @Inject constructor(
     /**
      * The always-visible core menu (the "toolbar" window). Grab-and-draggable anywhere (raw-coord
      * filter via [onTouch]; a non-moving tap is routed by [toolbarRouter]). Renders a vertical panel
-     * or a horizontal icon bar; during a rotate it renders BOTH overlaid (bottom-left aligned) and
-     * crossfades while [animateRotate] drives the window size frame-by-frame.
+     * or a horizontal icon bar; during a rotate it renders BOTH overlaid (pinned to the anchor corner)
+     * and crossfades. The Surface *frame* morphs size here in Compose while [animateRotate] holds the
+     * window stationary at the union size — see that function for why the window must not resize per
+     * frame.
      */
     @OptIn(ExperimentalComposeUiApi::class)
     @Composable
@@ -1900,31 +1992,41 @@ class OverlayLiveEditController @Inject constructor(
         val animating = progress != null
         // Outside a rotate, size the window to the active content (the layout-change listener won't
         // fire on an orientation flip — the old explicit size clips the new content). During a rotate
-        // the animation owns the window size, so skip it.
+        // the window is held at the union size by animateRotate, so skip it.
         LaunchedEffect(horizontal, animating) { if (!animating) resizeToolbarToContent() }
 
         // Pill ends + tight shadow corner once settled horizontal; rounded otherwise. The shadow
         // needs room, so the visible Surface is inset by MENU_SHADOW_MARGIN within the window.
         val shape = if (horizontal && !animating) CircleShape else MaterialTheme.shapes.large
         val shadowCorner = if (horizontal && !animating) 100.dp else 16.dp
-        // While animating, fill the animation-driven window; otherwise wrap content so the window
+        // The corner that stays pinned during the morph (matches the window anchor set by animateRotate):
+        // top-start when growing down (menu in the top half), bottom-start when growing up.
+        val cornerAlign = if (rotateGrowFromTop) Alignment.TopStart else Alignment.BottomStart
+        // While animating, the menu frame is sized EXPLICITLY to the morphing content size (and pinned
+        // to the anchor corner of the stationary union window); otherwise it wraps so the window
         // measures to it (resizeToolbarToContent).
-        val fill = if (animating) Modifier.fillMaxSize() else Modifier
+        val frameMod: Modifier = if (animating) {
+            val ls = interpolateRotateSize(progress ?: 0f, rotateFromSize, rotateToSize, rotateToHorizontal)
+            with(LocalDensity.current) { Modifier.size(ls.width.toDp(), ls.height.toDp()) }
+        } else {
+            Modifier
+        }
         Box(
             // Interop filter OUTERMOST so its ev.x/ev.y share the window origin with the rows'
             // positionInWindow() used for tap routing; the shadow-margin padding is inside it.
             modifier = Modifier
                 .pointerInteropFilter(onTouchEvent = onTouch)
                 .padding(MENU_SHADOW_MARGIN.dp)
-                .then(fill),
+                .then(if (animating) Modifier.fillMaxSize() else Modifier),
+            contentAlignment = cornerAlign,
         ) {
             // Shadow on a wrapper Box so it can't be clipped by the Surface's shape.
-            Box(Modifier.menuDropShadow(shadowCorner).then(fill)) {
+            Box(Modifier.menuDropShadow(shadowCorner).then(frameMod)) {
                 Surface(
                     shape = shape,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     tonalElevation = 6.dp,
-                    modifier = fill,
+                    modifier = frameMod,
                 ) {
                     if (animating) {
                         val t = progress ?: 0f
@@ -1932,13 +2034,8 @@ class OverlayLiveEditController @Inject constructor(
                         val fromAlpha = ((0.55f - t) / 0.1f).coerceIn(0f, 1f)
                         val vAlpha = if (rotateToHorizontal) fromAlpha else toAlpha
                         val hAlpha = if (rotateToHorizontal) toAlpha else fromAlpha
-                        // Align content to the PINNED corner so it reveals from that edge: top-start when
-                        // growing down (menu in the top half), bottom-start when growing up. Otherwise a
-                        // bottom-aligned panel in a top-anchored (downward-growing) window would slide
-                        // down with the moving bottom edge instead of unrolling from the fixed top.
-                        val cornerAlign = if (rotateGrowFromTop) Alignment.TopStart else Alignment.BottomStart
-                        // Both overlaid at that corner, measured UNBOUNDED (each reports its true size);
-                        // the window clips them to the animating bounds.
+                        // Both overlaid at the pinned corner, measured UNBOUNDED (each reports its true
+                        // size); the Surface frame clips them to the morphing bounds.
                         Box(contentAlignment = cornerAlign) {
                             VerticalPanel(
                                 register = false,

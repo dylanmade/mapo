@@ -58,6 +58,26 @@ class MouseOutputSettingsTest {
     }
 
     @Test
+    fun invertHorizontal_flipsXSignOnly() {
+        val s = MouseOutputSettings.parse(
+            """{"mouse_sensitivity":100,"invert_horizontal":true}""",
+        )
+        val (vx, vy) = s.toVelocity(0.5f, 0.5f)
+        assertTrue("x should be flipped negative", vx < 0f)
+        assertTrue("y should be unaffected", vy > 0f)
+    }
+
+    @Test
+    fun invertVertical_flipsYSignOnly() {
+        val s = MouseOutputSettings.parse(
+            """{"mouse_sensitivity":100,"invert_vertical":true}""",
+        )
+        val (vx, vy) = s.toVelocity(0.5f, 0.5f)
+        assertTrue("x should be unaffected", vx > 0f)
+        assertTrue("y should be flipped negative", vy < 0f)
+    }
+
+    @Test
     fun rotate90_forwardBecomesRight() {
         // Forward = up = (0, -1) in +Y-down → rotated 90° → right = (+x, 0).
         val s = MouseOutputSettings.parse("""{"mouse_sensitivity":100,"rotate_output":90}""")

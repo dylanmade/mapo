@@ -451,6 +451,7 @@ object SourceModeSettingsSchema {
             "General",
             listOf(
                 MOUSE_SENSITIVITY, HORIZONTAL_SCALE, VERTICAL_SCALE,
+                INVERT_HORIZONTAL, INVERT_VERTICAL,
                 MOUSE_STICK_RESPONSE_CURVE, CUSTOM_RESPONSE_CURVE, MOUSE_RESPONSE_AXIS_STYLE,
             ),
         ),

@@ -55,6 +55,7 @@ class RemapControlsScreenTest {
 
     @get:Rule val composeRule = createComposeRule()
 
+
     @Test
     fun renders_allSectionLabelsInRail() {
         composeRule.setContent {

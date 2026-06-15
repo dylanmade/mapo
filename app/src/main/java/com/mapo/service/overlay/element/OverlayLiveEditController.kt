@@ -25,6 +25,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -103,6 +104,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.PathEffect
@@ -748,17 +750,7 @@ class OverlayLiveEditController @Inject constructor(
         val owner = OverlayLifecycleOwner()
         val view = ComposeView(context).apply {
             attachOwner(owner)
-            setContent {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            // Tap empty space to deselect all; touches are consumed so they
-                            // don't reach the app underneath while editing.
-                            detectTapGestures(onTap = { selectedIds.value = emptySet() })
-                        },
-                )
-            }
+            setContent { MapoTheme { ScrimContent() } }
         }
         owner.resumeTo()
         val params = layoutParams(
@@ -773,6 +765,56 @@ class OverlayLiveEditController @Inject constructor(
         // Note: we intentionally do NOT exclude the system back gesture here anymore. Back
         // (gesture or button) should route through the activity's back dispatcher to the
         // "Exit overlay editing?" confirm — an escape hatch, with a guard against accidents.
+    }
+
+    /**
+     * The full-screen edit scrim. A TAP on empty space deselects all; a DRAG from empty space draws a
+     * rubber-band marquee and selects every button it intersects on release. (A drag that starts ON a
+     * button hits that button's own window instead — button windows sit above the scrim — so the
+     * marquee only ever begins from empty space, which is exactly the desired trigger.)
+     */
+    @Composable
+    private fun ScrimContent() {
+        // Marquee endpoints in scrim-local px (== screen px: the scrim is MATCH_PARENT at 0,0).
+        var start by remember { mutableStateOf<Offset?>(null) }
+        var current by remember { mutableStateOf(Offset.Zero) }
+        val primary = MaterialTheme.colorScheme.primary
+        Box(
+            Modifier
+                .fillMaxSize()
+                // Tap empty space to deselect all; touches are consumed so they don't reach the app
+                // underneath while editing.
+                .pointerInput(Unit) { detectTapGestures(onTap = { selectedIds.value = emptySet() }) }
+                // Drag from empty space = rubber-band select (replaces the current selection).
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { start = it; current = it },
+                        onDrag = { change, _ -> change.consume(); current = change.position },
+                        onDragEnd = { start?.let { commitMarquee(it, current) }; start = null },
+                        onDragCancel = { start = null },
+                    )
+                }
+                .drawBehind {
+                    val s = start ?: return@drawBehind
+                    val left = minOf(s.x, current.x); val top = minOf(s.y, current.y)
+                    val w = kotlin.math.abs(current.x - s.x); val h = kotlin.math.abs(current.y - s.y)
+                    drawRect(primary.copy(alpha = 0.12f), topLeft = Offset(left, top), size = androidx.compose.ui.geometry.Size(w, h))
+                    drawRect(primary, topLeft = Offset(left, top), size = androidx.compose.ui.geometry.Size(w, h), style = Stroke(width = 1.5.dp.toPx()))
+                },
+        )
+    }
+
+    /** Select every element whose pixel rect intersects the marquee (replacing the current selection). */
+    private fun commitMarquee(a: Offset, b: Offset) {
+        val left = minOf(a.x, b.x); val top = minOf(a.y, b.y)
+        val right = maxOf(a.x, b.x); val bottom = maxOf(a.y, b.y)
+        val size = displaySizePx()
+        val hits = overlayEditor.elements.value.filter { el ->
+            val l = el.x * size.x; val t = el.y * size.y
+            val r = (el.x + el.width) * size.x; val bm = (el.y + el.height) * size.y
+            left < r && right > l && top < bm && bottom > t // rect-intersection test
+        }.map { it.id }.toSet()
+        selectedIds.value = hits
     }
 
     /**
@@ -1336,6 +1378,9 @@ class OverlayLiveEditController @Inject constructor(
             targets.values.forEach { t -> if (t.bounds.contains(xi, yi)) { t.onTap(); return true } }
             return false
         }
+
+        /** True if (x, y) [window-local px] lands on a registered row/icon (no action fired). */
+        fun hits(x: Int, y: Int): Boolean = targets.values.any { it.bounds.contains(x, y) }
     }
 
     /**
@@ -1456,6 +1501,15 @@ class OverlayLiveEditController @Inject constructor(
      * every fly-out). The tap itself still reaches whatever window is underneath, so it isn't eaten.
      */
     private fun handleMenuOutsideTap(rawX: Int, rawY: Int) = runOnMain {
+        // A tap that lands on an actual toolbar ROW/ICON is handled by the toolbar's own routing (which
+        // toggles the source row's submenu, switches to another row's, or closes on a leaf). Don't ALSO
+        // dismiss here: otherwise tapping an open submenu's source row would close it via this outside-tap
+        // path AND then the route would re-open it (it'd see no submenu open). But a tap on DEAD toolbar
+        // space (gap between icons, the shadow margin) hits no row, so it should dismiss like any outside
+        // tap — hence the hit-test against the router rather than the whole window bounds.
+        toolbarParams?.let { tp ->
+            if (toolbarRouter.hits(rawX - tp.x, rawY - tp.y)) return@runOnMain
+        }
         var keep = 0
         menuStack.forEachIndexed { i, mw ->
             val l = mw.params.x; val t = mw.params.y

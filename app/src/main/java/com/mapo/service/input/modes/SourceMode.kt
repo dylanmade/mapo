@@ -2760,19 +2760,23 @@ internal data class StickToAxisSettings(
  * (Deadzone / response curve / outer-ring / haptics live in [StickToAxisSettings]
  * and are shared with Joystick Move.)
  *
- * Per the spec, this menu has no invert toggles and no Output-Joystick entry
- * (the output is the cursor) — inversion is achievable via Rotate output.
+ * No Output-Joystick entry (the output is the cursor). Invert horizontal /
+ * vertical are a Mapo extension (the Steam spec omits them for this mode) added
+ * at the user's request.
  *
  * **toVelocity** takes the already-shaped `(sx, sy)` (magnitude 0..1, +Y-down):
  *  1. Rotate the vector by [rotateRadians] (same convention as Joystick Move:
  *     +90° maps forward → right).
  *  2. Multiply by [sensitivityPxPerSec] and the per-axis scale.
- *  3. Apply the output-axis limit.
+ *  3. Per-axis invert.
+ *  4. Apply the output-axis limit.
  */
 internal data class MouseOutputSettings(
     val sensitivityPxPerSec: Float,
     val horizontalScale: Float, // 0..1
     val verticalScale: Float,   // 0..1
+    val invertHorizontal: Boolean,
+    val invertVertical: Boolean,
     val rotateRadians: Float,
     val outputAxis: String,     // horizontal / vertical / both
 ) {
@@ -2789,6 +2793,8 @@ internal data class MouseOutputSettings(
         }
         var vx = x * sensitivityPxPerSec * horizontalScale
         var vy = y * sensitivityPxPerSec * verticalScale
+        if (invertHorizontal) vx = -vx
+        if (invertVertical) vy = -vy
         when (outputAxis) {
             "horizontal" -> vy = 0f
             "vertical" -> vx = 0f
@@ -2809,6 +2815,8 @@ internal data class MouseOutputSettings(
             sensitivityPxPerSec = PX_PER_SEC_AT_100 * (DEFAULT_SENSITIVITY_PCT / 100f),
             horizontalScale = 1f,
             verticalScale = 1f,
+            invertHorizontal = false,
+            invertVertical = false,
             rotateRadians = 0f,
             outputAxis = "both",
         )
@@ -2825,6 +2833,8 @@ internal data class MouseOutputSettings(
                         .coerceIn(0f, 1f),
                     verticalScale = (obj.optDouble("vertical_scale", 100.0).toFloat() / 100f)
                         .coerceIn(0f, 1f),
+                    invertHorizontal = obj.optBoolean("invert_horizontal", false),
+                    invertVertical = obj.optBoolean("invert_vertical", false),
                     rotateRadians = Math.toRadians(
                         obj.optDouble("rotate_output", 0.0).coerceIn(-180.0, 180.0),
                     ).toFloat(),

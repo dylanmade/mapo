@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Layers
@@ -39,7 +38,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -179,11 +177,10 @@ fun RemapRail(
 }
 
 /**
- * The scope (action set / layer) entry: a [WideNavigationRailItem] with a trailing ▸ (the same
- * [Icons.AutoMirrored.Filled.ArrowRight] the Edit Overlay submenu rows use) and a thin divider
- * pinned to the bottom of its slot (so it separates scope from sections without consuming an
- * extra 64dp rail slot). Tapping it opens a fly-out [DropdownMenu] just past the rail's right
- * edge — offset computed from the item's measured bounds. The menu lists every action set
+ * The scope (action set / layer) entry: a [WideNavigationRailItem] with a thin divider in flow
+ * beneath it (separating scope from the section items). Tapping it opens a fly-out
+ * [DropdownMenu] just past the rail's right edge — offset computed from the item's measured
+ * bounds. The menu lists every action set
  * (filled [Icons.Filled.Layers]) with layers indented (outlined [Icons.Outlined.Layers]); the
  * current scope is pill-highlighted; each row's horizontal kebab opens Rename / Duplicate /
  * Delete; "Add layer" trails each set, "Add set" the whole list. Rows are [CompactDropdownMenuItem].
@@ -282,8 +279,10 @@ private fun ScopeRailItem(
                 )
             }
         }
-        // Thin divider in normal flow — real space above (9dp) and below (6dp), ~1.5 : 1.
-        HorizontalDivider(Modifier.padding(top = 9.dp, bottom = 6.dp))
+        // Thin divider in normal flow — real space above (18dp) and below (12dp), ~1.5 : 1.
+        // NB: the WideNavigationRailItem reserves a tall label box, so the *visible* gap above
+        // the divider is this padding plus the item's own trailing dead space.
+        HorizontalDivider(Modifier.padding(top = 18.dp, bottom = 6.dp))
     }
 }
 

@@ -16,12 +16,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Behavior tests for [FlickStickMode]. Covers the NEUTRAL → FLICKING →
- * HOLDING state machine, per-source state isolation, snap-to-cardinal,
- * settings parsing, and the source-filter (joysticks only).
- *
- * Each test resets the global per-source state in [@After] so leftover
- * state from a prior test can't bleed into the next.
+ * Behavior tests for [FlickStickMode] — the NEUTRAL → HOLDING flick/sweep state
+ * machine, snapping, output axis/invert, front-angle deadzone, flick-on-awake,
+ * per-source isolation, and settings parsing. Pure settings math lives in the
+ * companion ([FlickStickSettings]).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [33])
@@ -39,7 +37,13 @@ class FlickStickModeTest {
         digitalEmitted.clear()
     }
 
-    private fun ctx(settingsJson: String = "") = ModeContext(
+    // No snapping + no front-angle deadzone, and flick-on-awake so a deflected
+    // first reading flicks (tests don't prime with a centered reading) → assert raw
+    // flick targets cleanly.
+    private val rawJson =
+        """{"snap_angle":"no_snapping","front_angle_deadzone":0,"flick_on_awake":true}"""
+
+    private fun ctx(settingsJson: String = rawJson) = ModeContext(
         source = InputSource.RIGHT_JOYSTICK,
         settingsJson = settingsJson,
         priorLatched = emptyMap(),
@@ -54,6 +58,8 @@ class FlickStickModeTest {
         timestampMs: Long = 0L,
     ) = AnalogEvent(source = source, x = x, y = y, timestampMs = timestampMs)
 
+    private val defaultVel = FlickStickSettings.DEFAULTS.velocityPxPerRad
+
     // ── Mode metadata ────────────────────────────────────────────────────────
 
     @Test
@@ -63,9 +69,6 @@ class FlickStickModeTest {
 
     @Test
     fun validInputs_areClickAndOuterRing() {
-        // Matches the joystick-side inputs convention used by JoystickMouseMode
-        // / JoystickMoveMode so users can switch between joystick modes without
-        // re-binding click/outer_ring activators.
         assertEquals(setOf("click", "outer_ring"), FlickStickMode.validInputs())
     }
 
@@ -78,167 +81,129 @@ class FlickStickModeTest {
             mouse = mouse,
         )
         verify(exactly = 0) { mouse.addRelativeDelta(any(), any()) }
+        verify(exactly = 0) { mouse.scheduleSmoothDelta(any(), any(), any()) }
     }
 
-    // ── NEUTRAL → FLICKING transition ────────────────────────────────────────
+    // ── NEUTRAL → flick ──────────────────────────────────────────────────────
 
     @Test
-    fun stickInsideDeadzone_emitsNothing() {
+    fun stickInsideInnerDeadzone_emitsNothing() {
+        // Default inner deadzone is 50%; (0.2, 0.2) magnitude ~0.28 is inside.
         FlickStickMode.evaluate(
-            reading = reading(x = 0.05f, y = 0.05f, timestampMs = 0L),
+            reading = reading(x = 0.2f, y = 0.2f, timestampMs = 0L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        verify(exactly = 0) { mouse.addRelativeDelta(any(), any()) }
+        verify(exactly = 0) { mouse.scheduleSmoothDelta(any(), any(), any()) }
     }
 
     @Test
-    fun firstActiveReading_schedulesSmoothFlickOverFlickTime() {
-        // Steam-faithful (verified on Steam Deck by user 2026-06-03): the
-        // flick commits at threshold crossing and plays out over
-        // flick_time via the mouse emitter. We assert the scheduled total
-        // matches `target * velocity` and the duration matches flick_time.
+    fun flickRight_schedulesPositiveHorizontalDelta() {
         val dxSlot = slot<Float>()
-        val durSlot = slot<Long>()
-        every {
-            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, capture(durSlot))
-        } returns Unit
+        every { mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any()) } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        val expectedPx = kotlin.math.PI.toFloat() / 2f *
-            FlickStickSettings.DEFAULT_VELOCITY_PX_PER_RAD
-        assertEquals(expectedPx, dxSlot.captured, 1f)
-        assertEquals(
-            FlickStickSettings.DEFAULT_FLICK_TIME_MS.toLong(),
-            durSlot.captured,
-        )
+        val expected = kotlin.math.PI.toFloat() / 2f * defaultVel
+        assertEquals(expected, dxSlot.captured, 1f)
     }
 
     @Test
-    fun flickRightward_schedulesPositiveDx() {
+    fun flickLeft_schedulesNegativeHorizontalDelta() {
         val dxSlot = slot<Float>()
-        every {
-            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
-        } returns Unit
-        FlickStickMode.evaluate(
-            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        assertTrue("dx should be positive for rightward flick", dxSlot.captured > 0f)
-    }
-
-    @Test
-    fun flickLeftward_schedulesNegativeDx() {
-        val dxSlot = slot<Float>()
-        every {
-            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
-        } returns Unit
+        every { mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any()) } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = -1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        assertTrue("dx should be negative for leftward flick", dxSlot.captured < 0f)
+        assertTrue("left flick should be negative dx", dxSlot.captured < 0f)
     }
 
     @Test
-    fun flickStraightUp_emitsZeroAngle() {
-        // Stick up (x=0, y=-1) → target angle atan2(0, 1) = 0 → no flick.
+    fun frontAngleDeadzone_suppressesNearForwardFlick() {
+        // flick-on-awake so the stick can flick immediately; default 7° front-angle
+        // deadzone; a flick straight up (angle 0) must still be suppressed.
         FlickStickMode.evaluate(
             reading = reading(x = 0f, y = -1f, timestampMs = 0L),
-            ctx = ctx(),
+            ctx = ctx(settingsJson = """{"flick_on_awake":true}"""),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        verify(exactly = 0) {
-            mouse.scheduleSmoothDelta(neq(0f), any(), any())
-        }
+        verify(exactly = 0) { mouse.scheduleSmoothDelta(any(), any(), any()) }
     }
 
     @Test
-    fun flick180Down_schedulesFullPiAngle() {
-        // Stick down (x=0, y=+1) → atan2(0, -1) = π → flick is a full
-        // 180° turn (Steam-Deck-verified by user 2026-06-03).
-        val dxSlot = slot<Float>()
-        every {
-            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
-        } returns Unit
-        FlickStickMode.evaluate(
-            reading = reading(x = 0f, y = 1f, timestampMs = 0L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        val expectedPx = kotlin.math.PI.toFloat() *
-            FlickStickSettings.DEFAULT_VELOCITY_PX_PER_RAD
-        assertEquals(expectedPx, dxSlot.captured, 1f)
-    }
-
-    @Test
-    fun flickPartialAngle_schedulesProportionalAmount() {
-        // 45° east push → +π/4 flick. Confirms the angle-not-just-cardinal
-        // observation: a 45° flick produces a 45° turn (user-verified on
-        // Steam Deck 2026-06-03).
-        val dxSlot = slot<Float>()
-        every {
-            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
-        } returns Unit
-        // (x, y) = (sin(π/4), -cos(π/4)) = (0.707, -0.707) — stick pointing
-        // up-and-to-the-right at 45° from screen-up.
-        FlickStickMode.evaluate(
-            reading = reading(x = 0.707f, y = -0.707f, timestampMs = 0L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        val expectedPx = kotlin.math.PI.toFloat() / 4f *
-            FlickStickSettings.DEFAULT_VELOCITY_PX_PER_RAD
-        assertEquals(expectedPx, dxSlot.captured, 1f)
-    }
-
-    @Test
-    fun activation_doesNotCall_addRelativeDelta_anymore() {
-        // Regression guard: the prior instant-snap model fired the flick
-        // through addRelativeDelta. The Steam-parity model schedules via
-        // scheduleSmoothDelta instead — addRelativeDelta is only used by
-        // the hold-phase emissions now.
+    fun outputVertical_routesFlickToYAxis() {
+        val dySlot = slot<Float>()
+        every { mouse.scheduleSmoothDelta(0f, capture(dySlot), any()) } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
-            ctx = ctx(),
+            ctx = ctx(settingsJson = """{"snap_angle":"no_snapping","front_angle_deadzone":0,"flick_on_awake":true,"output_axis":"vertical"}"""),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        verify(exactly = 0) { mouse.addRelativeDelta(any(), any()) }
+        assertTrue("vertical output should write the y axis", dySlot.captured > 0f)
     }
+
+    @Test
+    fun invertOutput_flipsFlickSign() {
+        val dxSlot = slot<Float>()
+        every { mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any()) } returns Unit
+        FlickStickMode.evaluate(
+            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
+            ctx = ctx(settingsJson = """{"snap_angle":"no_snapping","front_angle_deadzone":0,"flick_on_awake":true,"invert_output":true}"""),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        // Rightward flick (+π/2) inverted → negative.
+        assertTrue("invert should flip the flick to negative", dxSlot.captured < 0f)
+    }
+
+    @Test
+    fun flickOnAwake_false_suppressesFlickWhenAlreadyDeflected() {
+        // Fresh state, first reading already past inner deadzone, flick_on_awake off
+        // → no flick fires (must return home first).
+        FlickStickMode.evaluate(
+            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
+            ctx = ctx(settingsJson = """{"snap_angle":"no_snapping","front_angle_deadzone":0,"flick_on_awake":false}"""),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        verify(exactly = 0) { mouse.scheduleSmoothDelta(any(), any(), any()) }
+    }
+
+    @Test
+    fun flickOnAwake_true_flicksImmediatelyWhenDeflected() {
+        every { mouse.scheduleSmoothDelta(any(), any(), any()) } returns Unit
+        FlickStickMode.evaluate(
+            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
+            ctx = ctx(settingsJson = """{"snap_angle":"no_snapping","front_angle_deadzone":0,"flick_on_awake":true}"""),
+            digitalEmit = digitalEmit,
+            mouse = mouse,
+        )
+        verify(exactly = 1) { mouse.scheduleSmoothDelta(any(), 0f, any()) }
+    }
+
+    // ── HOLDING / sweep ──────────────────────────────────────────────────────
 
     @Test
     fun holdPhase_isLockedOut_duringFlickTimeWindow() {
-        // The reported "bounce-back" artifact: when the user's stick angle
-        // drifts during the finish of their push (e.g. activation at 89°,
-        // stabilizes at 95°), hold-phase rotation must NOT fire while the
-        // flick is still resolving.
-        every {
-            mouse.scheduleSmoothDelta(any(), any(), any())
-        } returns Unit
-        // Activation at t=0, target = +π/2.
+        every { mouse.scheduleSmoothDelta(any(), any(), any()) } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        // 50ms in, still inside the 100ms flick_time window — stick has
-        // drifted by ~5°. Hold-phase MUST NOT emit.
+        // 30ms in (inside the ~90ms default flick window) — no sweep emission.
         FlickStickMode.evaluate(
-            reading = reading(x = 0.996f, y = 0.087f, timestampMs = 50L),
+            reading = reading(x = 0.996f, y = 0.087f, timestampMs = 30L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
@@ -247,58 +212,7 @@ class FlickStickModeTest {
     }
 
     @Test
-    fun holdPhase_baselinesAtCurrentAngle_afterLockoutEnds() {
-        // Right after the lockout, the next stick reading re-baselines
-        // lastStickAngleRad without emitting (so post-lockout hold-phase
-        // measures intentional rotation from where the stick *currently
-        // is*, not from the activation target). Subsequent reading then
-        // emits a delta relative to the settled baseline.
-        every {
-            mouse.scheduleSmoothDelta(any(), any(), any())
-        } returns Unit
-        // Activation: target +π/2 at t=0.
-        FlickStickMode.evaluate(
-            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        // After lockout (t > 100ms): stick has drifted to ~105°. The
-        // settle pass must NOT emit a delta from 90° → 105°.
-        FlickStickMode.evaluate(
-            reading = reading(x = 0.966f, y = 0.259f, timestampMs = 150L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        verify(exactly = 0) { mouse.addRelativeDelta(any(), any()) }
-
-        // Next read: stick continues to rotate (intentional this time) →
-        // the delta from the settled baseline should emit.
-        val dxSlot = slot<Float>()
-        every {
-            mouse.addRelativeDelta(capture(dxSlot), 0f)
-        } returns Unit
-        FlickStickMode.evaluate(
-            reading = reading(x = 0.866f, y = 0.5f, timestampMs = 160L),  // ~120°
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        assertTrue(
-            "post-settle rotation should emit a hold-phase delta",
-            dxSlot.captured > 0f,
-        )
-    }
-
-    // ── HOLDING phase ────────────────────────────────────────────────────────
-
-    @Test
-    fun holdPhase_emitsDeltaProportionalToStickRotation() {
-        // After activation at t=0, the lockout runs through t=100ms.
-        // The first post-lockout event re-baselines the angle (no emit).
-        // The next event past that emits a delta relative to the settled
-        // baseline.
+    fun holdPhase_emitsSweepAfterLockout() {
         every { mouse.scheduleSmoothDelta(any(), any(), any()) } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
@@ -306,241 +220,138 @@ class FlickStickModeTest {
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        // Settle pass at t=110ms: lastStickAngleRad re-baselined to π/2.
+        // Settle pass well past the lockout.
         FlickStickMode.evaluate(
-            reading = reading(x = 1f, y = 0f, timestampMs = 110L),
+            reading = reading(x = 1f, y = 0f, timestampMs = 300L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        // CW rotation from +π/2 toward +3π/4 (stick = (0.707, +0.707)).
+        // Now rotate CW toward +3π/4 → positive sweep dx.
         val dxSlot = slot<Float>()
         every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
         FlickStickMode.evaluate(
-            reading = reading(x = 0.707f, y = 0.707f, timestampMs = 120L),
+            reading = reading(x = 0.707f, y = 0.707f, timestampMs = 320L),
             ctx = ctx(),
             digitalEmit = digitalEmit,
             mouse = mouse,
         )
-        assertTrue("hold-phase CW rotation should emit positive dx", dxSlot.captured > 0f)
-    }
-
-    @Test
-    fun holdPhase_oppositeRotationEmitsNegativeDx() {
-        every { mouse.scheduleSmoothDelta(any(), any(), any()) } returns Unit
-        FlickStickMode.evaluate(
-            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        // Settle pass past lockout.
-        FlickStickMode.evaluate(
-            reading = reading(x = 1f, y = 0f, timestampMs = 110L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        // CCW rotation from +π/2 toward +π/4 (stick = (0.707, -0.707)).
-        val dxSlot = slot<Float>()
-        every { mouse.addRelativeDelta(capture(dxSlot), 0f) } returns Unit
-        FlickStickMode.evaluate(
-            reading = reading(x = 0.707f, y = -0.707f, timestampMs = 120L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        assertTrue("hold-phase CCW rotation should emit negative dx", dxSlot.captured < 0f)
+        assertTrue("CW sweep should emit positive dx", dxSlot.captured > 0f)
     }
 
     @Test
     fun releaseToCenter_resetsState_nextPushReFlicks() {
         val dxSlot = slot<Float>()
-        every {
-            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
-        } returns Unit
-        // First push → flick to the right and transition to HOLDING.
+        every { mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any()) } returns Unit
         FlickStickMode.evaluate(
             reading = reading(x = 1f, y = 0f, timestampMs = 0L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
+            ctx = ctx(), digitalEmit = digitalEmit, mouse = mouse,
         )
-        // Release to center.
         FlickStickMode.evaluate(
             reading = reading(x = 0f, y = 0f, timestampMs = 200L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
+            ctx = ctx(), digitalEmit = digitalEmit, mouse = mouse,
         )
-        // Second push (leftward) — must re-flick to −π/2, not interpret
-        // as a hold-phase rotation from +π/2.
         FlickStickMode.evaluate(
             reading = reading(x = -1f, y = 0f, timestampMs = 300L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
+            ctx = ctx(), digitalEmit = digitalEmit, mouse = mouse,
         )
-        val expectedPx = -kotlin.math.PI.toFloat() / 2f *
-            FlickStickSettings.DEFAULT_VELOCITY_PX_PER_RAD
-        assertEquals(
-            "re-flick after center-release must fire fresh −π/2 target",
-            expectedPx, dxSlot.captured, 1f,
-        )
+        val expected = -kotlin.math.PI.toFloat() / 2f * defaultVel
+        assertEquals("re-flick after center release fires fresh −π/2", expected, dxSlot.captured, 1f)
     }
-
-    // ── Per-source state isolation ───────────────────────────────────────────
 
     @Test
     fun leftAndRightStick_haveIndependentFlickState() {
-        // Left stick flicks right; right stick independently flicks left.
-        // Both schedule playouts on first-event activation and must not
-        // share state.
         val dxCalls = mutableListOf<Float>()
-        every {
-            mouse.scheduleSmoothDelta(any(), 0f, any())
-        } answers {
-            dxCalls += firstArg<Float>()
-        }
+        every { mouse.scheduleSmoothDelta(any(), 0f, any()) } answers { dxCalls += firstArg<Float>() }
         FlickStickMode.evaluate(
             reading = reading(source = InputSource.LEFT_JOYSTICK, x = 1f, y = 0f, timestampMs = 0L),
             ctx = ctx().copy(source = InputSource.LEFT_JOYSTICK),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
+            digitalEmit = digitalEmit, mouse = mouse,
         )
         FlickStickMode.evaluate(
             reading = reading(source = InputSource.RIGHT_JOYSTICK, x = -1f, y = 0f, timestampMs = 0L),
-            ctx = ctx(),  // RIGHT_JOYSTICK
-            digitalEmit = digitalEmit,
-            mouse = mouse,
+            ctx = ctx(), digitalEmit = digitalEmit, mouse = mouse,
         )
-        assertEquals("both sticks should schedule independent flick playouts", 2, dxCalls.size)
+        assertEquals(2, dxCalls.size)
         assertTrue("left stick scheduled positive dx", dxCalls[0] > 0f)
         assertTrue("right stick scheduled negative dx", dxCalls[1] < 0f)
     }
 
-    // ── Snap-to-cardinal ─────────────────────────────────────────────────────
+    // ── Snapping ─────────────────────────────────────────────────────────────
 
     @Test
-    fun snapMode_off_doesNotChangeFlickTarget() {
-        val s = FlickStickSettings.DEFAULTS
+    fun snap_none_doesNotChangeTarget() {
+        val s = FlickStickSettings.DEFAULTS.copy(snapMode = FlickStickSettings.SnapMode.NONE)
         assertEquals(0.7f, s.snapAngle(0.7f), 1e-6f)
-        assertEquals(-0.7f, s.snapAngle(-0.7f), 1e-6f)
     }
 
     @Test
-    fun snapMode_fourWay_fullStrength_snapsToNearestCardinal() {
-        val s = FlickStickSettings.DEFAULTS.copy(
-            snapMode = FlickStickSettings.SnapMode.FOUR_WAY,
-            snapStrength = 1f,
-        )
-        // 0.4 rad (~23°) snaps to 0 (north).
-        assertEquals(0f, s.snapAngle(0.4f), 1e-5f)
-        // 1.3 rad (~74°) snaps to π/2 (~1.5708, east).
-        assertEquals(kotlin.math.PI.toFloat() / 2f, s.snapAngle(1.3f), 1e-5f)
+    fun snap_ninety_quantizesToNearestQuarter() {
+        val s = FlickStickSettings.DEFAULTS.copy(snapMode = FlickStickSettings.SnapMode.QUARTER)
+        assertEquals(0f, s.snapAngle(0.4f), 1e-5f) // ~23° → 0
+        assertEquals(kotlin.math.PI.toFloat() / 2f, s.snapAngle(1.3f), 1e-5f) // ~74° → 90°
     }
 
     @Test
-    fun snapMode_eightWay_snapsToNearest45Deg() {
-        val s = FlickStickSettings.DEFAULTS.copy(
-            snapMode = FlickStickSettings.SnapMode.EIGHT_WAY,
-            snapStrength = 1f,
-        )
-        // 0.5 rad (~28.6°) snaps to π/4 (45°, NE).
-        assertEquals(kotlin.math.PI.toFloat() / 4f, s.snapAngle(0.5f), 1e-5f)
+    fun snap_eighths_quantizesTo45() {
+        val s = FlickStickSettings.DEFAULTS.copy(snapMode = FlickStickSettings.SnapMode.EIGHTHS)
+        assertEquals(kotlin.math.PI.toFloat() / 4f, s.snapAngle(0.5f), 1e-5f) // ~28.6° → 45°
     }
 
     @Test
-    fun snapMode_partialStrength_blendsTowardNearest() {
-        val s = FlickStickSettings.DEFAULTS.copy(
-            snapMode = FlickStickSettings.SnapMode.FOUR_WAY,
-            snapStrength = 0.5f,
-        )
-        // Raw 0.4, nearest cardinal 0, midpoint 0.2.
-        assertEquals(0.2f, s.snapAngle(0.4f), 1e-5f)
+    fun snap_forwardOnly_snapsNearForward_passesThroughElsewhere() {
+        val s = FlickStickSettings.DEFAULTS.copy(snapMode = FlickStickSettings.SnapMode.FORWARD_ONLY)
+        assertEquals("near-forward snaps to 0", 0f, s.snapAngle(0.3f), 1e-6f)
+        val big = kotlin.math.PI.toFloat() / 2f // 90° — outside the ±45° window
+        assertEquals("far-from-forward passes through", big, s.snapAngle(big), 1e-6f)
     }
 
     // ── Settings parsing ─────────────────────────────────────────────────────
 
     @Test
-    fun settings_parse_emptyString_returnsDefaults() {
-        val s = FlickStickSettings.parse("")
-        assertEquals(FlickStickSettings.DEFAULTS, s)
+    fun parse_emptyAndEmptyObject_returnDefaults() {
+        assertEquals(FlickStickSettings.DEFAULTS, FlickStickSettings.parse(""))
+        assertEquals(FlickStickSettings.DEFAULTS, FlickStickSettings.parse("{}"))
     }
 
     @Test
-    fun settings_parse_malformedJson_fallsBackToDefaults() {
-        val s = FlickStickSettings.parse("not valid json {")
-        assertEquals(FlickStickSettings.DEFAULTS, s)
+    fun parse_malformed_fallsBackToDefaults() {
+        assertEquals(FlickStickSettings.DEFAULTS, FlickStickSettings.parse("not json {"))
     }
 
     @Test
-    fun settings_parse_partialOverridesPreserveDefaults() {
-        val s = FlickStickSettings.parse("""{"flick_time":50}""")
-        assertEquals(50, s.flickTimeMs)
-        assertEquals(FlickStickSettings.DEFAULT_DEADZONE, s.deadzone, 1e-6f)
-        assertEquals(FlickStickSettings.DEFAULT_VELOCITY_PX_PER_RAD, s.velocityPxPerRad, 1e-6f)
+    fun parse_dotsPer360_derivesVelocityPxPerRad() {
+        val s = FlickStickSettings.parse("""{"dots_per_360":6283}""")
+        // 6283 / 2π ≈ 1000 px/rad.
+        assertEquals(1000f, s.velocityPxPerRad, 1f)
     }
 
     @Test
-    fun settings_parse_clampsOutOfRangeValues() {
+    fun flickTurnTightness_higherMeansShorterFlick() {
+        val tight = FlickStickSettings.parse("""{"flick_turn_tightness":100}""").flickTimeMs
+        val loose = FlickStickSettings.parse("""{"flick_turn_tightness":0}""").flickTimeMs
+        assertTrue("higher tightness = shorter flick time", tight < loose)
+    }
+
+    @Test
+    fun parse_snapAngleVariants() {
+        assertEquals(FlickStickSettings.SnapMode.NONE, FlickStickSettings.parse("""{"snap_angle":"no_snapping"}""").snapMode)
+        assertEquals(FlickStickSettings.SnapMode.HALF, FlickStickSettings.parse("""{"snap_angle":"180"}""").snapMode)
+        assertEquals(FlickStickSettings.SnapMode.QUARTER, FlickStickSettings.parse("""{"snap_angle":"90"}""").snapMode)
+        assertEquals(FlickStickSettings.SnapMode.SIXTHS, FlickStickSettings.parse("""{"snap_angle":"sixths"}""").snapMode)
+        assertEquals(FlickStickSettings.SnapMode.EIGHTHS, FlickStickSettings.parse("""{"snap_angle":"eighths"}""").snapMode)
+        // Default + unknown both fall to forward_only.
+        assertEquals(FlickStickSettings.SnapMode.FORWARD_ONLY, FlickStickSettings.parse("""{"snap_angle":"garbage"}""").snapMode)
+        assertEquals(FlickStickSettings.SnapMode.FORWARD_ONLY, FlickStickSettings.DEFAULTS.snapMode)
+    }
+
+    @Test
+    fun parse_clampsOutOfRange() {
         val s = FlickStickSettings.parse(
-            """{"flick_deadzone":-5,"flick_exponent":99,"flick_velocity":-100}"""
+            """{"dots_per_360":99999,"sweep_sensitivity":99,"release_dampening":-5}""",
         )
-        assertTrue("deadzone must clamp to ≥ 0.05", s.deadzone >= 0.05f)
-        assertTrue("exponent must clamp to ≤ 5", s.exponent <= 5f)
-        assertTrue("velocity must clamp to ≥ 1", s.velocityPxPerRad >= 1f)
-    }
-
-    @Test
-    fun settings_parse_snapModeAcceptsVariants() {
-        assertEquals(
-            FlickStickSettings.SnapMode.FOUR_WAY,
-            FlickStickSettings.parse("""{"flick_snap_mode":"4_way"}""").snapMode,
-        )
-        assertEquals(
-            FlickStickSettings.SnapMode.EIGHT_WAY,
-            FlickStickSettings.parse("""{"flick_snap_mode":"8_way"}""").snapMode,
-        )
-        assertEquals(
-            FlickStickSettings.SnapMode.NONE,
-            FlickStickSettings.parse("""{"flick_snap_mode":"garbage"}""").snapMode,
-        )
-    }
-
-    @Test
-    fun defaultJson_roundTripsThroughParse() {
-        val s = FlickStickSettings.parse(FlickStickSettings.DEFAULT_JSON)
-        assertEquals(FlickStickSettings.DEFAULTS, s)
-    }
-
-    // ── resetState() ─────────────────────────────────────────────────────────
-
-    @Test
-    fun resetState_clearsPerSourceState() {
-        every { mouse.scheduleSmoothDelta(any(), any(), any()) } returns Unit
-        // Push stick right → flick scheduled, now in HOLDING.
-        FlickStickMode.evaluate(
-            reading = reading(x = 1f, y = 0f, timestampMs = 0L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        FlickStickMode.resetState()
-        // Without reset, this leftward stick on next event would be
-        // interpreted as a hold-phase rotation from +π/2 (after lockout).
-        // With reset, the state goes back to NEUTRAL → fresh flick fires
-        // a scheduled playout with negative dx target.
-        val dxSlot = slot<Float>()
-        every {
-            mouse.scheduleSmoothDelta(capture(dxSlot), 0f, any())
-        } returns Unit
-        FlickStickMode.evaluate(
-            reading = reading(x = -1f, y = 0f, timestampMs = 100L),
-            ctx = ctx(),
-            digitalEmit = digitalEmit,
-            mouse = mouse,
-        )
-        assertTrue("post-reset push must re-flick (negative dx)", dxSlot.captured < 0f)
+        assertTrue(s.dotsPer360 <= 32000f)
+        assertTrue(s.sweepSensitivity <= 6f)
+        assertTrue(s.releaseDampening >= 0f)
     }
 }

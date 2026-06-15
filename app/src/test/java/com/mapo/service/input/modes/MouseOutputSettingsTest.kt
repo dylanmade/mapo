@@ -28,10 +28,11 @@ class MouseOutputSettingsTest {
     }
 
     @Test
-    fun defaultSensitivity_275pct_isAbout800PxPerSec() {
+    fun defaultSensitivity_275pct_matchesCalibratedBase() {
         // Full-deflection shaped input (1, 0) → vx ≈ sensitivity px/sec.
+        // 970 px/sec per 100% × 2.75 ≈ 2668 px/sec (calibrated to Steam Input).
         val (vx, vy) = MouseOutputSettings.DEFAULTS.toVelocity(1f, 0f)
-        assertClose(800f, vx, 2f)
+        assertClose(2667.5f, vx, 2f)
         assertEquals(0f, vy, 1e-3f)
     }
 

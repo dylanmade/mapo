@@ -415,6 +415,109 @@ object SourceModeSettingsSchema {
         control = SettingControl.Dropdown(RESPONSE_AXIS_OPTIONS, defaultId = "per_axis"),
     )
 
+    // ── Flick Stick specs (Joysticks → Flick Stick) ─────────────────────────────
+    private val SNAP_ANGLE_OPTIONS = listOf(
+        DropdownOption("no_snapping", "No snapping"),
+        DropdownOption("180", "180 degrees"),
+        DropdownOption("90", "90 degrees"),
+        DropdownOption("sixths", "Sixths"),
+        DropdownOption("eighths", "Eighths"),
+        DropdownOption("forward_only", "Forward only", "Snap to forward only when the flick is roughly forward; other turns stay precise."),
+    )
+    private val FLICK_OUTPUT_AXIS_OPTIONS = listOf(
+        DropdownOption("horizontal", "Horizontal only"),
+        DropdownOption("vertical", "Vertical only"),
+    )
+
+    private val FLICK_DOTS_PER_360 = SettingSpec(
+        key = "dots_per_360",
+        label = "Dots per 360",
+        helper = "Mouse pixels for one full 360° sweep. Shared with Gyro to Mouse's Dots per 360. Bind \"Turn camera 360\" to calibrate against the game.",
+        control = SettingControl.Slider(1f, 32000f, default = 6545f, unitSuffix = " px"),
+    )
+    private val FLICK_SWEEP_SENSITIVITY = SettingSpec(
+        key = "sweep_sensitivity",
+        label = "Sweep sensitivity",
+        helper = "Multiplier for sweeping the stick around the edge. Tune after Dots per 360.",
+        control = SettingControl.Slider(0f, 6f, default = 1f, step = 0.125f, unitSuffix = "x", decimals = 3),
+    )
+    private val FLICK_ROTATION_OFFSET = SettingSpec(
+        key = "rotation_offset",
+        label = "Rotation offset",
+        helper = "Rotates the flick inputs, if a forward flick consistently lands to one side.",
+        control = SettingControl.Slider(-180f, 180f, default = 0f, unitSuffix = "°"),
+    )
+    private val FLICK_SNAP_ANGLE = SettingSpec(
+        key = "snap_angle",
+        label = "Snap angle",
+        control = SettingControl.Dropdown(SNAP_ANGLE_OPTIONS, defaultId = "forward_only"),
+    )
+    private val FLICK_FRONT_ANGLE_DEADZONE = SettingSpec(
+        key = "front_angle_deadzone",
+        label = "Front angle deadzone",
+        helper = "No flick turn occurs if the stick points within this angle of forward. Lets you sweep without flicking.",
+        control = SettingControl.Slider(0f, 180f, default = 7f, unitSuffix = "°"),
+    )
+    private val FLICK_TURN_TIGHTNESS = SettingSpec(
+        key = "flick_turn_tightness",
+        label = "Flick turn tightness",
+        helper = "Flick turn smoothing. Higher = quicker turns.",
+        control = SettingControl.Slider(0f, 100f, default = 80f, unitSuffix = "%"),
+    )
+    private val FLICK_SWEEP_TIGHTNESS = SettingSpec(
+        key = "sweep_tightness",
+        label = "Sweep tightness",
+        helper = "Smooths sweep noise. Higher = quicker response; lower = smoother/slower.",
+        control = SettingControl.Slider(0f, 100f, default = 70f, unitSuffix = "%"),
+    )
+    private val FLICK_RELEASE_DAMPENING = SettingSpec(
+        key = "release_dampening",
+        label = "Release dampening speed",
+        helper = "Reduces stray sweep as the stick returns home. Higher = the stick must return faster to dampen.",
+        control = SettingControl.Slider(0f, 10f, default = 2.5f, step = 0.25f, unitSuffix = " u/s", decimals = 2),
+    )
+    private val FLICK_INNER_DEADZONE = SettingSpec(
+        key = "inner_deadzone",
+        label = "Inner deadzone",
+        helper = "Push the stick this far to begin the flick turn. Higher values help compute a more accurate initial angle.",
+        control = SettingControl.Slider(0f, 100f, default = 50f, unitSuffix = "%"),
+    )
+    private val FLICK_OUTER_DEADZONE = SettingSpec(
+        key = "outer_deadzone",
+        label = "Outer deadzone",
+        helper = "Push the stick this far to reach the maximum flick turn rate.",
+        control = SettingControl.Slider(0f, 100f, default = 90f, unitSuffix = "%"),
+    )
+    private val FLICK_OUTPUT_AXIS = SettingSpec(
+        key = "output_axis",
+        label = "Output axis",
+        helper = "Send the flick to horizontal (typical) or vertical mouse movement.",
+        control = SettingControl.Dropdown(FLICK_OUTPUT_AXIS_OPTIONS, defaultId = "horizontal"),
+    )
+    private val FLICK_INVERT_OUTPUT = SettingSpec(
+        key = "invert_output",
+        label = "Invert output",
+        control = SettingControl.Toggle(),
+    )
+    private val FLICK_ON_AWAKE = SettingSpec(
+        key = "flick_on_awake",
+        label = "Allow flick on awake",
+        helper = "If the stick is already past the inner deadzone when this action set activates, flick immediately. Off = move the stick home and back out first.",
+        control = SettingControl.Toggle(),
+    )
+    private val FLICK_ROTATIONAL_HAPTICS = SettingSpec(
+        key = "rotational_haptics",
+        label = "Rotational haptics",
+        helper = "Haptic bump intensity while sweeping the flick stick.",
+        control = SettingControl.Dropdown(HAPTIC_INTENSITY_OPTIONS, defaultId = "medium"),
+    )
+    private val FLICK_DEGREES_PER_HAPTIC_BUMP = SettingSpec(
+        key = "degrees_per_haptic_bump",
+        label = "Degrees per haptic bump",
+        helper = "Degrees of sweep rotation between rotational haptic bumps.",
+        control = SettingControl.Slider(0f, 360f, default = 5f, unitSuffix = "°"),
+    )
+
     /** Output Joystick defaults to the matching stick for an analog joystick source. */
     private fun outputJoystick(source: InputSource) = SettingSpec(
         key = "output_joystick",
@@ -461,6 +564,25 @@ object SourceModeSettingsSchema {
         SettingCategory("Haptics", listOf(HAPTIC_INTENSITY)),
     )
 
+    /** The "Flick Stick" mode menu (analog stick → flick-turn + sweep camera). */
+    private val FLICK_STICK_CATEGORIES = listOf(
+        SettingCategory("Angle calibration", listOf(FLICK_DOTS_PER_360)),
+        SettingCategory("Sensitivity", listOf(FLICK_SWEEP_SENSITIVITY, FLICK_ROTATION_OFFSET)),
+        SettingCategory("Snapping", listOf(FLICK_SNAP_ANGLE, FLICK_FRONT_ANGLE_DEADZONE)),
+        SettingCategory(
+            "Smoothing",
+            listOf(FLICK_TURN_TIGHTNESS, FLICK_SWEEP_TIGHTNESS, FLICK_RELEASE_DAMPENING),
+        ),
+        SettingCategory("Deadzones", listOf(FLICK_INNER_DEADZONE, FLICK_OUTER_DEADZONE)),
+        SettingCategory("Output", listOf(FLICK_OUTPUT_AXIS, FLICK_INVERT_OUTPUT)),
+        SettingCategory("Outer ring", listOf(COMMAND_RADIUS, COMMAND_INVERT)),
+        SettingCategory("Action set activation", listOf(FLICK_ON_AWAKE)),
+        SettingCategory(
+            "Haptics",
+            listOf(FLICK_ROTATIONAL_HAPTICS, FLICK_DEGREES_PER_HAPTIC_BUMP),
+        ),
+    )
+
     /**
      * The settings menu for a given (source, mode). Empty list = no cog shown.
      * Filled in menu-by-menu as each slice lands.
@@ -488,6 +610,10 @@ object SourceModeSettingsSchema {
         // Analog joysticks in Joystick Mouse mode (stick → cursor).
         (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) &&
             mode == BindingMode.JOYSTICK_MOUSE -> JOYSTICK_MOUSE_CATEGORIES
+
+        // Analog joysticks in Flick Stick mode.
+        (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) &&
+            mode == BindingMode.FLICK_STICK -> FLICK_STICK_CATEGORIES
 
         else -> emptyList()
     }

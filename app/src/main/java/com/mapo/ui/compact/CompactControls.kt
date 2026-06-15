@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
@@ -77,6 +78,31 @@ fun CompactSwitch(
  * shrunk widget actually frees up space). A plain `Modifier.scale` only transforms drawing and
  * leaves the original measured bounds, which is exactly what we don't want for a dense row.
  */
+/**
+ * A compact [Checkbox]. M3's checkbox has no size token (its box is ~18dp inside a 40–48dp
+ * minimum-interactive footprint), so this scales the box via [scaledLayout] (which shrinks the
+ * measured bounds, reclaiming row space — not just the drawing) and drops the min-interactive
+ * reservation. Intended for decorative use where the *row* owns the toggle (`onCheckedChange = null`),
+ * so the smaller tap target on the box itself is fine.
+ */
+@Composable
+fun CompactCheckbox(
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    scale: Float = 0.8f,
+) {
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = modifier.scaledLayout(scale),
+            enabled = enabled,
+        )
+    }
+}
+
 private fun Modifier.scaledLayout(scale: Float): Modifier =
     if (scale == 1f) this
     else this.layout { measurable, constraints ->

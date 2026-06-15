@@ -45,9 +45,10 @@ import androidx.compose.ui.unit.dp
  * way to fake the notch without the decoration-box machinery that churns across material3
  * alphas.
  *
- * Selection only: there is no text entry. Pass [options] as `(key, label)` pairs; the
- * entry whose key equals [selectedKey] is marked with a trailing check. Management actions
- * (add / rename / …) belong in an adjacent control, not in this menu.
+ * Selection only: there is no text entry. The simple form takes [options] as `(key, label)`
+ * pairs (the [selectedKey] entry gets a trailing check). For a richer menu — leading icons,
+ * per-row kebabs, footer actions — pass [menuContent] instead and render your own rows
+ * (e.g. [CompactDropdownMenuItem]s); it receives a `dismiss` callback to close the menu.
  *
  * @param labelBackground the color the notch paints over to "cut" the border — must match
  *   whatever is *behind* the field (e.g. the app-bar / surface color) or the mask shows.
@@ -57,13 +58,14 @@ import androidx.compose.ui.unit.dp
 fun CompactDropdownField(
     label: String,
     selectedText: String,
-    options: List<Pair<String, String>>,
-    selectedKey: String?,
-    onPick: (String) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     fieldTestTag: String? = null,
     labelBackground: Color = MaterialTheme.colorScheme.surface,
+    options: List<Pair<String, String>> = emptyList(),
+    selectedKey: String? = null,
+    onPick: (String) -> Unit = {},
+    menuContent: (@Composable (dismiss: () -> Unit) -> Unit)? = null,
 ) {
     val density = LocalCompactDensity.current
     val colors = MaterialTheme.colorScheme
@@ -106,7 +108,8 @@ fun CompactDropdownField(
             ) {
                 Text(
                     text = selectedText,
-                    style = compactBodyStyle(),
+                    // Match the menu rows (CompactDropdownMenuItem also uses compactLabelStyle).
+                    style = compactLabelStyle(),
                     color = contentColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -133,17 +136,21 @@ fun CompactDropdownField(
             )
         }
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (key, text) ->
-                CompactDropdownMenuItem(
-                    text = text,
-                    onClick = {
-                        expanded = false
-                        if (key != selectedKey) onPick(key)
-                    },
-                    trailingIcon = if (key == selectedKey) {
-                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.padding(start = 8.dp)) }
-                    } else null,
-                )
+            if (menuContent != null) {
+                menuContent { expanded = false }
+            } else {
+                options.forEach { (key, text) ->
+                    CompactDropdownMenuItem(
+                        text = text,
+                        onClick = {
+                            expanded = false
+                            if (key != selectedKey) onPick(key)
+                        },
+                        trailingIcon = if (key == selectedKey) {
+                            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.padding(start = 8.dp)) }
+                        } else null,
+                    )
+                }
             }
         }
     }

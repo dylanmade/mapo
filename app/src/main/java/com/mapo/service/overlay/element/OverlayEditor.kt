@@ -110,7 +110,51 @@ class OverlayEditor @Inject constructor(
     }
 
     fun setScope(newScope: OverlayScope) {
+        if (_editingScope.value != newScope) clearHistory() // undo history is per editing scope
         _editingScope.value = newScope
+    }
+
+    // ── undo / redo (per editing scope; snapshots of the scope's full element list) ───────────────
+    private val undoStack = ArrayDeque<List<OverlayElement>>()
+    private val redoStack = ArrayDeque<List<OverlayElement>>()
+    private val _canUndo = MutableStateFlow(false)
+    val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
+    private val _canRedo = MutableStateFlow(false)
+    val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
+
+    /** Capture the current scope's elements onto the undo stack — call BEFORE a mutating edit. */
+    fun pushUndoSnapshot() {
+        if (_editingScope.value == null) return
+        undoStack.addLast(elements.value)
+        while (undoStack.size > MAX_UNDO) undoStack.removeFirst()
+        redoStack.clear()
+        syncUndoFlags()
+    }
+
+    fun undo() = restoreFrom(undoStack, redoStack)
+    fun redo() = restoreFrom(redoStack, undoStack)
+
+    private fun restoreFrom(from: ArrayDeque<List<OverlayElement>>, to: ArrayDeque<List<OverlayElement>>) {
+        val current = _editingScope.value ?: return
+        val snapshot = from.removeLastOrNull() ?: return
+        to.addLast(elements.value) // current state becomes the inverse-direction entry
+        syncUndoFlags()
+        scope.launch {
+            overlayRepository.replaceScopeElements(
+                actionSetId = (current as? OverlayScope.Set)?.actionSetId,
+                actionLayerId = (current as? OverlayScope.Layer)?.actionLayerId,
+                elements = snapshot,
+            )
+        }
+    }
+
+    private fun clearHistory() {
+        undoStack.clear(); redoStack.clear(); syncUndoFlags()
+    }
+
+    private fun syncUndoFlags() {
+        _canUndo.value = undoStack.isNotEmpty()
+        _canRedo.value = redoStack.isNotEmpty()
     }
 
     /** Elements of the current [editingScope], live. Empty when no scope is selected. */
@@ -191,13 +235,75 @@ class OverlayEditor @Inject constructor(
         scope.launch { overlayRepository.update(element) }
     }
 
+    /**
+     * Clone [sources] into the CURRENT scope, nudged by [PASTE_OFFSET] so the copies don't sit exactly
+     * on top of their originals. New rows (id reset to 0 → auto-assigned). [onDone] receives the new ids
+     * (e.g. so the caller can select the pastes); it may run on a background thread.
+     */
+    fun duplicate(sources: List<OverlayElement>, onDone: (List<Long>) -> Unit = {}) {
+        val profileId = activeProfileId.value ?: return
+        val current = _editingScope.value ?: return
+        if (sources.isEmpty()) return
+        scope.launch {
+            val base = elements.value.size
+            // ONE batched insert → a single flow emission → renderElements/raiseToolbar run ONCE
+            // (inserting the clones one-by-one storms the toolbar recreation and can crash it).
+            val clones = sources.mapIndexed { i, src ->
+                src.copy(
+                    id = 0,
+                    profileId = profileId,
+                    actionSetId = (current as? OverlayScope.Set)?.actionSetId,
+                    actionLayerId = (current as? OverlayScope.Layer)?.actionLayerId,
+                    x = (src.x + PASTE_OFFSET).coerceIn(0f, 1f - src.width),
+                    y = (src.y + PASTE_OFFSET).coerceIn(0f, 1f - src.height),
+                    zIndex = base + i,
+                )
+            }
+            onDone(overlayRepository.addAll(clones))
+        }
+    }
+
     fun delete(id: Long) {
         scope.launch { overlayRepository.deleteById(id) }
+    }
+
+    /**
+     * Create a new (default-seeded) action set in the active controller config and report its scope
+     * (so the caller can switch the editor to it). The new set appears in [availableScopes] reactively.
+     */
+    fun addActionSet(onDone: (OverlayScope) -> Unit = {}) {
+        val profileId = activeProfileId.value ?: return
+        scope.launch {
+            val config = controllerConfigRepository.getActiveConfigOnce(profileId) ?: return@launch
+            val n = config.actionSets.size + 1
+            val id = controllerConfigRepository.addActionSet(
+                controllerProfileId = config.controllerProfile.id,
+                name = "set_$n",
+                title = "Action set $n",
+            )
+            onDone(OverlayScope.Set(id))
+        }
+    }
+
+    /** Create a new empty layer under [actionSetId] and report its scope. */
+    fun addLayer(actionSetId: Long, onDone: (OverlayScope) -> Unit = {}) {
+        val profileId = activeProfileId.value ?: return
+        scope.launch {
+            val config = controllerConfigRepository.getActiveConfigOnce(profileId) ?: return@launch
+            val set = config.actionSets.firstOrNull { it.actionSet.id == actionSetId } ?: return@launch
+            val n = set.layers.size + 1
+            val id = controllerConfigRepository.addLayer(actionSetId, name = "layer_$n", title = "Layer $n")
+            onDone(OverlayScope.Layer(actionLayerId = id, parentActionSetId = actionSetId))
+        }
     }
 
     companion object {
         const val DEFAULT_WIDTH = 0.16f
         const val DEFAULT_HEIGHT = 0.10f
         const val MIN_SIZE = 0.04f
+        // Normalized offset applied to pasted/duplicated copies so they don't overlap the originals.
+        const val PASTE_OFFSET = 0.03f
+        // Depth of the per-scope undo history.
+        const val MAX_UNDO = 50
     }
 }

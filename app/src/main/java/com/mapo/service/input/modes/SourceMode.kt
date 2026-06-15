@@ -1131,28 +1131,32 @@ object FlickStickMode : SourceMode {
     override fun validInputs(): Set<String> = INPUTS
     override fun defaultSettingsJson(): String = FlickStickSettings.DEFAULT_JSON
     private val INPUTS = setOf("click", "outer_ring")
+    private const val TAG = "FlickStickMode"
 
     private enum class Phase { NEUTRAL, HOLDING }
 
-    private data class State(
-        var phase: Phase = Phase.NEUTRAL,
-        var lastStickAngleRad: Float = 0f,
+    private class State {
+        var phase: Phase = Phase.NEUTRAL
+        var lastStickAngleRad: Float = 0f
+        /** Timestamp (ms) of the most recent NEUTRAL → HOLDING transition. */
+        var flickActivationMs: Long = 0L
+        /** False during the post-activation lockout; see hold-phase handling. */
+        var holdSettled: Boolean = false
         /**
-         * Timestamp (ms) of the most recent NEUTRAL → HOLDING transition.
-         * Hold-phase emissions are suppressed until
-         * `now - flickActivationMs >= flick_time`. Reset to 0 on return
-         * to NEUTRAL.
+         * Whether the next outward crossing is allowed to fire a flick. Set from
+         * `flick_on_awake` on the first evaluate (so a stick already deflected when
+         * the action set activates only flicks if the user opted in), then forced
+         * true whenever the stick returns home.
          */
-        var flickActivationMs: Long = 0L,
-        /**
-         * False during the post-activation lockout. Flips true on the first
-         * evaluate() after the lockout expires, at which point we re-baseline
-         * `lastStickAngleRad` to the current stick angle without emitting,
-         * so subsequent hold-phase rotation is measured against where the
-         * stick actually is — not against the flick target angle.
-         */
-        var holdSettled: Boolean = false,
-    )
+        var armed: Boolean = true
+        var initialized: Boolean = false
+        /** Exponential-smoothing accumulator for hold-phase sweep. */
+        var smoothedSweep: Float = 0f
+        /** Accumulated |sweep| degrees toward the next rotational haptic bump. */
+        var hapticAccumDeg: Float = 0f
+        var prevMagnitude: Float = 0f
+        var prevTimestampMs: Long = 0L
+    }
 
     private val stateBySource = mutableMapOf<InputSource, State>()
 
@@ -1173,172 +1177,303 @@ object FlickStickMode : SourceMode {
         mouse: MouseEmitter,
     ) {
         if (reading.source != InputSource.LEFT_JOYSTICK && reading.source != InputSource.RIGHT_JOYSTICK) return
-        val settings = FlickStickSettings.parse(ctx.settingsJson)
+        val s = FlickStickSettings.parse(ctx.settingsJson)
 
         val state = synchronized(stateBySource) {
             stateBySource.getOrPut(reading.source) { State() }
         }
 
-        val magnitude = kotlin.math.sqrt(reading.x * reading.x + reading.y * reading.y)
+        // Outer-ring command — independent of the flick state machine, shared with
+        // the other joystick modes.
+        StickOuterRingHaptics.outerRingCommand(
+            reading, s.commandRadius, s.commandInvert, ctx, digitalEmit, TAG,
+        )
 
-        // Stick neutral → reset state, no output. The flick playout (if
-        // any) continues independently in the MouseEmitter — it was
-        // committed at activation and is uninterruptible by stick state.
-        if (magnitude < settings.deadzone) {
+        val magnitude = kotlin.math.sqrt(reading.x * reading.x + reading.y * reading.y)
+        // Capture the prior radial sample for release-dampening, then advance it.
+        val prevMag = state.prevMagnitude
+        val prevTs = state.prevTimestampMs
+        state.prevMagnitude = magnitude
+        state.prevTimestampMs = reading.timestampMs
+
+        // First evaluate after a (re)start: "Allow Flick on Awake" decides whether a
+        // stick already past the inner deadzone may flick immediately.
+        if (!state.initialized) {
+            state.armed = s.flickOnAwake
+            state.initialized = true
+        }
+
+        // Stick home → reset; arm the next flick. Any in-flight flick playout
+        // continues independently in the MouseEmitter (committed at activation).
+        if (magnitude < s.innerDeadzone) {
             state.phase = Phase.NEUTRAL
             state.flickActivationMs = 0L
             state.holdSettled = false
+            state.armed = true
+            state.smoothedSweep = 0f
+            state.hapticAccumDeg = 0f
             return
         }
 
         when (state.phase) {
             Phase.NEUTRAL -> {
-                // Threshold crossing: commit the flick. atan2(x, -y) gives
-                // 0 = up, +π/2 = right, ±π = down, −π/2 = left. Schedule
-                // the full target * velocity delta to play out over
-                // flick_time ms via the MouseEmitter; we transition
-                // straight to HOLDING with a lockout window so the
-                // user's finishing-the-push drift isn't picked up as
-                // hold-phase rotation while the flick is still resolving.
-                val rawTarget = kotlin.math.atan2(reading.x, -reading.y)
-                val target = settings.snapAngle(rawTarget)
-                val dxPx = target * settings.velocityPxPerRad
-                if (dxPx != 0f) {
-                    mouse.scheduleSmoothDelta(dxPx, 0f, settings.flickTimeMs.toLong())
+                // atan2(x, -y): 0 = up, +π/2 = right, ±π = down, −π/2 = left.
+                // Rotation Offset shifts the whole flick frame.
+                val rawTarget = wrapPi(kotlin.math.atan2(reading.x, -reading.y) + s.rotationOffsetRad)
+                if (state.armed && kotlin.math.abs(rawTarget) >= s.frontAngleDeadzoneRad) {
+                    // Commit the flick: schedule target*velocity to play out over the
+                    // flick-turn duration. Front Angle Deadzone suppresses flicks that
+                    // are within `front_angle_deadzone` of forward (sweep-only intent).
+                    val target = s.snapAngle(rawTarget)
+                    val px = target * s.velocityPxPerRad
+                    if (px != 0f) scheduleDelta(mouse, s, px)
                 }
-                state.lastStickAngleRad = target
-                state.flickActivationMs = reading.timestampMs
-                state.holdSettled = false
+                // Enter HOLDING regardless (sweep tracking). The lockout only applies
+                // when a flick actually fired; otherwise settle the baseline now.
+                state.lastStickAngleRad = rawTarget
+                state.smoothedSweep = 0f
+                state.hapticAccumDeg = 0f
+                if (state.armed && kotlin.math.abs(rawTarget) >= s.frontAngleDeadzoneRad) {
+                    state.flickActivationMs = reading.timestampMs
+                    state.holdSettled = false
+                } else {
+                    // No flick fired → no lockout; sweep immediately from here.
+                    state.flickActivationMs = reading.timestampMs - s.flickTimeMs
+                    state.holdSettled = true
+                }
                 state.phase = Phase.HOLDING
             }
             Phase.HOLDING -> {
                 val elapsedMs = reading.timestampMs - state.flickActivationMs
-                if (elapsedMs < settings.flickTimeMs) {
-                    // Lockout window: flick is still playing out. Suppress
-                    // hold-phase emission and don't touch lastStickAngleRad
-                    // — we'll re-baseline at lockout end against whatever
-                    // angle the stick has drifted to.
+                if (elapsedMs < s.flickTimeMs) {
+                    // Lockout: flick still resolving. Suppress hold-phase emission and
+                    // re-baseline at lockout end against wherever the stick drifted to.
                     return
                 }
+                val currentAngle = wrapPi(kotlin.math.atan2(reading.x, -reading.y) + s.rotationOffsetRad)
                 if (!state.holdSettled) {
-                    // First post-lockout evaluate: settle the baseline at
-                    // the current stick angle, emit nothing. Subsequent
-                    // hold-phase rotation is measured against here.
-                    state.lastStickAngleRad = kotlin.math.atan2(reading.x, -reading.y)
+                    state.lastStickAngleRad = currentAngle
                     state.holdSettled = true
+                    state.smoothedSweep = 0f
                     return
                 }
-                val currentAngle = kotlin.math.atan2(reading.x, -reading.y)
                 val delta = angularDelta(state.lastStickAngleRad, currentAngle)
                 state.lastStickAngleRad = currentAngle
-                // Apply exponent curve to the hold-phase delta. Sign-preserve.
-                val sign = if (delta < 0f) -1f else 1f
-                val curved = kotlin.math.abs(delta).pow(settings.exponent) * sign
-                val dxPx = curved * settings.velocityPxPerRad
-                if (dxPx != 0f) mouse.addRelativeDelta(dxPx, 0f)
+
+                // Sweep smoothing (Sweep Tightness): higher = more responsive.
+                val alpha = s.sweepTightness.coerceIn(0.05f, 1f)
+                state.smoothedSweep = state.smoothedSweep * (1f - alpha) + delta * alpha
+
+                // Release Dampening: reduce sweep while the stick is moving home, so a
+                // thumb bounce-off on release doesn't fire a stray sweep. Higher
+                // setting = the stick must return faster to dampen.
+                val dtSec = ((reading.timestampMs - prevTs).toFloat() / 1000f).coerceAtLeast(1e-3f)
+                val inwardSpeed = ((prevMag - magnitude) / dtSec).coerceAtLeast(0f)
+                val dampen = if (inwardSpeed <= 0f) {
+                    1f
+                } else if (s.releaseDampening <= 0f) {
+                    0f // any inward motion fully dampens
+                } else {
+                    (1f - (inwardSpeed / s.releaseDampening).coerceIn(0f, 1f))
+                }
+
+                val sweptRad = state.smoothedSweep * s.sweepSensitivity * dampen
+                val px = sweptRad * s.velocityPxPerRad
+                if (px != 0f) emitDelta(mouse, s, px)
+
+                // Rotational haptic bumps — one buzz per `degrees_per_haptic_bump` of
+                // raw sweep, at the configured intensity.
+                if (s.degreesPerHapticBump > 0f) {
+                    val intensity = HapticIntensity.fromId(s.rotationalHaptics) ?: HapticIntensity.OFF
+                    if (intensity != HapticIntensity.OFF) {
+                        state.hapticAccumDeg += Math.toDegrees(kotlin.math.abs(delta).toDouble()).toFloat()
+                        if (state.hapticAccumDeg >= s.degreesPerHapticBump) {
+                            state.hapticAccumDeg = 0f
+                            ctx.haptic(intensity)
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /** Schedule the flick burst on the configured output axis, honoring invert. */
+    private fun scheduleDelta(mouse: MouseEmitter, s: FlickStickSettings, amount: Float) {
+        val signed = if (s.invertOutput) -amount else amount
+        val dur = s.flickTimeMs.toLong()
+        if (s.outputVertical) mouse.scheduleSmoothDelta(0f, signed, dur)
+        else mouse.scheduleSmoothDelta(signed, 0f, dur)
+    }
+
+    /** Emit a hold-phase sweep delta on the configured output axis, honoring invert. */
+    private fun emitDelta(mouse: MouseEmitter, s: FlickStickSettings, amount: Float) {
+        val signed = if (s.invertOutput) -amount else amount
+        if (s.outputVertical) mouse.addRelativeDelta(0f, signed)
+        else mouse.addRelativeDelta(signed, 0f)
+    }
+
+    /** Wrap an angle to (−π, π]. */
+    private fun wrapPi(rad: Float): Float {
+        var d = rad
+        val twoPi = (2 * kotlin.math.PI).toFloat()
+        while (d > kotlin.math.PI) d -= twoPi
+        while (d < -kotlin.math.PI) d += twoPi
+        return d
     }
 
     /**
      * Shortest signed angular difference between two angles. Wraps around
      * ±π so a 350°-to-10° transition is treated as +20° rather than −340°.
      */
-    private fun angularDelta(fromRad: Float, toRad: Float): Float {
-        var d = toRad - fromRad
-        val twoPi = (2 * kotlin.math.PI).toFloat()
-        while (d > kotlin.math.PI) d -= twoPi
-        while (d < -kotlin.math.PI) d += twoPi
-        return d
-    }
+    private fun angularDelta(fromRad: Float, toRad: Float): Float = wrapPi(toRad - fromRad)
 }
 
 /**
- * Parsed [FlickStickMode] settings. Tolerant of missing keys; falls back to
- * Jibb-Smart-canonical defaults that match Steam Deck's default Flick Stick
- * configuration as a starting point for device-feel verification.
+ * Parsed [FlickStickMode] settings — the full "Flick Stick" menu. Tolerant of
+ * missing keys. Keys mirror
+ * [com.mapo.ui.screen.remap.settings.SourceModeSettingsSchema]'s
+ * `FLICK_STICK_CATEGORIES`.
  *
- * **VDF mapping (Steam parity):** Steam's `flickstick` group settings —
- * `flick_time`, `flick_deadzone`, `flick_snap_strength`, `flick_snap_mode`,
- * `flick_velocity`, `flick_exponent` — round-trip through this shape.
+ * Stored slider units (normalized at parse): [dotsPer360] is mouse pixels per
+ * full 360° (1..32000); [flickTurnTightness] / [sweepTightness] / [innerDeadzone]
+ * / [outerDeadzone] are percentages (0..100); [rotationOffsetRad] /
+ * [frontAngleDeadzoneRad] come from degrees; [commandRadius] is the raw Steam
+ * 0..32767 radius (shared with the Joystick menu's slider for data consistency,
+ * a minor deviation from the spec's %-display).
  *
- * **[flickTimeMs]** controls both the flick playout duration (handed to
- * [MouseEmitter.scheduleSmoothDelta]) AND the hold-phase lockout window
- * (suppresses angular-delta emission until the flick finishes resolving,
- * so user's finishing-the-push stick drift doesn't fire as hold-phase
- * rotation).
+ * Derived: [velocityPxPerRad] = dots-per-360 ÷ 2π (the px/radian the flick burst
+ * + sweep emit at); [flickTimeMs] is derived from Flick Turn Tightness (higher =
+ * shorter = snappier turn).
+ *
+ * Approximations flagged to the user pending on-device verification: [outerDeadzone]
+ * is parsed but the one-shot flick model doesn't scale turn speed between inner/outer;
+ * `forward_only` snap semantics (snap to forward only when roughly forward).
  */
 internal data class FlickStickSettings(
-    val flickTimeMs: Int,
-    val deadzone: Float,
-    val velocityPxPerRad: Float,
-    val exponent: Float,
+    val dotsPer360: Float,
+    val sweepSensitivity: Float,
+    val rotationOffsetRad: Float,
     val snapMode: SnapMode,
-    val snapStrength: Float,
+    val frontAngleDeadzoneRad: Float,
+    val flickTurnTightness: Float, // 0..1
+    val sweepTightness: Float,     // 0..1
+    val releaseDampening: Float,   // 0..10 units/sec
+    val innerDeadzone: Float,      // 0..1
+    val outerDeadzone: Float,      // 0..1
+    val outputVertical: Boolean,   // false = horizontal (default), true = vertical
+    val invertOutput: Boolean,
+    val commandRadius: Float,      // 0..1 (normalized from 0..32767)
+    val commandInvert: Boolean,
+    val flickOnAwake: Boolean,
+    val rotationalHaptics: String, // off / low / medium / high
+    val degreesPerHapticBump: Float,
 ) {
-    enum class SnapMode { NONE, FOUR_WAY, EIGHT_WAY }
+    enum class SnapMode { NONE, HALF, QUARTER, SIXTHS, EIGHTHS, FORWARD_ONLY }
+
+    /** px per radian = dots-per-360 over a full turn. */
+    val velocityPxPerRad: Float get() = dotsPer360 / (2f * kotlin.math.PI.toFloat())
+
+    /** Flick-turn playout duration from tightness: 100% → fast (MIN), 0% → slow (MAX). */
+    val flickTimeMs: Int
+        get() = (MAX_FLICK_MS - flickTurnTightness.coerceIn(0f, 1f) * (MAX_FLICK_MS - MIN_FLICK_MS))
+            .toInt().coerceAtLeast(1)
 
     /**
-     * If [snapMode] is non-NONE, snap [rawTargetRad] toward the nearest
-     * cardinal (4-way) or 45°-quantized (8-way) angle with
-     * `snapStrength`-weighted blend. Strength 0 → no snap; strength 1 → full
-     * snap; intermediate values interpolate. Hold-phase rotation is
-     * intentionally unaffected — this only adjusts the flick burst's
-     * landing angle.
+     * Snap the flick's landing angle. For the evenly-divided modes (180/90/sixths/
+     * eighths) the target quantizes to the nearest division at full strength.
+     * `forward_only` snaps to forward (0) only when the flick is roughly forward
+     * (within ±[FORWARD_ONLY_WINDOW_RAD]); other angles pass through unsnapped, so
+     * you can reliably re-center while keeping precise turns elsewhere. Hold-phase
+     * sweep is unaffected.
      */
     fun snapAngle(rawTargetRad: Float): Float {
-        if (snapMode == SnapMode.NONE || snapStrength <= 0f) return rawTargetRad
         val divisions = when (snapMode) {
-            SnapMode.FOUR_WAY -> 4
-            SnapMode.EIGHT_WAY -> 8
             SnapMode.NONE -> return rawTargetRad
+            SnapMode.HALF -> 2
+            SnapMode.QUARTER -> 4
+            SnapMode.SIXTHS -> 6
+            SnapMode.EIGHTHS -> 8
+            SnapMode.FORWARD_ONLY ->
+                return if (kotlin.math.abs(rawTargetRad) <= FORWARD_ONLY_WINDOW_RAD) 0f else rawTargetRad
         }
         val step = (2 * kotlin.math.PI / divisions).toFloat()
-        val nearest = (kotlin.math.round(rawTargetRad / step) * step).toFloat()
-        val s = snapStrength.coerceIn(0f, 1f)
-        return rawTargetRad * (1f - s) + nearest * s
+        return (kotlin.math.round(rawTargetRad / step) * step).toFloat()
     }
 
     companion object {
-        const val DEFAULT_FLICK_TIME_MS = 100
-        const val DEFAULT_DEADZONE = 0.9f
-        const val DEFAULT_VELOCITY_PX_PER_RAD = 1500f  // ≈ 26 px per degree
-        const val DEFAULT_EXPONENT = 1.0f
-        const val DEFAULT_SNAP_STRENGTH = 0f
+        const val MIN_FLICK_MS = 50
+        const val MAX_FLICK_MS = 250
+        val FORWARD_ONLY_WINDOW_RAD = (kotlin.math.PI / 4).toFloat() // ±45°
+
+        const val DEFAULT_DOTS_PER_360 = 6545f
+        const val DEFAULT_SWEEP_SENSITIVITY = 1f
+        const val DEFAULT_FRONT_ANGLE_DEG = 7f
+        const val DEFAULT_FLICK_TURN_TIGHTNESS = 0.80f
+        const val DEFAULT_SWEEP_TIGHTNESS = 0.70f
+        const val DEFAULT_RELEASE_DAMPENING = 2.5f
+        const val DEFAULT_INNER_DEADZONE = 0.50f
+        const val DEFAULT_OUTER_DEADZONE = 0.90f
+        const val DEFAULT_COMMAND_RADIUS_RAW = 26214f // ≈ 80% of 32767 (spec default)
+        const val DEFAULT_DEGREES_PER_HAPTIC_BUMP = 5f
 
         val DEFAULTS = FlickStickSettings(
-            flickTimeMs = DEFAULT_FLICK_TIME_MS,
-            deadzone = DEFAULT_DEADZONE,
-            velocityPxPerRad = DEFAULT_VELOCITY_PX_PER_RAD,
-            exponent = DEFAULT_EXPONENT,
-            snapMode = SnapMode.NONE,
-            snapStrength = DEFAULT_SNAP_STRENGTH,
+            dotsPer360 = DEFAULT_DOTS_PER_360,
+            sweepSensitivity = DEFAULT_SWEEP_SENSITIVITY,
+            rotationOffsetRad = 0f,
+            snapMode = SnapMode.FORWARD_ONLY,
+            frontAngleDeadzoneRad = Math.toRadians(DEFAULT_FRONT_ANGLE_DEG.toDouble()).toFloat(),
+            flickTurnTightness = DEFAULT_FLICK_TURN_TIGHTNESS,
+            sweepTightness = DEFAULT_SWEEP_TIGHTNESS,
+            releaseDampening = DEFAULT_RELEASE_DAMPENING,
+            innerDeadzone = DEFAULT_INNER_DEADZONE,
+            outerDeadzone = DEFAULT_OUTER_DEADZONE,
+            outputVertical = false,
+            invertOutput = false,
+            commandRadius = DEFAULT_COMMAND_RADIUS_RAW / 32767f,
+            commandInvert = false,
+            flickOnAwake = false,
+            rotationalHaptics = "medium",
+            degreesPerHapticBump = DEFAULT_DEGREES_PER_HAPTIC_BUMP,
         )
 
-        val DEFAULT_JSON =
-            """{"flick_time":$DEFAULT_FLICK_TIME_MS,"flick_deadzone":$DEFAULT_DEADZONE,""" +
-                """"flick_velocity":$DEFAULT_VELOCITY_PX_PER_RAD,""" +
-                """"flick_exponent":$DEFAULT_EXPONENT,"flick_snap_mode":"none",""" +
-                """"flick_snap_strength":$DEFAULT_SNAP_STRENGTH}"""
+        // All keys tolerant → "{}" seeds the spec defaults.
+        val DEFAULT_JSON = "{}"
 
         fun parse(json: String): FlickStickSettings {
             if (json.isBlank()) return DEFAULTS
             return try {
                 val obj = JSONObject(json)
+                fun pct(key: String, defPct: Float) =
+                    (obj.optDouble(key, defPct.toDouble()).toFloat() / 100f).coerceIn(0f, 1f)
                 FlickStickSettings(
-                    flickTimeMs = obj.optInt("flick_time", DEFAULT_FLICK_TIME_MS)
-                        .coerceAtLeast(1),
-                    deadzone = obj.optDouble("flick_deadzone", DEFAULT_DEADZONE.toDouble())
-                        .toFloat().coerceIn(0.05f, 0.99f),
-                    velocityPxPerRad = obj.optDouble(
-                        "flick_velocity", DEFAULT_VELOCITY_PX_PER_RAD.toDouble()
-                    ).toFloat().coerceAtLeast(1f),
-                    exponent = obj.optDouble("flick_exponent", DEFAULT_EXPONENT.toDouble())
-                        .toFloat().coerceIn(0.1f, 5f),
-                    snapMode = parseSnapMode(obj.optString("flick_snap_mode") ?: "none"),
-                    snapStrength = obj.optDouble(
-                        "flick_snap_strength", DEFAULT_SNAP_STRENGTH.toDouble()
-                    ).toFloat().coerceIn(0f, 1f),
+                    dotsPer360 = obj.optDouble("dots_per_360", DEFAULT_DOTS_PER_360.toDouble())
+                        .toFloat().coerceIn(1f, 32000f),
+                    sweepSensitivity = obj.optDouble("sweep_sensitivity", DEFAULT_SWEEP_SENSITIVITY.toDouble())
+                        .toFloat().coerceIn(0f, 6f),
+                    rotationOffsetRad = Math.toRadians(
+                        obj.optDouble("rotation_offset", 0.0).coerceIn(-180.0, 180.0),
+                    ).toFloat(),
+                    snapMode = parseSnapMode(obj.optString("snap_angle", "forward_only")),
+                    frontAngleDeadzoneRad = Math.toRadians(
+                        obj.optDouble("front_angle_deadzone", DEFAULT_FRONT_ANGLE_DEG.toDouble())
+                            .coerceIn(0.0, 180.0),
+                    ).toFloat(),
+                    flickTurnTightness = pct("flick_turn_tightness", DEFAULT_FLICK_TURN_TIGHTNESS * 100f),
+                    sweepTightness = pct("sweep_tightness", DEFAULT_SWEEP_TIGHTNESS * 100f),
+                    releaseDampening = obj.optDouble("release_dampening", DEFAULT_RELEASE_DAMPENING.toDouble())
+                        .toFloat().coerceIn(0f, 10f),
+                    innerDeadzone = pct("inner_deadzone", DEFAULT_INNER_DEADZONE * 100f),
+                    outerDeadzone = pct("outer_deadzone", DEFAULT_OUTER_DEADZONE * 100f),
+                    outputVertical = obj.optString("output_axis", "horizontal") == "vertical",
+                    invertOutput = obj.optBoolean("invert_output", false),
+                    commandRadius = (obj.optDouble("command_radius", DEFAULT_COMMAND_RADIUS_RAW.toDouble())
+                        .toFloat() / 32767f).coerceIn(0f, 1f),
+                    commandInvert = obj.optBoolean("command_invert", false),
+                    flickOnAwake = obj.optBoolean("flick_on_awake", false),
+                    rotationalHaptics = obj.optString("rotational_haptics", "medium"),
+                    degreesPerHapticBump = obj.optDouble(
+                        "degrees_per_haptic_bump", DEFAULT_DEGREES_PER_HAPTIC_BUMP.toDouble(),
+                    ).toFloat().coerceIn(0f, 360f),
                 )
             } catch (_: JSONException) {
                 DEFAULTS
@@ -1346,9 +1481,13 @@ internal data class FlickStickSettings(
         }
 
         private fun parseSnapMode(s: String): SnapMode = when (s.lowercase()) {
-            "4_way", "four_way", "4way" -> SnapMode.FOUR_WAY
-            "8_way", "eight_way", "8way" -> SnapMode.EIGHT_WAY
-            else -> SnapMode.NONE
+            "no_snapping", "none" -> SnapMode.NONE
+            "180" -> SnapMode.HALF
+            "90" -> SnapMode.QUARTER
+            "sixths" -> SnapMode.SIXTHS
+            "eighths" -> SnapMode.EIGHTHS
+            "forward_only" -> SnapMode.FORWARD_ONLY
+            else -> SnapMode.FORWARD_ONLY
         }
     }
 }
@@ -1663,26 +1802,29 @@ internal object StickOuterRingHaptics {
         synchronized(hapticStateBySource) { hapticStateBySource.clear() }
     }
 
-    fun process(
+    /**
+     * Outer-ring command edge (shared by all analog-stick modes incl. Flick Stick).
+     *
+     * Distance metric = Chebyshev (max axis), i.e. the fraction of the way to the
+     * stick's travel edge. The axes are each calibrated to ±1 independently, so the
+     * reachable region is a square; clamped Euclidean magnitude would read the
+     * entire corner region (everything outside the inscribed unit circle, from
+     * ~71% diagonal travel onward) as a flat 1.0 — a too-wide ring that fires well
+     * before the stick reaches its furthest point. Chebyshev removes that band: the
+     * max radius setting now requires an axis to actually reach its edge. With
+     * [commandInvert] the command fires *inside* the radius instead of outside
+     * (Steam's "Walk/Sneak in the center" use case). [commandRadius] is 0..1.
+     */
+    fun outerRingCommand(
         reading: AnalogEvent,
-        analog: StickToAxisSettings,
+        commandRadius: Float,
+        commandInvert: Boolean,
         ctx: ModeContext,
         digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
         tag: String,
     ) {
-        // ── Outer Ring command ───────────────────────────────────────────────
-        // Distance metric = Chebyshev (max axis), i.e. the fraction of the way to
-        // the stick's travel edge. The axes are each calibrated to ±1 independently,
-        // so the reachable region is a square; clamped Euclidean magnitude would
-        // read the entire corner region (everything outside the inscribed unit
-        // circle, from ~71% diagonal travel onward) as a flat 1.0 — a too-wide ring
-        // that fires well before the stick reaches its furthest point. Chebyshev
-        // removes that band: the max radius setting now requires an axis to actually
-        // reach its edge. With Command Invert the command fires *inside* the radius
-        // instead of outside (Steam's "Walk/Sneak in the center" use case).
         val radius = maxOf(abs(reading.x), abs(reading.y)).coerceIn(0f, 1f)
-        val want = if (analog.commandInvert) radius < analog.commandRadius
-                   else radius >= analog.commandRadius
+        val want = if (commandInvert) radius < commandRadius else radius >= commandRadius
         val prior = ctx.priorLatched["outer_ring"] ?: false
         if (want != prior) {
             digitalEmit("outer_ring", want)
@@ -1691,10 +1833,20 @@ internal object StickOuterRingHaptics {
                 tag,
                 "outer_ring ${if (want) "DOWN" else "UP"} " +
                     "radius=%.3f thr=%.3f x=%.3f y=%.3f".format(
-                        radius, analog.commandRadius, reading.x, reading.y,
+                        radius, commandRadius, reading.x, reading.y,
                     ),
             )
         }
+    }
+
+    fun process(
+        reading: AnalogEvent,
+        analog: StickToAxisSettings,
+        ctx: ModeContext,
+        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
+        tag: String,
+    ) {
+        outerRingCommand(reading, analog.commandRadius, analog.commandInvert, ctx, digitalEmit, tag)
 
         // ── Travel-based haptic ──────────────────────────────────────────────
         // A texture buzz every HAPTIC_TRAVEL_STEP units of stick travel as the
@@ -2388,10 +2540,9 @@ internal data class GyroFlickStickSettings(
         const val DEFAULT_DEADZONE = 0.05f
 
         /**
-         * Continuous yaw→mouse sensitivity. Matches joystick
-         * [FlickStickSettings.DEFAULT_VELOCITY_PX_PER_RAD] so the two
-         * flick stick modes feel consistent in their hold-phase
-         * sensitivity.
+         * Continuous yaw→mouse sensitivity. Comparable to the joystick Flick
+         * Stick's derived px/radian (its Dots Per 360 ÷ 2π) so the two flick
+         * stick modes feel consistent in their hold-phase sensitivity.
          */
         const val DEFAULT_VELOCITY_PX_PER_RAD = 1500f
 
@@ -2804,11 +2955,13 @@ internal data class MouseOutputSettings(
 
     companion object {
         /**
-         * Pixels/sec at full deflection per 100% mouse sensitivity. Chosen so the
-         * spec default of 275% yields ~800 px/sec — the cursor-tuned feel the prior
-         * Joystick Mouse default shipped with.
+         * Pixels/sec at full deflection per 100% mouse sensitivity. Calibrated so
+         * the spec default of 275% matches Steam Input's cursor speed at the same
+         * setting. Tuned against user device measurements: base 291 read ~0.30×
+         * Steam, so the base is ~291/0.30 ≈ 970 → ~2668 px/sec at 275%. (Two passes:
+         * 291 → 485 was still ~0.5× Steam, → 970.)
          */
-        const val PX_PER_SEC_AT_100 = 291f
+        const val PX_PER_SEC_AT_100 = 970f
         const val DEFAULT_SENSITIVITY_PCT = 275f
 
         val DEFAULTS = MouseOutputSettings(

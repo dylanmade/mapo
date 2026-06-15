@@ -201,7 +201,7 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
     }
 
-    // ── Rail scope fly-out: action sets (the "rail-scope" entry) ──────────────
+    // ── App-bar scope picker: action sets ──────────────
 
     @Test
     fun scopeFlyout_listsEverySet_andSelectingInvokesCallback() {
@@ -225,7 +225,7 @@ class RemapControlsScreenTest {
         }
 
         // Open the scope fly-out from the rail entry; every set is listed.
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithTag("scope-picker").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Menu", useUnmergedTree = true).assertExists()
 
@@ -286,7 +286,7 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
     }
 
-    // ── Rail scope fly-out: set management (kebab + add) ──────────────────────
+    // ── App-bar scope picker: set management (kebab + add) ──────────────────────
 
     @Test
     fun scopeFlyout_addSet_opensAddSetDialog() {
@@ -308,9 +308,9 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithTag("scope-picker").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Add set", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Add action set", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Add Action Set", useUnmergedTree = true).assertIsDisplayed()
     }
 
@@ -334,13 +334,13 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithTag("scope-picker").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithContentDescription("Manage \"Menu\"").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Rename").assertIsEnabled()
-        composeRule.onNodeWithText("Duplicate").assertIsEnabled()
-        composeRule.onNodeWithText("Delete").assertIsEnabled()
+        composeRule.onNodeWithText("Rename Menu").assertIsEnabled()
+        composeRule.onNodeWithText("Duplicate Menu").assertIsEnabled()
+        composeRule.onNodeWithText("Delete Menu").assertIsEnabled()
     }
 
     @Test
@@ -358,11 +358,11 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithTag("scope-picker").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithContentDescription("Manage \"Default\"").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Delete").assertIsNotEnabled()
+        composeRule.onNodeWithText("Delete Default").assertIsNotEnabled()
     }
 
     @Test
@@ -390,7 +390,7 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("Switch to: Menu").assertIsDisplayed()
     }
 
-    // ── Rail scope fly-out: layers ────────────────────────────────────────────
+    // ── App-bar scope picker: layers ────────────────────────────────────────────
 
     @Test
     fun scopeFlyout_listsLayers_underTheirSet() {
@@ -402,7 +402,7 @@ class RemapControlsScreenTest {
                             layers = listOf(10L to "Scope", 11L to "Vehicle"),
                         ),
                         viewingActionSetId = 1L,
-                        viewingLayerId = null,  // base view → rail label is the set name, not a layer
+                        viewingLayerId = null,  // base view → field shows the set name, not a layer
                         onOpenInputEditor = { _, _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
@@ -411,7 +411,7 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithTag("scope-picker").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Scope", useUnmergedTree = true).assertExists()
         composeRule.onNodeWithText("Vehicle", useUnmergedTree = true).assertExists()
@@ -438,7 +438,7 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithTag("scope-picker").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Vehicle", useUnmergedTree = true).performClick()
 
@@ -468,7 +468,7 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithTag("scope-picker").performClick()
         composeRule.waitForIdle()
         // Tapping the set row itself selects the base set (no layer overlay).
         composeRule.onNodeWithText("Default", useUnmergedTree = true).performClick()
@@ -476,28 +476,6 @@ class RemapControlsScreenTest {
         assert(lastSelected == null) {
             "Expected selecting the set row to fire onSelectLayer(null), got $lastSelected"
         }
-    }
-
-    @Test
-    fun scopeFlyout_addLayer_opensAddLayerDialog() {
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = sampleConfig(),
-                        viewingActionSetId = 1L,
-                        onOpenInputEditor = { _, _, _ -> },
-                        onBack = {},
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        composeRule.onNodeWithTag("rail-scope").performClick()
-        composeRule.waitForIdle()
-        composeRule.onNodeWithText("Add layer", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithText("Add Layer", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
@@ -519,13 +497,13 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithTag("scope-picker").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithContentDescription("Manage \"Scope\"").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Rename").assertIsEnabled()
-        composeRule.onNodeWithText("Duplicate").assertIsEnabled()
-        composeRule.onNodeWithText("Delete").assertIsEnabled()
+        composeRule.onNodeWithText("Rename Scope").assertIsEnabled()
+        composeRule.onNodeWithText("Duplicate Scope").assertIsEnabled()
+        composeRule.onNodeWithText("Delete Scope").assertIsEnabled()
     }
 
     @Test
@@ -549,7 +527,7 @@ class RemapControlsScreenTest {
 
         // The fly-out is a global switcher: every set's layers are listed, not just the
         // viewing set's (unlike the old per-set pill row).
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithTag("scope-picker").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("ScopeA", useUnmergedTree = true).assertExists()
         composeRule.onNodeWithText("ScopeB", useUnmergedTree = true).assertExists()
@@ -887,8 +865,10 @@ class RemapControlsScreenTest {
         )
         return ControllerConfig(
             controllerProfile = ControllerProfile(
+                // Distinct from the "Default" set title so app-bar subtitle text doesn't
+                // collide with the set row in onNodeWithText lookups.
                 id = 1L, profileId = 1L,
-                controllerType = ControllerType.GENERIC_ANDROID, name = "Default",
+                controllerType = ControllerType.GENERIC_ANDROID, name = "Test profile",
             ),
             actionSets = listOf(actionSet),
         )

@@ -30,6 +30,9 @@ class OverlayRepository @Inject constructor(private val dao: OverlayElementDao) 
     /** Insert a new element (or replace one with the same id). Returns the row id. */
     suspend fun add(element: OverlayElement): Long = dao.insert(element)
 
+    /** Insert several elements in ONE transaction (single emission). Returns the new row ids. */
+    suspend fun addAll(elements: List<OverlayElement>): List<Long> = dao.insertAll(elements)
+
     suspend fun update(element: OverlayElement) = dao.update(element)
 
     /** Atomic batch update — see [OverlayElementDao.update] (single transaction, one emission). */
@@ -38,6 +41,10 @@ class OverlayRepository @Inject constructor(private val dao: OverlayElementDao) 
     suspend fun delete(element: OverlayElement) = dao.delete(element)
 
     suspend fun deleteById(id: Long) = dao.deleteById(id)
+
+    /** Restore one scope's elements to [elements] in a single transaction (used by editor undo/redo). */
+    suspend fun replaceScopeElements(actionSetId: Long?, actionLayerId: Long?, elements: List<OverlayElement>) =
+        dao.replaceScope(actionSetId, actionLayerId, elements)
 
     suspend fun clearForProfile(profileId: Long) = dao.deleteAllForProfile(profileId)
 }

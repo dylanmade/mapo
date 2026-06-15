@@ -24,6 +24,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -79,12 +82,12 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VerticalDistribute
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DrawerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ripple
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -140,6 +143,7 @@ import com.mapo.data.model.OverlayElement
 import com.mapo.data.settings.OverlaySettings
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.overlay.OverlayLifecycleOwner
+import com.mapo.ui.compact.CompactCheckbox
 import com.mapo.ui.overlay.OverlayEditActivity
 import com.mapo.ui.screen.overlay.OverlayElementConfigContent
 import com.mapo.ui.screen.overlay.OverlayElementLabel
@@ -209,9 +213,9 @@ class OverlayLiveEditController @Inject constructor(
     val editing: StateFlow<Boolean> = _editing
     // Multi-select: tapping buttons accumulates them; dragging any member moves the whole set.
     private val selectedIds = MutableStateFlow<Set<Long>>(emptySet())
-    // Flipped when the user picks Copy / Copy style. UI-only for now — the real copy of button
-    // data + style waits on the virtual-button model rework; this just makes Paste's enabled
-    // state demonstrable.
+    // Copied elements (a snapshot; OverlayElement is immutable). Paste new clones these; Paste style
+    // applies the first one's appearance to the selection. [clipboardHasContent] gates Paste's enabled.
+    private val clipboard = mutableListOf<OverlayElement>()
     private val clipboardHasContent = MutableStateFlow(false)
 
     private val windowManager get() = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -520,6 +524,8 @@ class OverlayLiveEditController @Inject constructor(
     /** Delete every selected button and clear the selection. */
     private fun deleteSelected() {
         val ids = selectedIds.value
+        if (ids.isEmpty()) return
+        overlayEditor.pushUndoSnapshot()
         ids.forEach { overlayEditor.delete(it) }
         selectedIds.value = emptySet()
     }
@@ -532,6 +538,7 @@ class OverlayLiveEditController @Inject constructor(
      * which is what produced the one-frame flash on a multi-button drag.
      */
     private fun onElementsDragEnd(ids: Set<Long>) {
+        overlayEditor.pushUndoSnapshot() // capture pre-move positions (model not yet committed)
         val size = displaySizePx()
         val rects = ids.mapNotNull { id ->
             val w = elementWindows[id] ?: return@mapNotNull null
@@ -779,6 +786,9 @@ class OverlayLiveEditController @Inject constructor(
         var start by remember { mutableStateOf<Offset?>(null) }
         var current by remember { mutableStateOf(Offset.Zero) }
         val primary = MaterialTheme.colorScheme.primary
+        val gridOn by showGrid.collectAsStateWithLifecycle()
+        val divisions by gridDivisions.collectAsStateWithLifecycle()
+        val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)
         Box(
             Modifier
                 .fillMaxSize()
@@ -795,6 +805,15 @@ class OverlayLiveEditController @Inject constructor(
                     )
                 }
                 .drawBehind {
+                    // Grid guide (behind buttons): [divisions] cells across + down.
+                    if (gridOn && divisions > 1) {
+                        val stepX = size.width / divisions
+                        val stepY = size.height / divisions
+                        for (i in 1 until divisions) {
+                            drawLine(gridColor, Offset(i * stepX, 0f), Offset(i * stepX, size.height), 1f)
+                            drawLine(gridColor, Offset(0f, i * stepY), Offset(size.width, i * stepY), 1f)
+                        }
+                    }
                     val s = start ?: return@drawBehind
                     val left = minOf(s.x, current.x); val top = minOf(s.y, current.y)
                     val w = kotlin.math.abs(current.x - s.x); val h = kotlin.math.abs(current.y - s.y)
@@ -838,6 +857,7 @@ class OverlayLiveEditController @Inject constructor(
                     startRawX = ev.rawX; startRawY = ev.rawY
                     startX = p?.x ?: 0; startY = p?.y ?: 0
                     dragging = false
+                    toolbarRouter.press(ev.x, ev.y) // press ripple on the row under the finger
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -846,6 +866,7 @@ class OverlayLiveEditController @Inject constructor(
                         val dy = ev.rawY - startRawY
                         if (!dragging && hypot(dx, dy) > touchSlop) {
                             dragging = true
+                            toolbarRouter.endPress(release = false) // became a drag → cancel the ripple
                             dismissSubmenus() // starting a drag closes submenus (anchored to the toolbar)
                         }
                         if (dragging) {
@@ -861,7 +882,9 @@ class OverlayLiveEditController @Inject constructor(
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (!dragging) toolbarRouter.route(ev.x, ev.y)
+                    val released = ev.actionMasked == MotionEvent.ACTION_UP && !dragging
+                    toolbarRouter.endPress(release = released) // settle the ripple (release vs cancel)
+                    if (released) toolbarRouter.route(ev.x, ev.y)
                     true
                 }
                 else -> true
@@ -970,6 +993,10 @@ class OverlayLiveEditController @Inject constructor(
         if (rotateProgress.value != null) return // the rotate animation owns the window size
         val view = toolbar?.first ?: return
         val params = toolbarParams ?: return
+        // The layout-change listener can fire on a view that was just detached (e.g. an old toolbar
+        // mid-recreation during a burst of button adds). Measuring a detached ComposeView throws
+        // ("Cannot locate windowRecomposer"), so bail — the live toolbar's own listener will resize it.
+        if (!view.isAttachedToWindow) return
         view.forceLayout()
         val unspec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         view.measure(unspec, unspec)
@@ -1365,22 +1392,49 @@ class OverlayLiveEditController @Inject constructor(
      * Rows register their current bounds + action keyed by label (unique per window) as they lay out.
      */
     private class MenuTapRouter {
-        private class Target(val bounds: android.graphics.Rect, val onTap: () -> Unit)
+        private class Target(
+            val bounds: android.graphics.Rect,
+            val source: MutableInteractionSource,
+            val onTap: () -> Unit,
+        )
         private val targets = LinkedHashMap<String, Target>()
+        // The row currently showing a press ripple (driven by the raw-coord filter's DOWN/MOVE/UP).
+        private var pressed: Pair<Target, PressInteraction.Press>? = null
 
-        fun put(key: String, bounds: android.graphics.Rect, onTap: () -> Unit) {
-            targets[key] = Target(bounds, onTap)
+        fun put(key: String, bounds: android.graphics.Rect, source: MutableInteractionSource, onTap: () -> Unit) {
+            targets[key] = Target(bounds, source, onTap)
         }
 
+        private fun targetAt(xi: Int, yi: Int): Target? =
+            targets.values.firstOrNull { it.bounds.contains(xi, yi) }
+
+        /** Start a press ripple on the row under (x, y) [window-local px]. */
+        fun press(x: Float, y: Float) {
+            cancelPress()
+            val xi = x.roundToInt(); val yi = y.roundToInt()
+            val t = targetAt(xi, yi) ?: return
+            // Ripple origin relative to the row.
+            val press = PressInteraction.Press(Offset((xi - t.bounds.left).toFloat(), (yi - t.bounds.top).toFloat()))
+            t.source.tryEmit(press)
+            pressed = t to press
+        }
+
+        /** End the active press ripple ([release] = a real tap finished; otherwise it's a cancel). */
+        fun endPress(release: Boolean) {
+            val (t, p) = pressed ?: return
+            t.source.tryEmit(if (release) PressInteraction.Release(p) else PressInteraction.Cancel(p))
+            pressed = null
+        }
+
+        private fun cancelPress() = endPress(release = false)
+
         fun route(x: Float, y: Float): Boolean {
-            val xi = x.roundToInt()
-            val yi = y.roundToInt()
-            targets.values.forEach { t -> if (t.bounds.contains(xi, yi)) { t.onTap(); return true } }
+            targetAt(x.roundToInt(), y.roundToInt())?.let { it.onTap(); return true }
             return false
         }
 
         /** True if (x, y) [window-local px] lands on a registered row/icon (no action fired). */
-        fun hits(x: Int, y: Int): Boolean = targets.values.any { it.bounds.contains(x, y) }
+        fun hits(x: Int, y: Int): Boolean = targetAt(x, y) != null
     }
 
     /**
@@ -1656,7 +1710,7 @@ class OverlayLiveEditController @Inject constructor(
                 .fillMaxWidth()
                 .onGloballyPositioned { rowTop = it.positionInWindow().y.roundToInt() }
                 .then(if (rowClick != null) Modifier.clickable(onClick = rowClick) else Modifier)
-                .padding(start = if (item.indent) 28.dp else 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                .padding(start = if (item.indent) 28.dp else 12.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -1683,7 +1737,7 @@ class OverlayLiveEditController @Inject constructor(
             when (trailing) {
                 is MenuTrailing.Check ->
                     // onCheckedChange = null so the ROW owns the toggle (whole row is tappable).
-                    Checkbox(checked = trailing.checked, onCheckedChange = null, enabled = item.enabled)
+                    CompactCheckbox(checked = trailing.checked, onCheckedChange = null, enabled = item.enabled)
                 is MenuTrailing.Value ->
                     Text(
                         trailing.text,
@@ -1732,6 +1786,8 @@ class OverlayLiveEditController @Inject constructor(
         val scopes by overlayEditor.availableScopes.collectAsStateWithLifecycle()
         val currentScope by overlayEditor.editingScope.collectAsStateWithLifecycle()
         val hasClipboard by clipboardHasContent.collectAsStateWithLifecycle()
+        val canUndo by overlayEditor.canUndo.collectAsStateWithLifecycle()
+        val canRedo by overlayEditor.canRedo.collectAsStateWithLifecycle()
         val hasSel = sel.isNotEmpty()
         val singleSel = sel.size == 1
         val currentLabel = scopes.firstOrNull { it.scope == currentScope }?.label ?: "No action set"
@@ -1745,7 +1801,7 @@ class OverlayLiveEditController @Inject constructor(
                     leadingIcon = Icons.Default.Add,
                     submenu = {
                         listOf(
-                            MenuEntry.Item("Add new", leadingIcon = Icons.Default.Add, onClick = { overlayEditor.addDefaultElement() }),
+                            MenuEntry.Item("Add new", leadingIcon = Icons.Default.Add, onClick = { overlayEditor.pushUndoSnapshot(); overlayEditor.addDefaultElement() }),
                             MenuEntry.Item("Add template", leadingIcon = Icons.Default.Widgets, onClick = { menuGap("Add template") }),
                         )
                     },
@@ -1788,8 +1844,8 @@ class OverlayLiveEditController @Inject constructor(
             )
             add(MenuEntry.Item("Delete", leadingIcon = Icons.Default.Delete, enabled = hasSel, onClick = { deleteSelected() }))
             add(MenuEntry.Divider)
-            add(MenuEntry.Item("Undo", leadingIcon = Icons.AutoMirrored.Filled.Undo, onClick = { menuGap("Undo") }))
-            add(MenuEntry.Item("Redo", leadingIcon = Icons.AutoMirrored.Filled.Redo, onClick = { menuGap("Redo") }))
+            add(MenuEntry.Item("Undo", leadingIcon = Icons.AutoMirrored.Filled.Undo, enabled = canUndo, onClick = { overlayEditor.undo() }))
+            add(MenuEntry.Item("Redo", leadingIcon = Icons.AutoMirrored.Filled.Redo, enabled = canRedo, onClick = { overlayEditor.redo() }))
             add(MenuEntry.Divider)
             add(MenuEntry.Item("Options", leadingIcon = Icons.Default.Tune, submenu = { OptionsEntries() }))
             add(MenuEntry.Item("Exit", leadingIcon = Icons.AutoMirrored.Filled.ExitToApp, onClick = { stop() }))
@@ -1834,21 +1890,29 @@ class OverlayLiveEditController @Inject constructor(
                         "Add layer",
                         indent = true,
                         leadingIcon = Icons.Default.Add,
-                        onClick = { menuGap("Add layer (set ${setOpt.label})") },
+                        onClick = { setId?.let { sid -> overlayEditor.addLayer(sid) { overlayEditor.setScope(it) } } },
                     ),
                 )
             }
-            add(MenuEntry.Item("Add set", leadingIcon = Icons.Default.Add, onClick = { menuGap("Add set") }))
+            add(
+                MenuEntry.Item(
+                    "Add set",
+                    leadingIcon = Icons.Default.Add,
+                    onClick = { overlayEditor.addActionSet { overlayEditor.setScope(it) } },
+                ),
+            )
         }
     }
 
     /** What Align/Space operate relative to. */
     private enum class AlignTarget(val label: String) { Selection("Selection"), Canvas("Canvas") }
 
+    /** The align/distribute operations (mapped to the menu rows). */
+    private enum class AlignOp { LEFT, CENTER_X, RIGHT, TOP, CENTER_Y, BOTTOM, DIST_X, DIST_Y }
+
     /**
      * Align / space submenu. The "Align to" row picks the reference (Selection vs Canvas); the
-     * align/space buttons enable based on it: Canvas needs ≥1 selected, Selection needs ≥2. All
-     * align/space actions are placeholders for now (see gap list).
+     * align/space buttons enable based on it: Canvas needs ≥1 selected, Selection needs ≥2.
      */
     @Composable
     private fun AlignEntries(): List<MenuEntry> {
@@ -1858,8 +1922,8 @@ class OverlayLiveEditController @Inject constructor(
             AlignTarget.Canvas -> sel.isNotEmpty()
             AlignTarget.Selection -> sel.size >= 2
         }
-        fun align(name: String, icon: ImageVector) =
-            MenuEntry.Item(name, leadingIcon = icon, enabled = canAlign, onClick = { menuGap("$name (to ${target.label})") })
+        fun align(name: String, icon: ImageVector, op: AlignOp) =
+            MenuEntry.Item(name, leadingIcon = icon, enabled = canAlign, onClick = { applyAlign(op, target) })
         return buildList {
             add(
                 MenuEntry.Item(
@@ -1879,16 +1943,73 @@ class OverlayLiveEditController @Inject constructor(
                 ),
             )
             add(MenuEntry.Divider)
-            add(align("Align left", Icons.Default.AlignHorizontalLeft))
-            add(align("Align vertically", Icons.Default.AlignHorizontalCenter))
-            add(align("Align right", Icons.Default.AlignHorizontalRight))
-            add(align("Space vertically", Icons.Default.VerticalDistribute))
+            add(align("Align left", Icons.Default.AlignHorizontalLeft, AlignOp.LEFT))
+            add(align("Align vertically", Icons.Default.AlignHorizontalCenter, AlignOp.CENTER_X))
+            add(align("Align right", Icons.Default.AlignHorizontalRight, AlignOp.RIGHT))
+            add(align("Space vertically", Icons.Default.VerticalDistribute, AlignOp.DIST_Y))
             add(MenuEntry.Divider)
-            add(align("Align top", Icons.Default.AlignVerticalTop))
-            add(align("Align horizontally", Icons.Default.AlignVerticalCenter))
-            add(align("Align bottom", Icons.Default.AlignVerticalBottom))
-            add(align("Space horizontally", Icons.Default.HorizontalDistribute))
+            add(align("Align top", Icons.Default.AlignVerticalTop, AlignOp.TOP))
+            add(align("Align horizontally", Icons.Default.AlignVerticalCenter, AlignOp.CENTER_Y))
+            add(align("Align bottom", Icons.Default.AlignVerticalBottom, AlignOp.BOTTOM))
+            add(align("Space horizontally", Icons.Default.HorizontalDistribute, AlignOp.DIST_X))
         }
+    }
+
+    /**
+     * Align or distribute the selected elements relative to [target] (the selection's bounding box or
+     * the whole canvas). All math is in normalized (0..1) space; [OverlayEditor.moveResizeAll] clamps
+     * to canvas + commits in one batch write (so [renderElements] never flashes a partial update).
+     */
+    private fun applyAlign(op: AlignOp, target: AlignTarget) {
+        val ids = selectedIds.value
+        val els = overlayEditor.elements.value.filter { it.id in ids }
+        if (els.isEmpty()) return
+        overlayEditor.pushUndoSnapshot()
+        val refL: Float; val refT: Float; val refR: Float; val refB: Float
+        when (target) {
+            AlignTarget.Canvas -> { refL = 0f; refT = 0f; refR = 1f; refB = 1f }
+            AlignTarget.Selection -> {
+                refL = els.minOf { it.x }; refT = els.minOf { it.y }
+                refR = els.maxOf { it.x + it.width }; refB = els.maxOf { it.y + it.height }
+            }
+        }
+        fun rect(el: OverlayElement, x: Float = el.x, y: Float = el.y) =
+            OverlayEditor.ElementRect(el.id, x, y, el.width, el.height)
+        val rects = when (op) {
+            AlignOp.LEFT -> els.map { rect(it, x = refL) }
+            AlignOp.RIGHT -> els.map { rect(it, x = refR - it.width) }
+            AlignOp.CENTER_X -> els.map { rect(it, x = (refL + refR) / 2f - it.width / 2f) }
+            AlignOp.TOP -> els.map { rect(it, y = refT) }
+            AlignOp.BOTTOM -> els.map { rect(it, y = refB - it.height) }
+            AlignOp.CENTER_Y -> els.map { rect(it, y = (refT + refB) / 2f - it.height / 2f) }
+            AlignOp.DIST_X -> distribute(els, horizontal = true, target, refL, refR) { el, v -> rect(el, x = v) }
+            AlignOp.DIST_Y -> distribute(els, horizontal = false, target, refT, refB) { el, v -> rect(el, y = v) }
+        }
+        overlayEditor.moveResizeAll(rects)
+    }
+
+    /**
+     * Distribute [els] with equal gaps along one axis. Span = the canvas edges for [AlignTarget.Canvas],
+     * else the selection's outer edges (first start … last end, which then stay put). Needs ≥2 elements.
+     */
+    private fun distribute(
+        els: List<OverlayElement>,
+        horizontal: Boolean,
+        target: AlignTarget,
+        refStart: Float,
+        refEnd: Float,
+        place: (OverlayElement, Float) -> OverlayEditor.ElementRect,
+    ): List<OverlayEditor.ElementRect> {
+        val pos = { e: OverlayElement -> if (horizontal) e.x else e.y }
+        val len = { e: OverlayElement -> if (horizontal) e.width else e.height }
+        val sorted = els.sortedBy { pos(it) }
+        if (sorted.size < 2) return els.map { place(it, pos(it)) }
+        val spanStart = if (target == AlignTarget.Canvas) refStart else pos(sorted.first())
+        val spanEnd = if (target == AlignTarget.Canvas) refEnd else pos(sorted.last()) + len(sorted.last())
+        val totalLen = sorted.sumOf { len(it).toDouble() }.toFloat()
+        val gap = (spanEnd - spanStart - totalLen) / (sorted.size - 1)
+        var cursor = spanStart
+        return sorted.map { el -> place(el, cursor).also { cursor += len(el) + gap } }
     }
 
     @Composable
@@ -1908,13 +2029,40 @@ class OverlayLiveEditController @Inject constructor(
 
     // Real copy/paste of button data + style is deferred to the virtual-button model rework; for
     // now these only log and flip the "clipboard" flag so Paste's enabled state is demonstrable.
+    /** Snapshot the selected elements onto the clipboard (full button incl. appearance + commands). */
     private fun onCopy(styleOnly: Boolean) {
-        Log.i(TAG, "copy ${if (styleOnly) "style" else "full"} of ${selectedIds.value.size} button(s) — stub")
+        val ids = selectedIds.value
+        val copied = overlayEditor.elements.value.filter { it.id in ids }
+        if (copied.isEmpty()) return
+        clipboard.clear(); clipboard.addAll(copied)
         clipboardHasContent.value = true
     }
 
+    /**
+     * Paste new → clone the clipboard into the current scope (offset), then select the clones.
+     * Paste style → apply the first copied element's appearance (shape/opacity/colors) to the selection.
+     */
     private fun onPaste(asOverride: Boolean) {
-        Log.i(TAG, "paste ${if (asOverride) "as override" else "as new"} — stub")
+        if (clipboard.isEmpty()) return
+        if (!asOverride) {
+            overlayEditor.pushUndoSnapshot()
+            overlayEditor.duplicate(clipboard.toList()) { ids -> selectedIds.value = ids.toSet() }
+        } else {
+            val ids = selectedIds.value
+            if (overlayEditor.elements.value.none { it.id in ids }) return
+            overlayEditor.pushUndoSnapshot()
+            val style = clipboard.first()
+            overlayEditor.elements.value.filter { it.id in ids }.forEach { el ->
+                overlayEditor.update(
+                    el.copy(
+                        shape = style.shape,
+                        opacity = style.opacity,
+                        fillColorArgb = style.fillColorArgb,
+                        contentColorArgb = style.contentColorArgb,
+                    ),
+                )
+            }
+        }
     }
 
     /** Flip the core menu between vertical and horizontal with a choreographed two-phase animation. */
@@ -2174,6 +2322,9 @@ class OverlayLiveEditController @Inject constructor(
         val contentColor =
             if (item.enabled) MaterialTheme.colorScheme.onSurface
             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        // Tap ripple: the raw-coord filter consumes all touches (no `clickable`), so the router drives
+        // this interaction source's press/release as the finger goes down/up on the row.
+        val interaction = remember { MutableInteractionSource() }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2185,10 +2336,11 @@ class OverlayLiveEditController @Inject constructor(
                             p.x.roundToInt(), p.y.roundToInt(),
                             p.x.roundToInt() + c.size.width, p.y.roundToInt() + c.size.height,
                         )
-                        toolbarRouter.put(item.label, b) { rootItemTap(item, b) }
+                        toolbarRouter.put(item.label, b, interaction) { rootItemTap(item, b) }
                     } else Modifier,
                 )
-                .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                .indication(interaction, ripple())
+                .padding(start = 12.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -2220,9 +2372,11 @@ class OverlayLiveEditController @Inject constructor(
         val tint =
             if (item.enabled) MaterialTheme.colorScheme.onSurface
             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        val interaction = remember { MutableInteractionSource() }
         Box(
             modifier = Modifier
                 .size(40.dp)
+                .clip(CircleShape)
                 .then(
                     if (register) Modifier.onGloballyPositioned { c ->
                         val p = c.positionInWindow()
@@ -2230,9 +2384,11 @@ class OverlayLiveEditController @Inject constructor(
                             p.x.roundToInt(), p.y.roundToInt(),
                             p.x.roundToInt() + c.size.width, p.y.roundToInt() + c.size.height,
                         )
-                        toolbarRouter.put(item.label, b) { rootItemTap(item, b) }
+                        toolbarRouter.put(item.label, b, interaction) { rootItemTap(item, b) }
                     } else Modifier,
-                ),
+                )
+                // Circular ripple like an M3 icon button (router-driven; no clickable here).
+                .indication(interaction, ripple(bounded = true)),
             contentAlignment = Alignment.Center,
         ) {
             item.leadingIcon?.let {

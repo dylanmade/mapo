@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.mapo.data.model.OverlayElement
 import kotlinx.coroutines.flow.Flow
@@ -26,11 +27,37 @@ interface OverlayElementDao {
     @Query("SELECT * FROM overlay_elements WHERE actionLayerId = :actionLayerId ORDER BY zIndex ASC, id ASC")
     fun getByLayer(actionLayerId: Long): Flow<List<OverlayElement>>
 
+    @Query("SELECT * FROM overlay_elements WHERE actionSetId = :actionSetId ORDER BY zIndex ASC, id ASC")
+    suspend fun getBySetOnce(actionSetId: Long): List<OverlayElement>
+
+    @Query("SELECT * FROM overlay_elements WHERE actionLayerId = :actionLayerId ORDER BY zIndex ASC, id ASC")
+    suspend fun getByLayerOnce(actionLayerId: Long): List<OverlayElement>
+
     @Query("SELECT * FROM overlay_elements WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): OverlayElement?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(element: OverlayElement): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(elements: List<OverlayElement>): List<Long>
+
+    /**
+     * Replace one scope's (set OR layer) elements with [elements] in a single transaction: delete the
+     * rows not present in the snapshot, then upsert the snapshot (its rows keep their original ids, so
+     * windows/selection stay valid across undo). One transaction → observers re-emit once (no flash).
+     */
+    @Transaction
+    suspend fun replaceScope(actionSetId: Long?, actionLayerId: Long?, elements: List<OverlayElement>) {
+        val current = when {
+            actionLayerId != null -> getByLayerOnce(actionLayerId)
+            actionSetId != null -> getBySetOnce(actionSetId)
+            else -> return
+        }
+        val keep = elements.mapTo(HashSet()) { it.id }
+        current.forEach { if (it.id !in keep) deleteById(it.id) }
+        insertAll(elements)
+    }
 
     @Update
     suspend fun update(element: OverlayElement)

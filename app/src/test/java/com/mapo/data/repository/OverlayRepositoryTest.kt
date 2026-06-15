@@ -122,6 +122,12 @@ private class FakeOverlayElementDao : OverlayElementDao {
     override fun getByLayer(actionLayerId: Long): Flow<List<OverlayElement>> =
         rows.map { sorted(it.values.filter { row -> row.actionLayerId == actionLayerId }) }
 
+    override suspend fun getBySetOnce(actionSetId: Long): List<OverlayElement> =
+        sorted(rows.value.values.filter { it.actionSetId == actionSetId })
+
+    override suspend fun getByLayerOnce(actionLayerId: Long): List<OverlayElement> =
+        sorted(rows.value.values.filter { it.actionLayerId == actionLayerId })
+
     override suspend fun getById(id: Long): OverlayElement? = rows.value[id]
 
     override suspend fun insert(element: OverlayElement): Long {
@@ -129,6 +135,9 @@ private class FakeOverlayElementDao : OverlayElementDao {
         rows.value = rows.value + (id to element.copy(id = id))
         return id
     }
+
+    override suspend fun insertAll(elements: List<OverlayElement>): List<Long> =
+        elements.map { insert(it) }
 
     override suspend fun update(element: OverlayElement) {
         if (rows.value.containsKey(element.id)) {

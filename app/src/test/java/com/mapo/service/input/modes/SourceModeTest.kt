@@ -63,7 +63,7 @@ class SourceModeTest {
         // service; click is reserved for analog-stick-as-dpad use (inert until motion
         // capture lands).
         assertEquals(
-            setOf("dpad_up", "dpad_down", "dpad_right", "dpad_left", "click"),
+            setOf("dpad_up", "dpad_down", "dpad_right", "dpad_left", "click", "outer_ring"),
             DpadMode.validInputs(),
         )
     }
@@ -81,23 +81,25 @@ class SourceModeTest {
     }
 
     @Test
-    fun dpad_defaultSettingsJson_includesFourWayLayout() {
+    fun dpad_defaultSettingsJson_includesEightWayLayout() {
         // Brick K added analog-evaluate to DpadMode (stick-as-dpad), so the
         // defaults now carry inner_deadzone / outer_deadzone alongside the
-        // original dpad_layout. The 4_way default is the most common choice
-        // and the historical Steam default.
+        // original dpad_layout. 8 Way (Overlap) is the spec default
+        // (SOURCE_MODE_SETTINGS_SPEC.txt) and matches the settings dropdown's
+        // defaultId — the runtime default must agree so a group with an unset
+        // layout doesn't render as 8-way but behave as 4-way.
         val json = DpadMode.defaultSettingsJson()
         assertTrue(
             "Expected dpad_layout key in defaults; got: $json",
             json.contains("dpad_layout"),
         )
         assertTrue(
-            "Expected 4_way default value; got: $json",
-            json.contains("4_way"),
+            "Expected 8_way default value; got: $json",
+            json.contains("8_way"),
         )
         assertTrue(
-            "Expected inner_deadzone key in defaults; got: $json",
-            json.contains("inner_deadzone"),
+            "Expected deadzone key in defaults; got: $json",
+            json.contains("deadzone"),
         )
     }
 

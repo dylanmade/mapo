@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Mapo's home is a drawer, so its activity slides in from the start edge instead of the
-     default scale-from-icon launch animation. The window is mostly transparent, so visually
-     this reads as the drawer panel sliding in from the side. -->
-<translate xmlns:android="http://schemas.android.com/apk/res/android"
-    android:fromXDelta="-100%p"
-    android:toXDelta="0%p"
-    android:duration="300"
-    android:interpolator="@android:interpolator/fast_out_slow_in" />

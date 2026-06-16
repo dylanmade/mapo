@@ -86,7 +86,7 @@ abstract class AppDatabase : RoomDatabase() {
                 super.onOpen(db)
                 db.execSQL(
                     "INSERT INTO profiles (name, isDefault) " +
-                    "SELECT 'Default', 1 " +
+                    "SELECT 'Profile 1', 1 " +
                     "WHERE NOT EXISTS (SELECT 1 FROM profiles WHERE isDefault = 1)"
                 )
             }

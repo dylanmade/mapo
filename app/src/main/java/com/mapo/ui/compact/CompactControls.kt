@@ -103,7 +103,7 @@ fun CompactCheckbox(
     }
 }
 
-private fun Modifier.scaledLayout(scale: Float): Modifier =
+internal fun Modifier.scaledLayout(scale: Float): Modifier =
     if (scale == 1f) this
     else this.layout { measurable, constraints ->
         val placeable = measurable.measure(constraints)

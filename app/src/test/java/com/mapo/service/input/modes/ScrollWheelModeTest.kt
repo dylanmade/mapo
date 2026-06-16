@@ -79,7 +79,11 @@ class ScrollWheelModeTest {
         timestampMs = 0L,
     )
 
-    private fun evaluate(reading: AnalogEvent, settings: String = "") {
+    // sensitivity 16 = 360/16 = 22.5° per tick (the resolution these rotation
+    // tests were originally written against).
+    private val sens16 = """{"sensitivity":16}"""
+
+    private fun evaluate(reading: AnalogEvent, settings: String = sens16) {
         ScrollWheelMode.evaluate(reading, ctx(settings, reading.source), digitalEmit, mouse)
     }
 
@@ -231,8 +235,8 @@ class ScrollWheelModeTest {
 
     @Test
     fun invertSetting_swapsClockwiseAndCcw() {
-        evaluate(stickAtAngle(0f), settings = """{"scroll_invert":true}""")
-        evaluate(stickAtAngle((25 * Math.PI / 180).toFloat()), settings = """{"scroll_invert":true}""")
+        evaluate(stickAtAngle(0f), settings = """{"sensitivity":16,"invert_swipe":true}""")
+        evaluate(stickAtAngle((25 * Math.PI / 180).toFloat()), settings = """{"sensitivity":16,"invert_swipe":true}""")
         // Without invert, this would be scroll_clockwise. Inverted: ccw.
         assertEquals(
             listOf("scroll_counter_clockwise" to true, "scroll_counter_clockwise" to false),
@@ -244,8 +248,8 @@ class ScrollWheelModeTest {
 
     @Test
     fun customScrollAngle_changesTickResolution() {
-        // 45° per tick → 8 ticks/rev. Rotate by 50° = 1 tick (not 2).
-        val s = """{"scroll_angle":45.0}"""
+        // sensitivity 8 → 360/8 = 45° per tick. Rotate by 50° = 1 tick (not 2).
+        val s = """{"sensitivity":8}"""
         evaluate(stickAtAngle(0f), settings = s)
         evaluate(stickAtAngle((50 * Math.PI / 180).toFloat()), settings = s)
         assertEquals(listOf("scroll_clockwise" to true, "scroll_clockwise" to false), emitted)
@@ -253,7 +257,8 @@ class ScrollWheelModeTest {
 
     @Test
     fun fineScrollAngle_firesMoreTicksPerRotation() {
-        val s = """{"scroll_angle":10.0}"""
+        // sensitivity 36 → 360/36 = 10° per tick.
+        val s = """{"sensitivity":36}"""
         evaluate(stickAtAngle(0f), settings = s)
         // 45° / 10° = 4 ticks.
         evaluate(stickAtAngle((45 * Math.PI / 180).toFloat()), settings = s)
@@ -331,19 +336,30 @@ class ScrollWheelModeTest {
 
     @Test
     fun settings_parse_partialOverridesPreserveDefaults() {
-        val s = ScrollWheelSettings.parse("""{"scroll_angle":15.0}""")
-        assertEquals(15f, s.scrollAngleDeg, 1e-6f)
+        val s = ScrollWheelSettings.parse("""{"sensitivity":120}""")
+        assertEquals(120f, s.sensitivity, 1e-6f)
         assertEquals(ScrollWheelSettings.DEFAULT_DEADZONE, s.deadzone, 1e-6f)
-        assertEquals(ScrollWheelSettings.DEFAULT_INVERT, s.invert)
+        assertEquals(false, s.invert)
+        assertEquals(ScrollWheelSettings.SwipeDirection.CIRCULAR, s.swipeDirection)
     }
 
     @Test
     fun settings_parse_clampsValuesAtBoundaries() {
         val s = ScrollWheelSettings.parse(
-            """{"deadzone_inner_radius":-1,"scroll_angle":-5}"""
+            """{"deadzone_inner_radius":-1,"sensitivity":-5}"""
         )
         assertTrue("deadzone clamps to ≥ 0", s.deadzone >= 0f)
-        assertTrue("scroll_angle clamps to ≥ 1", s.scrollAngleDeg >= 1f)
+        assertTrue("sensitivity clamps to ≥ 1", s.sensitivity >= 1f)
+    }
+
+    @Test
+    fun swipeDirection_horizontal_emitsOnXTravel() {
+        // Horizontal swipe: full −1..+1 sweep = sensitivity ticks. sensitivity 10
+        // → threshold 0.2 units. Move x from 0 to 0.5 = 2 ticks.
+        val s = """{"sensitivity":10,"swipe_direction":"horizontal"}"""
+        evaluate(AnalogEvent(InputSource.RIGHT_JOYSTICK, x = 0f, y = -0.8f, timestampMs = 0L), s)
+        evaluate(AnalogEvent(InputSource.RIGHT_JOYSTICK, x = 0.5f, y = -0.8f, timestampMs = 0L), s)
+        assertEquals(2, emitted.count { it.first == "scroll_clockwise" && it.second })
     }
 
     @Test

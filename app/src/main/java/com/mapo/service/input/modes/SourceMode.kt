@@ -449,7 +449,8 @@ object DpadMode : SourceMode {
     override val mode: BindingMode = BindingMode.DPAD
     override fun validInputs(): Set<String> = INPUTS
     override fun defaultSettingsJson(): String = DpadSettings.DEFAULT_JSON
-    private val INPUTS = setOf("dpad_up", "dpad_down", "dpad_left", "dpad_right", "click")
+    private val INPUTS = setOf("dpad_up", "dpad_down", "dpad_left", "dpad_right", "click", "outer_ring")
+    private const val TAG = "DpadMode"
 
     // Per-source integrated tilt angle (radians) + last-seen timestamp (ms),
     // used for GYRO source only. Joystick sources pass instantaneous
@@ -522,7 +523,7 @@ object DpadMode : SourceMode {
         if (!active) {
             wantUp = false; wantDown = false; wantRight = false; wantLeft = false
         } else if (settings.dpadLayout == DpadSettings.LAYOUT_8_WAY) {
-            val axial = settings.innerDeadzone * AXIAL_PROJECTION_45
+            val axial = settings.diagonalAxial()
             wantUp = effY < -axial
             wantDown = effY > axial
             wantRight = effX > axial
@@ -533,7 +534,7 @@ object DpadMode : SourceMode {
             // center, snap to the dominant cardinal — making diagonals harder to hit
             // near center than at the edge (the "+ gate" cardinal bias).
             if (mag >= DpadSettings.CROSS_GATE_DIAGONAL_THRESHOLD) {
-                val axial = settings.innerDeadzone * AXIAL_PROJECTION_45
+                val axial = settings.diagonalAxial()
                 wantUp = effY < -axial
                 wantDown = effY > axial
                 wantRight = effX > axial
@@ -561,6 +562,14 @@ object DpadMode : SourceMode {
         if (wantDown != priorDown) digitalEmit("dpad_down", wantDown)
         if (wantRight != priorRight) digitalEmit("dpad_right", wantRight)
         if (wantLeft != priorLeft) digitalEmit("dpad_left", wantLeft)
+
+        // Outer-ring command — joystick sources only (gyro readings are rates, not
+        // a positional ring). Shared with the other joystick modes.
+        if (reading.source == InputSource.LEFT_JOYSTICK || reading.source == InputSource.RIGHT_JOYSTICK) {
+            StickOuterRingHaptics.outerRingCommand(
+                reading, settings.commandRadius, settings.commandInvert, ctx, digitalEmit, TAG,
+            )
+        }
     }
 
     private fun accumulateGyro(reading: AnalogEvent): Pair<Float, Float> {
@@ -586,9 +595,6 @@ object DpadMode : SourceMode {
         return state[0] to state[1]
     }
 
-    /** sin(45°) — per-axis floor projection for 8-way diagonal emit. */
-    private const val AXIAL_PROJECTION_45 = 0.7071068f
-
     // Pause-resume guard for the gyro integrator — see
     // [GyroToJoystickDeflectionMode.MAX_DT_SEC] for the same rationale.
     private const val MAX_GYRO_DT_SEC = 0.1f
@@ -609,14 +615,33 @@ internal data class DpadSettings(
     val outerDeadzone: Float,
     val dpadLayout: String,
     val tiltSensitivity: Float,
+    /** Raw 2000..16000 (Steam units). Higher = wider diagonal overlap band. */
+    val overlapRegion: Float,
+    val commandRadius: Float, // 0..1 (normalized from 0..32767)
+    val commandInvert: Boolean,
 ) {
+    /**
+     * Per-axis floor for 8-way / cross-gate diagonal emit, derived from Overlap
+     * Region: higher overlap → lower threshold → both directions fire across a
+     * wider band (lowest setting ≈ 4-way; highest ≈ overlap unless near-cardinal).
+     */
+    fun diagonalAxial(): Float {
+        val t = ((overlapRegion - 2000f) / 14000f).coerceIn(0f, 1f)
+        return MAX_OVERLAP_AXIAL * (1f - t)
+    }
+
     companion object {
         const val DEFAULT_INNER_DEADZONE = 0.20f
         const val DEFAULT_OUTER_DEADZONE = 0.05f
         const val LAYOUT_4_WAY = "4_way"
         const val LAYOUT_8_WAY = "8_way"
         const val LAYOUT_CROSS_GATE = "cross_gate"
-        const val DEFAULT_LAYOUT = LAYOUT_4_WAY
+        // Spec default is "8 Way (Overlap)" (SOURCE_MODE_SETTINGS_SPEC.txt line 134) and
+        // the settings dropdown's defaultId matches ("8_way"). The runtime default MUST
+        // agree: a group whose settingsJson omits "dpad_layout" (the common case — mode
+        // switch via updateBindingGroupMode doesn't seed settings) is shown as "8-way" in
+        // the cog menu, so parsing it as 4-way silently downgraded diagonals to cardinals.
+        const val DEFAULT_LAYOUT = LAYOUT_8_WAY
         // Cross-gate: diagonals allowed, but only once deflection magnitude reaches this
         // fraction of full — below it, snap to the dominant cardinal. This is the
         // "diagonals harder near center, easier at the edge" cardinal bias. Tunable.
@@ -629,8 +654,19 @@ internal data class DpadSettings(
         // joystick sources.
         const val DEFAULT_TILT_SENSITIVITY = 5.0f
 
+        // Deadzone exposed in the joystick Directional Pad menu as a raw 0..32767
+        // slider (spec default 10000 ≈ 0.305). Normalized to innerDeadzone.
+        const val DEFAULT_DEADZONE_RAW = 10000f
+        const val DEFAULT_OVERLAP_REGION = 4000f
+        // Max per-axis diagonal floor at the lowest overlap setting (≈4-way feel).
+        const val MAX_OVERLAP_AXIAL = 0.5f
+        // Outer-ring command radius — shared 0..32767 slider with the Joystick menu.
+        const val DEFAULT_COMMAND_RADIUS_RAW = 25000f
+
         val DEFAULT_JSON =
-            """{"inner_deadzone":$DEFAULT_INNER_DEADZONE,"outer_deadzone":$DEFAULT_OUTER_DEADZONE,"dpad_layout":"$DEFAULT_LAYOUT","tilt_sensitivity":$DEFAULT_TILT_SENSITIVITY}"""
+            """{"deadzone":$DEFAULT_DEADZONE_RAW,"outer_deadzone":$DEFAULT_OUTER_DEADZONE,""" +
+                """"dpad_layout":"$DEFAULT_LAYOUT","tilt_sensitivity":$DEFAULT_TILT_SENSITIVITY,""" +
+                """"overlap_region":$DEFAULT_OVERLAP_REGION}"""
 
         fun parse(json: String): DpadSettings {
             if (json.isBlank()) return defaults()
@@ -642,14 +678,27 @@ internal data class DpadSettings(
                 } else {
                     DEFAULT_LAYOUT
                 }
+                // Prefer the raw 0..32767 "deadzone" key (joystick DPad menu); fall back
+                // to the legacy normalized "inner_deadzone"; else the spec default.
+                val inner = when {
+                    obj.has("deadzone") ->
+                        (obj.optDouble("deadzone", DEFAULT_DEADZONE_RAW.toDouble()).toFloat() / 32767f)
+                    obj.has("inner_deadzone") ->
+                        obj.optDouble("inner_deadzone", DEFAULT_INNER_DEADZONE.toDouble()).toFloat()
+                    else -> DEFAULT_DEADZONE_RAW / 32767f
+                }.coerceIn(0f, 0.95f)
                 DpadSettings(
-                    innerDeadzone = obj.optDouble("inner_deadzone", DEFAULT_INNER_DEADZONE.toDouble())
-                        .toFloat().coerceIn(0f, 0.95f),
+                    innerDeadzone = inner,
                     outerDeadzone = obj.optDouble("outer_deadzone", DEFAULT_OUTER_DEADZONE.toDouble())
                         .toFloat().coerceIn(0f, 0.95f),
                     dpadLayout = layout,
                     tiltSensitivity = obj.optDouble("tilt_sensitivity", DEFAULT_TILT_SENSITIVITY.toDouble())
                         .toFloat().coerceAtLeast(0f),
+                    overlapRegion = obj.optDouble("overlap_region", DEFAULT_OVERLAP_REGION.toDouble())
+                        .toFloat().coerceIn(2000f, 16000f),
+                    commandRadius = (obj.optDouble("command_radius", DEFAULT_COMMAND_RADIUS_RAW.toDouble())
+                        .toFloat() / 32767f).coerceIn(0f, 1f),
+                    commandInvert = obj.optBoolean("command_invert", false),
                 )
             } catch (_: JSONException) {
                 defaults()
@@ -657,10 +706,13 @@ internal data class DpadSettings(
         }
 
         private fun defaults() = DpadSettings(
-            innerDeadzone = DEFAULT_INNER_DEADZONE,
+            innerDeadzone = DEFAULT_DEADZONE_RAW / 32767f,
             outerDeadzone = DEFAULT_OUTER_DEADZONE,
             dpadLayout = DEFAULT_LAYOUT,
             tiltSensitivity = DEFAULT_TILT_SENSITIVITY,
+            overlapRegion = DEFAULT_OVERLAP_REGION,
+            commandRadius = DEFAULT_COMMAND_RADIUS_RAW / 32767f,
+            commandInvert = false,
         )
     }
 }
@@ -1373,7 +1425,11 @@ internal data class FlickStickSettings(
     /** px per radian = dots-per-360 over a full turn. */
     val velocityPxPerRad: Float get() = dotsPer360 / (2f * kotlin.math.PI.toFloat())
 
-    /** Flick-turn playout duration from tightness: 100% → fast (MIN), 0% → slow (MAX). */
+    /**
+     * Flick-turn playout duration from tightness: 100% → fast (MIN), 0% → slow (MAX).
+     * Calibrated against Steam Input (user 2026-06-15: our 80% felt a touch slower
+     * than Steam's 80%) — the range was tightened 50–250ms → 40–200ms, so 80% ≈ 72ms.
+     */
     val flickTimeMs: Int
         get() = (MAX_FLICK_MS - flickTurnTightness.coerceIn(0f, 1f) * (MAX_FLICK_MS - MIN_FLICK_MS))
             .toInt().coerceAtLeast(1)
@@ -1401,8 +1457,8 @@ internal data class FlickStickSettings(
     }
 
     companion object {
-        const val MIN_FLICK_MS = 50
-        const val MAX_FLICK_MS = 250
+        const val MIN_FLICK_MS = 40
+        const val MAX_FLICK_MS = 200
         val FORWARD_ONLY_WINDOW_RAD = (kotlin.math.PI / 4).toFloat() // ±45°
 
         const val DEFAULT_DOTS_PER_360 = 6545f
@@ -1576,42 +1632,51 @@ object ScrollWheelMode : SourceMode {
             return
         }
 
-        val currentAngle = atan2(reading.x, -reading.y)
-        val baseline = synchronized(baselineAngleBySource) { baselineAngleBySource[reading.source] }
+        // Track a 1-D coordinate per swipe direction: stick angle (circular), or the
+        // stick position on one axis (horizontal/vertical). Only the circular path
+        // wraps around ±π.
+        val circular = settings.swipeDirection == ScrollWheelSettings.SwipeDirection.CIRCULAR
+        val coord = when (settings.swipeDirection) {
+            ScrollWheelSettings.SwipeDirection.CIRCULAR -> atan2(reading.x, -reading.y)
+            ScrollWheelSettings.SwipeDirection.VERTICAL -> -reading.y // up = forward
+            ScrollWheelSettings.SwipeDirection.HORIZONTAL -> reading.x
+        }
+        val threshold = settings.tickThreshold()
+        if (threshold <= 0f) return // defensive — settings clamp sensitivity, but be safe
 
+        val baseline = synchronized(baselineAngleBySource) { baselineAngleBySource[reading.source] }
         if (baseline == null) {
             // First deflection sample — set baseline, emit nothing.
-            synchronized(baselineAngleBySource) { baselineAngleBySource[reading.source] = currentAngle }
+            synchronized(baselineAngleBySource) { baselineAngleBySource[reading.source] = coord }
             return
         }
 
-        val delta = wrapToPlusMinusPi(currentAngle - baseline)
-        val thresholdRad = (settings.scrollAngleDeg * Math.PI / 180.0).toFloat()
-        if (thresholdRad <= 0f) return  // defensive — settings clamp this, but be safe
-
+        val delta = if (circular) wrapToPlusMinusPi(coord - baseline) else coord - baseline
         val absDelta = abs(delta)
-        if (absDelta < thresholdRad) {
+        if (absDelta < threshold) {
             // Sub-threshold motion — let it accumulate; baseline unchanged.
             return
         }
 
-        val ticks = (absDelta / thresholdRad).toInt()
+        val ticks = (absDelta / threshold).toInt()
         val deltaSign = if (delta >= 0f) 1f else -1f
         val isClockwise = (deltaSign > 0f) xor settings.invert
         val subInput = if (isClockwise) "scroll_clockwise" else "scroll_counter_clockwise"
+        val intensity = HapticIntensity.fromId(settings.hapticIntensity) ?: HapticIntensity.OFF
 
-        // Emit one DOWN→UP pulse per tick crossed. Back-to-back in the same
-        // evaluate() so the activator engine sees N complete press cycles.
+        // Emit one DOWN→UP pulse per tick crossed (back-to-back so the activator
+        // engine sees N complete press cycles), with a haptic bump per tick.
         repeat(ticks) {
             digitalEmit(subInput, true)
             digitalEmit(subInput, false)
+            if (intensity != HapticIntensity.OFF) ctx.haptic(intensity)
         }
 
         // Advance baseline by exactly N threshold-widths in the direction of
         // motion. Sub-threshold remainder stays in the baseline-to-current
         // gap and counts toward the next tick.
-        val consumed = ticks * thresholdRad * deltaSign
-        val newBaseline = wrapToPlusMinusPi(baseline + consumed)
+        val consumed = ticks * threshold * deltaSign
+        val newBaseline = if (circular) wrapToPlusMinusPi(baseline + consumed) else baseline + consumed
         synchronized(baselineAngleBySource) { baselineAngleBySource[reading.source] = newBaseline }
     }
 
@@ -1640,51 +1705,68 @@ object ScrollWheelMode : SourceMode {
  */
 internal data class ScrollWheelSettings(
     val deadzone: Float,
-    val scrollAngleDeg: Float,
+    /** Ticks per full motion (revolution for circular; full axis sweep for linear). */
+    val sensitivity: Float,
+    val swipeDirection: SwipeDirection,
     val invert: Boolean,
+    val hapticIntensity: String, // off / low / medium / high
+    /** Parsed for VDF round-trip; momentum/flywheel not yet implemented. */
+    val spinFriction: String,
+    /** Parsed for VDF round-trip; Mapo emits raw tick sub-inputs (no command list). */
+    val wrapList: Boolean,
 ) {
+    enum class SwipeDirection { HORIZONTAL, VERTICAL, CIRCULAR }
+
+    /** Threshold per tick: radians (circular) or stick-units (linear). */
+    fun tickThreshold(): Float =
+        if (swipeDirection == SwipeDirection.CIRCULAR) {
+            (2.0 * Math.PI / sensitivity).toFloat()
+        } else {
+            2f / sensitivity // full −1..+1 sweep = `sensitivity` ticks
+        }
+
     companion object {
         /**
-         * Radial deadzone — stick magnitude below this emits nothing. Higher
-         * than [StickToMouseSettings]' cursor default because spurious wheel
-         * ticks from idle stick noise are more disruptive than spurious
-         * cursor jitter (one notch can scroll a weapon, fire a hotbar action,
-         * etc.).
+         * Radial deadzone — stick magnitude below this emits nothing. Not exposed
+         * in the Scroll Wheel menu (the spec has none); kept as an internal floor
+         * so idle stick noise doesn't fire spurious ticks.
          */
         const val DEFAULT_DEADZONE = 0.20f
 
-        /**
-         * Degrees of stick rotation per emitted tick. 22.5° = 16 ticks per
-         * full revolution, matching Steam Input's stock Scroll Wheel default.
-         * Range typically 5° (very fine, ~72 ticks/rev) to 90° (very chunky,
-         * 4 ticks/rev).
-         */
-        const val DEFAULT_SCROLL_ANGLE_DEG = 22.5f
-
-        const val DEFAULT_INVERT = false
+        /** Ticks per full motion. Spec default 90; range 1 (coarse) .. 180 (fine). */
+        const val DEFAULT_SENSITIVITY = 90f
 
         val DEFAULTS = ScrollWheelSettings(
             deadzone = DEFAULT_DEADZONE,
-            scrollAngleDeg = DEFAULT_SCROLL_ANGLE_DEG,
-            invert = DEFAULT_INVERT,
+            sensitivity = DEFAULT_SENSITIVITY,
+            swipeDirection = SwipeDirection.CIRCULAR,
+            invert = false,
+            hapticIntensity = "medium",
+            spinFriction = "medium",
+            wrapList = true,
         )
 
-        val DEFAULT_JSON =
-            """{"deadzone_inner_radius":$DEFAULT_DEADZONE,""" +
-                """"scroll_angle":$DEFAULT_SCROLL_ANGLE_DEG,"scroll_invert":$DEFAULT_INVERT}"""
+        // All keys tolerant → "{}" seeds the spec defaults.
+        val DEFAULT_JSON = "{}"
 
         fun parse(json: String): ScrollWheelSettings {
             if (json.isBlank()) return DEFAULTS
             return try {
                 val obj = JSONObject(json)
                 ScrollWheelSettings(
-                    deadzone = obj.optDouble(
-                        "deadzone_inner_radius", DEFAULT_DEADZONE.toDouble()
-                    ).toFloat().coerceIn(0f, 0.99f),
-                    scrollAngleDeg = obj.optDouble(
-                        "scroll_angle", DEFAULT_SCROLL_ANGLE_DEG.toDouble()
-                    ).toFloat().coerceIn(1f, 180f),
-                    invert = obj.optBoolean("scroll_invert", DEFAULT_INVERT),
+                    deadzone = obj.optDouble("deadzone_inner_radius", DEFAULT_DEADZONE.toDouble())
+                        .toFloat().coerceIn(0f, 0.99f),
+                    sensitivity = obj.optDouble("sensitivity", DEFAULT_SENSITIVITY.toDouble())
+                        .toFloat().coerceIn(1f, 180f),
+                    swipeDirection = when (obj.optString("swipe_direction", "circular")) {
+                        "horizontal" -> SwipeDirection.HORIZONTAL
+                        "vertical" -> SwipeDirection.VERTICAL
+                        else -> SwipeDirection.CIRCULAR
+                    },
+                    invert = obj.optBoolean("invert_swipe", false),
+                    hapticIntensity = obj.optString("haptic_intensity", "medium"),
+                    spinFriction = obj.optString("spin_friction", "medium"),
+                    wrapList = obj.optBoolean("wrap_list", true),
                 )
             } catch (_: JSONException) {
                 DEFAULTS
@@ -2974,6 +3056,13 @@ internal data class MouseOutputSettings(
             outputAxis = "both",
         )
 
+        // NOTE: the Joystick Mouse settings menu also declares `stick_response_curve`
+        // (UI default "wide") and `response_axis_style` (UI default "per_axis"), which
+        // this parser does NOT yet read. When wiring them, the runtime fallback MUST
+        // match those UI defaultIds — mode switch never seeds settingsJson, so a group
+        // with the key unset relies on the fallback agreeing with what the cog shows.
+        // A divergence is the silent "UI says X, runtime does Y" bug (see DpadSettings
+        // DEFAULT_LAYOUT, which read 4-way while the dropdown showed 8-way).
         fun parse(json: String): MouseOutputSettings {
             if (json.isBlank()) return DEFAULTS
             return try {

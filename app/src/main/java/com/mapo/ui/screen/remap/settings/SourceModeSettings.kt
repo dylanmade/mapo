@@ -415,6 +415,62 @@ object SourceModeSettingsSchema {
         control = SettingControl.Dropdown(RESPONSE_AXIS_OPTIONS, defaultId = "per_axis"),
     )
 
+    // ── Directional Pad specs (Joysticks → Directional Pad) ──────────────────────
+    private val DPAD_OVERLAP_REGION = SettingSpec(
+        key = "overlap_region",
+        label = "Overlap region",
+        helper = "Diagonal space that triggers both directions. Lowest ≈ 4-way; highest applies overlap unless precisely on a cardinal.",
+        control = SettingControl.Slider(2000f, 16000f, default = 4000f),
+    )
+    private val DPAD_DEADZONE = SettingSpec(
+        key = "deadzone",
+        label = "Deadzone",
+        helper = "Below this stick deflection, no direction is sent.",
+        control = SettingControl.Slider(0f, 32767f, default = 10000f),
+    )
+
+    // ── Scroll Wheel specs (Joysticks → Scroll Wheel) ───────────────────────────
+    private val SWIPE_DIRECTION_OPTIONS = listOf(
+        DropdownOption("horizontal", "Horizontal"),
+        DropdownOption("vertical", "Vertical"),
+        DropdownOption("circular", "Circular", "Make circular motions to scroll forward/backward through the commands."),
+    )
+    private val SCROLL_SENSITIVITY = SettingSpec(
+        key = "sensitivity",
+        label = "Sensitivity",
+        helper = "Scroll ticks per full stick motion — higher scrolls faster.",
+        control = SettingControl.Slider(1f, 180f, default = 90f),
+    )
+    private val SCROLL_SPIN_FRICTION = SettingSpec(
+        key = "spin_friction",
+        label = "Spin friction",
+        helper = "Momentum/coast after you stop spinning. (Flywheel coasting is not yet implemented.)",
+        control = SettingControl.Dropdown(HAPTIC_INTENSITY_OPTIONS, defaultId = "medium"),
+    )
+    private val SCROLL_SWIPE_DIRECTION = SettingSpec(
+        key = "swipe_direction",
+        label = "Swipe direction",
+        control = SettingControl.Dropdown(SWIPE_DIRECTION_OPTIONS, defaultId = "circular"),
+    )
+    private val SCROLL_INVERT_SWIPE = SettingSpec(
+        key = "invert_swipe",
+        label = "Invert swipe direction",
+        helper = "Flips which way you swipe to move 'forward' through the commands.",
+        control = SettingControl.Toggle(),
+    )
+    private val SCROLL_WRAP_LIST = SettingSpec(
+        key = "wrap_list",
+        label = "Wrap list",
+        helper = "Scrolling past an end wraps to the other end. (Applies to command-list bindings; Mapo currently emits raw scroll ticks.)",
+        control = SettingControl.Toggle(default = true),
+    )
+    private val SCROLL_HAPTIC_INTENSITY = SettingSpec(
+        key = "haptic_intensity",
+        label = "Haptic intensity",
+        helper = "Haptic bump strength per scroll tick.",
+        control = SettingControl.Dropdown(HAPTIC_INTENSITY_OPTIONS, defaultId = "medium"),
+    )
+
     // ── Flick Stick specs (Joysticks → Flick Stick) ─────────────────────────────
     private val SNAP_ANGLE_OPTIONS = listOf(
         DropdownOption("no_snapping", "No snapping"),
@@ -564,6 +620,26 @@ object SourceModeSettingsSchema {
         SettingCategory("Haptics", listOf(HAPTIC_INTENSITY)),
     )
 
+    /** The "Scroll Wheel" mode menu for an analog joystick source. */
+    private val SCROLL_WHEEL_CATEGORIES = listOf(
+        SettingCategory(
+            "General",
+            listOf(
+                SCROLL_SENSITIVITY, SCROLL_SPIN_FRICTION, SCROLL_SWIPE_DIRECTION,
+                SCROLL_INVERT_SWIPE, SCROLL_WRAP_LIST,
+            ),
+        ),
+        SettingCategory("Haptics", listOf(SCROLL_HAPTIC_INTENSITY)),
+    )
+
+    /** The "Directional Pad" mode menu for an analog joystick source. */
+    private val JOYSTICK_DPAD_CATEGORIES = listOf(
+        SettingCategory("General", listOf(DIRECTIONAL_PAD_LAYOUT, DPAD_OVERLAP_REGION)),
+        SettingCategory("Deadzones", listOf(DPAD_DEADZONE)),
+        SettingCategory("Outer ring", listOf(COMMAND_RADIUS, COMMAND_INVERT)),
+        SettingCategory("Haptics", listOf(HAPTIC_INTENSITY_OVERRIDE)),
+    )
+
     /** The "Flick Stick" mode menu (analog stick → flick-turn + sweep camera). */
     private val FLICK_STICK_CATEGORIES = listOf(
         SettingCategory("Angle calibration", listOf(FLICK_DOTS_PER_360)),
@@ -614,6 +690,14 @@ object SourceModeSettingsSchema {
         // Analog joysticks in Flick Stick mode.
         (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) &&
             mode == BindingMode.FLICK_STICK -> FLICK_STICK_CATEGORIES
+
+        // Analog joysticks in Directional Pad mode.
+        (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) &&
+            mode == BindingMode.DPAD -> JOYSTICK_DPAD_CATEGORIES
+
+        // Analog joysticks in Scroll Wheel mode.
+        (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) &&
+            mode == BindingMode.SCROLL_WHEEL -> SCROLL_WHEEL_CATEGORIES
 
         else -> emptyList()
     }

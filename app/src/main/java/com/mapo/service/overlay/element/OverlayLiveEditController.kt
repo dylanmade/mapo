@@ -41,7 +41,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -62,9 +64,15 @@ import androidx.compose.material.icons.filled.AlignHorizontalRight
 import androidx.compose.material.icons.filled.AlignVerticalBottom
 import androidx.compose.material.icons.filled.AlignVerticalCenter
 import androidx.compose.material.icons.filled.AlignVerticalTop
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
+import androidx.compose.material.icons.filled.ArrowLeft
+import androidx.compose.material.icons.filled.ArrowRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.ControlCamera
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterCenterFocus
@@ -75,7 +83,6 @@ import androidx.compose.material.icons.filled.HorizontalDistribute
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.Tune
@@ -115,6 +122,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -156,6 +164,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -234,6 +244,17 @@ class OverlayLiveEditController @Inject constructor(
     private var toolbarParams: WindowManager.LayoutParams? = null
     private var configWindow: Pair<View, OverlayLifecycleOwner>? = null
     private var confirmWindow: Pair<View, OverlayLifecycleOwner>? = null
+    // The "Positioner": a separate, grab-anywhere-draggable dpad window for single-pixel nudging of
+    // the selection. Like the toolbar, the whole window is the drag surface (no handle) and its
+    // buttons are hit-tested by the raw-coord filter (no `clickable`) — [posTargets] holds their
+    // window-local bounds + ripple sources, keyed "up"/"down"/"left"/"right"/"close".
+    private var positioner: Pair<View, OverlayLifecycleOwner>? = null
+    private var positionerParams: WindowManager.LayoutParams? = null
+    private val positionerOpen = MutableStateFlow(false)
+    // Which control is pressed ("up"/"down"/"left"/"right"/"close"/null) — drives the press highlight.
+    // The diamond is drawn (not laid-out buttons), so the raw-coord filter hit-tests it geometrically.
+    private val positionerPressed = MutableStateFlow<String?>(null)
+    private var nudgeRepeatJob: Job? = null
     // The editor menu's ROOT is always-visible — it IS the toolbar window (a vertical panel with a
     // drag handle top + bottom). Its submenus open as cascading fly-out windows, one per open
     // level, tracked in [menuStack] (depth 1 = a submenu of a root row, 2 = a submenu of that, …).
@@ -338,6 +359,7 @@ class OverlayLiveEditController @Inject constructor(
             selectionJob?.cancel()
             selectionJob = null
             removeChrome()
+            removePositioner()
             dismissConfig()
             dismissExitConfirm()
             dismissSubmenus()
@@ -398,6 +420,8 @@ class OverlayLiveEditController @Inject constructor(
         // transient and usually closed during a button add, so the simpler raise is fine.
         raiseToolbar()
         menuStack.toList().forEach { mw -> raiseWindow(mw.view, mw.params) }
+        // Keep the Positioner above newly-added buttons too (it's a persistent floating window).
+        positioner?.let { (v, _) -> positionerParams?.let { raiseWindow(v, it) } }
     }
 
     /** Bring [view]'s overlay window to the top by re-adding it (keeps [params], hence its position). */
@@ -834,6 +858,283 @@ class OverlayLiveEditController @Inject constructor(
             left < r && right > l && top < bm && bottom > t // rect-intersection test
         }.map { it.id }.toSet()
         selectedIds.value = hits
+    }
+
+    // ── Positioner (separate draggable dpad window for nudging the selection) ─────────────────────
+
+    // A nudge "press" anchors on the selection's positions at press-time and applies the cumulative
+    // delta each step — so a held repeat moves steadily (not racing the async commit by re-reading
+    // elements.value), and the whole press is ONE undo entry.
+    private var nudgeAnchor: List<OverlayElement>? = null
+    private var nudgeAccumX = 0
+    private var nudgeAccumY = 0
+
+    /** Begin a nudge press: snapshot for undo + capture the selection's start positions. */
+    private fun beginNudge() {
+        val ids = selectedIds.value
+        val els = overlayEditor.elements.value.filter { it.id in ids }
+        if (els.isEmpty()) { nudgeAnchor = null; return }
+        overlayEditor.pushUndoSnapshot()
+        nudgeAnchor = els
+        nudgeAccumX = 0
+        nudgeAccumY = 0
+    }
+
+    /** Apply one nudge step ([dxPx], [dyPx]) cumulatively from the press-start positions. */
+    private fun stepNudge(dxPx: Int, dyPx: Int) {
+        val anchor = nudgeAnchor ?: return
+        nudgeAccumX += dxPx
+        nudgeAccumY += dyPx
+        val size = displaySizePx()
+        overlayEditor.moveResizeAll(
+            anchor.map { el ->
+                OverlayEditor.ElementRect(
+                    id = el.id,
+                    x = el.x + nudgeAccumX.toFloat() / size.x,
+                    y = el.y + nudgeAccumY.toFloat() / size.y,
+                    width = el.width,
+                    height = el.height,
+                ) // moveResizeAll clamps to the canvas
+            },
+        )
+    }
+
+    private fun endNudge() { nudgeAnchor = null }
+
+    private fun togglePositioner() {
+        if (positioner != null) removePositioner() else addPositioner()
+    }
+
+    private fun removePositioner() {
+        nudgeRepeatJob?.cancel(); nudgeRepeatJob = null
+        if (nudgeAnchor != null) endNudge()
+        positioner?.let { detach(it) }
+        positioner = null
+        positionerParams = null
+        positionerPressed.value = null
+        positionerOpen.value = false
+    }
+
+    @OptIn(ExperimentalComposeUiApi::class)
+    private fun addPositioner() {
+        if (positioner != null) return
+        positionerPressed.value = null
+        val owner = OverlayLifecycleOwner()
+        // ONE raw-coord filter over the whole window (like the toolbar): drag past slop moves the
+        // window; otherwise a press geometrically hit-tests the diamond ([positionerHit]) — a direction
+        // nudges (tap once / hold to repeat), close dismisses. The pressed control highlights via
+        // [positionerPressed]; empty corners (outside the rhombus) and disabled directions just drag.
+        var startRawX = 0f; var startRawY = 0f; var startX = 0; var startY = 0
+        var dragging = false
+        var pressedKey: String? = null
+        var nudging = false
+        val onTouch: (MotionEvent) -> Boolean = { ev ->
+            val p = positionerParams
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startRawX = ev.rawX; startRawY = ev.rawY; startX = p?.x ?: 0; startY = p?.y ?: 0
+                    dragging = false; nudging = false
+                    val key = positionerHit(ev.x, ev.y)
+                        ?.takeUnless { it != "close" && selectedIds.value.isEmpty() } // disabled dir → drag
+                    pressedKey = key
+                    positionerPressed.value = key
+                    if (key != null && key != "close") {
+                        val (dx, dy) = nudgeDelta(key)
+                        // Hold → after a delay, begin nudging and repeat (a quick tap fires on UP).
+                        nudgeRepeatJob = scope.launch {
+                            delay(NUDGE_HOLD_DELAY_MS)
+                            beginNudge(); nudging = true
+                            stepNudge(dx, dy)
+                            while (isActive) { delay(NUDGE_HOLD_REPEAT_MS); stepNudge(dx, dy) }
+                        }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!dragging && hypot(ev.rawX - startRawX, ev.rawY - startRawY) > touchSlop) {
+                        dragging = true
+                        nudgeRepeatJob?.cancel(); nudgeRepeatJob = null
+                        if (nudging) { endNudge(); nudging = false }
+                        pressedKey = null; positionerPressed.value = null // a drag → no tap action
+                    }
+                    if (dragging && p != null) {
+                        val v = positioner?.first
+                        val w = v?.width ?: 0; val h = v?.height ?: 0
+                        val size = displaySizePx()
+                        p.x = (startX + (ev.rawX - startRawX)).roundToInt().coerceIn(0, maxOf(0, size.x - w))
+                        p.y = (startY + (ev.rawY - startRawY)).roundToInt().coerceIn(0, maxOf(0, size.y - h))
+                        runCatching { windowManager.updateViewLayout(v, p) }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    nudgeRepeatJob?.cancel(); nudgeRepeatJob = null
+                    val released = ev.actionMasked == MotionEvent.ACTION_UP && !dragging
+                    val key = pressedKey
+                    if (released && key != null) {
+                        when {
+                            key == "close" -> removePositioner()
+                            !nudging -> { val (dx, dy) = nudgeDelta(key); beginNudge(); stepNudge(dx, dy); endNudge() }
+                            else -> endNudge() // a hold just finished
+                        }
+                    } else if (nudging) {
+                        endNudge()
+                    }
+                    pressedKey = null; positionerPressed.value = null; nudging = false; dragging = false
+                    true
+                }
+                else -> true
+            }
+        }
+        val view = ComposeView(context).apply {
+            attachOwner(owner)
+            setContent { MapoTheme { PositionerContent(onTouch) } }
+        }
+        owner.resumeTo()
+        val size = displaySizePx()
+        val params = layoutParams(
+            width = WindowManager.LayoutParams.WRAP_CONTENT,
+            height = WindowManager.LayoutParams.WRAP_CONTENT,
+            focusable = false,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = (size.x * 0.72f).roundToInt()
+            y = (size.y * 0.40f).roundToInt()
+        }
+        runCatching { windowManager.addView(view, params) }
+            .onFailure { Log.e(TAG, "addView(positioner) failed", it); return }
+        positioner = view to owner
+        positionerParams = params
+        positionerOpen.value = true
+    }
+
+    /**
+     * The Positioner: a rounded DIAMOND whose four quadrants are filled triangle direction buttons
+     * (white arrow legend on each), with a stacked **× / "Close"** control in the center. Drawn (not
+     * laid-out buttons) so [addPositioner]'s raw-coord filter hit-tests it geometrically ([positionerHit]).
+     * Grab-anywhere draggable; each direction nudges 1px per tap and auto-repeats while held; directions
+     * are disabled (greyed; that area drags) when nothing is selected.
+     */
+    @OptIn(ExperimentalComposeUiApi::class)
+    @Composable
+    private fun PositionerContent(onTouch: (MotionEvent) -> Boolean) {
+        val sel by selectedIds.collectAsStateWithLifecycle()
+        val enabled = sel.isNotEmpty()
+        val pressed by positionerPressed.collectAsStateWithLifecycle()
+        val diamondFill = MaterialTheme.colorScheme.surfaceContainerHigh.toArgb()
+        val triFill =
+            (if (enabled) MaterialTheme.colorScheme.secondaryContainer
+            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)).toArgb()
+        val triPress = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f).toArgb()
+        // Arrow legends use the normal white text color (onSurface), not the muted on-container tint.
+        // Arrow legends = the normal white text color, ALWAYS (the triangle fill conveys disabled, not
+        // the arrow). onSurface is the same color the menu text rows use.
+        val arrowTint = MaterialTheme.colorScheme.onSurface
+        val closeTint = MaterialTheme.colorScheme.onSurfaceVariant
+        val iconOffset = (POSITIONER_DP / 2f * POSITIONER_ICON_F).dp
+        Box(
+            Modifier
+                .pointerInteropFilter(onTouchEvent = onTouch)
+                .padding(MENU_SHADOW_MARGIN.dp)
+                .requiredSize(POSITIONER_DP.dp)
+                .drawBehind {
+                    val w = size.width; val h = size.height; val cx = w / 2f; val cy = h / 2f; val d = w / 2f
+                    val diamond = roundedPolygonPath(
+                        arrayOf(floatArrayOf(cx, 0f), floatArrayOf(w, cy), floatArrayOf(cx, h), floatArrayOf(0f, cy)),
+                        FloatArray(4) { POSITIONER_DIAMOND_CORNER_F * d },
+                    )
+                    // Per-corner radii: the outer apex (index 0) is rounded LESS than the two base corners.
+                    val triRadii = floatArrayOf(POSITIONER_TIP_CORNER_F * d, POSITIONER_BASE_CORNER_F * d, POSITIONER_BASE_CORNER_F * d)
+                    // Each direction = a right-isoceles half-square: apex `ap` out toward its edge, base `ba`
+                    // out from center, base half-width == height (= ap-ba). Keeping ba > (ap-ba) holds each
+                    // triangle inside its own quadrant (base corners don't cross the diagonals → no overlap).
+                    val ap = POSITIONER_APEX_F * d; val ba = POSITIONER_BASE_F * d; val wh = ap - ba
+                    val tris = listOf(
+                        "up" to arrayOf(floatArrayOf(cx, cy - ap), floatArrayOf(cx - wh, cy - ba), floatArrayOf(cx + wh, cy - ba)),
+                        "down" to arrayOf(floatArrayOf(cx, cy + ap), floatArrayOf(cx + wh, cy + ba), floatArrayOf(cx - wh, cy + ba)),
+                        "left" to arrayOf(floatArrayOf(cx - ap, cy), floatArrayOf(cx - ba, cy + wh), floatArrayOf(cx - ba, cy - wh)),
+                        "right" to arrayOf(floatArrayOf(cx + ap, cy), floatArrayOf(cx + ba, cy - wh), floatArrayOf(cx + ba, cy + wh)),
+                    ).map { (key, pts) -> key to roundedPolygonPath(pts, triRadii) }
+                    drawIntoCanvas { canvas ->
+                        val nc = canvas.nativeCanvas
+                        val shadow = android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb(72, 0, 0, 0)
+                            maskFilter = android.graphics.BlurMaskFilter(8.dp.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
+                            isAntiAlias = true
+                        }
+                        nc.save(); nc.translate(0f, 2.dp.toPx()); nc.drawPath(diamond, shadow); nc.restore()
+                        nc.drawPath(diamond, android.graphics.Paint().apply { color = diamondFill; isAntiAlias = true })
+                        val tp = android.graphics.Paint().apply { color = triFill; isAntiAlias = true }
+                        val pp = android.graphics.Paint().apply { color = triPress; isAntiAlias = true }
+                        tris.forEach { (key, path) ->
+                            nc.drawPath(path, tp)
+                            if (key == pressed) nc.drawPath(path, pp)
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            PosArrow(Modifier.align(Alignment.Center).offset(y = -iconOffset), Icons.Default.ArrowDropUp, "Up", arrowTint)
+            PosArrow(Modifier.align(Alignment.Center).offset(y = iconOffset), Icons.Default.ArrowDropDown, "Down", arrowTint)
+            PosArrow(Modifier.align(Alignment.Center).offset(x = -iconOffset), Icons.Default.ArrowLeft, "Left", arrowTint)
+            PosArrow(Modifier.align(Alignment.Center).offset(x = iconOffset), Icons.Default.ArrowRight, "Right", arrowTint)
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = closeTint, modifier = Modifier.requiredSize(22.dp))
+                Text("Close", style = MaterialTheme.typography.labelSmall, color = closeTint)
+            }
+        }
+    }
+
+    @Composable
+    private fun PosArrow(modifier: Modifier, icon: ImageVector, desc: String, tint: androidx.compose.ui.graphics.Color) {
+        // Scales with the diamond (so the whole positioner shrinks together; only the close stays fixed).
+        Icon(icon, contentDescription = desc, tint = tint, modifier = modifier.requiredSize((POSITIONER_DP * POSITIONER_ICON_SIZE_F).dp))
+    }
+
+    /** Geometric hit-test of the diamond at window-local ([xF], [yF]) → control key, or null (drag). */
+    private fun positionerHit(xF: Float, yF: Float): String? {
+        val density = context.resources.displayMetrics.density
+        val d = POSITIONER_DP * density / 2f
+        val c = MENU_SHADOW_MARGIN * density + d // diamond center = margin + half (square content)
+        val dx = xF - c; val dy = yF - c
+        val ax = abs(dx); val ay = abs(dy)
+        val closeHalf = POSITIONER_CLOSE_F * d
+        return when {
+            ax <= closeHalf && ay <= closeHalf -> "close"
+            ax + ay > d -> null // outside the rhombus → empty corner → drag
+            ay >= ax -> if (dy < 0) "up" else "down"
+            else -> if (dx < 0) "left" else "right"
+        }
+    }
+
+    private fun nudgeDelta(key: String): Pair<Int, Int> = when (key) {
+        "up" -> 0 to -NUDGE_PX
+        "down" -> 0 to NUDGE_PX
+        "left" -> -NUDGE_PX to 0
+        "right" -> NUDGE_PX to 0
+        else -> 0 to 0
+    }
+
+    /** A closed [android.graphics.Path] through [pts], each corner rounded to its [radii] (quad arcs). */
+    private fun roundedPolygonPath(pts: Array<FloatArray>, radii: FloatArray): android.graphics.Path {
+        val path = android.graphics.Path()
+        val n = pts.size
+        for (i in 0 until n) {
+            val curr = pts[i]; val prev = pts[(i - 1 + n) % n]; val next = pts[(i + 1) % n]
+            val v1x = prev[0] - curr[0]; val v1y = prev[1] - curr[1]
+            val v2x = next[0] - curr[0]; val v2y = next[1] - curr[1]
+            val l1 = hypot(v1x, v1y); val l2 = hypot(v2x, v2y)
+            val r = minOf(radii[i], l1 / 2f, l2 / 2f)
+            val p1x = curr[0] + v1x / l1 * r; val p1y = curr[1] + v1y / l1 * r
+            val p2x = curr[0] + v2x / l2 * r; val p2y = curr[1] + v2y / l2 * r
+            if (i == 0) path.moveTo(p1x, p1y) else path.lineTo(p1x, p1y)
+            path.quadTo(curr[0], curr[1], p2x, p2y)
+        }
+        path.close()
+        return path
     }
 
     /**
@@ -2017,12 +2318,17 @@ class OverlayLiveEditController @Inject constructor(
         val snap by overlaySettings.snapEnabled.collectAsStateWithLifecycle()
         val grid by showGrid.collectAsStateWithLifecycle()
         val divisions by gridDivisions.collectAsStateWithLifecycle()
+        val positionerShown by positionerOpen.collectAsStateWithLifecycle()
         return listOf(
             MenuEntry.Item("Snapping", leadingIcon = Icons.Default.GridOn, trailing = MenuTrailing.Check(snap) { overlaySettings.setSnapEnabled(it) }),
             MenuEntry.Item("Show grid", leadingIcon = Icons.Default.Grid4x4, trailing = MenuTrailing.Check(grid) { showGrid.value = it }),
             MenuEntry.Item("Grid size", leadingIcon = Icons.Default.Straighten, trailing = MenuTrailing.Value(divisions.toString())),
             MenuEntry.Divider,
-            MenuEntry.Item("Show controller", leadingIcon = Icons.Default.SportsEsports, onClick = { menuGap("Show controller") }),
+            MenuEntry.Item(
+                "Positioner",
+                leadingIcon = Icons.Default.ControlCamera,
+                trailing = MenuTrailing.Check(positionerShown) { togglePositioner() },
+            ),
             MenuEntry.Item("Rotate menu", leadingIcon = Icons.Default.ScreenRotation, onClick = { rotateMenu() }),
         )
     }
@@ -2667,5 +2973,20 @@ class OverlayLiveEditController @Inject constructor(
         private const val MENU_SHADOW_MARGIN = 10
         // Rotate animation: ~half collapsing the shrinking axis (ease-in), ~half growing the other (ease-out).
         private const val ROTATE_TOTAL_MS = 200
+        // Positioner nudge: one screen pixel per tap; hold to auto-repeat after a short delay.
+        private const val NUDGE_PX = 1
+        private const val NUDGE_HOLD_DELAY_MS = 350L
+        private const val NUDGE_HOLD_REPEAT_MS = 45L
+        // Positioner diamond geometry (fractions are of the half-diagonal D = POSITIONER_DP/2). The
+        // whole thing scales with POSITIONER_DP EXCEPT the central close ×/label (kept fixed/readable).
+        private const val POSITIONER_DP = 150
+        private const val POSITIONER_ICON_SIZE_F = 0.17f   // arrow legend size as a fraction of POSITIONER_DP
+        private const val POSITIONER_CLOSE_F = 0.32f       // central square half (close hit region)
+        private const val POSITIONER_APEX_F = 0.90f        // direction apex distance from center (toward the edge)
+        private const val POSITIONER_BASE_F = 0.45f        // direction base distance from center (≈ apex/2 = biggest no-overlap)
+        private const val POSITIONER_TIP_CORNER_F = 0.05f  // outer apex (tip) corner radius — small/sharp
+        private const val POSITIONER_BASE_CORNER_F = 0.14f // the two base (inner) corner radii — softer
+        private const val POSITIONER_DIAMOND_CORNER_F = 0.10f // diamond corner radius
+        private const val POSITIONER_ICON_F = 0.62f        // arrow legend offset from center (toward the periphery)
     }
 }

@@ -52,14 +52,13 @@ class MainActivity : ComponentActivity() {
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         hideSystemBars()
 
-        // The home IS a drawer, so the default "scale up from the launcher icon" open animation
-        // looks wrong. Override it to slide the (mostly transparent) window in from the start
-        // edge — visually, just the drawer panel sliding in from the side while the app behind
-        // holds still — and to retract the same way on leave. API 34+ only; older devices keep
-        // the platform default.
+        // The home is a translucent window over the foregrounded app, so the default "scale up
+        // from the launcher icon" open animation looks wrong. Fade the (mostly transparent) window
+        // — and its bottom toolbar — in and out instead, while the app behind holds still (hold).
+        // API 34+ only; older devices keep the platform default.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_OPEN, R.anim.drawer_slide_in, R.anim.hold)
-            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, R.anim.hold, R.anim.drawer_slide_out)
+            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_OPEN, android.R.anim.fade_in, R.anim.hold)
+            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, R.anim.hold, android.R.anim.fade_out)
         }
 
         setContent {

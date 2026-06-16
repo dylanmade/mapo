@@ -106,7 +106,7 @@ class ControllerConfigRepository @Inject constructor(
             ActionSet(
                 controllerProfileId = controllerProfileId,
                 name = "default",
-                title = "Default",
+                title = "Default Map",
                 legacy = true,
                 orderIndex = 0,
             )

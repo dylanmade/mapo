@@ -1,10 +1,8 @@
 package com.mapo.ui.screen
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,9 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.filled.ImportExport
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ButtonDefaults
@@ -39,14 +36,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,10 +50,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.BindingOutput
@@ -82,9 +75,8 @@ import com.mapo.service.input.modes.SourceModeCatalog
 import com.mapo.data.model.steam.requiresShizuku as outputRequiresShizuku
 import com.mapo.service.input.modes.requiresShizuku
 import com.mapo.service.input.modes.requiresShizukuOnSource
+import com.mapo.ui.component.NameableText
 import com.mapo.ui.screen.remap.RemapPaneItem
-import com.mapo.ui.compact.CompactDropdownField
-import com.mapo.ui.compact.CompactDropdownMenuItem
 import com.mapo.ui.screen.remap.RemapRail
 import com.mapo.ui.screen.remap.RemapSections
 import com.mapo.ui.screen.remap.settings.SourceModeSettingsSchema
@@ -104,6 +96,7 @@ fun RemapControlsScreen(
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    profileName: String? = null,
     viewingActionSetId: Long? = null,
     onSelectActionSet: (Long) -> Unit = {},
     onAddActionSet: (title: String, inheritFromSetId: Long?) -> Unit = { _, _ -> },
@@ -216,40 +209,52 @@ fun RemapControlsScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            // surfaceContainer app bar — one step up from the surface detail content (so the bar
-            // never matches it), same plane as the rail chrome. Small variant with subtitle (the
-            // current non-deprecated overload), back nav, and the scope picker on the right.
-            TopAppBar(
-                title = { Text("Map controls") },
-                subtitle = { Text("Profile: ${config?.controllerProfile?.name.orEmpty()}") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    RemapScopeField(
-                        config = config,
-                        viewingSetId = viewingSet?.actionSet?.id,
-                        viewingLayerId = viewingLayerId,
-                        canDeleteSet = (config?.actionSets?.size ?: 0) > 1,
-                        onSelectActionSet = onSelectActionSet,
-                        onSelectLayer = onSelectLayer,
-                        onAddSet = { dialog = ActionSetDialogState.Add },
-                        onRenameSet = { setId -> dialog = ActionSetDialogState.Rename(setId) },
-                        onDuplicateSet = { setId -> dialog = ActionSetDialogState.Duplicate(setId) },
-                        onDeleteSet = { setId -> dialog = ActionSetDialogState.Delete(setId) },
-                        onRenameLayer = { layerId -> layerDialog = LayerDialogState.Rename(layerId) },
-                        onDuplicateLayer = { layerId -> layerDialog = LayerDialogState.Duplicate(layerId) },
-                        onDeleteLayer = { layerId -> layerDialog = LayerDialogState.Delete(layerId) },
-                        modifier = Modifier.width(220.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-            )
+            Column {
+                // surfaceContainer app bar — one step up from the surface detail content (so the
+                // bar never matches it), same plane as the rail chrome. Title names the current
+                // profile; back nav; Import/Export + Reset actions (UI-only for now).
+                TopAppBar(
+                    title = {
+                        // Static prefix + width-capped name so a long profile name ellipsizes
+                        // instead of wrapping the app bar (see NameableText).
+                        if (profileName != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Editing ")
+                                NameableText(profileName)
+                            }
+                        } else {
+                            Text("Edit controls")
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        TextButton(onClick = { /* UI-only for now */ }) {
+                            Icon(Icons.Filled.ImportExport, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Import/Export")
+                        }
+                        TextButton(onClick = { /* UI-only for now */ }) {
+                            Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Reset")
+                        }
+                        // Pad the trailing action off the right edge (the default actions inset
+                        // reads too tight against the text-button label).
+                        Spacer(Modifier.width(10.dp))
+                    },
+                    // Shorter than the 64dp default so the bar claims less vertical space.
+                    expandedHeight = 50.dp,
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    ),
+                )
+                // Bottom border of the app bar.
+                HorizontalDivider()
+            }
         },
     ) { innerPadding ->
         Column(
@@ -264,6 +269,16 @@ fun RemapControlsScreen(
                 sections = RemapSections.rail,
                 selectedSectionId = selectedSectionId,
                 onSectionSelected = { selectedSectionId = it },
+                scopeLabel = viewingLayer?.layer?.title
+                    ?: viewingSet?.actionSet?.title
+                    ?: "—",
+                config = config,
+                viewingSetId = viewingSet?.actionSet?.id,
+                viewingLayerId = viewingLayerId,
+                onSelectActionSet = onSelectActionSet,
+                onSelectLayer = onSelectLayer,
+                onAddSet = { dialog = ActionSetDialogState.Add },
+                onAddLayer = { setId -> layerDialog = LayerDialogState.Add(setId) },
                 modifier = Modifier.fillMaxSize(),
             ) { sectionId, firstRowFocusRequester ->
                 RemapDetailPane(
@@ -405,138 +420,6 @@ fun RemapControlsScreen(
             )
         } ?: run { layerDialog = LayerDialogState.None }
     }
-}
-
-/**
- * App-bar action set / layer scope picker — a compact outlined-label dropdown
- * ([CompactDropdownField]) whose fly-out lists every action set (filled [Icons.Filled.Layers])
- * with its layers indented beneath (outlined [Icons.Outlined.Layers]); the current scope is
- * pill-highlighted, each row carries a vertical kebab → Rename / Duplicate / Delete (Delete
- * disabled when only one set remains), and "Add action set" trails the list. Selecting a set
- * drops to its base (no layer); selecting a layer switches to that layer + its parent set.
- */
-@Composable
-private fun RemapScopeField(
-    config: ControllerConfig?,
-    viewingSetId: Long?,
-    viewingLayerId: Long?,
-    canDeleteSet: Boolean,
-    onSelectActionSet: (Long) -> Unit,
-    onSelectLayer: (Long?) -> Unit,
-    onAddSet: () -> Unit,
-    onRenameSet: (Long) -> Unit,
-    onDuplicateSet: (Long) -> Unit,
-    onDeleteSet: (Long) -> Unit,
-    onRenameLayer: (Long) -> Unit,
-    onDuplicateLayer: (Long) -> Unit,
-    onDeleteLayer: (Long) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val sets = config?.actionSets.orEmpty()
-    val selectedKey = if (viewingLayerId != null) "l$viewingLayerId" else viewingSetId?.let { "s$it" }
-    val selectedLabel = sets.firstNotNullOfOrNull { setGraph ->
-        if ("s${setGraph.actionSet.id}" == selectedKey) setGraph.actionSet.title
-        else setGraph.layers.firstOrNull { "l${it.layer.id}" == selectedKey }?.layer?.title
-    } ?: "—"
-    CompactDropdownField(
-        label = "Action set",
-        selectedText = selectedLabel,
-        enabled = sets.isNotEmpty(),
-        fieldTestTag = "scope-picker",
-        // Match the TopAppBar container so the notched label masks the border cleanly.
-        labelBackground = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier,
-        menuContent = { dismiss ->
-            sets.forEach { setGraph ->
-                val setId = setGraph.actionSet.id
-                ScopeMenuRow(
-                    label = setGraph.actionSet.title,
-                    icon = Icons.Filled.Layers,
-                    indent = false,
-                    selected = viewingLayerId == null && viewingSetId == setId,
-                    canDelete = canDeleteSet,
-                    onSelect = { onSelectActionSet(setId); onSelectLayer(null); dismiss() },
-                    onRename = { onRenameSet(setId); dismiss() },
-                    onDuplicate = { onDuplicateSet(setId); dismiss() },
-                    onDelete = { onDeleteSet(setId); dismiss() },
-                )
-                setGraph.layers.forEach { layerGraph ->
-                    val layerId = layerGraph.layer.id
-                    ScopeMenuRow(
-                        label = layerGraph.layer.title,
-                        icon = Icons.Outlined.Layers,
-                        indent = true,
-                        selected = viewingLayerId == layerId,
-                        canDelete = true,
-                        onSelect = { onSelectActionSet(setId); onSelectLayer(layerId); dismiss() },
-                        onRename = { onRenameLayer(layerId); dismiss() },
-                        onDuplicate = { onDuplicateLayer(layerId); dismiss() },
-                        onDelete = { onDeleteLayer(layerId); dismiss() },
-                    )
-                }
-            }
-            HorizontalDivider()
-            CompactDropdownMenuItem(
-                text = "Add action set",
-                leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                onClick = { onAddSet(); dismiss() },
-            )
-        },
-    )
-}
-
-/**
- * One set/layer row inside the scope fly-out — a [CompactDropdownMenuItem] selected via a pill
- * background, with the row's set/layer [icon] leading and a trailing vertical kebab that opens
- * Rename / Duplicate / Delete (named after the row; Delete gated by [canDelete]).
- */
-@Composable
-private fun ScopeMenuRow(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    indent: Boolean,
-    selected: Boolean,
-    canDelete: Boolean,
-    onSelect: () -> Unit,
-    onRename: () -> Unit,
-    onDuplicate: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    var kebabOpen by remember { mutableStateOf(false) }
-    val colors = MaterialTheme.colorScheme
-    val rowModifier = (if (indent) Modifier.padding(start = 16.dp) else Modifier)
-        .then(
-            if (selected) {
-                Modifier
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                    .clip(RoundedCornerShape(percent = 50))
-                    .background(colors.secondaryContainer)
-            } else Modifier,
-        )
-    CompactDropdownMenuItem(
-        text = label,
-        onClick = onSelect,
-        modifier = rowModifier,
-        leadingIcon = { Icon(icon, contentDescription = null) },
-        trailingIcon = {
-            Box {
-                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                    IconButton(onClick = { kebabOpen = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Manage \"$label\"")
-                    }
-                }
-                DropdownMenu(expanded = kebabOpen, onDismissRequest = { kebabOpen = false }) {
-                    CompactDropdownMenuItem(text = "Rename $label", onClick = { kebabOpen = false; onRename() })
-                    CompactDropdownMenuItem(text = "Duplicate $label", onClick = { kebabOpen = false; onDuplicate() })
-                    CompactDropdownMenuItem(
-                        text = "Delete $label",
-                        enabled = canDelete,
-                        onClick = { kebabOpen = false; onDelete() },
-                    )
-                }
-            }
-        },
-    )
 }
 
 /** Resolve an [com.mapo.data.model.steam.ActionSet] entity by id across the config. */

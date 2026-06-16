@@ -61,7 +61,10 @@ class DpadModeAnalogTest {
             timestampMs = SystemClock.uptimeMillis(),
         )
 
-    private val settings4Way = DpadMode.defaultSettingsJson()
+    // Explicit 4-way override — the runtime default is now 8-way (matches the spec +
+    // settings dropdown), so the 4-way tests must opt into the layout rather than relying
+    // on the default. Inherits the spec deadzone/outer-ring defaults via the absent keys.
+    private val settings4Way = """{"dpad_layout":"4_way"}"""
     private val settings8Way =
         """{"inner_deadzone":0.20,"outer_deadzone":0.05,"dpad_layout":"8_way"}"""
 
@@ -69,41 +72,41 @@ class DpadModeAnalogTest {
 
     @Test
     fun fourWay_pushNorth_emitsDpadNorthDown() {
-        // Stick fully up: y = -1 (Android +y = down). |y| > |x| → vertical;
-        // y < 0 → north.
-        DpadMode.evaluate(reading(0f, -1f), ctx(), emit, MouseEmitter.NOOP)
+        // Magnitude 0.6: above the default deadzone but below the outer-ring radius
+        // (≈0.763) so only the direction emits. |y| > |x| → vertical; y < 0 → north.
+        DpadMode.evaluate(reading(0f, -0.6f), ctx(settingsJson = settings4Way), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_up" to true), emits)
     }
 
     @Test
     fun fourWay_pushSouth_emitsDpadSouthDown() {
-        DpadMode.evaluate(reading(0f, 1f), ctx(), emit, MouseEmitter.NOOP)
+        DpadMode.evaluate(reading(0f, 0.6f), ctx(settingsJson = settings4Way), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_down" to true), emits)
     }
 
     @Test
     fun fourWay_pushEast_emitsDpadEastDown() {
-        DpadMode.evaluate(reading(1f, 0f), ctx(), emit, MouseEmitter.NOOP)
+        DpadMode.evaluate(reading(0.6f, 0f), ctx(settingsJson = settings4Way), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_right" to true), emits)
     }
 
     @Test
     fun fourWay_pushWest_emitsDpadWestDown() {
-        DpadMode.evaluate(reading(-1f, 0f), ctx(), emit, MouseEmitter.NOOP)
+        DpadMode.evaluate(reading(-0.6f, 0f), ctx(settingsJson = settings4Way), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_left" to true), emits)
     }
 
     @Test
     fun fourWay_diagonalSnapsToDominantAxis_xWins() {
         // (0.7, -0.5): |x|=0.7 > |y|=0.5 → east only, no north.
-        DpadMode.evaluate(reading(0.7f, -0.5f), ctx(), emit, MouseEmitter.NOOP)
+        DpadMode.evaluate(reading(0.7f, -0.5f), ctx(settingsJson = settings4Way), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_right" to true), emits)
     }
 
     @Test
     fun fourWay_diagonalSnapsToDominantAxis_yWins() {
-        // (0.3, -0.8): |y|=0.8 > |x|=0.3 → north only, no east.
-        DpadMode.evaluate(reading(0.3f, -0.8f), ctx(), emit, MouseEmitter.NOOP)
+        // (0.25, -0.6): |y|=0.6 > |x|=0.25 → north only; mag below outer-ring radius.
+        DpadMode.evaluate(reading(0.25f, -0.6f), ctx(settingsJson = settings4Way), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_up" to true), emits)
     }
 
@@ -112,7 +115,11 @@ class DpadModeAnalogTest {
         // Was at north (|y| was dominant). Stick rotates to (0.6, -0.4):
         // |x|=0.6 > |y|=0.4 → switch to east. Single evaluate call should
         // emit UP on north + DOWN on east.
-        DpadMode.evaluate(reading(0.6f, -0.4f), ctx(priorN = true), emit, MouseEmitter.NOOP)
+        DpadMode.evaluate(
+            reading(0.6f, -0.4f),
+            ctx(priorN = true, settingsJson = settings4Way),
+            emit, MouseEmitter.NOOP,
+        )
         assertTrue("Expected north UP, got $emits", "dpad_up" to false in emits)
         assertTrue("Expected east DOWN, got $emits", "dpad_right" to true in emits)
         assertEquals(2, emits.size)
@@ -120,8 +127,13 @@ class DpadModeAnalogTest {
 
     @Test
     fun fourWay_sustainedDeflection_doesNotReFire() {
-        // Already latched east, still deflected east — must not re-emit east DOWN.
-        DpadMode.evaluate(reading(0.9f, 0f), ctx(priorE = true), emit, MouseEmitter.NOOP)
+        // Already latched east, still deflected east (mag 0.5, below outer-ring
+        // radius) — must not re-emit east DOWN.
+        DpadMode.evaluate(
+            reading(0.5f, 0f),
+            ctx(priorE = true, settingsJson = settings4Way),
+            emit, MouseEmitter.NOOP,
+        )
         assertTrue("Expected no emission while sustained-latched, got $emits", emits.isEmpty())
     }
 
@@ -145,10 +157,10 @@ class DpadModeAnalogTest {
 
     @Test
     fun eightWay_releasingOneAxisOfDiagonal_emitsOnlyThatAxisUp() {
-        // Was NE-latched. Stick rotates to (0.9, -0.05) — N now below axial
-        // floor, E still well above. Should emit only the N UP.
+        // Was NE-latched. Stick rotates to (0.6, -0.05) — N now below axial
+        // floor, E still above; mag below outer-ring radius. Only the N UP.
         DpadMode.evaluate(
-            reading(0.9f, -0.05f),
+            reading(0.6f, -0.05f),
             ctx(priorN = true, priorE = true, settingsJson = settings8Way),
             emit, MouseEmitter.NOOP,
         )
@@ -159,17 +171,22 @@ class DpadModeAnalogTest {
 
     @Test
     fun belowInnerDeadzone_emitsNothing() {
-        // Magnitude ≈ 0.10, below default inner_deadzone of 0.20.
+        // Magnitude ≈ 0.10, below default deadzone (10000/32767 ≈ 0.305).
         DpadMode.evaluate(reading(0.08f, -0.06f), ctx(), emit, MouseEmitter.NOOP)
         assertTrue("Expected no emission below deadzone, got $emits", emits.isEmpty())
     }
 
     @Test
     fun atRest_whenLatched_holdsInsideHysteresisBand() {
-        // Was east-latched. Stick drops to magnitude 0.18 — below
-        // inner_deadzone (0.20) but above release floor (0.20 - 0.05 = 0.15).
-        // Latch should hold; no emit.
-        DpadMode.evaluate(reading(0.18f, 0f), ctx(priorE = true), emit, MouseEmitter.NOOP)
+        // Was east-latched. Default inner ≈ 0.305, outer 0.05 → release floor ≈ 0.255.
+        // Stick at magnitude 0.28 — inside the [0.255, 0.305] band → latch holds.
+        // 4-way layout so the cardinal isn't gated by the 8-way axial threshold (this
+        // exercises the deadzone hysteresis band, not diagonal overlap).
+        DpadMode.evaluate(
+            reading(0.28f, 0f),
+            ctx(priorE = true, settingsJson = settings4Way),
+            emit, MouseEmitter.NOOP,
+        )
         assertTrue("Expected no emission inside hysteresis band, got $emits", emits.isEmpty())
     }
 
@@ -229,7 +246,7 @@ class DpadModeAnalogTest {
         // Tolerant parse: a binding_group seeded with `{}` (e.g. pre-Brick-K
         // DpadMode default that only had "dpad_layout") should pick up Steam
         // defaults so direction emit still works.
-        DpadMode.evaluate(reading(0f, -1f), ctx(settingsJson = "{}"), emit, MouseEmitter.NOOP)
+        DpadMode.evaluate(reading(0f, -0.6f), ctx(settingsJson = "{}"), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_up" to true), emits)
     }
 
@@ -239,34 +256,38 @@ class DpadModeAnalogTest {
         // deadzones. The parser must tolerate the older shape and apply Steam
         // defaults for the missing keys.
         val legacy = """{"dpad_layout":"4_way"}"""
-        DpadMode.evaluate(reading(0f, -1f), ctx(settingsJson = legacy), emit, MouseEmitter.NOOP)
+        DpadMode.evaluate(reading(0f, -0.6f), ctx(settingsJson = legacy), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_up" to true), emits)
     }
 
     @Test
     fun malformedJson_fallsBackToDefaults() {
         val garbage = "{not valid json"
-        DpadMode.evaluate(reading(0f, -1f), ctx(settingsJson = garbage), emit, MouseEmitter.NOOP)
+        DpadMode.evaluate(reading(0f, -0.6f), ctx(settingsJson = garbage), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_up" to true), emits)
     }
 
     @Test
-    fun unknownLayoutValue_fallsBackToFourWay() {
+    fun unknownLayoutValue_fallsBackToDefaultEightWay() {
         // Defensive: if someone hand-edits the JSON with a typo'd layout, we
-        // should default rather than disable direction emit.
+        // should default rather than disable direction emit. The spec default
+        // is 8-way, so a diagonal emits both axes.
         val typo = """{"inner_deadzone":0.20,"outer_deadzone":0.05,"dpad_layout":"6_way"}"""
-        // Diagonal (0.7, -0.7) in 4-way should pick vertical on tie → north.
         DpadMode.evaluate(reading(0.7f, -0.7f), ctx(settingsJson = typo), emit, MouseEmitter.NOOP)
-        assertEquals(listOf("dpad_up" to true), emits)
+        assertTrue("Expected dpad_up DOWN, got $emits", "dpad_up" to true in emits)
+        assertTrue("Expected dpad_right DOWN, got $emits", "dpad_right" to true in emits)
+        assertEquals(2, emits.size)
     }
 
     @Test
     fun defaultSettings_matchSteamShapedDefaults() {
         val parsed = DpadSettings.parse(DpadMode.defaultSettingsJson())
-        assertEquals(0.20f, parsed.innerDeadzone, 1e-4f)
+        // Deadzone default = 10000/32767 ≈ 0.305 (joystick DPad menu's spec default).
+        assertEquals(10000f / 32767f, parsed.innerDeadzone, 1e-4f)
         assertEquals(0.05f, parsed.outerDeadzone, 1e-4f)
-        assertEquals("4_way", parsed.dpadLayout)
+        assertEquals("8_way", parsed.dpadLayout)
         assertEquals(5.0f, parsed.tiltSensitivity, 1e-4f)
+        assertEquals(4000f, parsed.overlapRegion, 1e-4f)
     }
 
     // ── GYRO source (angle-integrated, tilt-and-hold semantics) ─────────────

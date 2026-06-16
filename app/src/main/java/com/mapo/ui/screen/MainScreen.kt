@@ -50,7 +50,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
@@ -58,7 +57,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -68,7 +66,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -231,8 +228,10 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val shizukuReady by viewModel.shizukuReady.collectAsStateWithLifecycle()
     val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
 
-    // Home is the drawer over the apps underneath (translucent window) — open it on launch.
-    val drawerState = rememberDrawerState(DrawerValue.Open)
+    // Home is a floating menu panel anchored over the apps underneath (translucent window),
+    // shown on launch. (Was a ModalNavigationDrawer; now a plain anchored panel so it no longer
+    // slides in / spans full height like a drawer.) `menuVisible` replaces the old drawer state.
+    var menuVisible by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val navController = rememberNavController()
 
@@ -242,14 +241,13 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     // and on the drawer (drawer-open implies the user is choosing nav, not playing a game).
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val isMainRoute = currentBackStackEntry?.destination?.route == MapoRoute.MAIN
-    val drawerOpen = drawerState.isOpen
-    val keyboardViewActive = isMainRoute && !drawerOpen
+    val keyboardViewActive = isMainRoute && !menuVisible
     SuppressEdgeBackGesture(active = keyboardViewActive)
-    // M3's ModalNavigationDrawer doesn't ship an internal BackHandler, so without this
-    // the press falls through to the activity default (moveTaskToBack) and the whole
-    // app minimizes. Close the drawer instead, which is what the user expects.
-    BackHandler(enabled = drawerOpen) {
-        scope.launch { drawerState.close() }
+    // Back on the home panel dismisses it (which backgrounds the task — see the menuVisible
+    // effect below), matching the old drawer-close behavior. Sub-screens pop via Navigation's
+    // own back handling, so this is scoped to the visible home panel only.
+    BackHandler(enabled = isMainRoute && menuVisible) {
+        menuVisible = false
     }
 
     // The home is a fullscreen *transparent* window, so a closed drawer on the MAIN route is
@@ -260,18 +258,18 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     // first, so the isMainRoute guard lets those pass without backgrounding.
     val activity = context as? Activity
     val currentIsMainRoute by rememberUpdatedState(isMainRoute)
-    LaunchedEffect(drawerState) {
-        snapshotFlow { drawerState.currentValue }.collect { value ->
-            if (value == DrawerValue.Closed && currentIsMainRoute) {
-                activity?.moveTaskToBack(true)
-            }
-        }
+    // Dismissing the home panel on MAIN (tap-outside / back) means "leave Mapo": background the
+    // task so touches fall through to the app underneath. Navigation off MAIN does NOT set
+    // menuVisible=false (the panel just hides via the isMainRoute guard), so this fires only on
+    // real dismissals, not when opening a sub-screen.
+    LaunchedEffect(menuVisible) {
+        if (!menuVisible && currentIsMainRoute) activity?.moveTaskToBack(true)
     }
-    // Re-entering MAIN (popping back from a settings screen) restores the home by reopening
-    // the drawer, rather than dropping the user onto the empty transparent trap. First
-    // composition is already Open, so this is a no-op there.
+    // Re-entering MAIN (popping back from a settings screen) restores the home panel, rather
+    // than dropping the user onto the empty transparent trap. First composition is already
+    // visible, so this is a no-op there.
     LaunchedEffect(isMainRoute) {
-        if (isMainRoute) drawerState.open()
+        if (isMainRoute) menuVisible = true
     }
 
     var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
@@ -287,11 +285,11 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 // the game, so the auto-switcher's distinctUntilChanged would suppress
                 // it. Force a re-evaluation on every resume.
                 viewModel.reevaluateAutoSwitch()
-                // Reopened from the launcher after a drawer-dismiss backgrounded us: the
-                // composition is retained (drawer still closed, route unchanged), so neither
-                // route/drawer effect re-fires. Restore the home drawer here so reopening
-                // Mapo never lands on the empty transparent trap.
-                if (currentIsMainRoute) scope.launch { drawerState.open() }
+                // Reopened from the launcher after a dismiss backgrounded us: the composition is
+                // retained (menu hidden, route unchanged), so neither route effect re-fires.
+                // Restore the home panel here so reopening Mapo never lands on the empty
+                // transparent trap.
+                if (currentIsMainRoute) menuVisible = true
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -306,69 +304,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        // On the (transparent) home the drawer is the only UI, so it must always be
-        // swipe-reachable; elsewhere only allow the swipe-to-close when already open.
-        gesturesEnabled = isMainRoute || drawerState.isOpen,
-        // No scrim: the home is the drawer floating over a live app, and any tint here dims
-        // that app (the "vignette" that brightened on close). Transparent keeps the app behind
-        // looking exactly as it does normally; the scrim still catches taps to dismiss.
-        scrimColor = androidx.compose.ui.graphics.Color.Transparent,
-        drawerContent = {
-            val drawerRemapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
-            val drawerOverlayShowing by viewModel.overlayShowing.collectAsStateWithLifecycle()
-            ProfileDrawerContent(
-                activeProfile = activeProfile,
-                steamAccountName = steamAccountName,
-                remapEnabled = drawerRemapEnabled,
-                overlayShowing = drawerOverlayShowing,
-                onOpenChangeProfile = {
-                    scope.launch { drawerState.close() }
-                    navController.navigate(MapoRoute.CHANGE_PROFILE)
-                },
-                onOpenRemapControls = {
-                    scope.launch { drawerState.close() }
-                    navController.navigate(MapoRoute.REMAP_CONTROLS)
-                },
-                onOpenAutoSwitch = {
-                    scope.launch { drawerState.close() }
-                    navController.navigate(MapoRoute.AUTO_SWITCH)
-                },
-                onOpenBlocklist = {
-                    scope.launch { drawerState.close() }
-                    navController.navigate(MapoRoute.BLOCKLIST)
-                },
-                onOpenThemeStudio = {
-                    scope.launch { drawerState.close() }
-                    navController.navigate(MapoRoute.THEME_STUDIO)
-                },
-                onOpenShizukuSetup = {
-                    scope.launch { drawerState.close() }
-                    navController.navigate(MapoRoute.SHIZUKU_SETUP)
-                },
-                onOpenSteamSetup = {
-                    scope.launch { drawerState.close() }
-                    navController.navigate(MapoRoute.STEAM_SETUP)
-                },
-                onOpenCompactGallery = {
-                    scope.launch { drawerState.close() }
-                    navController.navigate(MapoRoute.COMPACT_GALLERY)
-                },
-                onOpenColorPickerDemo = {
-                    scope.launch { drawerState.close() }
-                    navController.navigate(MapoRoute.COLOR_PICKER_DEMO)
-                },
-                onEditOverlay = {
-                    scope.launch { drawerState.close() }
-                    viewModel.startLiveOverlayEdit()
-                },
-                // Sticky bottom switches — left interactive without closing the drawer.
-                onToggleRemap = { viewModel.toggleRemap() },
-                onToggleOverlay = { viewModel.toggleOverlay() },
-            )
-        }
-    ) {
         NavHost(
             navController = navController,
             startDestination = MapoRoute.MAIN,
@@ -516,7 +451,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                                 // edit context. Add-keyboard cancellation, by contrast, leaves
                                 // edit mode intact (handled in the VM funnel).
                                 viewModel.exitEditMode()
-                                scope.launch { drawerState.open() }
+                                menuVisible = true
                             },
                             onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser },
                             onSelectButton = viewModel::selectButton,
@@ -576,6 +511,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             composable(MapoRoute.REMAP_CONTROLS) {
                 RemapControlsScreen(
                     config = activeControllerConfig,
+                    profileName = activeProfile?.name,
                     viewingActionSetId = viewingActionSetId,
                     onSelectActionSet = viewModel::setViewingActionSet,
                     onAddActionSet = { title, inheritFromSetId ->
@@ -1032,7 +968,51 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 )
             }
         }
-    }
+
+        // ── Home — a floating bottom toolbar (replaces the drawer / anchored panel). ──
+        // Shown only on MAIN while visible. Behind it sits a transparent tap-catcher: a tap
+        // anywhere outside the toolbar dismisses the home, which backgrounds the task (see the
+        // menuVisible effect above) so touches fall through to the app underneath.
+        if (isMainRoute && menuVisible) {
+            val drawerRemapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
+            val drawerOverlayShowing by viewModel.overlayShowing.collectAsStateWithLifecycle()
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) { detectTapGestures { menuVisible = false } },
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 24.dp),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                MainBottomToolbar(
+                    profileName = activeProfile?.name ?: "None",
+                    steamAccountName = steamAccountName,
+                    // Master toggle drives remap AND the button overlay to the same value in
+                    // lockstep — one control for both features. (Does NOT auto-show the overlay at
+                    // app launch; the overlay follows the toggle when the user flips it.)
+                    mapoEnabled = drawerRemapEnabled,
+                    onSetMapoEnabled = { target ->
+                        if (drawerRemapEnabled != target) viewModel.toggleRemap()
+                        if (drawerOverlayShowing != target) viewModel.toggleOverlay()
+                    },
+                    // Navigating off MAIN hides the toolbar via the isMainRoute guard, so these
+                    // don't touch menuVisible (and must not — that would background the task).
+                    onEditOverlay = { viewModel.startLiveOverlayEdit() },
+                    onEditControls = { navController.navigate(MapoRoute.REMAP_CONTROLS) },
+                    onOpenProfile = { navController.navigate(MapoRoute.CHANGE_PROFILE) },
+                    onOpenAutoSwitch = { navController.navigate(MapoRoute.AUTO_SWITCH) },
+                    onOpenBlocklist = { navController.navigate(MapoRoute.BLOCKLIST) },
+                    onOpenThemeStudio = { navController.navigate(MapoRoute.THEME_STUDIO) },
+                    onOpenShizukuSetup = { navController.navigate(MapoRoute.SHIZUKU_SETUP) },
+                    onOpenSteamSetup = { navController.navigate(MapoRoute.STEAM_SETUP) },
+                    onOpenCompactGallery = { navController.navigate(MapoRoute.COMPACT_GALLERY) },
+                    onOpenColorPickerDemo = { navController.navigate(MapoRoute.COLOR_PICKER_DEMO) },
+                )
+            }
+        }
 
     TabActionDialogHost(
         state = tabActionDialog,
@@ -1972,7 +1952,9 @@ private fun Modifier.circleDropShadow(
  * depends on the View's location on the screen — that produces inconsistent shadow
  * direction across multiple identical elements at different positions.
  */
-private fun Modifier.softDropShadow(
+// internal: shared with the main menu's separated sections (ui/component/menu). Keep the
+// BlurMaskFilter shadow centralized here per the drop-shadow doctrine — don't re-roll it.
+internal fun Modifier.softDropShadow(
     cornerRadius: Dp,
     blurRadius: Dp = SELECTION_SHADOW_BLUR,
     offsetY: Dp = SELECTION_SHADOW_OFFSET_Y,

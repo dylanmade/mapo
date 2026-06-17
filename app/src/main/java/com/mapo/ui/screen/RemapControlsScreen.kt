@@ -53,6 +53,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
@@ -66,6 +67,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -216,14 +218,20 @@ fun RemapControlsScreen(
                 TopAppBar(
                     title = {
                         // Static prefix + width-capped name so a long profile name ellipsizes
-                        // instead of wrapping the app bar (see NameableText).
-                        if (profileName != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Editing ")
-                                NameableText(profileName)
+                        // instead of wrapping the app bar (see NameableText). Sized between
+                        // titleMedium (16sp) and the default titleLarge (22sp) for a header that's a
+                        // touch lighter than default without feeling small.
+                        ProvideTextStyle(
+                            MaterialTheme.typography.titleMedium.copy(fontSize = 19.sp, lineHeight = 24.sp),
+                        ) {
+                            if (profileName != null) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Editing ")
+                                    NameableText(profileName)
+                                }
+                            } else {
+                                Text("Edit controls")
                             }
-                        } else {
-                            Text("Edit controls")
                         }
                     },
                     navigationIcon = {

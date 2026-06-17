@@ -121,12 +121,16 @@ fun RemapRail(
                 // item stack sits a touch higher (the M3 default top space is 44dp).
                 windowInsets = WindowInsets(0, 0, 0, 0),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
-                // D-pad → from anywhere in the rail jumps into the detail pane's first row.
-                modifier = Modifier.onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
-                        detailRequester.tryRequestFocus(); true
-                    } else false
-                },
+                // D-pad → from anywhere in the rail jumps into the detail pane's first row. A tight
+                // width also overrides the rail's default collapsed container width (96dp) — the
+                // layout honors a non-zero min-width constraint over its token.
+                modifier = Modifier
+                    .width(NarrowRailWidth)
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
+                            detailRequester.tryRequestFocus(); true
+                        } else false
+                    },
             ) {
                 // First slot: the scope button. It captures its own bounds (relative to the root Box)
                 // so the detached fly-out below can anchor to it.
@@ -143,7 +147,7 @@ fun RemapRail(
                         },
                 )
 
-                sections.forEach { section ->
+                sections.forEachIndexed { index, section ->
                     val interaction = remember(section.id) { MutableInteractionSource() }
                     val focused by interaction.collectIsFocusedAsState()
                     // Focus == selection: arrowing onto a section previews it in the detail pane.
@@ -158,7 +162,11 @@ fun RemapRail(
                         railExpanded = false,
                         enabled = section.enabled,
                         interactionSource = interaction,
-                        modifier = Modifier.testTag("section-rail-item:${section.id}"),
+                        // A touch of extra breathing room above the first section, setting it (and the
+                        // scope divider above) apart from the scope button.
+                        modifier = Modifier
+                            .testTag("section-rail-item:${section.id}")
+                            .then(if (index == 0) Modifier.padding(top = FirstSectionTopGap) else Modifier),
                     )
                 }
             }
@@ -218,12 +226,18 @@ fun RemapRail(
     }
 }
 
-/** Max width for the scope (action set / layer) label — the rail container is only ~96dp wide. */
-private val ScopeLabelMaxWidth = 80.dp
+/** Collapsed rail width — a touch narrower than the M3 default 96dp container. */
+private val NarrowRailWidth = 84.dp
+
+/** Max width for the scope (action set / layer) label — the rail container is only ~84dp wide. */
+private val ScopeLabelMaxWidth = 76.dp
+
+/** Extra space above the first section item, past the scope button + its divider. */
+private val FirstSectionTopGap = 6.dp
 
 /** Width + gap placement of the short rule separating the scope button from the section items. */
 private val ScopeDividerWidth = 24.dp
-private val ScopeDividerGap = 6.dp
+private val ScopeDividerGap = 8.dp
 private fun ScopeDividerWidthPx(density: androidx.compose.ui.unit.Density) =
     with(density) { ScopeDividerWidth.toPx() }
 private fun ScopeDividerGapPx(density: androidx.compose.ui.unit.Density) =

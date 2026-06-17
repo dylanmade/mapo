@@ -1045,9 +1045,10 @@ class OverlayLiveEditController @Inject constructor(
                     )
                     // Per-corner radii: the outer apex (index 0) is rounded LESS than the two base corners.
                     val triRadii = floatArrayOf(POSITIONER_TIP_CORNER_F * d, POSITIONER_BASE_CORNER_F * d, POSITIONER_BASE_CORNER_F * d)
-                    // Each direction = a right-isoceles half-square: apex `ap` out toward its edge, base `ba`
-                    // out from center, base half-width == height (= ap-ba). Keeping ba > (ap-ba) holds each
-                    // triangle inside its own quadrant (base corners don't cross the diagonals → no overlap).
+                    // Each direction = a right-isoceles half-square: apex `ap` out toward its edge, inner
+                    // base `ba` out from center, base half-width == height (= ap-ba). As `ba` slides toward
+                    // center the base corners extend outward; at ba = ap/2 they reach the diagonals (touch
+                    // the neighbours, closing the gap) — going below ap/2 makes them actually overlap.
                     val ap = POSITIONER_APEX_F * d; val ba = POSITIONER_BASE_F * d; val wh = ap - ba
                     val tris = listOf(
                         "up" to arrayOf(floatArrayOf(cx, cy - ap), floatArrayOf(cx - wh, cy - ba), floatArrayOf(cx + wh, cy - ba)),
@@ -2979,13 +2980,13 @@ class OverlayLiveEditController @Inject constructor(
         private const val NUDGE_HOLD_REPEAT_MS = 45L
         // Positioner diamond geometry (fractions are of the half-diagonal D = POSITIONER_DP/2). The
         // whole thing scales with POSITIONER_DP EXCEPT the central close ×/label (kept fixed/readable).
-        private const val POSITIONER_DP = 150
+        private const val POSITIONER_DP = 170
         private const val POSITIONER_ICON_SIZE_F = 0.17f   // arrow legend size as a fraction of POSITIONER_DP
         private const val POSITIONER_CLOSE_F = 0.32f       // central square half (close hit region)
         private const val POSITIONER_APEX_F = 0.90f        // direction apex distance from center (toward the edge)
-        private const val POSITIONER_BASE_F = 0.45f        // direction base distance from center (≈ apex/2 = biggest no-overlap)
-        private const val POSITIONER_TIP_CORNER_F = 0.05f  // outer apex (tip) corner radius — small/sharp
-        private const val POSITIONER_BASE_CORNER_F = 0.14f // the two base (inner) corner radii — softer
+        private const val POSITIONER_BASE_F = 0.45f        // inner base distance from center (= apex/2: corners touch the diagonals)
+        private const val POSITIONER_TIP_CORNER_F = 0.05f  // outer apex = the RIGHT-angle (90°) corner — unchanged
+        private const val POSITIONER_BASE_CORNER_F = 0.05f // the two base = the ACUTE (45°) corners — a little less round
         private const val POSITIONER_DIAMOND_CORNER_F = 0.10f // diamond corner radius
         private const val POSITIONER_ICON_F = 0.62f        // arrow legend offset from center (toward the periphery)
     }

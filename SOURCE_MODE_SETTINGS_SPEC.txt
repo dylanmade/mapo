@@ -1,4 +1,4 @@
-﻿MAPPO - SOURCE MODE SETTINGS (WORKING DRAFT)
+MAPPO - SOURCE MODE SETTINGS (WORKING DRAFT)
 
 
 Format legend (depth = number of leading hyphens):
@@ -424,7 +424,7 @@ Gyro - Gyro to Mouse Settings
 ---- min 1px, max 32000px, def 6545px
 - Gyro Sensitivity
 -- Gyro Sensitivity
---- When "Dots Per 360" is correctly calibrated in-game, this will multiply the output of the gyro to the mouse. 1x will give 1:1 real world gyro rotation to in-game rotation. 2x will turn the in-game camera twice as fast as the controller's rotation.
+--- When "Dots Per 360" is correctly calibrated in-game, this will multiply the output of the gyro to the mouse. 1x will give 1:1 real world gyro rotation to in-game rotation. 2x will turn the in-game camera twice as fast as the device's rotation.
 --- slider
 ---- min 0x, max 30x, def 2.5x
 -- Invert Y Output
@@ -446,7 +446,7 @@ Gyro - Gyro to Mouse Settings
 --- slider
 ---- min 0 deg/s, max 1 deg/s, def 0.36 deg/s
 -- Gyro Precision Speed
---- When rotating the device below this speed, sensitivity is reduced relative to the speed and motion will be even smaller in-game. This may be preferable to a deadzone for adept users. Rotation output filtered by the precision setting will be recovered when moving the controller at high speeds.
+--- When rotating the device below this speed, sensitivity is reduced relative to the speed and motion will be even smaller in-game. This may be preferable to a deadzone for adept users. Rotation output filtered by the precision setting will be recovered when moving the device at high speeds.
 --- slider
 ---- min 0 deg/s, max 15 deg/s, def 0.75 deg/s
 - Momentum
@@ -467,22 +467,22 @@ Gyro - Gyro to Mouse Settings
 -- 3DOF to 2D Conversion Style
 --- dropdown
 ---- Yaw
------ Turn the controller around its own vertical axis for horizontal output. Tilt the controller up and down around its own lateral axis for vertical output. (Local Space Preset)
+----- Turn the device around its own vertical axis for horizontal output. Tilt the device up and down around its own lateral axis for vertical output. (Local Space Preset)
 ---- Roll
------ Lean the controller around its forward axis for horizontal output. Tilt the controller up and down around its own lateral axis for vertical output. (Local Space Preset)
+----- Lean the device around its forward axis for horizontal output. Tilt the device up and down around its own lateral axis for vertical output. (Local Space Preset)
 ---- Yaw + Roll (default)
------ Combines Lean and Turn for horizontal output. Tilting the controller up and down around its own lateral axis still moves the mouse up and down. (Local Space Preset)
+----- Combines Lean and Turn for horizontal output. Tilting the device up and down around its own lateral axis still moves the mouse up and down. (Local Space Preset)
 ---- Local Space
------ Similar to Yaw + Roll, but gives full control over the pitch angle of the principle axis. You can also adjust the contribution of the complementary axis, which is at 90 degrees to the principal axis.
+----- Similar to Yaw + Roll, but gives full control over the pitch angle of the principal axis. You can also adjust the contribution of the complementary axis, which is at 90 degrees to the principal axis.
 ---- Player Space
 ----- Uses Yaw + Roll around the gravity axis for horizontal output, and Local Pitch for vertical output.
 ---- World Space
------ Uses all rotation around the gravity axis for horizontal output, and World Pitch for vertical output, but does not move vertically when the controller is tilted on its side.
+----- Uses all rotation around the gravity axis for horizontal output, and World Pitch for vertical output, but does not move vertically when the device is tilted on its side.
 ---- Laser Pointer
------ Acts similarly to a laser pointer. Great for cursor control of light gun games on a standalone controller.
+----- Acts similarly to a laser pointer. Great for cursor control of light gun games on a standalone device.
 -- Roll Axis Contribution
 --- conditional: only appears when 3DOF to 2D Conversion Style is set to Yaw + Roll
---- Turning the controller like a steering wheel (“Roll”) will cause the gyro to output horizontally, as well as turning it in “Yaw”. This setting allows you to tune how much Roll contributes to the horizontal output. Negative values will invert the contribution.
+--- Turning the device like a steering wheel (“Roll”) will cause the gyro to output horizontally, as well as turning it in “Yaw”. This setting allows you to tune how much Roll contributes to the horizontal output. Negative values will invert the contribution.
 --- slider
 ---- min -100%, max 100%, def 100%
 -- Primary Axis Offset
@@ -528,3 +528,249 @@ Gyro - Gyro to Mouse Settings
 ---- Low
 ---- Medium
 ---- High
+
+
+Gyro - Mouse Region Settings
+
+
+- General
+-- Snap Cursor on Activation
+--- Switch (enabled)
+-- Return Cursor on Deactivation
+--- Switch (enabled)
+-- Invert Horizontal
+-- Invert Vertical
+- Gyro Buttons
+-- Choose Gyro Button(s) (same as Mouse to Gyro)
+-- Gyro Enable/Suppress/Toggle (same as Mouse to Gyro)
+- Onscreen Display
+-- Region Horizontal Position
+--- slider
+---- min 0%, max 100%, def 50%
+-- Region Vertical Position
+--- slider
+---- min 0%, max 100%, def 50%
+-- Region Size
+--- slider
+---- min 1x, max 100x, def 80x
+-- Rotate Output
+--- Rotates the output to the joystick, such that pushing the physical stick "north" results in an output of "east" when set to 90 degrees.
+--- slider
+---- min -180 degrees, max 180 degrees, def 0 degrees
+-- Horizontal Scale
+--- Scale the horizontal region. You can use this to change the on-screen region from a circle to an ellipse or a line.
+--- slider
+---- min 0x, max 200x def 100x
+-- Vertical Scale
+--- Scale the vertical region. You can use this to change the on-screen region from a circle to an ellipse or a line.
+--- slider
+---- min 0x, max 200x def 100x
+- Trigger Dampening (same as Mouse to Gyro trigger dampening)
+- Outer Ring (same as Mouse to Gyro Outer Ring)
+- Haptics (same as Mouse to Gyro Haptics)
+
+
+Gyro - Gyro to Joystick Camera Settings
+
+
+- General (same as Mouse to Gyro General)
+- Joystick Output
+-- Send to Joystick
+--- Signal will be sent out to the chosen joystick.
+--- dropdown
+---- Left Joystick (default if joystick being configured is left joystick)
+---- Right Joystick (default if joystick being configured is right joystick)
+-- Minimum Gyro Input Speed
+--- slider
+---- min 0 degrees/second, max 1800 degrees/second, def 5 degrees/second
+-- Maximum Gyro Input Speed
+--- Set this to the in-game camera's turn rate (degrees per second) when the joystick is at maximum horizontal deflection. Tip: set the in-game joystick aim sensitivity as high as it will go. If the available in-game turn rate clamps the gyro turn rate, consider using "Angle Catch-up".
+--- slider
+---- min 0 degrees/second, 1800 degrees/second, def 180 degrees/second
+-- Minimum Joystick Output
+--- Minimum Gyro Input Speed maps to Minimum Joystick Output. Try to match the Minimum Joystick Output to the game's joystick deadzone. Reduce the in-game joystick deadzone if possible.
+--- slider
+---- min 0%, max 100%, def 0%
+-- Maximum Joystick Output
+--- Maximum Gyro Input Speed maps to Maximum Joystick Output. Decrease the maximum output to avoid triggering a game's "Extra Yaw" setting.
+--- slider
+---- min 0%, max 100%, def 100%
+-- Response Axis Style
+--- Apply the response curve Per Axis, or based on the distance from the deadzone.
+--- dropdown
+---- Per Axis
+----- The response curve is applied separately to each axis. The stick output will be biased toward the axes.
+---- Circular (default)
+----- The response curve is applied using the distance of the stick from the deadzone. The stick output will have no directional bias.
+-- Joystick Power Curve
+--- This controls how aggressively the joystick output deflects. At 0.1 the deflection is extremely aggressive; at 1 the deflection is linear; at 4 the deflection is extremely relaxed.
+--- slider
+---- min 0.1, max 4.0, def 1.0
+-- Lock at Edges
+--- Locks joystick output to the maximum joystick deflection angle. Turning this off allows the full joystick output range into the diagonals. Note: the response curve only affects output between the minimum and maximum deflection angles. 
+--- switch
+- Angle Calibration
+-- Angle Catch-Up Mode
+--- When the demanded gyro camera rotation exceeds the in-game Max Camera Turn Rate, Mappo will store the remaining catch-up angles to help catch up to the desired in-game camera angle. Note that this can feel like the joystick is "stuck" at its extreme point after large, fast flicks of the device, so it is recommended to increase in-game joystick camera sensitivity to minimize the issue.
+--- dropdown
+---- Off (default)
+----- Don't try to catch up to the desired angle after large gyro flicks have saturated joystick output.
+---- Only While Gyro Active
+----- Try to catch up to the desired angle, but only while the gyro is active.
+---- Always
+----- Always try to catch up to the desired angle. Even if the gyro is not active, continue to serve up any remaining catch-up angles. 
+- Gyro Sensitivity
+-- Gyro Degree Sensitivity
+--- slider
+---- min 0x, max 30x, def 2.5x
+-- Invert Y Output
+--- switch
+-- Invert X Output
+--- switch
+-- Gyro Speed Deadzone
+--- The minimum amount of speed that the gyro must be moved before there is a reaction on screen. This is useful for combatting hand shake or bounce-back after a flick. Rotation output lost to the deadzone will be recovered when moving the device at high speeds. 
+--- slider
+---- min 0 degrees/second, max 1 degrees/second, def 0 degrees/second, increments .01
+-- Gyro Precision Speed
+--- When rotating the device below this speed, sensitivity is reduced relative to the designated speed. This makes smaller motions even smaller in-game. This setting may be preferable to a deadzone for adept users. Rotation output lost to the precision filter will be recovered when moving the device at high speeds.
+--- slider
+---- min 0 degrees/second, max 15 degrees/second, def 0 degrees/second, increments .01
+-- Vertical/Horizontal Output Mixer
+--- Moving the slider to the left reduces vertical sensitivity, while moving the slider to the right reduces horizontal sensitivity. If the slider is in the direct center, vertical and horizontal sensitivity are equal (linear).
+-- Acceleration
+--- dropdown
+---- Linear (default)
+---- Relaxed
+---- Aggressive
+-- Enable Momentum
+--- When the gyro is disabled by the gyro enable button, the gyro will continue to output for a short time. Use friction settings to control how quickly the gyro slows down.
+--- switch
+- Gyro Orientation (same as Mouse to Gyro Gyro Orientation)
+- Trigger Dampening (same as Mouse to Gyro Trigger Dampening)
+- Haptics (same as Mouse to Gyro Haptics)
+
+
+Gyro - Gyro to Joystick Deflection settings
+
+
+- General (same as Mouse to Gyro General)
+- Gyro Orientation
+-- Use Relative Roll
+--- When enabled, the stick's horizontal output is based on the difference between the starting pose of the device and its current roll angle. When disabled, the stick's horizontal output is based on the roll of the device compared to Earth's horizon.
+--- switch (enabled)
+-- Use Relative Pitch
+--- When enabled, the stick's vertical output is based on the difference between the starting pose of the device and its current roll angle. When disabled, the stick's vertical output is based on the roll of the device compared to Earth's horizon.
+--- switch (enabled)
+-- Send to Joystick
+--- Signal will be sent out to the chosen joystick.
+--- dropdown
+---- Left Joystick (default if joystick being configured is left joystick)
+---- Right Joystick (default if joystick being configured is right joystick)
+-- Minimum Gyro Deflection Angle
+--- slider
+---- min 0 degrees, max 180 degrees, def 2 degrees
+-- Maximum Gyro Deflection Angle
+--- The minimum and maximum real world angles to map to the joystick. These angles are measured from the gyro's starting orientation. Use the gyro activation button to reset the orientation.
+--- slider
+---- min 0 degrees, max 180 degrees, def 45 degrees
+-- Minimum Joystick Output
+--- Minimum Gyro Deflection Angle maps to Minimum Joystick Output. Try to match the Minimum Joystick Output to the game's joystick deadzone. Reduce the in-game joystick deadzone if possible.
+--- slider
+---- min 0%, max 100%, def 0%
+-- Maximum Joystick Output
+--- Maximum Gyro Deflection Angle maps to Maximum Joystick Output. For example: at the default MGDA setting of 45 degrees, tilting the device 45 degrees results in the joystick deflecting 100%.
+--- slider
+---- min 0%, max 100%, def 100%
+-- Joystick Power Curve
+--- This controls how aggressively the joystick output deflects. At 0.1 the deflection is extremely aggressive; at 1 the deflection is linear; at 4 the deflection is extremely relaxed.
+--- slider
+---- min 0.1, max 4.0, def 1.0
+-- Response Axis Style
+--- Apply the response curve per axis, or based on the distance from the deadzone.
+--- dropdown
+---- Per Axis
+----- The response curve is applied separately to each axis. Moving the stick in a circle will bias movement toward the axes.
+---- Circular (default)
+----- The response curve is applied using the distance of the stick from the deadzone. Moving the stick in a circle will have no directional bias.
+-- Lock at Edges
+--- Locks joystick output to the maximum joystick deflection angle. Turning this off allows the full joystick output range into the diagonals. Note: the response curve only affects output between the minimum and maximum deflection angles. 
+--- switch
+-- Drag Center Point
+--- When exceeding the Maximum Deflection Angle, drag the gyro reference point with the controller's movement. This makes the controller feel more responsive when moving back from an extreme deflection, but will make returning to center less consistent.
+--- switch (enabled)
+-- Invert Y Output
+--- switch
+-- Invert X Output
+--- switch
+-- Gyro Speed Deadzone
+--- The minimum amount of speed that the gyro must be moved before there is a reaction on screen. This is useful for combatting hand shake or bounce-back after a flick. Rotation output lost to the deadzone will be recovered when moving the device at high speeds. 
+--- slider
+---- min 0 degrees/second, max 1 degrees/second, def 0 degrees/second, increments .01
+-- Gyro Precision Speed
+--- When rotating the device below this speed, sensitivity is reduced relative to the designated speed. This makes smaller motions even smaller in-game. This setting may be preferable to a deadzone for adept users. Rotation output lost to the precision filter will be recovered when moving the device at high speeds.
+--- slider
+---- min 0 degrees/second, max 15 degrees/second, def 0 degrees/second, increments .01
+-- Vertical/Horizontal Output Mixer
+--- Moving the slider to the left reduces vertical sensitivity, while moving the slider to the right reduces horizontal sensitivity. If the slider is in the direct center, vertical and horizontal sensitivity are equal (linear).
+- Output
+-- Rotate Output
+--- Adjust the gyroscope’s 2D output clockwise or counterclockwise.
+--- slider
+---- min -180 degrees, max 180 degrees, def 0 degrees
+- Haptics (same as Gyro to Mouse Haptics)
+
+
+Gyro - Directional Pad settings
+
+
+- General (same as Button Pad - Directional Pad General settings)
+- Gyro Buttons (same as Gyro to Mouse General settings)
+- Deadzones (same as Button Pad - Joystick Settings > Deadzones)
+- Outer Ring (same as Button Pad - Joystick Settings > Outer Ring)
+- Gyro
+-- Gyro Pitch Neutral Angle
+--- This setting represents the default position for a centered joystick. By changing this setting, you can alter the neutral centered position to tilt forward or backward to create a more comfortable position. Note that for some uses, such as emulating a steering wheel, it is recommended to disable the vertical portion entirely and just use the horizontal axis, where this neutral angle setting will not be a factor.
+--- slider
+---- min 0, max 32767, def 16384
+-- Gyro Lock at Edges
+--- When enabled, if the device is rotated past the outer edge, gyro input will lock to that edge. If disabled, if the device is rotated past the outer edge, gyro input may "flip" to the opposite side. If you experience problems with the device locking up, you may want to disable this setting.
+- Haptics (same as Gyro to Mouse Haptics)
+
+
+Gyro - Directional Swipe settings
+
+
+- General
+-- Sensitivity
+--- slider
+---- min 1%, max 3000%, def 100%
+-- Scroll Wheel Mode
+--- When enabled, a swipe will have momentum and fire multiple times. When disabled, a swipe will fire a single time and reset before firing any other swipes.
+--- dropdown
+---- Off (default)
+---- Both Horizontal & Vertical
+---- Horizontal Only
+---- Vertical Only
+-- Scroll Wheel Friction
+--- conditional; only appears if Scroll Wheel Mode is set to something besides "Off"
+--- dropdown
+---- Off
+---- None
+---- Low
+---- Medium (default)
+---- High
+- Output
+-- Smoothing
+--- slider
+---- min 0, max 40, def 20
+-- Rotation
+--- Rotation represents the horizon line of mouse movement. You can rotate this horizon line to better align with your thumb's natural swiping angle.
+--- slider
+---- min -180 degrees, max 180 degrees, def 0 degrees
+- Gyro (same as Gyro to Mouse General, except it has one additional setting below)
+-- Gyro Steering Axis
+--- Limits the horizontal output of the mouse to either the yaw or the roll of the device.
+--- dropdown
+---- Yaw
+---- Roll
+---- Combined Yaw & Roll (default)

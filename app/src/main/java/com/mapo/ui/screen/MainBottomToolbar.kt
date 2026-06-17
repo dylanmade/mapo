@@ -97,7 +97,9 @@ fun MainBottomToolbar(
     // the whole toolbar to that 40dp: the stock FilledTonalIconButton is already a 40dp button, and
     // the 32dp switch track is scaled up 1.25× (measure-scaling) to reach 40.
     val mediumStyle = SplitButtonDefaults.MediumContainerHeight
-    val switchScale = 40f / 32f
+    // 1.25× would make the 32dp switch track exactly 40dp, but a switch is a visually heavy element
+    // and read slightly large at that size — back it off a hair (≈38dp).
+    val switchScale = 1.18f
 
     Column(
         // Consume taps on the home chrome (pill gaps, the tab) so they don't fall through to the
@@ -117,13 +119,14 @@ fun MainBottomToolbar(
                 tonalElevation = 3.dp,
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                    // Tight vertical padding so the pill hugs the 40dp controls (less top/bottom excess).
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // ── Master enable switch ──
-                    // Strip the 48dp min-interactive box (so the footprint is the 32dp track, not
-                    // 48) then scale 1.25× to reach the 40dp toolbar height. Mirrors CompactSwitch.
+                    // ── Master enable switch (left) ──
+                    // Strip the 48dp min-interactive box (footprint = 32dp track, not 48) then scale
+                    // up to the toolbar height (see switchScale). Mirrors CompactSwitch.
                     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
                         Switch(
                             checked = mapoEnabled,
@@ -139,7 +142,7 @@ fun MainBottomToolbar(
                         )
                     }
 
-                    // ── Split button: profile name + menu (Small — defaults) ──
+                    // ── Split button: profile name + menu (center) ──
                     Box {
                         SplitButtonLayout(
                             leadingButton = {
@@ -176,11 +179,14 @@ fun MainBottomToolbar(
                         }
                     }
 
-                    // ── Options button → temporary "more" menu ──
+                    // ── Options button (right) → temporary "more" menu ──
                     Box {
-                        // Stock 40dp FilledTonalIconButton — already matches the toolbar height.
-                        FilledTonalIconButton(onClick = { moreExpanded = true }) {
-                            Icon(Icons.Filled.Settings, contentDescription = "More options")
+                        // Stock 40dp FilledTonalIconButton. Strip the 48dp min-interactive halo so its
+                        // box equals its 40dp visual, keeping its spacing to the split button symmetric.
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                            FilledTonalIconButton(onClick = { moreExpanded = true }) {
+                                Icon(Icons.Filled.Settings, contentDescription = "More options")
+                            }
                         }
                         UpwardMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
                             MenuItem("Auto switch", Icons.Filled.SwapHoriz) { moreExpanded = false; onOpenAutoSwitch() }

@@ -51,6 +51,13 @@ sealed interface SettingControl {
     ) : SettingControl
 
     /**
+     * Multi-select physical-input picker (e.g. the gyro enable button(s)).
+     * Stored as a JSON array of `"SOURCE|inputKey"` strings under the spec key;
+     * the renderer captures presses via the accessibility service's capture mode.
+     */
+    data object InputPicker : SettingControl
+
+    /**
      * Dual-handle range (e.g. an inner/outer deadzone). Stores two values under
      * [startKey] (the lower handle) and [endKey] (the upper handle); the lower can't
      * pass the upper. Both handles also expose a manual numeric entry field.
@@ -659,6 +666,242 @@ object SourceModeSettingsSchema {
         ),
     )
 
+    // ── Gyro shared option sets ──────────────────────────────────────────────
+    private val GYRO_ACCELERATION_OPTIONS = listOf(
+        DropdownOption("off", "Off"),
+        DropdownOption("linear", "Linear"),
+        DropdownOption("relaxed", "Relaxed"),
+        DropdownOption("aggressive", "Aggressive"),
+    )
+
+    // Steam-named orientation presets — Title Case is intentional (proper-noun mode
+    // names, per the UI-strings convention). Helper text is the authoritative spec.
+    private val GYRO_CONVERSION_STYLE_OPTIONS = listOf(
+        DropdownOption("yaw", "Yaw", "Turn the device around its vertical axis for horizontal output; tilt up/down for vertical."),
+        DropdownOption("roll", "Roll", "Lean the device around its forward axis for horizontal output; tilt up/down for vertical."),
+        DropdownOption("yaw_roll", "Yaw + Roll", "Combines lean and turn for horizontal output; tilting up/down still moves vertically."),
+        DropdownOption("local_space", "Local Space", "Like Yaw + Roll, but with full control over the principal axis's pitch and the complementary axis's contribution."),
+        DropdownOption("player_space", "Player Space", "Yaw + Roll around the gravity axis for horizontal output; Local Pitch for vertical."),
+        DropdownOption("world_space", "World Space", "All rotation around the gravity axis for horizontal output; World Pitch for vertical (no vertical move when tilted on its side)."),
+        DropdownOption("laser_pointer", "Laser Pointer", "Acts like a laser pointer — great for cursor control of light-gun games on a standalone device."),
+    )
+
+    private val GYRO_TRIGGER_DAMPENING_OPTIONS = listOf(
+        DropdownOption("off", "Off"),
+        DropdownOption("left_soft", "Left trigger soft pull"),
+        DropdownOption("right_soft", "Right trigger soft pull"),
+        DropdownOption("both_soft", "Both triggers soft pull"),
+        DropdownOption("left_soft_full", "Left trigger soft + full pull"),
+        DropdownOption("right_soft_full", "Right trigger soft + full pull"),
+        DropdownOption("both_soft_full", "Both triggers soft + full pull"),
+    )
+
+    private val GYRO_ENABLE_MODE_OPTIONS = listOf(
+        DropdownOption("enable", "Hold to enable", "Gyro is active only while a selected button is held."),
+        DropdownOption("suppress", "Hold to suppress", "Gyro is active except while a selected button is held."),
+        DropdownOption("toggle", "Toggle", "Each press of a selected button toggles the gyro on or off."),
+    )
+
+    // ── Shared gyro General specs (reused by every gyro menu) ─────────────────
+    private val GYRO_BUTTONS = SettingSpec(
+        key = "gyro_buttons",
+        label = "Choose gyro button(s)",
+        helper = "Selected buttons enable/suppress/toggle gyro output. If none are selected, the gyro is always on.",
+        control = SettingControl.InputPicker,
+    )
+    private val GYRO_ENABLE_MODE = SettingSpec(
+        key = "gyro_enable_mode",
+        label = "Gyro enable / suppress / toggle",
+        control = SettingControl.Dropdown(GYRO_ENABLE_MODE_OPTIONS, defaultId = "enable"),
+        visibleWhen = { val r = it.raw("gyro_buttons"); r != null && r != "[]" },
+    )
+    private val GYRO_GENERAL_CATEGORY = SettingCategory("General", listOf(GYRO_BUTTONS, GYRO_ENABLE_MODE))
+
+    // ── Gyro to Mouse specs ──────────────────────────────────────────────────
+    // All rows are wired to the runtime (GyroToMouseSettings + GyroToMouseMode +
+    // InputEvaluator gating): Dots Per 360, sensitivity, invert, speed deadzone,
+    // precision, mixer, acceleration, conversion styles, rotate output, momentum,
+    // trigger dampening, movement threshold, rotational haptics, and the gyro
+    // enable-button gating (General). The gravity-relative conversion styles
+    // (Local / Player / World / Laser) + acceleration curves are faithful
+    // approximations of Steam's unpublished algorithms — verify signs on device.
+    private val GYRO_DOTS_PER_360 = SettingSpec(
+        key = "dots_per_360",
+        label = "Gyro angles to mouse pixels (Dots Per 360)",
+        helper = "One full 360° turn of the gyro generates this many mouse pixels at 1× sensitivity. Shared with Flick Stick's Dots Per 360.",
+        control = SettingControl.Slider(1f, 32000f, default = 6545f, unitSuffix = " px"),
+    )
+    private val GYRO_SENSITIVITY = SettingSpec(
+        key = "gyro_sensitivity",
+        label = "Gyro sensitivity",
+        helper = "Multiplies the gyro's output once Dots Per 360 is calibrated in-game. 1× is 1:1 real-world to in-game rotation; 2× turns twice as fast.",
+        control = SettingControl.Slider(0f, 30f, default = 2.5f, step = 0.1f, unitSuffix = "x", decimals = 1),
+    )
+    private val GYRO_INVERT_Y = SettingSpec(
+        key = "invert_y",
+        label = "Invert Y output",
+        control = SettingControl.Toggle(),
+    )
+    private val GYRO_INVERT_X = SettingSpec(
+        key = "invert_x",
+        label = "Invert X output",
+        control = SettingControl.Toggle(),
+    )
+    private val GYRO_ACCELERATION = SettingSpec(
+        key = "acceleration",
+        label = "Acceleration",
+        control = SettingControl.Dropdown(GYRO_ACCELERATION_OPTIONS, defaultId = "off"),
+    )
+    private val GYRO_OUTPUT_MIXER = SettingSpec(
+        key = "output_mixer",
+        label = "Vertical/horizontal output mixer",
+        helper = "Slide left to reduce vertical sensitivity, right to reduce horizontal. At 0% the horizontal-to-vertical ratio is 1:1.",
+        control = SettingControl.Slider(-100f, 100f, default = 0f, unitSuffix = "%"),
+    )
+    private val GYRO_SPEED_DEADZONE = SettingSpec(
+        key = "gyro_speed_deadzone",
+        label = "Gyro speed deadzone",
+        helper = "Minimum gyro speed before there's a reaction on screen. Mitigates hand shake and flick bounce-back. Output lost to the deadzone is recovered at high speeds.",
+        control = SettingControl.Slider(0f, 1f, default = 0.36f, step = 0.01f, unitSuffix = " °/s", decimals = 2),
+    )
+    private val GYRO_PRECISION_SPEED = SettingSpec(
+        key = "gyro_precision_speed",
+        label = "Gyro precision speed",
+        helper = "Below this speed, sensitivity is reduced relative to speed so small motions are even smaller in-game. May be preferable to a deadzone for adept users.",
+        control = SettingControl.Slider(0f, 15f, default = 0.75f, step = 0.01f, unitSuffix = " °/s", decimals = 2),
+    )
+    private val GYRO_ENABLE_MOMENTUM = SettingSpec(
+        key = "enable_momentum",
+        label = "Enable momentum",
+        helper = "When the gyro is disabled by its enable button, it keeps outputting briefly. Friction controls how quickly it slows down.",
+        control = SettingControl.Toggle(),
+    )
+    private val GYRO_H_MOMENTUM_FRICTION = SettingSpec(
+        key = "h_momentum_friction",
+        label = "Horizontal momentum friction",
+        helper = "How quickly horizontal gyro momentum decays.",
+        control = SettingControl.Slider(0f, 720f, default = 100f, unitSuffix = " °/s"),
+        visibleWhen = { it.raw("enable_momentum") == "true" },
+    )
+    private val GYRO_V_MOMENTUM_FRICTION = SettingSpec(
+        key = "v_momentum_friction",
+        label = "Vertical momentum friction",
+        helper = "How quickly vertical gyro momentum decays. Set very high to make momentum turn only horizontally.",
+        control = SettingControl.Slider(0f, 720f, default = 200f, unitSuffix = " °/s"),
+        visibleWhen = { it.raw("enable_momentum") == "true" },
+    )
+    private val GYRO_CONVERSION_STYLE = SettingSpec(
+        key = "conversion_style",
+        label = "3DOF to 2D conversion style",
+        control = SettingControl.Dropdown(GYRO_CONVERSION_STYLE_OPTIONS, defaultId = "yaw_roll"),
+    )
+    private val GYRO_ROLL_CONTRIBUTION = SettingSpec(
+        key = "roll_contribution",
+        label = "Roll axis contribution",
+        helper = "How much turning the device like a steering wheel (Roll) adds to horizontal output. Negative values invert the contribution.",
+        control = SettingControl.Slider(-100f, 100f, default = 100f, unitSuffix = "%"),
+        visibleWhen = { it.raw("conversion_style") == "yaw_roll" },
+    )
+    private val GYRO_PRIMARY_AXIS_OFFSET = SettingSpec(
+        key = "primary_axis_offset",
+        label = "Primary axis offset",
+        helper = "Tilt the primary (Yaw) axis. 0° samples in front of the device (= Yaw); 90° samples from above (= Roll). 0–90° covers most needs.",
+        control = SettingControl.Slider(-180f, 180f, default = 0f, unitSuffix = "°"),
+        visibleWhen = { it.raw("conversion_style") == "local_space" },
+    )
+    private val GYRO_COMPLEMENTARY_AXIS = SettingSpec(
+        key = "complementary_axis_contribution",
+        label = "Complementary axis contribution (Roll)",
+        helper = "Tune the complementary axis's contribution to horizontal output — the axis perpendicular to your tilted primary axis.",
+        control = SettingControl.Slider(-100f, 100f, default = 100f, unitSuffix = "%"),
+        visibleWhen = { it.raw("conversion_style") == "local_space" },
+    )
+    private val GYRO_ROTATE_OUTPUT = SettingSpec(
+        key = "rotate_output",
+        label = "Rotate output",
+        helper = "Adjust the gyro's 2D output clockwise or counterclockwise.",
+        control = SettingControl.Slider(-180f, 180f, default = 0f, unitSuffix = "°"),
+    )
+    private val GYRO_TRIGGER_DAMPENING = SettingSpec(
+        key = "trigger_dampening",
+        label = "Trigger press mouse dampening",
+        helper = "Dampen mouse movement while a trigger is pulled, to correct for accidental movement when firing.",
+        control = SettingControl.Dropdown(GYRO_TRIGGER_DAMPENING_OPTIONS, defaultId = "off"),
+    )
+    private val GYRO_TRIGGER_DAMPENING_AMOUNT = SettingSpec(
+        key = "trigger_dampening_amount",
+        label = "Trigger dampening amount",
+        helper = "How much the trigger dampens mouse movement. Higher values suppress more.",
+        control = SettingControl.Slider(0f, 100f, default = 90f),
+        visibleWhen = { it.raw("trigger_dampening") != "off" },
+    )
+    private val GYRO_MOVEMENT_THRESHOLD = SettingSpec(
+        key = "movement_threshold",
+        label = "Movement threshold",
+        helper = "Batches small movements and only sends them once large enough, for games that filter tiny mouse moves. Keep as small as possible while preserving movement.",
+        control = SettingControl.Slider(0f, 40f, default = 0f),
+    )
+    private val GYRO_ROTATIONAL_HAPTICS = SettingSpec(
+        key = "rotational_haptics",
+        label = "Rotational haptics",
+        helper = "How intense the haptic bumps are when rotating the gyro.",
+        control = SettingControl.Dropdown(HAPTIC_INTENSITY_OPTIONS, defaultId = "off"),
+    )
+
+    /** The "Gyro to Mouse" menu (device rotation → mouse cursor). */
+    private val GYRO_TO_MOUSE_CATEGORIES = listOf(
+        GYRO_GENERAL_CATEGORY,
+        SettingCategory("Angle calibration", listOf(GYRO_DOTS_PER_360)),
+        SettingCategory(
+            "Sensitivity",
+            listOf(
+                GYRO_SENSITIVITY, GYRO_INVERT_Y, GYRO_INVERT_X, GYRO_ACCELERATION,
+                GYRO_OUTPUT_MIXER, GYRO_SPEED_DEADZONE, GYRO_PRECISION_SPEED,
+            ),
+        ),
+        SettingCategory(
+            "Momentum",
+            listOf(GYRO_ENABLE_MOMENTUM, GYRO_H_MOMENTUM_FRICTION, GYRO_V_MOMENTUM_FRICTION),
+        ),
+        SettingCategory(
+            "Gyro orientation",
+            listOf(
+                GYRO_CONVERSION_STYLE, GYRO_ROLL_CONTRIBUTION, GYRO_PRIMARY_AXIS_OFFSET,
+                GYRO_COMPLEMENTARY_AXIS, GYRO_ROTATE_OUTPUT,
+            ),
+        ),
+        SettingCategory(
+            "Trigger dampening",
+            listOf(GYRO_TRIGGER_DAMPENING, GYRO_TRIGGER_DAMPENING_AMOUNT),
+        ),
+        SettingCategory("Mouse output", listOf(GYRO_MOVEMENT_THRESHOLD)),
+        SettingCategory("Haptics", listOf(GYRO_ROTATIONAL_HAPTICS)),
+    )
+
+    // ── Gyro Directional Pad specs ───────────────────────────────────────────
+    private val GYRO_PITCH_NEUTRAL = SettingSpec(
+        key = "gyro_pitch_neutral",
+        label = "Gyro pitch neutral angle",
+        helper = "The default centered position. Shift it to tilt the neutral pose forward or backward for comfort. (For steering-wheel-style use, disable the vertical axis and ignore this.)",
+        control = SettingControl.Slider(0f, 32767f, default = 16384f),
+    )
+    private val GYRO_LOCK_AT_EDGES = SettingSpec(
+        key = "gyro_lock_at_edges",
+        label = "Gyro lock at edges",
+        helper = "When on, rotating past the outer edge locks to that edge. When off, input may wind up past the edge. Disable if the device locks up unexpectedly.",
+        control = SettingControl.Toggle(default = true),
+    )
+
+    /** The "Directional Pad" menu for the gyro source (tilt → directional pad). */
+    private val GYRO_DPAD_CATEGORIES = listOf(
+        SettingCategory("General", listOf(DIRECTIONAL_PAD_LAYOUT, DPAD_OVERLAP_REGION)),
+        GYRO_GENERAL_CATEGORY,
+        SettingCategory("Deadzones", listOf(DPAD_DEADZONE)),
+        SettingCategory("Outer ring", listOf(COMMAND_RADIUS, COMMAND_INVERT)),
+        SettingCategory("Gyro", listOf(GYRO_PITCH_NEUTRAL, GYRO_LOCK_AT_EDGES)),
+        SettingCategory("Haptics", listOf(GYRO_ROTATIONAL_HAPTICS)),
+    )
+
     /**
      * The settings menu for a given (source, mode). Empty list = no cog shown.
      * Filled in menu-by-menu as each slice lands.
@@ -698,6 +941,13 @@ object SourceModeSettingsSchema {
         // Analog joysticks in Scroll Wheel mode.
         (source == InputSource.LEFT_JOYSTICK || source == InputSource.RIGHT_JOYSTICK) &&
             mode == BindingMode.SCROLL_WHEEL -> SCROLL_WHEEL_CATEGORIES
+
+        // Gyro source — built menu-by-menu.
+        source == InputSource.GYRO -> when (mode) {
+            BindingMode.GYRO_TO_MOUSE -> GYRO_TO_MOUSE_CATEGORIES
+            BindingMode.DPAD -> GYRO_DPAD_CATEGORIES
+            else -> emptyList()
+        }
 
         else -> emptyList()
     }

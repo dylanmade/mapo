@@ -89,6 +89,10 @@ fun MainBottomToolbar(
     onOpenCompactGallery: () -> Unit,
     onOpenColorPickerDemo: () -> Unit,
     modifier: Modifier = Modifier,
+    // Brick 1 dev affordance (OVERLAY_TOOLBAR_PLAN.md): mount/unmount this same toolbar as a
+    // system overlay to verify passthrough + game-input coexistence. Null on the overlay's own
+    // copy so the entry only appears in the in-activity toolbar. Removed at Brick 6.
+    onToggleToolbarOverlayDev: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var moreExpanded by remember { mutableStateOf(false) }
@@ -196,6 +200,9 @@ fun MainBottomToolbar(
                             MenuItem(if (steamAccountName != null) "Steam account" else "Connect to Steam", Icons.Filled.Person) { moreExpanded = false; onOpenSteamSetup() }
                             MenuItem("Compact component gallery", Icons.Filled.Dashboard) { moreExpanded = false; onOpenCompactGallery() }
                             MenuItem("Color picker (preview)", Icons.Filled.Colorize) { moreExpanded = false; onOpenColorPickerDemo() }
+                            if (onToggleToolbarOverlayDev != null) {
+                                MenuItem("Toolbar overlay (dev)", Icons.Filled.Dashboard) { moreExpanded = false; onToggleToolbarOverlayDev() }
+                            }
                         }
                     }
                 }

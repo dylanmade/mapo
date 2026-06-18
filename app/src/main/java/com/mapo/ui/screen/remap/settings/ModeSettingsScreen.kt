@@ -18,7 +18,9 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +57,7 @@ import com.mapo.data.model.steam.InputSource
 import com.mapo.data.model.steam.displayNameFor
 import com.mapo.data.model.steam.resolveActionSet
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 
 /**
@@ -75,6 +79,8 @@ fun ModeSettingsScreen(
     viewingActionSetId: Long?,
     onSettingsChange: (bindingGroupId: Long, settingsJson: String) -> Unit,
     onBack: () -> Unit,
+    capturedInputs: kotlinx.coroutines.flow.SharedFlow<com.mapo.service.input.InputAddress>,
+    setCaptureMode: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val group = config?.resolveActionSet(viewingActionSetId)?.presetFor(source)?.group?.group
@@ -135,7 +141,14 @@ fun ModeSettingsScreen(
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
                 )
                 for (spec in visible) {
-                    SettingRow(spec = spec, obj = obj, settingsJson = settingsJson, onChange = onChange)
+                    SettingRow(
+                        spec = spec,
+                        obj = obj,
+                        settingsJson = settingsJson,
+                        onChange = onChange,
+                        capturedInputs = capturedInputs,
+                        setCaptureMode = setCaptureMode,
+                    )
                 }
             }
             Spacer(Modifier.height(24.dp))
@@ -149,8 +162,17 @@ private fun SettingRow(
     obj: JSONObject,
     settingsJson: String,
     onChange: (String) -> Unit,
+    capturedInputs: kotlinx.coroutines.flow.SharedFlow<com.mapo.service.input.InputAddress>,
+    setCaptureMode: (Boolean) -> Unit,
 ) {
     when (val control = spec.control) {
+        is SettingControl.InputPicker -> InputPickerSettingRow(
+            spec = spec,
+            selected = obj.readStringArray(spec.key),
+            capturedInputs = capturedInputs,
+            setCaptureMode = setCaptureMode,
+            onChange = { onChange(settingsWithArray(settingsJson, spec.key, it)) },
+        )
         is SettingControl.Toggle -> ToggleSettingRow(
             spec = spec,
             current = obj.optBoolean(spec.key, control.default),
@@ -182,6 +204,81 @@ private fun SettingRow(
                 )
             },
         )
+    }
+}
+
+/**
+ * Multi-select physical-input picker. Shows the chosen buttons as removable
+ * chips and an "Add button" affordance that enters the accessibility service's
+ * capture mode; the next physical press is appended. Stored as a JSON array of
+ * `"SOURCE|inputKey"` tokens (same encoding as the chord-partner picker).
+ */
+@Composable
+private fun InputPickerSettingRow(
+    spec: SettingSpec,
+    selected: List<String>,
+    capturedInputs: kotlinx.coroutines.flow.SharedFlow<com.mapo.service.input.InputAddress>,
+    setCaptureMode: (Boolean) -> Unit,
+    onChange: (List<String>) -> Unit,
+) {
+    var capturing by remember { mutableStateOf(false) }
+    // Safety net: leave capture mode if this row leaves composition mid-capture.
+    DisposableEffect(Unit) { onDispose { setCaptureMode(false) } }
+    // Collect a single press while capturing; cancelled (and capture mode left)
+    // if the user taps Cancel, which flips `capturing` and re-keys this effect.
+    LaunchedEffect(capturing) {
+        if (!capturing) return@LaunchedEffect
+        setCaptureMode(true)
+        val addr = capturedInputs.first()
+        val token = "${addr.source.name}|${addr.inputKey}"
+        if (token !in selected) onChange(selected + token)
+        setCaptureMode(false)
+        capturing = false
+    }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        SettingHeader(spec.label, spec.helper)
+        Spacer(Modifier.size(8.dp))
+        for (token in selected) {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.padding(bottom = 6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(prettyInputLabel(token), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(onClick = { onChange(selected - token) }, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Remove",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+        if (capturing) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Press a button on your controller…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = { setCaptureMode(false); capturing = false }) { Text("Cancel") }
+            }
+        } else {
+            TextButton(onClick = { capturing = true }) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(if (selected.isEmpty()) "Add button" else "Add another")
+            }
+        }
     }
 }
 
@@ -448,6 +545,31 @@ private fun sliderSteps(min: Float, max: Float, step: Float?): Int =
 
 private fun formatNumber(value: Float, decimals: Int): String =
     if (decimals <= 0) value.roundToInt().toString() else "%.${decimals}f".format(value)
+
+/** Read a JSON string array at [key] (e.g. the gyro enable-button tokens). */
+private fun JSONObject.readStringArray(key: String): List<String> {
+    val arr = optJSONArray(key) ?: return emptyList()
+    return (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotEmpty() } }
+}
+
+/** Returns [currentJson] with [key] set to the JSON array [values]. */
+private fun settingsWithArray(currentJson: String, key: String, values: List<String>): String {
+    val obj = try {
+        JSONObject(currentJson)
+    } catch (_: Exception) {
+        JSONObject()
+    }
+    obj.put(key, org.json.JSONArray(values))
+    return obj.toString()
+}
+
+/** Prettify a `"SOURCE|inputKey"` token for display (e.g. "button_a" → "Button A"). */
+private fun prettyInputLabel(token: String): String {
+    val key = token.substringAfter("|", token)
+    return key.split("_").joinToString(" ") { part ->
+        part.replaceFirstChar { if (it.isLowerCase()) it.uppercaseChar() else it }
+    }
+}
 
 /** Returns [currentJson] with [key] set to [value] (string / boolean / number). */
 private fun settingsWith(currentJson: String, key: String, value: Any): String =

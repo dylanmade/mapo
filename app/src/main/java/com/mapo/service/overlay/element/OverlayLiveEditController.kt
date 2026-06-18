@@ -34,6 +34,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -64,10 +65,6 @@ import androidx.compose.material.icons.filled.AlignHorizontalRight
 import androidx.compose.material.icons.filled.AlignVerticalBottom
 import androidx.compose.material.icons.filled.AlignVerticalCenter
 import androidx.compose.material.icons.filled.AlignVerticalTop
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
-import androidx.compose.material.icons.filled.ArrowLeft
-import androidx.compose.material.icons.filled.ArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -75,12 +72,15 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.ControlCamera
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.Grid4x4
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.HighlightAlt
 import androidx.compose.material.icons.filled.HorizontalDistribute
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Straighten
@@ -113,6 +113,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.focusRequester
@@ -921,9 +922,9 @@ class OverlayLiveEditController @Inject constructor(
         positionerPressed.value = null
         val owner = OverlayLifecycleOwner()
         // ONE raw-coord filter over the whole window (like the toolbar): drag past slop moves the
-        // window; otherwise a press geometrically hit-tests the diamond ([positionerHit]) — a direction
-        // nudges (tap once / hold to repeat), close dismisses. The pressed control highlights via
-        // [positionerPressed]; empty corners (outside the rhombus) and disabled directions just drag.
+        // window; otherwise a press geometrically hit-tests the dpad buttons ([positionerHit]) — a
+        // direction nudges (tap once / hold to repeat), close dismisses. The pressed control highlights
+        // via [positionerPressed]; empty corners (between the arms) and disabled directions just drag.
         var startRawX = 0f; var startRawY = 0f; var startX = 0; var startY = 0
         var dragging = false
         var pressedKey: String? = null
@@ -1008,12 +1009,44 @@ class OverlayLiveEditController @Inject constructor(
         positionerOpen.value = true
     }
 
+    /** A positioner button's rect, normalized to the half-side D = POSITIONER_DP/2 (so coords are in
+     *  [-1, 1] out from center). [key] is the control id; the `_big` keys nudge by the large step. */
+    private data class PosRect(val key: String, val l: Float, val t: Float, val r: Float, val b: Float)
+
     /**
-     * The Positioner: a rounded DIAMOND whose four quadrants are filled triangle direction buttons
-     * (white arrow legend on each), with a stacked **× / "Close"** control in the center. Drawn (not
-     * laid-out buttons) so [addPositioner]'s raw-coord filter hit-tests it geometrically ([positionerHit]).
-     * Grab-anywhere draggable; each direction nudges 1px per tap and auto-repeats while held; directions
-     * are disabled (greyed; that area drags) when nothing is selected.
+     * The nine positioner buttons (close + small/large per direction), as rects normalized to the
+     * half-side. Both the renderer ([PositionerContent]) and the hit-test ([positionerHit]) derive
+     * from this single source so the visible button and its touch region always coincide.
+     *
+     * Along each axis out from center: close occupies [0, closeHalf]; then a gap; the SMALL button;
+     * a gap; the LARGE button reaching the edge (±1). Arms are [armHalf] wide (perpendicular).
+     */
+    private fun positionerRects(): List<PosRect> {
+        val ch = POS_CLOSE_HALF_F; val ah = POS_ARM_HALF_F
+        val inner = ch + POS_GAP_F                       // inner edge of the small button
+        val seg = (1f - inner - POS_GAP_F) / 2f          // each button's length along its axis
+        val s0 = inner; val s1 = inner + seg             // small button span
+        val l0 = s1 + POS_GAP_F; val l1 = l0 + seg       // large button span (l1 ≈ 1)
+        return listOf(
+            PosRect("close", -ch, -ch, ch, ch),
+            PosRect("up", -ah, -s1, ah, -s0),
+            PosRect("up_big", -ah, -l1, ah, -l0),
+            PosRect("down", -ah, s0, ah, s1),
+            PosRect("down_big", -ah, l0, ah, l1),
+            PosRect("left", -s1, -ah, -s0, ah),
+            PosRect("left_big", -l1, -ah, -l0, ah),
+            PosRect("right", s0, -ah, s1, ah),
+            PosRect("right_big", l0, -ah, l1, ah),
+        )
+    }
+
+    /**
+     * The Positioner: a dpad-shaped panel (menu-colored plus background) carrying nine **M3 filled
+     * buttons** — a small (1px) + large (10px) move button on each arm, plus a stacked **× / "Close"**
+     * in the center. Drawn (not laid-out) so [addPositioner]'s raw-coord filter can hit-test it
+     * geometrically ([positionerHit]) while the whole window stays grab-anywhere draggable. Each
+     * direction nudges per tap and auto-repeats while held; directions take the disabled button look
+     * (and just drag) when nothing is selected. Close is always enabled.
      */
     @OptIn(ExperimentalComposeUiApi::class)
     @Composable
@@ -1021,41 +1054,39 @@ class OverlayLiveEditController @Inject constructor(
         val sel by selectedIds.collectAsStateWithLifecycle()
         val enabled = sel.isNotEmpty()
         val pressed by positionerPressed.collectAsStateWithLifecycle()
-        val diamondFill = MaterialTheme.colorScheme.surfaceContainerHigh.toArgb()
-        val triFill =
-            (if (enabled) MaterialTheme.colorScheme.secondaryContainer
-            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)).toArgb()
-        val triPress = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f).toArgb()
-        // Arrow legends use the normal white text color (onSurface), not the muted on-container tint.
-        // Arrow legends = the normal white text color, ALWAYS (the triangle fill conveys disabled, not
-        // the arrow). onSurface is the same color the menu text rows use.
-        val arrowTint = MaterialTheme.colorScheme.onSurface
-        val closeTint = MaterialTheme.colorScheme.onSurfaceVariant
-        val iconOffset = (POSITIONER_DP / 2f * POSITIONER_ICON_F).dp
+        // Background = the menu container color (matches the vertical/horizontal toolbars).
+        val bgFill = MaterialTheme.colorScheme.surfaceContainerHigh.toArgb()
+        // M3 filled-button roles: primary container / onPrimary content; disabled = onSurface @ 0.12 /
+        // 0.38; pressed = the onPrimary state layer over the container.
+        val btnFill = MaterialTheme.colorScheme.primary.toArgb()
+        val btnDisabledFill = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f).toArgb()
+        val btnPress = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f).toArgb()
+        val onBtn = MaterialTheme.colorScheme.onPrimary
+        val onBtnDisabled = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        val dirTint = if (enabled) onBtn else onBtnDisabled
+
+        // Icon offsets out from center (dp), to the small/large button centers.
+        val halfDp = POSITIONER_DP / 2f
+        val inner = POS_CLOSE_HALF_F + POS_GAP_F
+        val seg = (1f - inner - POS_GAP_F) / 2f
+        val smallOff = ((inner + seg / 2f) * halfDp).dp
+        val largeOff = ((inner + seg + POS_GAP_F + seg / 2f) * halfDp).dp
+
         Box(
             Modifier
                 .pointerInteropFilter(onTouchEvent = onTouch)
                 .padding(MENU_SHADOW_MARGIN.dp)
                 .requiredSize(POSITIONER_DP.dp)
                 .drawBehind {
-                    val w = size.width; val h = size.height; val cx = w / 2f; val cy = h / 2f; val d = w / 2f
-                    val diamond = roundedPolygonPath(
-                        arrayOf(floatArrayOf(cx, 0f), floatArrayOf(w, cy), floatArrayOf(cx, h), floatArrayOf(0f, cy)),
-                        FloatArray(4) { POSITIONER_DIAMOND_CORNER_F * d },
-                    )
-                    // Per-corner radii: the outer apex (index 0) is rounded LESS than the two base corners.
-                    val triRadii = floatArrayOf(POSITIONER_TIP_CORNER_F * d, POSITIONER_BASE_CORNER_F * d, POSITIONER_BASE_CORNER_F * d)
-                    // Each direction = a right-isoceles half-square: apex `ap` out toward its edge, inner
-                    // base `ba` out from center, base half-width == height (= ap-ba). As `ba` slides toward
-                    // center the base corners extend outward; at ba = ap/2 they reach the diagonals (touch
-                    // the neighbours, closing the gap) — going below ap/2 makes them actually overlap.
-                    val ap = POSITIONER_APEX_F * d; val ba = POSITIONER_BASE_F * d; val wh = ap - ba
-                    val tris = listOf(
-                        "up" to arrayOf(floatArrayOf(cx, cy - ap), floatArrayOf(cx - wh, cy - ba), floatArrayOf(cx + wh, cy - ba)),
-                        "down" to arrayOf(floatArrayOf(cx, cy + ap), floatArrayOf(cx + wh, cy + ba), floatArrayOf(cx - wh, cy + ba)),
-                        "left" to arrayOf(floatArrayOf(cx - ap, cy), floatArrayOf(cx - ba, cy + wh), floatArrayOf(cx - ba, cy - wh)),
-                        "right" to arrayOf(floatArrayOf(cx + ap, cy), floatArrayOf(cx + ba, cy - wh), floatArrayOf(cx + ba, cy + wh)),
-                    ).map { (key, pts) -> key to roundedPolygonPath(pts, triRadii) }
+                    val d = size.width / 2f; val cx = d; val cy = d
+                    fun rectPx(l: Float, t: Float, r: Float, b: Float) =
+                        android.graphics.RectF(cx + l * d, cy + t * d, cx + r * d, cy + b * d)
+                    // Plus-shaped background = vertical bar ∪ horizontal bar (overlapping round rects).
+                    val bgCorner = POS_BG_CORNER_DP.dp.toPx()
+                    val plus = android.graphics.Path().apply {
+                        addRoundRect(rectPx(-POS_BG_HALF_F, -1f, POS_BG_HALF_F, 1f), bgCorner, bgCorner, android.graphics.Path.Direction.CW)
+                        addRoundRect(rectPx(-1f, -POS_BG_HALF_F, 1f, POS_BG_HALF_F), bgCorner, bgCorner, android.graphics.Path.Direction.CW)
+                    }
                     drawIntoCanvas { canvas ->
                         val nc = canvas.nativeCanvas
                         val shadow = android.graphics.Paint().apply {
@@ -1063,79 +1094,78 @@ class OverlayLiveEditController @Inject constructor(
                             maskFilter = android.graphics.BlurMaskFilter(8.dp.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
                             isAntiAlias = true
                         }
-                        nc.save(); nc.translate(0f, 2.dp.toPx()); nc.drawPath(diamond, shadow); nc.restore()
-                        nc.drawPath(diamond, android.graphics.Paint().apply { color = diamondFill; isAntiAlias = true })
-                        val tp = android.graphics.Paint().apply { color = triFill; isAntiAlias = true }
-                        val pp = android.graphics.Paint().apply { color = triPress; isAntiAlias = true }
-                        tris.forEach { (key, path) ->
-                            nc.drawPath(path, tp)
-                            if (key == pressed) nc.drawPath(path, pp)
+                        nc.save(); nc.translate(0f, 2.dp.toPx()); nc.drawPath(plus, shadow); nc.restore()
+                        nc.drawPath(plus, android.graphics.Paint().apply { color = bgFill; isAntiAlias = true })
+                        val fillPaint = android.graphics.Paint().apply { isAntiAlias = true }
+                        val pressPaint = android.graphics.Paint().apply { color = btnPress; isAntiAlias = true }
+                        val btnCornerPx = POS_BTN_CORNER_DP.dp.toPx()
+                        positionerRects().forEach { pr ->
+                            val rf = rectPx(pr.l, pr.t, pr.r, pr.b)
+                            // Squarer M3-button corner: a fixed radius, clamped so it never fully rounds.
+                            val rad = minOf(btnCornerPx, minOf(rf.width(), rf.height()) / 2f)
+                            val btnEnabled = pr.key == "close" || enabled
+                            fillPaint.color = if (btnEnabled) btnFill else btnDisabledFill
+                            nc.drawRoundRect(rf, rad, rad, fillPaint)
+                            if (pr.key == pressed) nc.drawRoundRect(rf, rad, rad, pressPaint)
                         }
                     }
                 },
             contentAlignment = Alignment.Center,
         ) {
-            PosArrow(Modifier.align(Alignment.Center).offset(y = -iconOffset), Icons.Default.ArrowDropUp, "Up", arrowTint)
-            PosArrow(Modifier.align(Alignment.Center).offset(y = iconOffset), Icons.Default.ArrowDropDown, "Down", arrowTint)
-            PosArrow(Modifier.align(Alignment.Center).offset(x = -iconOffset), Icons.Default.ArrowLeft, "Left", arrowTint)
-            PosArrow(Modifier.align(Alignment.Center).offset(x = iconOffset), Icons.Default.ArrowRight, "Right", arrowTint)
+            // Single filled triangles on the small buttons; double (fast-forward style) on the large.
+            PosIcon(offsetY = -smallOff, icon = Icons.Default.PlayArrow, rotation = -90f, sizeDp = POS_SMALL_ICON_DP, tint = dirTint, desc = "Up 1")
+            PosIcon(offsetY = smallOff, icon = Icons.Default.PlayArrow, rotation = 90f, sizeDp = POS_SMALL_ICON_DP, tint = dirTint, desc = "Down 1")
+            PosIcon(offsetX = -smallOff, icon = Icons.Default.PlayArrow, rotation = 180f, sizeDp = POS_SMALL_ICON_DP, tint = dirTint, desc = "Left 1")
+            PosIcon(offsetX = smallOff, icon = Icons.Default.PlayArrow, rotation = 0f, sizeDp = POS_SMALL_ICON_DP, tint = dirTint, desc = "Right 1")
+            PosIcon(offsetY = -largeOff, icon = Icons.Default.FastForward, rotation = -90f, sizeDp = POS_LARGE_ICON_DP, tint = dirTint, desc = "Up 10")
+            PosIcon(offsetY = largeOff, icon = Icons.Default.FastForward, rotation = 90f, sizeDp = POS_LARGE_ICON_DP, tint = dirTint, desc = "Down 10")
+            PosIcon(offsetX = -largeOff, icon = Icons.Default.FastRewind, rotation = 0f, sizeDp = POS_LARGE_ICON_DP, tint = dirTint, desc = "Left 10")
+            PosIcon(offsetX = largeOff, icon = Icons.Default.FastForward, rotation = 0f, sizeDp = POS_LARGE_ICON_DP, tint = dirTint, desc = "Right 10")
             Column(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = closeTint, modifier = Modifier.requiredSize(22.dp))
-                Text("Close", style = MaterialTheme.typography.labelSmall, color = closeTint)
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = onBtn, modifier = Modifier.requiredSize(20.dp))
+                Text("Close", style = MaterialTheme.typography.labelSmall, color = onBtn)
             }
         }
     }
 
     @Composable
-    private fun PosArrow(modifier: Modifier, icon: ImageVector, desc: String, tint: androidx.compose.ui.graphics.Color) {
-        // Scales with the diamond (so the whole positioner shrinks together; only the close stays fixed).
-        Icon(icon, contentDescription = desc, tint = tint, modifier = modifier.requiredSize((POSITIONER_DP * POSITIONER_ICON_SIZE_F).dp))
+    private fun BoxScope.PosIcon(
+        offsetX: Dp = 0.dp,
+        offsetY: Dp = 0.dp,
+        icon: ImageVector,
+        rotation: Float,
+        sizeDp: Int,
+        tint: androidx.compose.ui.graphics.Color,
+        desc: String,
+    ) {
+        Icon(
+            icon, contentDescription = desc, tint = tint,
+            modifier = Modifier.align(Alignment.Center).offset(offsetX, offsetY).rotate(rotation).requiredSize(sizeDp.dp),
+        )
     }
 
-    /** Geometric hit-test of the diamond at window-local ([xF], [yF]) → control key, or null (drag). */
+    /** Geometric hit-test at window-local ([xF], [yF]) → button key, or null (empty space → drag). */
     private fun positionerHit(xF: Float, yF: Float): String? {
         val density = context.resources.displayMetrics.density
         val d = POSITIONER_DP * density / 2f
-        val c = MENU_SHADOW_MARGIN * density + d // diamond center = margin + half (square content)
-        val dx = xF - c; val dy = yF - c
-        val ax = abs(dx); val ay = abs(dy)
-        val closeHalf = POSITIONER_CLOSE_F * d
-        return when {
-            ax <= closeHalf && ay <= closeHalf -> "close"
-            ax + ay > d -> null // outside the rhombus → empty corner → drag
-            ay >= ax -> if (dy < 0) "up" else "down"
-            else -> if (dx < 0) "left" else "right"
-        }
+        val c = MENU_SHADOW_MARGIN * density + d // dpad center = margin + half (square content)
+        val rx = (xF - c) / d; val ry = (yF - c) / d // normalized to the half-side
+        return positionerRects().firstOrNull { rx in it.l..it.r && ry in it.t..it.b }?.key
     }
 
     private fun nudgeDelta(key: String): Pair<Int, Int> = when (key) {
-        "up" -> 0 to -NUDGE_PX
-        "down" -> 0 to NUDGE_PX
-        "left" -> -NUDGE_PX to 0
-        "right" -> NUDGE_PX to 0
+        "up" -> 0 to -NUDGE_SMALL_PX
+        "down" -> 0 to NUDGE_SMALL_PX
+        "left" -> -NUDGE_SMALL_PX to 0
+        "right" -> NUDGE_SMALL_PX to 0
+        "up_big" -> 0 to -NUDGE_LARGE_PX
+        "down_big" -> 0 to NUDGE_LARGE_PX
+        "left_big" -> -NUDGE_LARGE_PX to 0
+        "right_big" -> NUDGE_LARGE_PX to 0
         else -> 0 to 0
-    }
-
-    /** A closed [android.graphics.Path] through [pts], each corner rounded to its [radii] (quad arcs). */
-    private fun roundedPolygonPath(pts: Array<FloatArray>, radii: FloatArray): android.graphics.Path {
-        val path = android.graphics.Path()
-        val n = pts.size
-        for (i in 0 until n) {
-            val curr = pts[i]; val prev = pts[(i - 1 + n) % n]; val next = pts[(i + 1) % n]
-            val v1x = prev[0] - curr[0]; val v1y = prev[1] - curr[1]
-            val v2x = next[0] - curr[0]; val v2y = next[1] - curr[1]
-            val l1 = hypot(v1x, v1y); val l2 = hypot(v2x, v2y)
-            val r = minOf(radii[i], l1 / 2f, l2 / 2f)
-            val p1x = curr[0] + v1x / l1 * r; val p1y = curr[1] + v1y / l1 * r
-            val p2x = curr[0] + v2x / l2 * r; val p2y = curr[1] + v2y / l2 * r
-            if (i == 0) path.moveTo(p1x, p1y) else path.lineTo(p1x, p1y)
-            path.quadTo(curr[0], curr[1], p2x, p2y)
-        }
-        path.close()
-        return path
     }
 
     /**
@@ -2974,20 +3004,22 @@ class OverlayLiveEditController @Inject constructor(
         private const val MENU_SHADOW_MARGIN = 10
         // Rotate animation: ~half collapsing the shrinking axis (ease-in), ~half growing the other (ease-out).
         private const val ROTATE_TOTAL_MS = 200
-        // Positioner nudge: one screen pixel per tap; hold to auto-repeat after a short delay.
-        private const val NUDGE_PX = 1
+        // Positioner nudge magnitudes (screen px per tap): small = fine (1), large = coarse (10).
+        // Hold any direction to auto-repeat after a short delay.
+        private const val NUDGE_SMALL_PX = 1
+        private const val NUDGE_LARGE_PX = 10
         private const val NUDGE_HOLD_DELAY_MS = 350L
         private const val NUDGE_HOLD_REPEAT_MS = 45L
-        // Positioner diamond geometry (fractions are of the half-diagonal D = POSITIONER_DP/2). The
-        // whole thing scales with POSITIONER_DP EXCEPT the central close ×/label (kept fixed/readable).
-        private const val POSITIONER_DP = 170
-        private const val POSITIONER_ICON_SIZE_F = 0.17f   // arrow legend size as a fraction of POSITIONER_DP
-        private const val POSITIONER_CLOSE_F = 0.32f       // central square half (close hit region)
-        private const val POSITIONER_APEX_F = 0.90f        // direction apex distance from center (toward the edge)
-        private const val POSITIONER_BASE_F = 0.45f        // inner base distance from center (= apex/2: corners touch the diagonals)
-        private const val POSITIONER_TIP_CORNER_F = 0.05f  // outer apex = the RIGHT-angle (90°) corner — unchanged
-        private const val POSITIONER_BASE_CORNER_F = 0.05f // the two base = the ACUTE (45°) corners — a little less round
-        private const val POSITIONER_DIAMOND_CORNER_F = 0.10f // diamond corner radius
-        private const val POSITIONER_ICON_F = 0.62f        // arrow legend offset from center (toward the periphery)
+        // Positioner dpad geometry. The window content is a POSITIONER_DP square; the button-rect
+        // fractions below ([positionerRects]) are of the half-side D = POSITIONER_DP/2, out from center.
+        private const val POSITIONER_DP = 196
+        private const val POS_CLOSE_HALF_F = 0.27f  // close button: square half-side
+        private const val POS_ARM_HALF_F = 0.205f   // arm half-width (perpendicular); <= close half
+        private const val POS_GAP_F = 0.045f        // gap between adjacent buttons (close↔small↔large)
+        private const val POS_BG_HALF_F = 0.30f     // plus-background bar half-width (> close half)
+        private const val POS_BG_CORNER_DP = 18     // plus-background corner radius
+        private const val POS_BTN_CORNER_DP = 10    // button corner radius (squarer than full-round)
+        private const val POS_SMALL_ICON_DP = 18    // single-arrow legend (small / 1px move)
+        private const val POS_LARGE_ICON_DP = 22    // double-arrow legend (large / 10px move)
     }
 }

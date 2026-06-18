@@ -776,6 +776,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                         viewModel.setBindingGroupSettings(id, settingsJson)
                     },
                     onBack = { navController.popBackStack() },
+                    capturedInputs = viewModel.capturedInputs,
+                    setCaptureMode = { viewModel.setCaptureMode(it) },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1010,6 +1012,9 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onOpenSteamSetup = { navController.navigate(MapoRoute.STEAM_SETUP) },
                     onOpenCompactGallery = { navController.navigate(MapoRoute.COMPACT_GALLERY) },
                     onOpenColorPickerDemo = { navController.navigate(MapoRoute.COLOR_PICKER_DEMO) },
+                    // Brick 1 dev affordance: mount this toolbar as a system overlay (see
+                    // OVERLAY_TOOLBAR_PLAN.md). Background Mapo afterward to verify passthrough.
+                    onToggleToolbarOverlayDev = { viewModel.toggleToolbarOverlayDev() },
                 )
             }
         }

@@ -69,15 +69,26 @@ class GyroToMouseModeTest {
 
     // ── Happy path ──────────────────────────────────────────────────────────
 
+    @org.junit.Before
+    fun resetGyroMouseState() {
+        // The mode's per-source scratch (dt / momentum / accumulators) is a
+        // singleton — clear it so prior tests don't bleed in.
+        GyroToMouseMode.resetState()
+    }
+
     @Test
-    fun gyroReading_atDefaultSensitivity_drivesCursorOnYawAndPitch() {
-        GyroToMouseMode.evaluate(gyroReading(1.0f, 0.5f), ctx(), digitalEmit, mouse)
+    fun gyroReading_atDefaultSensitivity_drivesCursorOnRollAndPitch() {
+        // Deadzone off for a clean exact assertion. Default style is Yaw + Roll;
+        // with no yaw component, horizontal = roll, vertical = pitch.
+        GyroToMouseMode.evaluate(gyroReading(1.0f, 0.5f), ctx("""{"gyro_speed_deadzone":0.0}"""), digitalEmit, mouse)
         assertEquals(1, mouse.velocityCalls.size)
         val (source, vx, vy) = mouse.velocityCalls.single()
         assertEquals(InputSource.GYRO, source)
-        // Built-in -1 sign correction on both axes — see toVelocity KDoc.
-        assertEquals(-GyroToMouseSettings.DEFAULT_SENSITIVITY_X, vx, EPSILON)
-        assertEquals(-0.5f * GyroToMouseSettings.DEFAULT_SENSITIVITY_Y, vy, EPSILON)
+        // px/rad = DotsPer360 / 2π × sensitivity. Built-in -1 sign correction.
+        val scale = GyroToMouseSettings.DEFAULT_DOTS_PER_360 / (2f * Math.PI.toFloat()) *
+            GyroToMouseSettings.DEFAULT_GYRO_SENSITIVITY
+        assertEquals(-scale, vx, EPSILON)
+        assertEquals(-0.5f * scale, vy, EPSILON)
     }
 
     @Test
@@ -86,7 +97,8 @@ class GyroToMouseModeTest {
         // integration loop sees the GYRO slot zero out and exits cleanly when
         // the user releases the device. Not skipping the call is load-bearing
         // for the loop's exit condition.
-        GyroToMouseMode.evaluate(gyroReading(0.01f, 0.01f), ctx(), digitalEmit, mouse)
+        // Default deadzone is 0.36 deg/sec ≈ 0.0063 rad/sec; stay below it.
+        GyroToMouseMode.evaluate(gyroReading(0.003f, 0.003f), ctx(), digitalEmit, mouse)
         val (source, vx, vy) = mouse.velocityCalls.single()
         assertEquals(InputSource.GYRO, source)
         assertEquals(0f, vx, EPSILON)
@@ -121,13 +133,14 @@ class GyroToMouseModeTest {
     // ── Settings-aware behavior ─────────────────────────────────────────────
 
     @Test
-    fun customSensitivity_appliesPerAxis() {
-        val ctx = ctx("""{"sensitivity_x":1000,"sensitivity_y":250,"deadzone":0.05}""")
-        GyroToMouseMode.evaluate(gyroReading(1.0f, 1.0f), ctx, digitalEmit, mouse)
+    fun customDotsAndSensitivity_scaleOutput() {
+        val ctx = ctx("""{"dots_per_360":8000,"gyro_sensitivity":2.0,"gyro_speed_deadzone":0.0}""")
+        GyroToMouseMode.evaluate(gyroReading(1.0f, 0.5f), ctx, digitalEmit, mouse)
         val (_, vx, vy) = mouse.velocityCalls.single()
-        // Built-in -1 sign correction on both axes — see toVelocity KDoc.
-        assertEquals(-1000f, vx, EPSILON)
-        assertEquals(-250f, vy, EPSILON)
+        // px/rad = 8000 / 2π × 2.0. Built-in -1 sign correction on both axes.
+        val scale = 8000f / (2f * Math.PI.toFloat()) * 2.0f
+        assertEquals(-scale, vx, EPSILON)
+        assertEquals(-0.5f * scale, vy, EPSILON)
     }
 
     @Test

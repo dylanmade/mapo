@@ -353,6 +353,12 @@ class InputEvaluator @Inject constructor(
         for ((src, active) in dpadActiveInputs) for (k in active) onRelease(InputAddress(src, k))
         dpadActiveInputs.clear()
         dpadHeldOrder.clear()
+        // Reset gyro enable-button gating state so a toggle/pull doesn't leak
+        // across a config change, and force a re-parse of the gating config.
+        gyroToggleOn = false
+        gyroGateJson = null
+        leftTriggerPull = 0f
+        rightTriggerPull = 0f
         // Drop any held directional stick-OUTPUT bindings so they don't stick across change.
         emitter.resetStickOutputs()
         // Clear the analog trigger-OUTPUT contributions (TriggerMode "Analog output trigger").
@@ -891,9 +897,84 @@ class InputEvaluator @Inject constructor(
      * call is the only place that sees the reading — everything else is bookkeeping
      * around the active set + latched-edge priors.
      */
+    // ── Gyro enable-button gating + trigger dampening state ──────────────────
+    // Latest analog-trigger pull fraction (0..1), cached from trigger readings.
+    private var leftTriggerPull = 0f
+    private var rightTriggerPull = 0f
+    // TOGGLE-mode gyro on/off latch (flipped on each configured-button press).
+    private var gyroToggleOn = false
+    // Cache of the parsed gyro gating config, keyed by the settings JSON string
+    // so we only re-parse when it changes (gyro events arrive at sensor rate).
+    private var gyroGateJson: String? = null
+    private var gyroGateButtons: List<InputAddress> = emptyList()
+    private var gyroGateMode: com.mapo.service.input.modes.GyroEnableMode =
+        com.mapo.service.input.modes.GyroEnableMode.ENABLE
+
+    /** Parse the gyro enable-button list + mode from a gyro group's settings JSON. */
+    private fun gyroGating(json: String): Pair<List<InputAddress>, com.mapo.service.input.modes.GyroEnableMode> {
+        if (json != gyroGateJson) {
+            gyroGateButtons = emptyList()
+            gyroGateMode = com.mapo.service.input.modes.GyroEnableMode.ENABLE
+            try {
+                val obj = org.json.JSONObject(json)
+                obj.optJSONArray("gyro_buttons")?.let { arr ->
+                    gyroGateButtons = (0 until arr.length()).mapNotNull { i ->
+                        // Stored "SOURCE|inputKey" (see the gyro-button picker).
+                        val parts = arr.optString(i).split("|", limit = 2)
+                        if (parts.size == 2) {
+                            runCatching { InputAddress(InputSource.valueOf(parts[0]), parts[1]) }.getOrNull()
+                        } else {
+                            null
+                        }
+                    }
+                }
+                gyroGateMode = com.mapo.service.input.modes.GyroEnableMode.fromId(
+                    obj.optString("gyro_enable_mode", gyroGateMode.id),
+                )
+            } catch (_: org.json.JSONException) {
+                // Leave defaults (no buttons → always enabled).
+            }
+            gyroGateJson = json
+        }
+        return gyroGateButtons to gyroGateMode
+    }
+
+    /**
+     * Whether gyro output is currently enabled given the gyro group's
+     * enable-button config + held/toggle state. No buttons → always on
+     * (spec: "If no buttons are selected, the gyro will always be on").
+     */
+    private fun computeGyroEnabled(json: String): Boolean {
+        val (buttons, mode) = gyroGating(json)
+        if (buttons.isEmpty()) return true
+        return when (mode) {
+            com.mapo.service.input.modes.GyroEnableMode.ENABLE -> buttons.any { it in physicallyHeld }
+            com.mapo.service.input.modes.GyroEnableMode.SUPPRESS -> buttons.none { it in physicallyHeld }
+            com.mapo.service.input.modes.GyroEnableMode.TOGGLE -> gyroToggleOn
+        }
+    }
+
+    /** Flip the TOGGLE-mode gyro latch when a configured gyro button is pressed. */
+    private fun maybeToggleGyro(address: InputAddress) {
+        val set = resolveActiveSet() ?: return
+        val gyro = findSourceModeFor(set, InputSource.GYRO) ?: return
+        val (buttons, mode) = gyroGating(gyro.settingsJson)
+        if (mode == com.mapo.service.input.modes.GyroEnableMode.TOGGLE && address in buttons) {
+            gyroToggleOn = !gyroToggleOn
+            Log.d(TAG, "gyro toggle ${if (gyroToggleOn) "ON" else "OFF"} via $address")
+        }
+    }
+
     private fun dispatchReadings(readings: List<AnalogEvent>) {
         val set = resolveActiveSet() ?: return
         for (reading in readings) {
+            // Cache analog-trigger pull for gyro trigger-press dampening. Done
+            // before any continue so it tracks even DEVICE_DEFAULT triggers.
+            when (reading.source) {
+                InputSource.LEFT_TRIGGER -> leftTriggerPull = reading.x.coerceIn(0f, 1f)
+                InputSource.RIGHT_TRIGGER -> rightTriggerPull = reading.x.coerceIn(0f, 1f)
+                else -> Unit
+            }
             val resolved = findSourceModeFor(set, reading.source)
             val isNoneSource = reading.source in set.noneModeSources
             // Brick C.5: NONE-mode silencing for analog sources under
@@ -958,6 +1039,23 @@ class InputEvaluator @Inject constructor(
             val priors = analogLatched.entries
                 .filter { it.key.source == reading.source }
                 .associate { it.key.inputKey to it.value }
+            // Gyro enable-button gating + trigger-press dampening state — only
+            // meaningful for the GYRO source, so computed lazily there.
+            val gyroEnabled = if (reading.source == InputSource.GYRO) {
+                computeGyroEnabled(resolved.settingsJson)
+            } else {
+                true
+            }
+            val triggerPull = if (reading.source == InputSource.GYRO) {
+                com.mapo.service.input.modes.TriggerPullState(
+                    leftSoft = leftTriggerPull >= TRIGGER_SOFT_FRAC,
+                    leftFull = leftTriggerPull >= TRIGGER_FULL_FRAC,
+                    rightSoft = rightTriggerPull >= TRIGGER_SOFT_FRAC,
+                    rightFull = rightTriggerPull >= TRIGGER_FULL_FRAC,
+                )
+            } else {
+                com.mapo.service.input.modes.TriggerPullState.NONE
+            }
             val ctx = ModeContext(
                 source = reading.source,
                 settingsJson = resolved.settingsJson,
@@ -965,6 +1063,8 @@ class InputEvaluator @Inject constructor(
                 activeLayerIds = activeLayers.toList(),
                 gamepad = gamepadEmitter,
                 haptic = { intensity -> haptics.buzz(intensity) },
+                gyroEnabled = gyroEnabled,
+                triggerPull = triggerPull,
             )
             handler.evaluate(
                 reading,
@@ -1095,6 +1195,10 @@ class InputEvaluator @Inject constructor(
         // Record the physical state up-front so any CHORDED_PRESS activator triggered by
         // *this* event sees a consistent held set if it queries.
         physicallyHeld.add(address)
+
+        // Gyro TOGGLE enable-button: flip the latch on this press. Done regardless
+        // of whether the button also has bindings (additive, like mode shifts).
+        maybeToggleGyro(address)
 
         // Phase 7 Brick B.5: activate any mode shifts whose trigger == this address.
         // Done BEFORE binding evaluation so the trigger's own bindings (if any) still
@@ -1923,6 +2027,9 @@ class InputEvaluator @Inject constructor(
         // TriggerMode caches per-pull threshold-style state (hip-fire defer window,
         // exclusive lock); reset so it can't leak across a profile / action-set switch.
         com.mapo.service.input.modes.TriggerMode.resetState()
+        // GyroToMouseMode caches per-source dt / momentum / movement-threshold /
+        // rotational-haptic accumulators; reset at config boundaries.
+        com.mapo.service.input.modes.GyroToMouseMode.resetState()
         if (analogLatched.isEmpty()) return
         Log.d(TAG, "flushAnalog: releasing ${analogLatched.size} latched synthetic edge(s)")
         // Snapshot before mutation — dispatchSyntheticEdge writes back into
@@ -1973,6 +2080,11 @@ class InputEvaluator @Inject constructor(
         private const val TAG = "InputEvaluator"
         /** Distinct from [TAG] so motion logs can be filtered independently (`-s InputEvaluator.Motion`). */
         private const val TAG_MOTION = "InputEvaluator.Motion"
+
+        // Analog-trigger pull fractions for gyro trigger-press dampening soft/full
+        // detection. Match the Steam-ish trigger soft (~10%) / full-click (~95%) points.
+        private const val TRIGGER_SOFT_FRAC = 0.10f
+        private const val TRIGGER_FULL_FRAC = 0.95f
 
         // Analog-emulation PWM (digital dpad → analog stick): ~50% duty at ~25 Hz.
         // Tunable; true variable magnitude isn't possible from a single digital full-press.

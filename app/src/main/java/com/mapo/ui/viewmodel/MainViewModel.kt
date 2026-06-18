@@ -49,6 +49,7 @@ import com.mapo.service.input.toCompiled
 import com.mapo.service.keyboard.KeyboardController
 import com.mapo.service.overlay.element.OverlayLiveEditController
 import com.mapo.service.overlay.element.OverlayPresenter
+import com.mapo.service.overlay.element.ToolbarOverlayManager
 import com.mapo.ui.screen.keyboard.KeyboardHostState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.util.Log
@@ -102,6 +103,7 @@ class MainViewModel @Inject constructor(
     private val inputDispatcher: InputDispatcher,
     private val overlayPresenter: OverlayPresenter,
     private val overlayLiveEditController: OverlayLiveEditController,
+    private val toolbarOverlayManager: ToolbarOverlayManager,
     private val keyboardController: KeyboardController,
     steamCredentialStore: SteamCredentialStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -1400,6 +1402,15 @@ class MainViewModel @Inject constructor(
     /** Drawer affordance for toggling the rebuilt free-positioned button overlay. */
     fun toggleOverlay() {
         overlayPresenter.toggle()
+    }
+
+    /**
+     * Brick 1 dev affordance (OVERLAY_TOOLBAR_PLAN.md): mount/unmount the home chrome as a
+     * non-focusable system overlay to verify passthrough + game-input coexistence before the
+     * gamepad-navigation work. Removed at Brick 6.
+     */
+    fun toggleToolbarOverlayDev() {
+        toolbarOverlayManager.toggle()
     }
 
     /**

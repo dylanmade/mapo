@@ -2,16 +2,19 @@ package com.mapo.ui.screen.remap
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -26,8 +29,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material3.WideNavigationRail
-import androidx.compose.material3.WideNavigationRailDefaults
 import androidx.compose.material3.WideNavigationRailItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Rect
@@ -68,21 +70,24 @@ data class SectionedPaneItem(
 )
 
 /**
- * The Remap screen's left rail, built on the real M3-expressive [WideNavigationRail], held
- * permanently **collapsed** (the narrow icon + label-under configuration). First slot is the
- * action set / layer **scope button** (Layers icon + current scope name), then the section slots
- * (Buttons / D-Pad / Triggers / Joysticks / Gyro). The scope button
- * opens a fly-out (just past the rail's right edge) modeled on the Edit Overlay scope picker:
- * sets with layers indented, "Add layer" per set, "Add set" at the end; the current scope is
- * primary-tinted + checked (no pill, no kebab). Right pane = [detailPane].
+ * The Remap screen's left rail: a narrow `surfaceContainer` [Surface] holding a centered [Column] of
+ * [WideNavigationRailItem]s (collapsed icon-over-label look). First item is the action set / layer
+ * **scope button** (Layers icon + current scope name), then the section items (Buttons / D-Pad /
+ * Triggers / Joysticks / Gyro). The scope button opens a fly-out (just past the rail's right edge)
+ * modeled on the Edit Overlay scope picker: sets with layers indented, "Add layer" per set, "Add
+ * set" at the end; the current scope is primary-tinted + checked (no pill, no kebab). Right pane =
+ * [detailPane].
  *
- * `windowInsets` is zeroed (the Scaffold already insets). Rail container is `surfaceContainer`,
- * one step up from the `surface` detail pane, with a [VerticalDivider] right border. Gamepad:
- * focusing a section selects it; D-pad → enters the detail pane.
+ * We hand-roll the rail rather than use [androidx.compose.material3.WideNavigationRail] because that
+ * component forces a fixed 96dp collapsed container and places its items at x=0 — forcing it narrower
+ * knocked the items off-center. Instead a [Column] with centered alignment **wraps its content**, so
+ * the rail comes out a touch narrower than 96dp with reliably centered items. Tunables:
+ * [RailHorizontalPadding], [RailItemSpacing], [RailItemMinHeight]. Rail is one step up from the
+ * `surface` detail pane, with a [VerticalDivider] right border. Gamepad: focusing a section selects
+ * it; D-pad right → enters the detail pane.
  *
- * The scope fly-out is rendered **outside** the rail's content slot (at the root [Box], anchored to
- * the scope item's captured bounds): an open [DropdownMenu] placed inside the rail's slot becomes a
- * measured child of the rail's item layout and shoves the section items downward when it opens.
+ * The scope fly-out + the short separator rule are rendered **outside** the rail (at the root [Box],
+ * positioned off the scope item's captured bounds) so neither perturbs the rail's vertical layout.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -107,67 +112,86 @@ fun RemapRail(
     var menuOpen by remember { mutableStateOf(false) }
     var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var scopeBounds by remember { mutableStateOf<Rect?>(null) }
+    var railBounds by remember { mutableStateOf<Rect?>(null) }
     val density = LocalDensity.current
 
     Box(modifier = modifier.fillMaxSize().onGloballyPositioned { rootCoords = it }) {
         Row(Modifier.fillMaxSize()) {
-            // Default state = collapsed (narrow); no toggle, so it stays narrow.
-            WideNavigationRail(
-                // M3 role: surfaceContainer — one step up from the surface detail pane.
-                colors = WideNavigationRailDefaults.colors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-                // Scaffold already applies the status-bar inset; don't double it. Trim the top so the
-                // item stack sits a touch higher (the M3 default top space is 44dp).
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
-                // D-pad → from anywhere in the rail jumps into the detail pane's first row. A tight
-                // width also overrides the rail's default collapsed container width (96dp) — the
-                // layout honors a non-zero min-width constraint over its token.
+            // M3 role: surfaceContainer — one step up from the surface detail pane. No forced width:
+            // the rail wraps its (centered) item column, which comes out a touch narrower than the M3
+            // default 96dp container. Forcing a width here is what knocked the items off-center.
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                // D-pad → from anywhere in the rail jumps into the detail pane's first row.
                 modifier = Modifier
-                    .width(NarrowRailWidth)
+                    .fillMaxHeight()
+                    .onGloballyPositioned { c -> rootCoords?.let { railBounds = it.localBoundingBoxOf(c) } }
                     .onPreviewKeyEvent { event ->
                         if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionRight) {
                             detailRequester.tryRequestFocus(); true
                         } else false
                     },
             ) {
-                // First slot: the scope button. It captures its own bounds (relative to the root Box)
-                // so the detached fly-out below can anchor to it.
-                WideNavigationRailItem(
-                    selected = false,
-                    onClick = { menuOpen = true },
-                    icon = { Icon(Icons.Filled.Layers, contentDescription = null) },
-                    label = { NameableText(scopeLabel, maxWidth = ScopeLabelMaxWidth) },
-                    railExpanded = false,
+                Column(
                     modifier = Modifier
-                        .testTag("rail-scope")
-                        .onGloballyPositioned { c ->
-                            rootCoords?.let { scopeBounds = it.localBoundingBoxOf(c) }
-                        },
-                )
+                        .fillMaxHeight()
+                        .padding(top = 4.dp, bottom = 4.dp, start = RailHorizontalPadding, end = RailHorizontalPadding)
+                        .selectableGroup(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(RailItemSpacing),
+                ) {
+                    // Items are bare [WideNavigationRailItem]s sized to their content and centered by
+                    // the column. Each sits in a fixed-min-height [Box] (RailItemMinHeight) to restore
+                    // the per-item height the real rail enforced. Both that and RailHorizontalPadding /
+                    // RailItemSpacing are levers below.
 
-                sections.forEachIndexed { index, section ->
-                    val interaction = remember(section.id) { MutableInteractionSource() }
-                    val focused by interaction.collectIsFocusedAsState()
-                    // Focus == selection: arrowing onto a section previews it in the detail pane.
-                    LaunchedEffect(focused) {
-                        if (focused && section.enabled) onSectionSelected(section.id)
-                    }
-                    WideNavigationRailItem(
-                        selected = section.id == selectedSectionId,
-                        onClick = { onSectionSelected(section.id) },
-                        icon = { Icon(section.icon ?: Icons.Filled.Circle, contentDescription = null) },
-                        label = { Text(section.label) },
-                        railExpanded = false,
-                        enabled = section.enabled,
-                        interactionSource = interaction,
-                        // A touch of extra breathing room above the first section, setting it (and the
-                        // scope divider above) apart from the scope button.
+                    // First item: the scope button. The wrapping Box captures the row bounds (relative
+                    // to the root Box) so the detached fly-out + separator can anchor off it.
+                    Box(
                         modifier = Modifier
-                            .testTag("section-rail-item:${section.id}")
-                            .then(if (index == 0) Modifier.padding(top = FirstSectionTopGap) else Modifier),
-                    )
+                            .heightIn(min = RailItemMinHeight)
+                            .onGloballyPositioned { c ->
+                                rootCoords?.let { scopeBounds = it.localBoundingBoxOf(c) }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        WideNavigationRailItem(
+                            selected = false,
+                            onClick = { menuOpen = true },
+                            icon = { Icon(Icons.Filled.Layers, contentDescription = null) },
+                            label = { NameableText(scopeLabel, maxWidth = ScopeLabelMaxWidth) },
+                            railExpanded = false,
+                            modifier = Modifier.testTag("rail-scope"),
+                        )
+                    }
+
+                    sections.forEachIndexed { index, section ->
+                        val interaction = remember(section.id) { MutableInteractionSource() }
+                        val focused by interaction.collectIsFocusedAsState()
+                        // Focus == selection: arrowing onto a section previews it in the detail pane.
+                        LaunchedEffect(focused) {
+                            if (focused && section.enabled) onSectionSelected(section.id)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .heightIn(min = RailItemMinHeight)
+                                // Extra breathing room above the first section, setting it (and the
+                                // scope divider above) apart from the scope button.
+                                .then(if (index == 0) Modifier.padding(top = FirstSectionTopGap) else Modifier),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            WideNavigationRailItem(
+                                selected = section.id == selectedSectionId,
+                                onClick = { onSectionSelected(section.id) },
+                                icon = { Icon(section.icon ?: Icons.Filled.Circle, contentDescription = null) },
+                                label = { Text(section.label) },
+                                railExpanded = false,
+                                enabled = section.enabled,
+                                interactionSource = interaction,
+                                modifier = Modifier.testTag("section-rail-item:${section.id}"),
+                            )
+                        }
+                    }
                 }
             }
 
@@ -183,22 +207,26 @@ fun RemapRail(
             }
         }
 
-        // Detached scope fly-out: a zero-content anchor placed exactly over the scope item, with the
-        // menu hanging off its right edge. Living at the root Box keeps it out of the rail's vertical
-        // item layout, so opening it no longer pushes the section items down.
-        scopeBounds?.let { bounds ->
+        // Detached scope fly-out: a zero-content anchor spanning the rail width at the scope item's
+        // row, with the menu hanging off the rail's right edge. Living at the root Box keeps it out
+        // of the rail's vertical item layout, so opening it no longer pushes the section items down.
+        // Anchored off the rail's captured bounds (the rail wraps its content, so its width varies).
+        val bounds = scopeBounds
+        val rail = railBounds
+        if (bounds != null && rail != null) {
             Box(
                 Modifier
-                    .absoluteOffset { IntOffset(bounds.left.roundToInt(), bounds.top.roundToInt()) }
+                    .absoluteOffset { IntOffset(rail.left.roundToInt(), bounds.top.roundToInt()) }
                     .size(
-                        width = with(density) { bounds.width.toDp() },
+                        width = with(density) { rail.width.toDp() },
                         height = with(density) { bounds.height.toDp() },
                     ),
             ) {
                 ScopeFlyout(
                     expanded = menuOpen,
                     onDismiss = { menuOpen = false },
-                    anchor = bounds,
+                    // anchor.width drives the menu's right offset; height aligns it to the row top.
+                    anchor = Rect(0f, 0f, rail.width, bounds.height),
                     density = density,
                     config = config,
                     viewingSetId = viewingSetId,
@@ -211,12 +239,12 @@ fun RemapRail(
             }
 
             // A short rule hung in the gap beneath the scope item — drawn here at the root Box so it
-            // adds no layout height of its own (a divider inside the rail's slot would count as an
-            // extra spaced item). Sets the scope button apart from the traditional section items.
+            // adds no layout height of its own. Centered on the rail. Sets the scope button apart
+            // from the traditional section items.
             HorizontalDivider(
                 modifier = Modifier
                     .absoluteOffset {
-                        val x = bounds.left + (bounds.width - ScopeDividerWidthPx(density)) / 2f
+                        val x = rail.left + (rail.width - ScopeDividerWidthPx(density)) / 2f
                         val y = bounds.bottom + ScopeDividerGapPx(density)
                         IntOffset(x.roundToInt(), y.roundToInt())
                     }
@@ -226,8 +254,14 @@ fun RemapRail(
     }
 }
 
-/** Collapsed rail width — a touch narrower than the M3 default 96dp container. */
-private val NarrowRailWidth = 84.dp
+/** Horizontal padding on each side of the rail item column (lever) — sets how snug the rail is. */
+private val RailHorizontalPadding = 8.dp
+
+/** Vertical spacing between rail items (lever). Matches the M3 collapsed rail's 4dp item spacing. */
+private val RailItemSpacing = 4.dp
+
+/** Per-item min height (lever) — restores the height the real rail enforced (M3 token = 64dp). */
+private val RailItemMinHeight = 64.dp
 
 /** Max width for the scope (action set / layer) label — the rail container is only ~84dp wide. */
 private val ScopeLabelMaxWidth = 76.dp

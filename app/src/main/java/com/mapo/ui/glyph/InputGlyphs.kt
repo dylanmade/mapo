@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.InputSource
 
@@ -103,29 +104,40 @@ object InputGlyphs {
         else -> null
     }
 
-    /** Glyph size used in headers and sub-input rows. */
-    private val GlyphSize = 22.dp
+    /** Default glyph size used in headers and sub-input rows. */
+    val GlyphSize = 22.dp
 
     /**
      * Leading glyph for a bindable sub-input row. Face buttons render as a circled letter badge
      * (Xbox family); d-pad / trigger / click etc. render a Material icon; anything else a sized
-     * spacer so labels stay aligned.
+     * spacer so labels stay aligned. [size] lets callers scale it down for inline contexts (e.g.
+     * a menu-item label).
      */
     @Composable
-    fun SubInputGlyph(source: InputSource, subInputKey: String, modifier: Modifier = Modifier) {
+    fun SubInputGlyph(
+        source: InputSource,
+        subInputKey: String,
+        modifier: Modifier = Modifier,
+        size: androidx.compose.ui.unit.Dp = GlyphSize,
+    ) {
         val tint = LocalContentColor.current
         val letter = faceButtonLetter(source, subInputKey)
         when {
             letter != null -> Box(
-                modifier = modifier.size(GlyphSize).border(1.5.dp, tint, CircleShape),
+                modifier = modifier.size(size).border((size.value / 14.667f).dp, tint, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(letter, style = MaterialTheme.typography.labelSmall, color = tint)
+                Text(
+                    letter,
+                    fontSize = (size.value * 0.5f).sp,
+                    lineHeight = (size.value * 0.5f).sp,
+                    color = tint,
+                )
             }
             else -> {
                 val icon = subInputIcon(subInputKey)
-                if (icon != null) Icon(icon, contentDescription = null, modifier = modifier.size(GlyphSize), tint = tint)
-                else Spacer(modifier.size(GlyphSize))
+                if (icon != null) Icon(icon, contentDescription = null, modifier = modifier.size(size), tint = tint)
+                else Spacer(modifier.size(size))
             }
         }
     }

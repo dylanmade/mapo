@@ -275,9 +275,19 @@ not just a static ring). Sentence-case all strings; M3 surface roles per
   the PROMPT path) so Compose's native key-activation fires. Movement/highlight = Compose focus + M3
   focus indication. The Bricks 3–4 service cursor + `InputDispatcher` target/selection/activate/back
   machinery are now **vestigial** (cleanup later). Highlight prominence + motion = polish (Brick 5c).
-- **Brick 5b — QS tile reveal** (pending).
-- **Brick 5c — trigger via activator flow + permission/health surfacing + highlight motion polish**
-  (pending). Resolves the remaining MVP artifacts (Select-tap on entry; menu-popup focus).
+- **Brick 5b — QS tile reveal — ✅ LANDED (awaiting device verify).** `ToolbarTileService`
+  (`@AndroidEntryPoint` `TileService`) toggles the toolbar via `ToolbarOverlayManager.toggle()`
+  (tile-shown = persistent, `summonedByNav` false); reflects `isShowing()` as active/inactive; if
+  overlay perm is missing it `startActivityAndCollapse`-launches the app so its permission flow can
+  prompt. Manifest service + `ic_toolbar_tile` vector + `toolbar_tile_label`.
+- **Brick 5c (highlight polish) — ✅ LANDED (awaiting device verify).** Replaced M3's subtle default
+  focus indicator with `Modifier.toolbarFocusRing` — a constant-footprint (3 dp gap reserved, no
+  reflow), animated primary ring driven by `focusGroup()` + `onFocusChanged { hasFocus }`. Split
+  button's leading made non-focusable (`focusProperties { canFocus = false }`) so gamepad focus is a
+  clean 3-stop walk (switch → menu → options); focused menu rows get a fading `secondaryContainer`
+  background. Per `feedback_animate_interactions_by_default` / `feedback_handrolled_components_animations`.
+- **Brick 5c (remaining) — trigger via activator flow + permission/health surfacing** (pending).
+  Also clears the residual MVP artifacts (Select-tap on entry; menu-popup transient focus-steal).
 
 ### Brick 6 — Retire the in-activity home
 Remove the home route, backdrop tap-to-background, and dead drawer/menu code; the launcher

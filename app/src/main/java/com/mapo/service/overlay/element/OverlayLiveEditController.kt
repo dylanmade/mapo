@@ -19,6 +19,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -82,7 +84,6 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VerticalDistribute
@@ -95,12 +96,17 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material.ripple.RippleAlpha
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.material3.RippleConfiguration
 import androidx.compose.material3.ripple
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -138,6 +144,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.AndroidUiDispatcher
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -269,10 +276,10 @@ class OverlayLiveEditController @Inject constructor(
     // left) and inherited by deeper levels so they don't stack back over their parents. Reset to null
     // whenever a fresh root submenu opens.
     private var menuCascadeSide: MenuSide? = null
-    // Editor-local toggles surfaced under Options. Grid is ON by default; grid size displays the snap
-    // grid's division count but isn't editable yet.
+    // Editor-local toggles surfaced under Options. Grid is ON by default. The grid auto-sizes to the
+    // screen (square-ish cells that tile it exactly, derived from the aspect ratio — see [gridCellPx]);
+    // there's no user-adjustable division count.
     private val showGrid = MutableStateFlow(true)
-    private val gridDivisions = MutableStateFlow(OverlaySettings.GRID_DIVISIONS)
     // Align submenu's reference (Selection vs Canvas) — gates which align/space buttons are enabled.
     private val alignTo = MutableStateFlow(AlignTarget.Selection)
     // Core menu orientation: false = vertical panel, true = horizontal icon-only bar ("Rotate menu").
@@ -818,8 +825,8 @@ class OverlayLiveEditController @Inject constructor(
         var current by remember { mutableStateOf(Offset.Zero) }
         val primary = MaterialTheme.colorScheme.primary
         val gridOn by showGrid.collectAsStateWithLifecycle()
-        val divisions by gridDivisions.collectAsStateWithLifecycle()
-        val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.14f)
+        val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+        val density = LocalDensity.current.density
         Box(
             Modifier
                 .fillMaxSize()
@@ -836,15 +843,20 @@ class OverlayLiveEditController @Inject constructor(
                     )
                 }
                 .drawBehind {
-                    // Grid guide (behind buttons): SQUARE cells. [divisions] sets the columns across the
-                    // width; the cell size derives from that, and the rows are however many such squares
-                    // fit the height (so cells stay square on a non-square screen).
-                    if (gridOn && divisions > 1) {
-                        val cell = size.width / divisions
-                        var x = cell
-                        while (x < size.width - 0.5f) { drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), 1f); x += cell }
-                        var y = cell
-                        while (y < size.height - 0.5f) { drawLine(gridColor, Offset(0f, y), Offset(size.width, y), 1f); y += cell }
+                    // Grid guide (behind buttons): translucent PLUSES at every lattice corner. Cells
+                    // auto-size to tile the screen exactly (whole number of near-square cells per axis,
+                    // derived from the aspect ratio — see [gridCellPx]), so the lattice fits perfectly
+                    // and lines up with snapping on any screen.
+                    if (gridOn) {
+                        val (cellX, cellY) = gridCellPx(size.width, size.height, density)
+                        val cols = (size.width / cellX).roundToInt()
+                        val rows = (size.height / cellY).roundToInt()
+                        val arm = 4.dp.toPx()
+                        for (i in 0..cols) for (j in 0..rows) {
+                            val px = i * cellX; val py = j * cellY
+                            drawLine(gridColor, Offset(px - arm, py), Offset(px + arm, py), 1f)
+                            drawLine(gridColor, Offset(px, py - arm), Offset(px, py + arm), 1f)
+                        }
                     }
                     val s = start ?: return@drawBehind
                     val left = minOf(s.x, current.x); val top = minOf(s.y, current.y)
@@ -1004,7 +1016,7 @@ class OverlayLiveEditController @Inject constructor(
         }
         val view = ComposeView(context).apply {
             attachOwner(owner)
-            setContent { MapoTheme { PositionerContent(onTouch) } }
+            setContent { MapoTheme { ProvideMenuRipple { PositionerContent(onTouch) } } }
         }
         owner.resumeTo()
         val size = displaySizePx()
@@ -1231,7 +1243,7 @@ class OverlayLiveEditController @Inject constructor(
         }
         val view = ComposeView(context).apply {
             attachOwner(owner)
-            setContent { MapoTheme { ToolbarContent(onTouch = onTouch) } }
+            setContent { MapoTheme { ProvideMenuRipple { ToolbarContent(onTouch = onTouch) } } }
         }
         owner.resumeTo()
         return view to owner
@@ -1892,15 +1904,23 @@ class OverlayLiveEditController @Inject constructor(
      * levels inherit that side so they open into the same open space instead of over their parents.
      */
     private fun placeMenuX(parentLeft: Int, parentRight: Int, width: Int, screenW: Int): Int {
-        val side = menuCascadeSide ?: run {
-            val chosen = when {
-                parentRight + width <= screenW -> MenuSide.RIGHT
-                parentLeft - width >= 0 -> MenuSide.LEFT
-                else -> MenuSide.RIGHT
-            }
-            menuCascadeSide = chosen
-            chosen
+        val rightFits = parentRight + width <= screenW
+        val leftFits = parentLeft - width >= 0
+        // Honor the cascade's preferred side IF it fits; otherwise flip FULLY to the other side (never
+        // clamp on top of the parent). The first level records the side; deeper levels inherit it.
+        val pref = menuCascadeSide
+        val side = when {
+            pref == MenuSide.RIGHT && rightFits -> MenuSide.RIGHT
+            pref == MenuSide.LEFT && leftFits -> MenuSide.LEFT
+            pref == MenuSide.RIGHT -> if (leftFits) MenuSide.LEFT else MenuSide.RIGHT
+            pref == MenuSide.LEFT -> if (rightFits) MenuSide.RIGHT else MenuSide.LEFT
+            rightFits -> MenuSide.RIGHT
+            leftFits -> MenuSide.LEFT
+            else -> MenuSide.RIGHT
         }
+        if (menuCascadeSide == null) menuCascadeSide = side
+        // Flush against the parent's near edge on the chosen side. Only clamp if even the chosen side
+        // overflows the screen (neither side had room) — the unavoidable last-resort overlap.
         val x = if (side == MenuSide.RIGHT) parentRight else parentLeft - width
         return x.coerceIn(0, maxOf(0, screenW - width))
     }
@@ -1944,7 +1964,7 @@ class OverlayLiveEditController @Inject constructor(
         val owner = OverlayLifecycleOwner()
         val composeView = ComposeView(context).apply {
             defaultFocusHighlightEnabled = false
-            setContent { MapoTheme { CascadeMenuLevel(depth, builder) } }
+            setContent { MapoTheme { ProvideMenuRipple { CascadeMenuLevel(depth, builder) } } }
         }
         // Host catches ACTION_OUTSIDE; only the TOP-most open fly-out acts on it (others get it too).
         // ViewTree owners live on the host so the child ComposeView resolves them up the tree.
@@ -1979,14 +1999,22 @@ class OverlayLiveEditController @Inject constructor(
             val unspec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
             view.measure(unspec, unspec)
             val size = displaySizePx()
+            // The window includes a transparent MENU_SHADOW_MARGIN inset on every side (room for the
+            // shadow); place by the VISIBLE surface size, then offset the window by -margin so the
+            // visible edges land where intended (anchored flush to the parent).
+            val margin = (MENU_SHADOW_MARGIN * context.resources.displayMetrics.density).roundToInt()
+            val visW = view.measuredWidth - 2 * margin
+            val visH = view.measuredHeight - 2 * margin
             // growUp: [anchorTop] is the menu's TOP edge and the fly-out opens upward, so its BOTTOM
             // sits at anchorTop (used by the horizontal menu when it's in the screen's bottom half).
-            val baseY = if (growUp) anchorTop - view.measuredHeight else anchorTop
-            params.x = when {
-                sideParent != null -> placeMenuX(sideParent.first, sideParent.second, view.measuredWidth, size.x)
-                else -> (fixedLeft ?: 0).coerceIn(0, maxOf(0, size.x - view.measuredWidth))
+            val baseVisTop = if (growUp) anchorTop - visH else anchorTop
+            val visLeft = when {
+                sideParent != null -> placeMenuX(sideParent.first, sideParent.second, visW, size.x)
+                else -> (fixedLeft ?: 0).coerceIn(0, maxOf(0, size.x - visW))
             }
-            params.y = baseY.coerceIn(0, maxOf(0, size.y - view.measuredHeight))
+            val visTop = baseVisTop.coerceIn(0, maxOf(0, size.y - visH))
+            params.x = visLeft - margin
+            params.y = visTop - margin
             params.alpha = 1f
             runCatching { windowManager.updateViewLayout(view, params) }
         }
@@ -2002,20 +2030,51 @@ class OverlayLiveEditController @Inject constructor(
 
     private fun dismissSubmenus() = truncateMenusTo(0)
 
+    /**
+     * Make M3 ripples in the overlay menus / Positioner clearly visible: a primary-tinted ripple with
+     * a stronger-than-default pressed alpha (the stock onSurface ripple over the menu surface reads too
+     * faint). Wraps the toolbar, the Positioner, and each fly-out so all tap feedback is consistent.
+     */
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun ProvideMenuRipple(content: @Composable () -> Unit) {
+        val cfg = RippleConfiguration(
+            color = MaterialTheme.colorScheme.primary,
+            rippleAlpha = RippleAlpha(draggedAlpha = 0.20f, focusedAlpha = 0.26f, hoveredAlpha = 0.16f, pressedAlpha = 0.32f),
+        )
+        CompositionLocalProvider(LocalRippleConfiguration provides cfg, content = content)
+    }
+
     @Composable
     private fun CascadeMenuLevel(depth: Int, builder: @Composable () -> List<MenuEntry>) {
-        // Content fade-in (the window is positioned-while-hidden then revealed; no window animation).
+        // M3-expressive enter: a quick scale-up + fade (the window is positioned-while-hidden then
+        // revealed; this Compose animation IS the open motion). Spring = snappy, no bounce.
         val appear = remember { Animatable(0f) }
-        LaunchedEffect(Unit) { appear.animateTo(1f, tween(110)) }
-        // surfaceContainerHighest — menu container (canonical M3 menu surface). No shadow margin here
-        // (submenus anchor flush to the core menu; their own margin would re-open the gap).
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            shape = MaterialTheme.shapes.medium,
-            tonalElevation = 6.dp,
-            modifier = Modifier.graphicsLayer { alpha = appear.value },
-        ) {
-            MenuList(depth = depth, builder = builder, modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT_DP.dp))
+        LaunchedEffect(Unit) {
+            appear.animateTo(1f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium))
+        }
+        // The window carries a transparent MENU_SHADOW_MARGIN inset so the soft drop shadow (same as the
+        // core menu's) has room; pushMenuLevel offsets the window by -margin so the visible surface still
+        // sits flush against its parent. surfaceContainerHighest = canonical M3 menu surface.
+        Box(Modifier.padding(MENU_SHADOW_MARGIN.dp)) {
+            Box(
+                Modifier
+                    .menuDropShadow(12.dp)
+                    .graphicsLayer {
+                        alpha = appear.value
+                        val s = 0.9f + 0.1f * appear.value
+                        scaleX = s; scaleY = s
+                        transformOrigin = TransformOrigin(0f, 0f)
+                    },
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shape = MaterialTheme.shapes.medium,
+                    tonalElevation = 6.dp,
+                ) {
+                    MenuList(depth = depth, builder = builder, modifier = Modifier.heightIn(max = MENU_MAX_HEIGHT_DP.dp))
+                }
+            }
         }
     }
 
@@ -2389,12 +2448,10 @@ class OverlayLiveEditController @Inject constructor(
     private fun OptionsEntries(): List<MenuEntry> {
         val snap by overlaySettings.snapEnabled.collectAsStateWithLifecycle()
         val grid by showGrid.collectAsStateWithLifecycle()
-        val divisions by gridDivisions.collectAsStateWithLifecycle()
         val positionerShown by positionerOpen.collectAsStateWithLifecycle()
         return listOf(
             MenuEntry.Item("Snapping", leadingIcon = Icons.Default.GridOn, trailing = MenuTrailing.Check(snap) { overlaySettings.setSnapEnabled(it) }),
             MenuEntry.Item("Show grid", leadingIcon = Icons.Default.Grid4x4, trailing = MenuTrailing.Check(grid) { showGrid.value = it }),
-            MenuEntry.Item("Grid size", leadingIcon = Icons.Default.Straighten, trailing = MenuTrailing.Value(divisions.toString())),
             MenuEntry.Divider,
             MenuEntry.Item(
                 "Positioner",
@@ -2923,6 +2980,19 @@ class OverlayLiveEditController @Inject constructor(
     // ── snapping ────────────────────────────────────────────────────────────────
 
     /**
+     * Cell size (px) of the editor grid for a [w]×[h] screen: the count per axis is chosen so cells
+     * are as close to square as possible AND tile the screen exactly (whole cells, no partial row at
+     * the edge), derived from the aspect ratio off a [GRID_TARGET_CELL_DP] target. Both the rendered
+     * guide and snapping read this, so they always coincide on any screen.
+     */
+    private fun gridCellPx(w: Float, h: Float, density: Float): Pair<Float, Float> {
+        val target = GRID_TARGET_CELL_DP * density
+        val cols = maxOf(1, (w / target).roundToInt())
+        val rows = maxOf(1, (h / target).roundToInt())
+        return (w / cols) to (h / rows)
+    }
+
+    /**
      * Snap the dragged element's top-left to the nearest grid line or sibling edge/center
      * within [snapThresholdPx], so groups line up cleanly. Per axis it considers: the grid,
      * sibling near/far edges (including adjacent stacking), and sibling centers. [exclude] holds
@@ -2930,10 +3000,8 @@ class OverlayLiveEditController @Inject constructor(
      */
     private fun snapPosition(x: Int, y: Int, w: Int, h: Int, size: Point, exclude: Set<Long>): Point {
         val others = overlayEditor.elements.value.filter { it.id !in exclude }
-        // SQUARE grid (matches the rendered guide): one cell size derived from the width, used on both
-        // axes — so snapping lines up with the visible square grid rather than a stretched one.
-        val gridX = size.x.toFloat() / gridDivisions.value
-        val gridY = gridX
+        // Snap to the SAME lattice the guide draws (whole near-square cells that tile the screen).
+        val (gridX, gridY) = gridCellPx(size.x.toFloat(), size.y.toFloat(), context.resources.displayMetrics.density)
 
         val xCandidates = mutableListOf(((x / gridX).roundToInt() * gridX).roundToInt())
         val yCandidates = mutableListOf(((y / gridY).roundToInt() * gridY).roundToInt())
@@ -3042,7 +3110,9 @@ class OverlayLiveEditController @Inject constructor(
         private const val HANDLE_DOT_DP = 14
         // Editor menu sizing: narrow fixed width, capped height (scrolls past it).
         private const val MENU_WIDTH_DP = 156
-        private const val MENU_MAX_HEIGHT_DP = 360
+        private const val MENU_MAX_HEIGHT_DP = 460
+        // Target editor-grid cell size; the actual cell rounds to tile the screen exactly (see [gridCellPx]).
+        private const val GRID_TARGET_CELL_DP = 56
         // Transparent inset around the menu Surface inside its window, giving the drop shadow room.
         private const val MENU_SHADOW_MARGIN = 10
         // Rotate animation: ~half collapsing the shrinking axis (ease-in), ~half growing the other (ease-out).

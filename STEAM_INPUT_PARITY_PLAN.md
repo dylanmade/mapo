@@ -1003,7 +1003,16 @@ Shared infrastructure that every later subphase rides on.
 
 #### Parser / translator
 
-- **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfParser.kt` — Kotlin VDF parser. Honor duplicate-key semantics (collect into lists, not maps) — many `"group"` blocks, multiple `"preset"` blocks at the same level are intentional and a naive JSON-style parser will silently lose data.
+> **Progress — VDF reader landed (2026-06-22).** The parser half is done and tested. New files under `app/src/main/java/com/mapo/data/io/vdf/`:
+> - `VdfValue.kt` — node model (`Str` leaf / `Obj` block). `Obj` is an **ordered, duplicate-tolerant list** of entries with `all()`/`objects()` (list) + `first()`/`string()`/`obj()` (first-wins) + `toStringMap()`. Case-insensitive key lookup; original casing preserved for export.
+> - `VdfTokenStream.kt` — KV1 tokenizer: quoted (with `\n \t \r \" \\` escapes) + unquoted strings, `//` line comments, `[$COND]` tags skipped. `VdfParseException` on malformed input.
+> - `VdfParser.kt` — recursive-descent, one-token lookahead → `VdfValue.Obj`.
+> - `VdfControllerConfig.kt` — **structural reader** (the no-schema-decisions half of the translator): lifts the tree into typed records `VdfActionSet` / `VdfActionLayer` / `VdfGroup` / `VdfGroupInput` / `VdfActivator` / `VdfBinding` (CSV `command,label,icon` + verb/args split) / `VdfPreset` / `VdfSourceBinding` (parses `"<src> active modeshift"`). `isLegacyRawBindings` flags `legacy_set "0"`. VDF tokens kept verbatim (`mode="joystick_move"`, `type="Soft_Press"`) — enum mapping is deferred to `VdfImporter`.
+> - Tests: `VdfParserTest` (duplicate-key preservation, escapes, comments, conditionals, error cases) + `VdfControllerConfigTest` (structural read of a GW-modeled config). Green in isolation. Validated ad-hoc against the real 1890-line Guild Wars `controller_neptune` config: 1 set / 2 layers / 46 groups / 3 presets / 24 langs / 61 bindings, all parse.
+>
+> **Still TODO in this brick — `VdfImporter.kt` (entity translation).** Map the structural records onto Mapo Room entities: mode-token → `BindingMode`, activator-token → `ActivatorType` (incl. the `doubetap_max_duration` typo + `Soft_Press` → soft-pull sub-input unification), binding-string verb → `BindingOutput`, `controller_action add_layer …` → layer-add command, group_source_bindings → `PresetBinding` (state qualifier + mode-shift → `SourceModeShift`, NOT a binding), controller-type mapping + `withFreshChildIds()` on every created entity, localization `#token` resolution. Then the `ImportSummary` for the confirmation dialog.
+
+- **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfParser.kt` — Kotlin VDF parser. Honor duplicate-key semantics (collect into lists, not maps) — many `"group"` blocks, multiple `"preset"` blocks at the same level are intentional and a naive JSON-style parser will silently lose data. ✅ done
 - **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfImporter.kt` — schema translator:
   - `controller_mappings.actions` → `ActionSet` records
   - `controller_mappings.action_layers` → `ActionLayer` records (`parent_set_name` resolved)

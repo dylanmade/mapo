@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -64,6 +66,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -981,6 +984,25 @@ private fun DashedAddButton(text: String, onClick: () -> Unit, modifier: Modifie
     }
 }
 
+/**
+ * The shared kebab (vertical "more" button) used by both the input rows and the mode-card header —
+ * a slim compact icon button with the 48dp min-interactive reservation suppressed so it packs
+ * tightly against its neighbors. (Whole rows/cards remain comfortable tap targets.)
+ */
+@Composable
+private fun RowKebab(onClick: () -> Unit, contentDescription: String = "Options") {
+    CompositionLocalProvider(
+        androidx.compose.material3.LocalMinimumInteractiveComponentSize provides androidx.compose.ui.unit.Dp.Unspecified,
+    ) {
+        CompactIconButton(
+            icon = Icons.Filled.MoreVert,
+            contentDescription = contentDescription,
+            onClick = onClick,
+            size = CompactButtonSize.Slim,
+        )
+    }
+}
+
 /** A `DropdownMenuItem` with a leading icon and two-line title + helper text. */
 @Composable
 private fun RichMenuItem(
@@ -1035,7 +1057,9 @@ private fun InputRow(
     var editingLabel by remember { mutableStateOf(false) }
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        // Left padding bumped (start=16) so glyphs aren't crammed against the card edge. No vertical
+        // padding — the card body's spacedBy controls inter-row spacing uniformly.
+        modifier = Modifier.fillMaxWidth().heightIn(min = InputRowMinHeight).padding(start = 16.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -1077,12 +1101,11 @@ private fun InputRow(
                 }
             }
         }
-        // Options — plain compact icon-button kebab (no tonal container).
+        // Options kebab — same compact slim icon button as the card header's, with the 48dp
+        // min-interactive reservation suppressed so its gap to the press button matches the
+        // designation↔press gap (uniform 8dp).
         Box {
-            CompactIconButton(
-                icon = Icons.Filled.MoreVert, contentDescription = "Input options",
-                onClick = { kebab = true }, size = CompactButtonSize.Slim,
-            )
+            RowKebab(onClick = { kebab = true })
             DropdownMenu(expanded = kebab, onDismissRequest = { kebab = false }) {
                 RichMenuItem(
                     title = "Configure input",
@@ -1096,19 +1119,30 @@ private fun InputRow(
                     icon = Icons.Filled.Edit,
                     onClick = { kebab = false; editingLabel = true },
                 )
-                RichMenuItem(
-                    title = "Add another $subInputLabel input",
-                    helper = "Bind another command to this input.",
-                    icon = Icons.Filled.Add,
+                // "Add another <glyph> input" — the sub-input glyph stands in for the input name.
+                DropdownMenuItem(
+                    leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    text = {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Add another ", style = MaterialTheme.typography.bodyLarge)
+                                com.mapo.ui.glyph.InputGlyphs.SubInputGlyph(source, subInputKey, size = 16.dp)
+                                Text(" input", style = MaterialTheme.typography.bodyLarge)
+                            }
+                            Text("Bind another command to this input.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
                     onClick = { kebab = false; onAddAnother() },
                 )
-                RichMenuItem(
-                    title = "Delete input",
-                    helper = if (canDelete) "Remove this input row." else "Can't remove the last input.",
-                    icon = Icons.Filled.Delete,
-                    enabled = canDelete,
-                    onClick = { kebab = false; onDelete(binding.id) },
-                )
+                // Delete only when removable — no dead "can't remove the last input" entry.
+                if (canDelete) {
+                    RichMenuItem(
+                        title = "Delete input",
+                        helper = "Remove this input row.",
+                        icon = Icons.Filled.Delete,
+                        onClick = { kebab = false; onDelete(binding.id) },
+                    )
+                }
             }
         }
     }
@@ -1168,6 +1202,10 @@ private fun SubInputGroup(
         ?.flatMap { ag -> ag.bindings.map { b -> b to ag.activator.type } }
         .orEmpty()
     val canDelete = rows.size > 1
+    // Emit rows directly into the parent card body (no wrapping Column) so the body's single
+    // `spacedBy` gives a uniform vertical gap everywhere — header→first row, row→row, last
+    // row→card bottom. A divider after the group (unless it's the card's last) is the only extra
+    // separation between different physical inputs.
     rows.forEach { (binding, type) ->
         InputRow(
             source = source,
@@ -1185,23 +1223,29 @@ private fun SubInputGroup(
             onAddAnother = { groupInput?.let { onAddInputRow(it.input.id, ActivatorType.FULL_PRESS) } },
         )
     }
-    // One divider per physical input, between groups only (not after the card's last group). Inset
-    // to the card's content — same treatment as the "Other buttons" card.
     if (!isLastGroup && rows.isNotEmpty()) {
         HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
     }
 }
 
-/** Banner image for an input mode header — a clipped, cropped vector (placeholder art for now). */
+/** Uniform vertical gap inside a card: body edge padding AND inter-row spacing both use it. */
+private val CardBodyGap = 6.dp
+/** Input-row height; the mode-card header matches it so the header reads as a peer row. */
+private val InputRowMinHeight = 48.dp
+
+/**
+ * Banner image for an input mode header — a cropped vector that fills the header's top-left corner
+ * (placeholder art for now). No clip: the [androidx.compose.material3.OutlinedCard] clips it to the
+ * card's rounded top-start corner, and it bleeds flush to the card outline on the left/top and down
+ * to the header divider.
+ */
 @Composable
-private fun ModeBanner(mode: BindingMode) {
+private fun ModeBanner(mode: BindingMode, modifier: Modifier = Modifier) {
     androidx.compose.foundation.Image(
         painter = androidx.compose.ui.res.painterResource(com.mapo.R.drawable.mode_banner_placeholder),
         contentDescription = null,
         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-        modifier = Modifier
-            .size(width = 76.dp, height = 36.dp)
-            .clip(MaterialTheme.shapes.small),
+        modifier = modifier.fillMaxHeight().width(72.dp),
     )
 }
 
@@ -1248,26 +1292,29 @@ private fun ModeCard(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // ── Header row ──────────────────────────────────────────────────────
+            // No padding on the row: the banner bleeds to the card edges; the title + kebab take
+            // their own insets. Height is fixed so the banner fills it corner-to-divider.
             Box {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth().height(InputRowMinHeight),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     ModeBanner(mode)
                     Row(
                         modifier = Modifier
                             .weight(1f)
+                            .fillMaxHeight()
                             .then(if (firstRowFocusRequester != null) Modifier.focusRequester(firstRowFocusRequester) else Modifier)
-                            .clip(MaterialTheme.shapes.small)
                             .clickable(enabled = canChangeMode) { modeMenu = true }
-                            .padding(vertical = 4.dp),
+                            .padding(start = 16.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f, fill = false)) {
-                            if (isAdded) {
-                                Text("Added mode", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                            Text(
+                                if (isAdded) "Added input mode" else "Input mode",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                             Text(modeName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                         if (canChangeMode) {
@@ -1275,10 +1322,10 @@ private fun ModeCard(
                             Icon(Icons.Filled.ArrowDropDown, contentDescription = "Change input mode", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    Box {
-                        IconButton(onClick = { kebab = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "Mode options")
-                        }
+                    // end=12 matches the input rows' end padding so this kebab sits at the exact
+                    // same x as the per-input kebabs below.
+                    Box(modifier = Modifier.padding(end = 12.dp)) {
+                        RowKebab(onClick = { kebab = true }, contentDescription = "Mode options")
                         DropdownMenu(expanded = kebab, onDismissRequest = { kebab = false }) {
                             RichMenuItem(
                                 title = "Configure $modeName",
@@ -1335,7 +1382,13 @@ private fun ModeCard(
             }
 
             // ── Body: sub-input groups for this mode ────────────────────────────
-            Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp)) {
+            // Single uniform gap (CardBodyGap) as both edge padding and inter-row spacing — rows
+            // are emitted flat by SubInputGroup so every gap (header→first, row→row, last→bottom)
+            // is identical; only the between-input divider adds extra separation.
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = CardBodyGap),
+                verticalArrangement = Arrangement.spacedBy(CardBodyGap),
+            ) {
                 val subInputs = RemapSections.bindableSubInputsFor(source, mode)
                 subInputs.forEachIndexed { index, (key, label) ->
                     SubInputGroup(
@@ -1396,7 +1449,9 @@ private fun SourceModeBlock(
 ) {
     val baseGroup = viewingSet.presetFor(source)?.group ?: return
     val validModes = SourceModeCatalog.modesValidFor(source)
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // 12dp between the base card, added-mode cards, and the add button — matches the inter-card and
+    // card-to-chrome padding so the whole stack breathes consistently.
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ModeCard(
             source = source, groupGraph = baseGroup, config = config, validModes = validModes,
             isAdded = false, shift = null, firstRowFocusRequester = firstRowFocusRequester,
@@ -1416,21 +1471,23 @@ private fun SourceModeBlock(
             )
         }
         if (source in RemapSections.MODE_SHIFT_OWNERS) {
-            DashedAddButton(text = "Add additional input mode", onClick = { onAddModeShift(source) })
+            DashedAddButton(text = "Add input mode", onClick = { onAddModeShift(source) })
         }
     }
 }
 
 /**
- * The "Other buttons" Card (bumpers + Start/Select). No mode dropdown — each button has a passthrough
- * toggle ((Device default) ↔ intercept); when intercepting, its input rows + "Add additional input".
+ * The "Other buttons" Card (bumpers + Start/Select). Each is a single-button source rendered as an
+ * ordinary input row — no switch UI. Binding a command auto-promotes the source to SINGLE_BUTTON
+ * (digital remap, no Shizuku); leaving it unbound passes through to the system (the runtime treats
+ * an all-Unbound SINGLE_BUTTON source as passthrough). Mode promotion/demotion is handled in the
+ * repository on command change.
  */
 @Composable
 private fun OtherButtonsCard(
     sources: List<InputSource>,
     viewingSet: com.mapo.data.model.steam.ActionSetGraph,
     config: ControllerConfig?,
-    onSetBindingGroupMode: (Long, BindingMode) -> Unit,
     onEditCommand: (Long, BindingOutput, String) -> Unit,
     onAddInputRow: (Long, ActivatorType) -> Unit,
     onSetPressType: (Long, ActivatorType) -> Unit,
@@ -1440,43 +1497,26 @@ private fun OtherButtonsCard(
 ) {
     // OutlinedCard — outlined variant grouping the single-button "other" inputs.
     androidx.compose.material3.OutlinedCard {
-        Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = CardBodyGap),
+            verticalArrangement = Arrangement.spacedBy(CardBodyGap),
+        ) {
             sources.forEachIndexed { index, source ->
                 val groupGraph = viewingSet.presetFor(source)?.group ?: return@forEachIndexed
-                val group = groupGraph.group
-                val intercept = group.mode == BindingMode.SINGLE_BUTTON
-                if (index > 0) HorizontalDivider()
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    com.mapo.ui.glyph.InputGlyphs.SubInputGlyph(source, "click")
-                    Column(Modifier.weight(1f)) {
-                        Text(otherButtonName(source), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-                        Text(
-                            text = if (intercept) "Intercepted by Mapo" else "Passes through to the system",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = intercept,
-                        onCheckedChange = { on -> onSetBindingGroupMode(group.id, if (on) BindingMode.SINGLE_BUTTON else BindingMode.DEVICE_DEFAULT) },
-                    )
-                }
-                if (intercept) {
-                    SubInputGroup(
-                        source = source,
-                        subInputKey = "click",
-                        subInputLabel = otherButtonName(source),
-                        groupInput = groupGraph.inputByKey("click"),
-                        config = config,
-                        isLastGroup = true,
-                        onEditCommand = onEditCommand,
-                        onAddInputRow = onAddInputRow,
-                        onSetPressType = onSetPressType,
-                        onSetLabel = onSetLabel,
-                        onDelete = onDelete,
-                        onConfigure = onConfigure,
-                    )
-                }
+                SubInputGroup(
+                    source = source,
+                    subInputKey = "click",
+                    subInputLabel = otherButtonName(source),
+                    groupInput = groupGraph.inputByKey("click"),
+                    config = config,
+                    isLastGroup = index == sources.lastIndex,
+                    onEditCommand = onEditCommand,
+                    onAddInputRow = onAddInputRow,
+                    onSetPressType = onSetPressType,
+                    onSetLabel = onSetLabel,
+                    onDelete = onDelete,
+                    onConfigure = onConfigure,
+                )
             }
         }
     }
@@ -1539,7 +1579,6 @@ private fun BaseModeContent(
                 sources = otherButtons,
                 viewingSet = viewingSet,
                 config = config,
-                onSetBindingGroupMode = onSetBindingGroupMode,
                 onEditCommand = onEditCommand,
                 onAddInputRow = onAddInputRow,
                 onSetPressType = onSetPressType,

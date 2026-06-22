@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">mapo</string>
     <string name="accessibility_service_label">Mapo</string>
+    <string name="toolbar_tile_label">Mapo toolbar</string>
     <string name="accessibility_service_description">Injects keyboard and mouse input events for PC games running via FEX emulation on the secondary screen.</string>
 
     <string name="permissions_required_title">Permissions Required</string>

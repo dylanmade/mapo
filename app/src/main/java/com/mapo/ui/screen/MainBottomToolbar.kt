@@ -1,6 +1,9 @@
 package com.mapo.ui.screen
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.mapo.ui.component.NameableText
 import androidx.compose.foundation.layout.Arrangement
@@ -51,7 +54,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -193,30 +198,35 @@ fun MainBottomToolbar(
                     // ── Master enable switch (left) — first focus target ──
                     // Strip the 48dp min-interactive box (footprint = 32dp track, not 48) then scale
                     // up to the toolbar height (see switchScale). Mirrors CompactSwitch. The
-                    // focusRequester lets nav land here first; M3 shows the focus indicator natively.
-                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                        Switch(
-                            checked = mapoEnabled,
-                            onCheckedChange = onSetMapoEnabled,
-                            modifier = Modifier
-                                .focusRequester(firstFocus)
-                                .scaledLayout(switchScale),
-                            thumbContent = {
-                                Icon(
-                                    imageVector = if (mapoEnabled) Icons.Filled.Check else Icons.Filled.Close,
-                                    contentDescription = if (mapoEnabled) "Mapo features on" else "Mapo features off",
-                                    modifier = Modifier.size(SwitchDefaults.IconSize),
-                                )
-                            },
-                        )
+                    // focusRequester lets nav land here first; the wrapper draws the focus ring.
+                    Box(modifier = Modifier.toolbarFocusRing(navEnabled)) {
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                            Switch(
+                                checked = mapoEnabled,
+                                onCheckedChange = onSetMapoEnabled,
+                                modifier = Modifier
+                                    .focusRequester(firstFocus)
+                                    .scaledLayout(switchScale),
+                                thumbContent = {
+                                    Icon(
+                                        imageVector = if (mapoEnabled) Icons.Filled.Check else Icons.Filled.Close,
+                                        contentDescription = if (mapoEnabled) "Mapo features on" else "Mapo features off",
+                                        modifier = Modifier.size(SwitchDefaults.IconSize),
+                                    )
+                                },
+                            )
+                        }
                     }
 
                     // ── Split button: profile name + menu (center) ──
-                    Box {
+                    Box(modifier = Modifier.toolbarFocusRing(navEnabled)) {
                         SplitButtonLayout(
                             leadingButton = {
                                 SplitButtonDefaults.LeadingButton(
                                     onClick = onOpenProfile,
+                                    // Skipped by gamepad focus traversal: the menu (trailing) is the
+                                    // single gamepad stop and already contains "Profile options".
+                                    modifier = Modifier.focusProperties { canFocus = false },
                                     shapes = SplitButtonDefaults.leadingButtonShapesFor(mediumStyle),
                                     contentPadding = SplitButtonDefaults.leadingButtonContentPaddingFor(mediumStyle),
                                 ) {
@@ -251,7 +261,7 @@ fun MainBottomToolbar(
                     }
 
                     // ── Options button (right) → temporary "more" menu ──
-                    Box {
+                    Box(modifier = Modifier.toolbarFocusRing(navEnabled)) {
                         // Stock 40dp FilledTonalIconButton. Strip the 48dp min-interactive halo so its
                         // box equals its 40dp visual, keeping its spacing to the split button symmetric.
                         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
@@ -339,6 +349,25 @@ private fun UpwardMenu(
     }
 }
 
+/**
+ * A constant-footprint, animated focus ring for gamepad nav (Brick 5). A `focusGroup` + `hasFocus`
+ * wrapper so it lights whenever any control inside is focused (works regardless of whether the M3
+ * component exposes an interactionSource). The 3 dp gap is reserved always (no reflow when focus
+ * lands); only the primary-colored ring fades in. A no-op on the in-activity copy (`!navEnabled`).
+ */
+@Composable
+private fun Modifier.toolbarFocusRing(navEnabled: Boolean): Modifier {
+    if (!navEnabled) return this
+    var focused by remember { mutableStateOf(false) }
+    val ringAlpha by animateFloatAsState(if (focused) 1f else 0f, label = "toolbarFocusRing")
+    val color = MaterialTheme.colorScheme.primary
+    return this
+        .border(2.5.dp, color.copy(alpha = ringAlpha), CircleShape)
+        .padding(3.dp)
+        .onFocusChanged { focused = it.hasFocus }
+        .focusGroup()
+}
+
 /** A toolbar menu item modeled for both touch and gamepad nav (Brick 4). */
 private data class ToolbarMenuEntry(
     val id: String,
@@ -348,10 +377,14 @@ private data class ToolbarMenuEntry(
 )
 
 @Composable
-private fun MenuItem(label: String, icon: ImageVector, selected: Boolean = false, onClick: () -> Unit) {
+private fun MenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
+    // Gamepad focus highlight: secondaryContainer fades in behind the focused row (mirrors hover).
+    var focused by remember { mutableStateOf(false) }
+    val bgAlpha by animateFloatAsState(if (focused) 1f else 0f, label = "menuItemFocus")
     DropdownMenuItem(
-        // secondaryContainer = the gamepad-selection highlight (mirrors a hovered/focused row).
-        modifier = if (selected) Modifier.background(MaterialTheme.colorScheme.secondaryContainer) else Modifier,
+        modifier = Modifier
+            .onFocusChanged { focused = it.hasFocus }
+            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = bgAlpha)),
         text = { Text(label) },
         leadingIcon = { Icon(icon, contentDescription = null) },
         onClick = onClick,

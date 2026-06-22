@@ -1048,6 +1048,7 @@ class ControllerConfigRepository @Inject constructor(
         val (type, args) = output.toEntity()
         if (existing.outputType == type && existing.args == args) return
         bindingDao.update(existing.copy(outputType = type, args = args))
+        resolveGroupIdForBinding(bindingId)?.let { syncAuxButtonMode(it) }
         configDirtyTick.value = configDirtyTick.value + 1
     }
 
@@ -1078,7 +1079,9 @@ class ControllerConfigRepository @Inject constructor(
      * `primaryOutput` accessor and `addActivator` setup both assume.
      */
     suspend fun removeCommand(bindingId: Long) {
+        val groupId = resolveGroupIdForBinding(bindingId)
         bindingDao.deleteById(bindingId)
+        groupId?.let { syncAuxButtonMode(it) }
         configDirtyTick.value = configDirtyTick.value + 1
     }
 
@@ -1145,11 +1148,40 @@ class ControllerConfigRepository @Inject constructor(
     suspend fun deleteInputRow(bindingId: Long) {
         val binding = bindingDao.getById(bindingId) ?: return
         val activatorId = binding.activatorId
+        val groupId = resolveGroupIdForBinding(bindingId)
         bindingDao.deleteById(bindingId)
         if (bindingDao.getByActivators(listOf(activatorId)).isEmpty()) {
             activatorDao.deleteById(activatorId)
         }
+        groupId?.let { syncAuxButtonMode(it) }
         configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /** Resolve the owning binding_group id for a [bindingId] (binding → activator → group input). */
+    private suspend fun resolveGroupIdForBinding(bindingId: Long): Long? {
+        val binding = bindingDao.getById(bindingId) ?: return null
+        val activator = activatorDao.getById(binding.activatorId) ?: return null
+        return groupInputDao.getById(activator.groupInputId)?.bindingGroupId
+    }
+
+    /**
+     * Auto-manage the passthrough↔intercept mode for the single-button "other" sources (bumpers +
+     * Start/Select), which the UI renders as ordinary input rows with no mode control. A source with
+     * any bound command intercepts (`SINGLE_BUTTON`, digital remap — no Shizuku); a fully-unbound
+     * source passes through (`DEVICE_DEFAULT`). No-op for any other source or mode, so binding
+     * other inputs is untouched. Does not bump the dirty tick — the caller does.
+     */
+    private suspend fun syncAuxButtonMode(bindingGroupId: Long) {
+        val group = bindingGroupDao.getById(bindingGroupId) ?: return
+        if (group.mode != BindingMode.DEVICE_DEFAULT && group.mode != BindingMode.SINGLE_BUTTON) return
+        val source = findInputSourceForSetBindingGroup(bindingGroupId) ?: return
+        if (source !in AUX_BUTTON_SOURCES) return
+        val inputs = groupInputDao.getByGroups(listOf(bindingGroupId))
+        val activators = activatorDao.getByGroupInputs(inputs.map { it.id })
+        val bindings = bindingDao.getByActivators(activators.map { it.id })
+        val hasBound = bindings.any { it.outputType != BindingOutputType.UNBOUND }
+        val desired = if (hasBound) BindingMode.SINGLE_BUTTON else BindingMode.DEVICE_DEFAULT
+        if (group.mode != desired) bindingGroupDao.update(group.copy(mode = desired))
     }
 
     // ── Phase 7 Brick B.5: Source Mode Shifts ────────────────────────────────
@@ -1402,6 +1434,18 @@ class ControllerConfigRepository @Inject constructor(
          * [com.mapo.service.input.GyroLifecycleCoordinator] short-circuits at
          * the hardware-presence check, so the group is inert there.
          */
+        /**
+         * Single-button "other" sources whose intercept mode is auto-managed by [syncAuxButtonMode]
+         * (bound → SINGLE_BUTTON, unbound → DEVICE_DEFAULT) so the UI can show them as plain rows
+         * with no passthrough toggle.
+         */
+        private val AUX_BUTTON_SOURCES: Set<InputSource> = setOf(
+            InputSource.LEFT_BUMPER,
+            InputSource.RIGHT_BUMPER,
+            InputSource.SWITCH_START,
+            InputSource.SWITCH_SELECT,
+        )
+
         private val DEFAULT_INPUT_SOURCE_SEEDS: Map<InputSource, InputSourceSeed> = linkedMapOf(
             InputSource.BUTTON_DIAMOND to InputSourceSeed(
                 "face_buttons", BindingMode.BUTTON_PAD,

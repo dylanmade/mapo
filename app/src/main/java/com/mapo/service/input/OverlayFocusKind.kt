@@ -19,9 +19,15 @@ package com.mapo.service.input
  *    naturally — no service-side intervention needed today. Declared as a value
  *    rather than a future-only TODO so the dispatcher / service can adopt
  *    keyboard-specific routing later without changing the enum shape.
+ *  - [TOOLBAR] — the home toolbar overlay is in gamepad-navigation mode
+ *    (OVERLAY_TOOLBAR_PLAN.md). Handled identically to [PROMPT]: the toolbar window is
+ *    made focusable while navigating, so the platform's focus traversal drives the
+ *    stick / D-pad (which are MotionEvents the service can't see) and the service only
+ *    translates gamepad A → ENTER and B → BACK so Compose's native key activation fires.
  */
 enum class OverlayFocusKind {
     NONE,
     PROMPT,
     KEYBOARD,
+    TOOLBAR,
 }

@@ -42,6 +42,7 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @Inject lateinit var shizukuKeyInjector: ShizukuKeyInjector
     @Inject lateinit var shizukuMouseInjector: ShizukuMouseInjector
     @Inject lateinit var shizukuStylusInjector: ShizukuStylusInjector
+    @Inject lateinit var toolbarOverlayManager: com.mapo.service.overlay.element.ToolbarOverlayManager
 
     companion object {
         // Physical gamepad keycodes → DeviceButton enum
@@ -161,6 +162,13 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
      */
     @Volatile
     private var focusedAppDisplayId: Int = Display.DEFAULT_DISPLAY
+
+    /**
+     * Toolbar-nav chord state (OVERLAY_TOOLBAR_PLAN.md, Brick 3): tracks whether Select is
+     * currently held so a following A press can enter gamepad nav of the toolbar overlay.
+     * Brick-3 MVP; Brick 5 migrates the trigger to the configurable activator flow.
+     */
+    private var selectHeld = false
 
     private val inputEventSetDisplayIdMethod: java.lang.reflect.Method? by lazy {
         try {
@@ -500,10 +508,22 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
             dumpAllDisplays("onKeyEvent/keyCode=${event.keyCode}")
         }
 
-        if (dispatcher.overlayFocus.value == OverlayFocusKind.PROMPT) {
-            // Translate gamepad A/B into ENTER/BACK so DPAD-navigated overlay buttons
-            // can be activated. DPAD events pass through unchanged so Compose's focus
-            // traversal handles left/right/up/down naturally.
+        // Track Select (the chord modifier) FIRST — before the PROMPT/TOOLBAR branch below, which
+        // returns early while navigating. If we tracked it after, the Select-UP that arrives during
+        // nav would be swallowed and selectHeld would stay stuck true, so a bare A would re-trigger
+        // the chord after exiting nav (observed on-device 2026-06-19).
+        val downEdge = event.action == KeyEvent.ACTION_DOWN
+        if (event.keyCode == KeyEvent.KEYCODE_BUTTON_SELECT) {
+            selectHeld = downEdge
+        }
+
+        // PROMPT and the toolbar's gamepad-nav mode (TOOLBAR) are handled identically: the overlay
+        // window is focusable, so the platform's focus traversal drives the stick / D-pad (which are
+        // MotionEvents the service never sees), and we only translate gamepad A → ENTER and B → BACK
+        // so Compose's native key-activation fires on the focused element. Everything else passes to
+        // the focused overlay window unchanged. (OVERLAY_TOOLBAR_PLAN.md, Brick 5 — transient focus.)
+        val focusKind = dispatcher.overlayFocus.value
+        if (focusKind == OverlayFocusKind.PROMPT || focusKind == OverlayFocusKind.TOOLBAR) {
             val isDown = event.action == KeyEvent.ACTION_DOWN
             return when (event.keyCode) {
                 KeyEvent.KEYCODE_BUTTON_A -> {
@@ -517,6 +537,24 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
                 else -> false
             }
         }
+
+        // ── Toolbar nav ENTER trigger (OVERLAY_TOOLBAR_PLAN.md) ──
+        // Select held + A summons the toolbar (if needed) and enters gamepad-nav mode, which flips
+        // the overlay focusable + sets overlayFocus = TOOLBAR (handled above on subsequent keys).
+        // Placed BEFORE the remap-enabled gate so the toolbar is reachable even with remap off.
+        // Brick-5 MVP chord detected inline; migrates to the configurable activator flow later.
+        if (selectHeld && event.keyCode == KeyEvent.KEYCODE_BUTTON_A && downEdge && event.repeatCount == 0 &&
+            !dispatcher.toolbarNavActive.value
+        ) {
+            // Reveal the toolbar if it isn't up (showForNav returns false when overlay perm is
+            // missing → let A reach the game). Already-shown (dev/QS) toolbars enter nav in place.
+            if (toolbarOverlayManager.isShowing() || toolbarOverlayManager.showForNav()) {
+                Log.i(TAG, "onKeyEvent: Select+A → reveal/enter toolbar nav")
+                dispatcher.requestEnterToolbarNavWhenReady()
+                return true
+            }
+        }
+
         if (!dispatcher.remapEnabled.value) return false
 
         val address = KEYCODE_TO_INPUT_ADDRESS[event.keyCode] ?: return false

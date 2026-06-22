@@ -255,7 +255,7 @@ fun RemapRail(
 }
 
 /** Horizontal padding on each side of the rail item column (lever) — sets how snug the rail is. */
-private val RailHorizontalPadding = 8.dp
+private val RailHorizontalPadding = 4.dp
 
 /** Vertical spacing between rail items (lever). Matches the M3 collapsed rail's 4dp item spacing. */
 private val RailItemSpacing = 4.dp

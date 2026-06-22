@@ -53,6 +53,13 @@ class DirectionalSwipeModeTest {
         z = yaw,
     )
 
+    @org.junit.Before
+    fun resetSwipeState() {
+        // The mode is now stateful (smoothing + scroll momentum); clear the
+        // singleton so prior tests don't bleed in.
+        DirectionalSwipeMode.resetState()
+    }
+
     // ── Pitch axis (forward/back → up/down) ─────────────────────────────────
 
     @Test
@@ -150,9 +157,10 @@ class DirectionalSwipeModeTest {
     // ── Settings parse ──────────────────────────────────────────────────────
 
     @Test
-    fun customThreshold_isHonored() {
-        // Lower threshold → fires at smaller rates.
-        val custom = """{"rate_threshold":0.5,"release_floor":0.1}"""
+    fun higherSensitivity_lowersThreshold_firesAtSmallerRates() {
+        // Sensitivity 400% → threshold = 2.0 × 100/400 = 0.5, so a 1.0 rate fires
+        // (it wouldn't at the default 100% / 2.0 threshold).
+        val custom = """{"sensitivity":400}"""
         DirectionalSwipeMode.evaluate(gyro(pitch = -1.0f), ctx(settingsJson = custom), emit, MouseEmitter.NOOP)
         assertEquals(listOf("dpad_up" to true), emits)
     }
@@ -175,12 +183,9 @@ class DirectionalSwipeModeTest {
     }
 
     @Test
-    fun parse_floorAboveThreshold_isClampedToHysteresisMargin() {
-        // Defensive: hand-edited JSON with floor >= threshold would otherwise
-        // create a no-release latch (once latched, never released). Parser
-        // falls back to threshold * 0.25 as a small hysteresis margin.
-        val nonsense = """{"rate_threshold":1.0,"release_floor":5.0}"""
-        val parsed = DirectionalSwipeSettings.parse(nonsense)
+    fun sensitivity_scalesThresholdAndFloor() {
+        // Threshold = BASE(2.0) × 100/sensitivity; release floor = threshold × 0.25.
+        val parsed = DirectionalSwipeSettings.parse("""{"sensitivity":200}""")
         assertEquals(1.0f, parsed.rateThreshold, 1e-4f)
         assertEquals(0.25f, parsed.releaseFloor, 1e-4f)
     }

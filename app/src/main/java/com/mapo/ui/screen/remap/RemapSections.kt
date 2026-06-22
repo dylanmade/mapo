@@ -119,60 +119,77 @@ object RemapSections {
         InputSource.LEFT_JOYSTICK,
         InputSource.RIGHT_JOYSTICK,
         InputSource.GYRO,
-        // 2026-06-01 — bumpers + switches gained per-source mode dropdowns
-        // (DEVICE_DEFAULT / NONE / SINGLE_BUTTON) so users can opt into
-        // remap mode after the seed default flipped to DEVICE_DEFAULT.
-        // Each source now has its own subheader so the dropdown anchors
-        // correctly (a combined "Bumpers" header has no inputSource and
-        // can't drive a per-source picker).
+        // NB: bumpers + switches are NOT mode-aware. As of the detail-pane refactor they live in
+        // the "Other buttons" section as single-button rows (no mode dropdown) — see
+        // [OTHER_BUTTON_SOURCES] / OtherButtonRow.
+    )
+
+    /**
+     * Single-button "switch" sources (bumpers + Start/Select). They have no behavioral modes; the
+     * detail pane renders them via OtherButtonRow under the "Other buttons" header — a passthrough
+     * toggle ((Device default) ↔ Single button) plus inline command assignment when intercepted.
+     */
+    val OTHER_BUTTON_SOURCES: Set<InputSource> = setOf(
         InputSource.LEFT_BUMPER,
         InputSource.RIGHT_BUMPER,
         InputSource.SWITCH_START,
         InputSource.SWITCH_SELECT,
     )
 
+    /**
+     * Phase 6: the input sources a section renders, in display order. The detail pane builds one
+     * Card per mode-aware source (plus its added modes) and groups [OTHER_BUTTON_SOURCES] into a
+     * single trailing card. Left precedes right so stacked cards read in a predictable order.
+     */
+    fun sectionSources(sectionId: String): List<InputSource> = when (sectionId) {
+        SECTION_BUTTONS -> listOf(InputSource.BUTTON_DIAMOND) + OTHER_BUTTON_SOURCES
+        SECTION_DPAD -> listOf(InputSource.DPAD)
+        SECTION_TRIGGERS -> listOf(InputSource.LEFT_TRIGGER, InputSource.RIGHT_TRIGGER)
+        SECTION_JOYSTICKS -> listOf(InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK)
+        SECTION_GYRO -> listOf(InputSource.GYRO)
+        else -> emptyList()
+    }
+
     val contentBySection: Map<String, List<RemapPaneItem>> = mapOf(
         SECTION_BUTTONS to listOf(
             // Face buttons: rows generated dynamically per current mode (BUTTON_PAD →
             // A/B/X/Y; DPAD → A/B/X/Y mapped to directions; etc.).
             RemapPaneItem.Subheader("buttons.face.header", "Face Buttons", InputSource.BUTTON_DIAMOND),
-            // Bumpers + switches each get their own subheader anchored to the
-            // specific InputSource so the mode dropdown can surface DEVICE_DEFAULT
-            // / NONE / SINGLE_BUTTON (added 2026-06-01). Sub-input rows ("click")
-            // generate dynamically via expandWithDynamicBaseRows the same way
-            // every other mode-aware source does — the row only appears under
-            // SINGLE_BUTTON mode; DEVICE_DEFAULT hides it (the source is passing
-            // through to the OS / virtual gamepad and there's nothing to bind).
-            RemapPaneItem.Subheader("buttons.bumper.left.header", "Left Bumper (L1)", InputSource.LEFT_BUMPER),
-            RemapPaneItem.Subheader("buttons.bumper.right.header", "Right Bumper (R1)", InputSource.RIGHT_BUMPER),
-            RemapPaneItem.Subheader("buttons.menu.start.header", "Start", InputSource.SWITCH_START),
-            RemapPaneItem.Subheader("buttons.menu.select.header", "Select", InputSource.SWITCH_SELECT),
+            // Other buttons: bumpers + Start/Select. These are single-button "switch" sources with
+            // no behavioral modes, so they get NO mode dropdown (header has no inputSource). Each is
+            // a static bindable row rendered by OtherButtonRow — a passthrough toggle ((Device
+            // default) ↔ intercept) plus direct command assignment when intercepted.
+            RemapPaneItem.Subheader("buttons.other.header", "Other buttons", inputSource = null),
+            RemapPaneItem.BindingRow("buttons.other.l1", "L1", InputSource.LEFT_BUMPER, "click"),
+            RemapPaneItem.BindingRow("buttons.other.r1", "R1", InputSource.RIGHT_BUMPER, "click"),
+            RemapPaneItem.BindingRow("buttons.other.start", "Start", InputSource.SWITCH_START, "click"),
+            RemapPaneItem.BindingRow("buttons.other.select", "Select", InputSource.SWITCH_SELECT, "click"),
         ),
         SECTION_DPAD to listOf(
             // Dpad source rows: dynamic per mode. DPAD/BUTTON_PAD modes surface the
             // four directions; JOYSTICK_MOUSE / etc. surface their respective
             // sub-input vocabularies.
-            RemapPaneItem.Subheader("dpad.header", "Directional Pad Behavior", InputSource.DPAD),
+            RemapPaneItem.Subheader("dpad.header", "Directional Pad", InputSource.DPAD),
         ),
         SECTION_TRIGGERS to listOf(
-            RemapPaneItem.Subheader("triggers.left.header", "Left Trigger Behavior", InputSource.LEFT_TRIGGER),
+            RemapPaneItem.Subheader("triggers.left.header", "Left Trigger", InputSource.LEFT_TRIGGER),
             // Dynamic rows for LEFT_TRIGGER inject here. The Analog Output
             // Trigger DisabledRow stays as a fixed-position placeholder after
             // the dynamic rows — it documents a sub-input we don't yet expose.
             RemapPaneItem.DisabledRow("triggers.left.analog", "Analog Output Trigger"),
-            RemapPaneItem.Subheader("triggers.right.header", "Right Trigger Behavior", InputSource.RIGHT_TRIGGER),
+            RemapPaneItem.Subheader("triggers.right.header", "Right Trigger", InputSource.RIGHT_TRIGGER),
             RemapPaneItem.DisabledRow("triggers.right.analog", "Analog Output Trigger"),
         ),
         SECTION_JOYSTICKS to listOf(
-            RemapPaneItem.Subheader("joysticks.left.header", "Left Joystick Behavior", InputSource.LEFT_JOYSTICK),
-            RemapPaneItem.Subheader("joysticks.right.header", "Right Joystick Behavior", InputSource.RIGHT_JOYSTICK),
+            RemapPaneItem.Subheader("joysticks.left.header", "Left Joystick", InputSource.LEFT_JOYSTICK),
+            RemapPaneItem.Subheader("joysticks.right.header", "Right Joystick", InputSource.RIGHT_JOYSTICK),
         ),
         SECTION_GYRO to listOf(
             // Gyro source has no static sub-input rows — gyro modes (Gyro to Mouse,
             // Gyro to Joystick Camera, etc.) emit continuous output, not bindable
             // sub-inputs. The subheader carries the mode picker; everything else
             // (sensitivity / deadzone / invert) lives in the Cog menu.
-            RemapPaneItem.Subheader("gyro.header", "Gyro Behavior", InputSource.GYRO),
+            RemapPaneItem.Subheader("gyro.header", "Gyro", InputSource.GYRO),
         ),
     )
 

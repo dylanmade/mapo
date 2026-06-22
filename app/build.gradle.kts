@@ -75,6 +75,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    // MaterialKolor — seed-based M3 expressive color generation (SPEC_2025). Feeds MapoTheme's
+    // base color scheme from a seed instead of a hand-authored palette.
+    implementation(libs.materialkolor)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.ui.text.google.fonts)
     debugImplementation(libs.androidx.compose.ui.tooling)

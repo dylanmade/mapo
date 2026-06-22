@@ -7,9 +7,13 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import android.content.Intent
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -22,8 +26,16 @@ import com.mapo.ui.theme.MapoTheme
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    // Deep-route request from the toolbar overlay (OVERLAY_TOOLBAR_PLAN.md, Brick 2). The
+    // overlay launches us with EXTRA_ROUTE naming a NavHost destination; MainScreen navigates
+    // there off the nonce. The nonce (not the route string) keys the navigation so re-tapping
+    // the same destination after backing out re-navigates — a plain String wouldn't re-fire.
+    private var pendingRoute by mutableStateOf<String?>(null)
+    private var routeNonce by mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        consumeRouteExtra(intent)
         // Fully immersive, GameNative-style: the system bars are HIDDEN by default and Mapo
         // uses the entire screen (incl. the display cutout). A swipe from the edge reveals the
         // bars transiently, OVER the content, without shifting layout — so the Edit Overlay
@@ -65,10 +77,24 @@ class MainActivity : ComponentActivity() {
             val themeStorage = remember { SharedPrefsThemeOverridesStorage(applicationContext) }
             ThemeStudioProvider(storage = themeStorage) {
                 MapoTheme {
-                    MainScreen()
+                    MainScreen(deepLinkRoute = pendingRoute, deepLinkNonce = routeNonce)
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // singleTask: a re-launch (e.g. the overlay firing a new deep-route intent while we're
+        // already alive) arrives here, not onCreate. Re-point getIntent() and consume the route.
+        setIntent(intent)
+        consumeRouteExtra(intent)
+    }
+
+    private fun consumeRouteExtra(intent: Intent?) {
+        val route = intent?.getStringExtra(EXTRA_ROUTE) ?: return
+        pendingRoute = route
+        routeNonce++
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -81,5 +107,10 @@ class MainActivity : ComponentActivity() {
     private fun hideSystemBars() {
         WindowCompat.getInsetsController(window, window.decorView)
             .hide(WindowInsetsCompat.Type.systemBars())
+    }
+
+    companion object {
+        /** Intent extra (a [com.mapo.ui.nav.MapoRoute] string) launching us straight to a deep screen. */
+        const val EXTRA_ROUTE = "com.mapo.extra.ROUTE"
     }
 }

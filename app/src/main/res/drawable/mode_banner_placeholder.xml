@@ -1,0 +1,20 @@
+<!-- Placeholder "banner image" for an input mode card header. Wide aspect, abstract shapes — swap
+     for real per-mode artwork later. Static colors (vector drawables don't theme cleanly). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="48dp"
+    android:viewportWidth="96"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#1E3A5F"
+        android:pathData="M0,0 h96 v48 h-96 z" />
+    <path
+        android:fillColor="#2E6BB8"
+        android:pathData="M0,48 L34,14 L62,48 z" />
+    <path
+        android:fillColor="#4FA3FF"
+        android:pathData="M44,48 L72,18 L96,48 z" />
+    <path
+        android:fillColor="#9ECBFF"
+        android:pathData="M70,12 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 z" />
+</vector>

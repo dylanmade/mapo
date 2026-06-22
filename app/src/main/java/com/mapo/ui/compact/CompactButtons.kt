@@ -1,5 +1,6 @@
 package com.mapo.ui.compact
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.TextButton
@@ -229,5 +231,47 @@ fun CompactIconButton(
             contentDescription = contentDescription,
             modifier = Modifier.size(glyph),
         )
+    }
+}
+
+/**
+ * A compact **filled-tonal** icon button — like [CompactIconButton] but with a `secondaryContainer`
+ * pill behind the glyph (M3's `FilledTonalIconButton` look) at compact metrics. The stock
+ * `FilledTonalIconButton` hard-sets its own size, so this is hand-rolled the same way [CompactIconButton] is.
+ */
+@Composable
+fun CompactFilledTonalIconButton(
+    icon: ImageVector,
+    contentDescription: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    size: CompactButtonSize = CompactButtonSize.Standard,
+) {
+    val density = LocalCompactDensity.current
+    val boxSize = size.iconButtonSize(density)
+    val glyph = (boxSize.value * 0.5f).coerceAtLeast(16f).dp
+    val container = if (enabled) MaterialTheme.colorScheme.secondaryContainer
+    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    val contentColor = if (enabled) MaterialTheme.colorScheme.onSecondaryContainer
+    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    Box(
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .size(boxSize)
+            .clip(CircleShape)
+            .background(container)
+            .clickable(
+                onClick = onClick,
+                enabled = enabled,
+                role = Role.Button,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = ripple(bounded = false, radius = boxSize / 2),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            Icon(imageVector = icon, contentDescription = contentDescription, modifier = Modifier.size(glyph))
+        }
     }
 }

@@ -5,20 +5,31 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -37,8 +48,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.themestudio.core.ColorGenerationOverrides
 import com.themestudio.core.ColorRoles
 import com.themestudio.core.LocalThemeStudioController
 import com.themestudio.core.LocalThemeStudioVariantOverride
@@ -120,6 +133,7 @@ fun ThemeStudioScreen(
     var tabIndex by remember { mutableIntStateOf(0) }
     var showExport by remember { mutableStateOf(false) }
     var pickerColorRole by remember { mutableStateOf<String?>(null) }
+    var pickerSeed by remember { mutableStateOf(false) }
     var pickerTypoRole by remember { mutableStateOf<String?>(null) }
     var pickerShapeRole by remember { mutableStateOf<String?>(null) }
     var pickerFontFamilyKind by remember { mutableStateOf<FontFamilyKind?>(null) }
@@ -193,7 +207,16 @@ fun ThemeStudioScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         when (StudioTab.values()[tabIndex]) {
-                            StudioTab.Colors -> colorsPreview { name -> pickerColorRole = name }
+                            StudioTab.Colors -> {
+                                ColorGenerationSection(
+                                    gen = overrides.colorGeneration,
+                                    onPickSeed = { pickerSeed = true },
+                                    onStyle = { controller.setPaletteStyle(it) },
+                                    onContrast = { controller.setColorContrast(it) },
+                                    onResetContrast = { controller.setColorContrast(null) },
+                                )
+                                colorsPreview { name -> pickerColorRole = name }
+                            }
                             StudioTab.Typography -> {
                                 // Family chooser cards sit above the per-role specimen so swapping
                                 // the Display or Body family is the most discoverable action — the
@@ -278,6 +301,23 @@ fun ThemeStudioScreen(
                         }
                     } else null,
                     pickerKey = "$roleName.${if (editingDark) "dark" else "light"}",
+                )
+            }
+        }
+    }
+
+    // ── Seed color picker sheet ───────────────────────────────────────────
+    if (pickerSeed) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(sheetState = sheetState, onDismissRequest = { pickerSeed = false }) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                SheetHeader(title = "Seed color", subtitle = "Generates the whole palette")
+                val seed = overrides.colorGeneration.seed
+                ColorPicker(
+                    color = seed ?: MaterialTheme.colorScheme.primary,
+                    onChange = { controller.setSeedColor(it) },
+                    onClearOverride = if (seed != null) { { controller.setSeedColor(null) } } else null,
+                    pickerKey = "seed",
                 )
             }
         }
@@ -439,5 +479,83 @@ private fun SheetHeader(title: String, subtitle: String) {
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * Seed-based color-generation controls at the top of the Colors tab: the seed color, palette style,
+ * and contrast. These drive the consumer's generator (e.g. MaterialKolor) via the
+ * [ColorGenerationOverrides]; the per-role overrides below still layer on top.
+ */
+@Composable
+private fun ColorGenerationSection(
+    gen: ColorGenerationOverrides,
+    onPickSeed: () -> Unit,
+    onStyle: (String) -> Unit,
+    onContrast: (Float) -> Unit,
+    onResetContrast: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Color generation", style = MaterialTheme.typography.titleSmall)
+
+        // Seed color — tap to open the color picker.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.small)
+                .clickable { onPickSeed() }
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(gen.seed ?: MaterialTheme.colorScheme.primary)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+            )
+            Column(Modifier.weight(1f)) {
+                Text("Seed color", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = if (gen.seed != null) "Custom seed" else "Default seed",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.Filled.Colorize, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        // Palette style — dropdown of generic style names.
+        var styleMenu by remember { mutableStateOf(false) }
+        Box {
+            OutlinedButton(onClick = { styleMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("Style: ${gen.style ?: "TonalSpot"}", modifier = Modifier.weight(1f), fontSize = 13.sp)
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+            }
+            DropdownMenu(expanded = styleMenu, onDismissRequest = { styleMenu = false }) {
+                ColorGenerationOverrides.STYLE_NAMES.forEach { name ->
+                    DropdownMenuItem(
+                        text = { Text(name) },
+                        onClick = { styleMenu = false; onStyle(name) },
+                    )
+                }
+            }
+        }
+
+        // Contrast — −1 (low) … +1 (high).
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Contrast", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(72.dp))
+            Slider(
+                value = (gen.contrast ?: 0f).coerceIn(-1f, 1f),
+                onValueChange = onContrast,
+                valueRange = -1f..1f,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onResetContrast) { Text("Reset", fontSize = 12.sp) }
+        }
     }
 }

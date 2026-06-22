@@ -25,6 +25,7 @@ import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.keyboard.KeyboardController
 import com.mapo.service.overlay.element.OverlayLiveEditController
+import com.mapo.service.overlay.element.ToolbarOverlayManager
 import com.mapo.service.overlay.element.OverlayPresenter
 import com.mapo.steam.auth.SteamCredentialStore
 import app.cash.turbine.test
@@ -71,6 +72,7 @@ class MainViewModelTest {
     private lateinit var inputDispatcher: InputDispatcher
     private lateinit var overlayPresenter: OverlayPresenter
     private lateinit var overlayLiveEditController: OverlayLiveEditController
+    private lateinit var toolbarOverlayManager: ToolbarOverlayManager
     private lateinit var steamCredentialStore: SteamCredentialStore
     private lateinit var keyboardController: KeyboardController
 
@@ -106,6 +108,7 @@ class MainViewModelTest {
         inputDispatcher = mockk(relaxed = true)
         overlayPresenter = mockk(relaxed = true)
         overlayLiveEditController = mockk(relaxed = true)
+        toolbarOverlayManager = mockk(relaxed = true)
         steamCredentialStore = mockk(relaxed = true)
         // SharedFlow.collect returns Nothing — a relaxed mock throws on collect, so the
         // VM's errorMessages relay needs a real (empty) flow.
@@ -147,6 +150,7 @@ class MainViewModelTest {
             inputDispatcher = inputDispatcher,
             overlayPresenter = overlayPresenter,
             overlayLiveEditController = overlayLiveEditController,
+            toolbarOverlayManager = toolbarOverlayManager,
             steamCredentialStore = steamCredentialStore,
                 keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
@@ -521,6 +525,7 @@ class MainViewModelTest {
             inputDispatcher = inputDispatcher,
             overlayPresenter = overlayPresenter,
             overlayLiveEditController = overlayLiveEditController,
+            toolbarOverlayManager = toolbarOverlayManager,
             steamCredentialStore = steamCredentialStore,
                 keyboardController = keyboardController,
             ioDispatcher = testDispatcher,
@@ -929,6 +934,7 @@ class MainViewModelTest {
         inputDispatcher = inputDispatcher,
         overlayPresenter = overlayPresenter,
         overlayLiveEditController = overlayLiveEditController,
+        toolbarOverlayManager = toolbarOverlayManager,
         steamCredentialStore = steamCredentialStore,
         keyboardController = keyboardController,
         ioDispatcher = testDispatcher,

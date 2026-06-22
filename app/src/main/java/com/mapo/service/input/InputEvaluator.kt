@@ -390,7 +390,6 @@ class InputEvaluator @Inject constructor(
                 if (source == InputSource.GYRO) {
                     com.mapo.service.input.modes.GyroToJoystickDeflectionMode.resetState()
                     com.mapo.service.input.modes.DpadMode.resetState()
-                    com.mapo.service.input.modes.GyroFlickStickMode.resetState()
                 }
                 // FlickStickMode runs on joystick sources; its per-source
                 // state machine (NEUTRAL/FLICKING/HOLDING) must reset on
@@ -2030,6 +2029,10 @@ class InputEvaluator @Inject constructor(
         // GyroToMouseMode caches per-source dt / momentum / movement-threshold /
         // rotational-haptic accumulators; reset at config boundaries.
         com.mapo.service.input.modes.GyroToMouseMode.resetState()
+        // GyroToJoystickCameraMode caches per-source dt / momentum / haptic state.
+        com.mapo.service.input.modes.GyroToJoystickCameraMode.resetState()
+        // DirectionalSwipeMode caches per-source smoothing + scroll-momentum state.
+        com.mapo.service.input.modes.DirectionalSwipeMode.resetState()
         if (analogLatched.isEmpty()) return
         Log.d(TAG, "flushAnalog: releasing ${analogLatched.size} latched synthetic edge(s)")
         // Snapshot before mutation — dispatchSyntheticEdge writes back into

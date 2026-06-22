@@ -14,15 +14,36 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import com.mapo.ui.compact.CompactButton
+import com.mapo.ui.compact.CompactButtonSize
+import com.mapo.ui.compact.CompactFilledTonalButton
+import com.mapo.ui.compact.CompactIconButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ImportExport
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
@@ -37,12 +58,15 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -54,6 +78,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mapo.data.model.steam.ActivatorType
 import com.mapo.data.model.steam.BindingMode
 import com.mapo.data.model.steam.BindingOutput
 import com.mapo.data.model.steam.ControllerConfig
@@ -63,6 +88,7 @@ import com.mapo.data.model.steam.displayName
 import com.mapo.data.model.steam.displayNameFor
 import androidx.compose.ui.res.stringResource
 import com.mapo.R
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
@@ -123,6 +149,23 @@ fun RemapControlsScreen(
     shizukuState: com.mapo.service.shizuku.ShizukuState = com.mapo.service.shizuku.ShizukuState.Granted,
     onAcknowledgeShizukuRequired: () -> Unit = {},
     onOpenShizukuSetup: () -> Unit = {},
+    // Phase 2: inline input-assignment editor. The command picker still navigates away (full
+    // screen) and pops back here, delivering its result via [pickerResult]; the rest are the
+    // activator/command callbacks the inline editor invokes (formerly InputEditorScreen's).
+    pickerResult: BindingOutput? = null,
+    onConsumePickerResult: () -> Unit = {},
+    onPickResult: (bindingId: Long, output: BindingOutput) -> Unit = { _, _ -> },
+    onOpenPicker: (title: String, current: BindingOutput) -> Unit = { _, _ -> },
+    onAddActivator: (groupInputId: Long, type: ActivatorType) -> Unit = { _, _ -> },
+    onRemoveActivator: (activatorId: Long) -> Unit = {},
+    onSetActivatorType: (activatorId: Long, type: ActivatorType) -> Unit = { _, _ -> },
+    onOpenActivatorSettings: (activatorId: Long, label: String) -> Unit = { _, _ -> },
+    onAddCommand: (activatorId: Long) -> Unit = {},
+    onRemoveCommand: (bindingId: Long) -> Unit = {},
+    onAddInputRow: (groupInputId: Long, type: ActivatorType) -> Unit = { _, _ -> },
+    onSetInputRowPressType: (bindingId: Long, type: ActivatorType) -> Unit = { _, _ -> },
+    onSetInputRowLabel: (bindingId: Long, label: String) -> Unit = { _, _ -> },
+    onDeleteInputRow: (bindingId: Long) -> Unit = {},
 ) {
     // Physical/gesture back navigates home (the rail's back affordance was removed; this keeps
     // the Thor hardware back button + the touch back gesture working). Open menus/dialogs install
@@ -188,6 +231,23 @@ fun RemapControlsScreen(
     // it on, then deselecting the layer, would otherwise leave a stale filter applied
     // when the next overlay session starts.
     if (viewingLayer == null && onlyOverrides) onlyOverrides = false
+
+    // Phase 2 inline editor: which command (Binding) is awaiting a picker result. Survives the
+    // full-screen picker round-trip (rememberSaveable) the same way InputEditorScreen did.
+    var editingBindingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(pickerResult) {
+        val output = pickerResult ?: return@LaunchedEffect
+        editingBindingId?.let { onPickResult(it, output) }
+        editingBindingId = null
+        onConsumePickerResult()
+    }
+    // Tapping a command row opens the picker for that binding.
+    val onEditCommand: (Long, BindingOutput, String) -> Unit = { bindingId, current, title ->
+        editingBindingId = bindingId
+        onOpenPicker(title, current)
+    }
+    // Which binding rows are collapsed (default = expanded, per design). Keyed by row key.
+    val collapsedRows = remember { mutableStateListOf<String>() }
 
     // Brick G follow-up: walk the current config for any binding whose
     // (source, mode) pair requires Shizuku. If one exists AND Shizuku isn't
@@ -316,6 +376,22 @@ fun RemapControlsScreen(
                     onRemoveModeShift = onRemoveModeShift,
                     onSetModeShiftTrigger = onSetModeShiftTrigger,
                     onOpenModeShiftInputEditor = onOpenModeShiftInputEditor,
+                    collapsedRows = collapsedRows,
+                    onToggleRowCollapsed = { key ->
+                        if (collapsedRows.contains(key)) collapsedRows.remove(key)
+                        else collapsedRows.add(key)
+                    },
+                    onEditCommand = onEditCommand,
+                    onAddActivator = onAddActivator,
+                    onRemoveActivator = onRemoveActivator,
+                    onSetActivatorType = onSetActivatorType,
+                    onOpenActivatorSettings = onOpenActivatorSettings,
+                    onAddCommand = onAddCommand,
+                    onRemoveCommand = onRemoveCommand,
+                    onAddInputRow = onAddInputRow,
+                    onSetInputRowPressType = onSetInputRowPressType,
+                    onSetInputRowLabel = onSetInputRowLabel,
+                    onDeleteInputRow = onDeleteInputRow,
                 )
             }
         }
@@ -475,7 +551,43 @@ private fun RemapDetailPane(
     onRemoveModeShift: (modeShiftId: Long) -> Unit,
     onSetModeShiftTrigger: (modeShiftId: Long, triggerSource: InputSource?, triggerSubInput: String?) -> Unit,
     onOpenModeShiftInputEditor: (modeShiftId: Long, ownerSource: InputSource, groupInputKey: String, label: String) -> Unit,
+    collapsedRows: List<String>,
+    onToggleRowCollapsed: (key: String) -> Unit,
+    onEditCommand: (bindingId: Long, current: BindingOutput, title: String) -> Unit,
+    onAddActivator: (groupInputId: Long, type: ActivatorType) -> Unit,
+    onRemoveActivator: (activatorId: Long) -> Unit,
+    onSetActivatorType: (activatorId: Long, type: ActivatorType) -> Unit,
+    onOpenActivatorSettings: (activatorId: Long, label: String) -> Unit,
+    onAddCommand: (activatorId: Long) -> Unit,
+    onRemoveCommand: (bindingId: Long) -> Unit,
+    onAddInputRow: (groupInputId: Long, type: ActivatorType) -> Unit,
+    onSetInputRowPressType: (bindingId: Long, type: ActivatorType) -> Unit,
+    onSetInputRowLabel: (bindingId: Long, label: String) -> Unit,
+    onDeleteInputRow: (bindingId: Long) -> Unit,
 ) {
+    // Phase 6: base set renders the new Card/input-row UI. Layer (overlay) mode keeps the legacy
+    // item-list rendering below (override ghosts + materialize-on-tap), unchanged.
+    if (viewingLayer == null) {
+        BaseModeContent(
+            sectionId = sectionId,
+            viewingSet = viewingSet,
+            config = config,
+            firstRowFocusRequester = firstRowFocusRequester,
+            onSetBindingGroupMode = onSetBindingGroupMode,
+            onOpenModeSettings = onOpenModeSettings,
+            onAddModeShift = onAddModeShift,
+            onRemoveModeShift = onRemoveModeShift,
+            onSetModeShiftTrigger = onSetModeShiftTrigger,
+            onEditCommand = onEditCommand,
+            onAddInputRow = onAddInputRow,
+            onSetPressType = onSetInputRowPressType,
+            onSetLabel = onSetInputRowLabel,
+            onDelete = onDeleteInputRow,
+            onConfigure = onOpenActivatorSettings,
+        )
+        return
+    }
+
     val rawItems = RemapSections.contentBySection[sectionId]
 
     if (rawItems == null) {
@@ -541,15 +653,41 @@ private fun RemapDetailPane(
                         onOpenModeSettings = onOpenModeSettings,
                         onAddModeShift = onAddModeShift,
                     )
-                    is RemapPaneItem.BindingRow -> BindingRowItem(
-                        item = item,
-                        viewingSet = viewingSet,
-                        viewingLayer = viewingLayer,
-                        config = config,
-                        modifier = focusModifier,
-                        onOpenInputEditor = onOpenInputEditor,
-                        onClearOverride = onClearOverride,
-                    )
+                    is RemapPaneItem.BindingRow -> if (item.inputSource in RemapSections.OTHER_BUTTON_SOURCES && viewingLayer == null) {
+                        OtherButtonRow(
+                            item = item,
+                            viewingSet = viewingSet,
+                            config = config,
+                            modifier = focusModifier,
+                            onSetBindingGroupMode = onSetBindingGroupMode,
+                            onEditCommand = onEditCommand,
+                            onAddActivator = onAddActivator,
+                            onRemoveActivator = onRemoveActivator,
+                            onSetActivatorType = onSetActivatorType,
+                            onOpenActivatorSettings = onOpenActivatorSettings,
+                            onAddCommand = onAddCommand,
+                            onRemoveCommand = onRemoveCommand,
+                        )
+                    } else {
+                        BindingRowItem(
+                            item = item,
+                            viewingSet = viewingSet,
+                            viewingLayer = viewingLayer,
+                            config = config,
+                            modifier = focusModifier,
+                            collapsed = collapsedRows.contains(item.key),
+                            onToggleCollapsed = { onToggleRowCollapsed(item.key) },
+                            onEditCommand = onEditCommand,
+                            onAddActivator = onAddActivator,
+                            onRemoveActivator = onRemoveActivator,
+                            onSetActivatorType = onSetActivatorType,
+                            onOpenActivatorSettings = onOpenActivatorSettings,
+                            onAddCommand = onAddCommand,
+                            onRemoveCommand = onRemoveCommand,
+                            onOpenInputEditor = onOpenInputEditor,
+                            onClearOverride = onClearOverride,
+                        )
+                    }
                     is RemapPaneItem.DisabledRow -> DisabledRowItem(item)
                     is RemapPaneItem.ModeShiftHeader -> ModeShiftHeaderRow(
                         item = item,
@@ -558,6 +696,7 @@ private fun RemapDetailPane(
                         onSetBindingGroupMode = onSetBindingGroupMode,
                         onRemoveModeShift = onRemoveModeShift,
                         onSetModeShiftTrigger = onSetModeShiftTrigger,
+                        onOpenModeSettings = onOpenModeSettings,
                     )
                     is RemapPaneItem.ModeShiftBindingRow -> ModeShiftBindingRowItem(
                         item = item,
@@ -749,6 +888,669 @@ private fun OverridesFilterToggle(
     HorizontalDivider()
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 6: Card-based detail content (base set). Each input mode is a Card of always-visible
+// "input rows"; each row = one command (Binding) bucketed under a press-type Activator.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Fixed width for the press-type button, sized to the widest label ("Double") for uniformity. */
+private val PressButtonWidth = 84.dp
+
+/** Press types offered in the press-type menu, in display order (SOFT_PRESS is a sub-input, not here). */
+private val pressTypeOrder = listOf(
+    ActivatorType.FULL_PRESS,
+    ActivatorType.LONG_PRESS,
+    ActivatorType.DOUBLE_PRESS,
+    ActivatorType.START_PRESS,
+    ActivatorType.RELEASE_PRESS,
+    ActivatorType.CHORDED_PRESS,
+)
+
+/**
+ * Short label for the press-type button. NB: START_PRESS reads "Down" and RELEASE_PRESS reads "Up"
+ * (Mapo wording — fires on the down / up edge). VDF import/export must map Steam's "Start Press" ↔
+ * "Down" and "Release Press" ↔ "Up". "Double" is the widest label — the press buttons are sized to it.
+ */
+private fun ActivatorType.shortLabel(): String = when (this) {
+    ActivatorType.FULL_PRESS -> "Press"
+    ActivatorType.LONG_PRESS -> "Long"
+    ActivatorType.DOUBLE_PRESS -> "Double"
+    ActivatorType.START_PRESS -> "Down"
+    ActivatorType.RELEASE_PRESS -> "Up"
+    ActivatorType.CHORDED_PRESS -> "Chord"
+    ActivatorType.SOFT_PRESS -> "Soft"
+}
+
+private fun ActivatorType.helperText(): String = when (this) {
+    ActivatorType.FULL_PRESS -> "Fires on a normal press."
+    ActivatorType.LONG_PRESS -> "Fires when held past the long-press time."
+    ActivatorType.DOUBLE_PRESS -> "Fires on two quick presses."
+    ActivatorType.START_PRESS -> "Fires the instant the button goes down."
+    ActivatorType.RELEASE_PRESS -> "Fires when the button is let go."
+    ActivatorType.CHORDED_PRESS -> "Fires only while another button is held."
+    ActivatorType.SOFT_PRESS -> "Fires on a soft (partial) pull."
+}
+
+private fun ActivatorType.pressIcon(): androidx.compose.ui.graphics.vector.ImageVector = when (this) {
+    ActivatorType.FULL_PRESS -> Icons.Filled.TouchApp
+    ActivatorType.LONG_PRESS -> Icons.Filled.Timer
+    ActivatorType.DOUBLE_PRESS -> Icons.Filled.Repeat
+    ActivatorType.START_PRESS -> Icons.Filled.Bolt
+    ActivatorType.RELEASE_PRESS -> Icons.AutoMirrored.Filled.Logout
+    ActivatorType.CHORDED_PRESS -> Icons.Filled.Link
+    ActivatorType.SOFT_PRESS -> Icons.Filled.Adjust
+}
+
+/** Short identifier for an "Other buttons" source (glyphs are generic for these). */
+private fun otherButtonName(source: InputSource): String = when (source) {
+    InputSource.LEFT_BUMPER -> "L1"
+    InputSource.RIGHT_BUMPER -> "R1"
+    InputSource.SWITCH_START -> "Start"
+    InputSource.SWITCH_SELECT -> "Select"
+    else -> source.displayName()
+}
+
+/** A dotted/dashed outlined "+ <text>" button used for the add-input / add-mode affordances. */
+@Composable
+private fun DashedAddButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val color = MaterialTheme.colorScheme.outline
+    val shape = MaterialTheme.shapes.medium
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .clickable { onClick() }
+            .drawBehind {
+                drawRoundRect(
+                    color = color,
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = 1.dp.toPx(),
+                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 8f)),
+                    ),
+                )
+            }
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = color)
+            Spacer(Modifier.width(8.dp))
+            Text(text, style = MaterialTheme.typography.labelLarge, color = color)
+        }
+    }
+}
+
+/** A `DropdownMenuItem` with a leading icon and two-line title + helper text. */
+@Composable
+private fun RichMenuItem(
+    title: String,
+    helper: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean = true,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    DropdownMenuItem(
+        enabled = enabled,
+        leadingIcon = { Icon(icon, contentDescription = null, tint = tint) },
+        text = {
+            Column {
+                Text(title, style = MaterialTheme.typography.bodyLarge, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                Text(helper, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        trailingIcon = if (selected) { { Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) } } else null,
+        onClick = onClick,
+    )
+}
+
+/**
+ * One input row: leading glyph + (empty-by-default) user label, then a split button [designation |
+ * press type] and an options kebab. The designation opens the command picker; the press-type side
+ * opens a rich menu; the kebab offers Configure / Edit label / Delete.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun InputRow(
+    source: InputSource,
+    subInputKey: String,
+    subInputLabel: String,
+    binding: com.mapo.data.model.steam.Binding,
+    pressType: ActivatorType,
+    config: ControllerConfig?,
+    canDelete: Boolean,
+    onEditCommand: (bindingId: Long, current: BindingOutput, title: String) -> Unit,
+    onSetPressType: (bindingId: Long, type: ActivatorType) -> Unit,
+    onSetLabel: (bindingId: Long, label: String) -> Unit,
+    onDelete: (bindingId: Long) -> Unit,
+    onConfigure: (activatorId: Long, title: String) -> Unit,
+    onAddAnother: () -> Unit,
+) {
+    val output = BindingOutput.fromEntity(binding.outputType, binding.args)
+    val title = "$subInputLabel · ${pressType.displayLabel()}"
+    var pressMenu by remember { mutableStateOf(false) }
+    var kebab by remember { mutableStateOf(false) }
+    var editingLabel by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        com.mapo.ui.glyph.InputGlyphs.SubInputGlyph(source, subInputKey)
+        Text(
+            text = binding.label.orEmpty(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        // Designation — compact filled button → command picker.
+        CompactButton(onClick = { onEditCommand(binding.id, output, title) }, size = CompactButtonSize.Slim) {
+            Text(
+                text = output.displayLabel(config),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 104.dp),
+            )
+        }
+        // Press type — compact tonal button → press-type menu. Fixed width sized to the widest
+        // label ("Double") so every press button is uniform; no dropdown arrow.
+        Box {
+            CompactFilledTonalButton(
+                onClick = { pressMenu = true },
+                size = CompactButtonSize.Slim,
+                modifier = Modifier.width(PressButtonWidth),
+            ) {
+                Text(pressType.shortLabel(), maxLines = 1)
+            }
+            DropdownMenu(expanded = pressMenu, onDismissRequest = { pressMenu = false }) {
+                pressTypeOrder.forEach { t ->
+                    RichMenuItem(
+                        title = t.shortLabel(), helper = t.helperText(), icon = t.pressIcon(),
+                        selected = t == pressType,
+                        onClick = { pressMenu = false; if (t != pressType) onSetPressType(binding.id, t) },
+                    )
+                }
+            }
+        }
+        // Options — plain compact icon-button kebab (no tonal container).
+        Box {
+            CompactIconButton(
+                icon = Icons.Filled.MoreVert, contentDescription = "Input options",
+                onClick = { kebab = true }, size = CompactButtonSize.Slim,
+            )
+            DropdownMenu(expanded = kebab, onDismissRequest = { kebab = false }) {
+                RichMenuItem(
+                    title = "Configure input",
+                    helper = "Cycle, turbo, long-press time, delays, chord.",
+                    icon = Icons.Filled.Settings,
+                    onClick = { kebab = false; onConfigure(binding.activatorId, title) },
+                )
+                RichMenuItem(
+                    title = "Edit input label",
+                    helper = "Give this input a name (optional).",
+                    icon = Icons.Filled.Edit,
+                    onClick = { kebab = false; editingLabel = true },
+                )
+                RichMenuItem(
+                    title = "Add another $subInputLabel input",
+                    helper = "Bind another command to this input.",
+                    icon = Icons.Filled.Add,
+                    onClick = { kebab = false; onAddAnother() },
+                )
+                RichMenuItem(
+                    title = "Delete input",
+                    helper = if (canDelete) "Remove this input row." else "Can't remove the last input.",
+                    icon = Icons.Filled.Delete,
+                    enabled = canDelete,
+                    onClick = { kebab = false; onDelete(binding.id) },
+                )
+            }
+        }
+    }
+
+    if (editingLabel) {
+        InputLabelDialog(
+            current = binding.label.orEmpty(),
+            onConfirm = { onSetLabel(binding.id, it); editingLabel = false },
+            onDismiss = { editingLabel = false },
+        )
+    }
+}
+
+/** Small dialog to edit an input row's label (no auto-IME-focus per UI doctrine). */
+@Composable
+private fun InputLabelDialog(current: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(current) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Input label") },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                label = { Text("Label") },
+            )
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * The input rows for one sub-input (e.g. A): one row per command across the sub-input's activators
+ * (ordered by press type). A single inset divider trails the group (unless it's the card's last
+ * group) so the whole group reads as one physical input, matching the bumper card's dividers.
+ * "Add another …" lives in each row's kebab (no standalone button).
+ */
+@Composable
+private fun SubInputGroup(
+    source: InputSource,
+    subInputKey: String,
+    subInputLabel: String,
+    groupInput: com.mapo.data.model.steam.GroupInputGraph?,
+    config: ControllerConfig?,
+    isLastGroup: Boolean,
+    onEditCommand: (Long, BindingOutput, String) -> Unit,
+    onAddInputRow: (groupInputId: Long, type: ActivatorType) -> Unit,
+    onSetPressType: (Long, ActivatorType) -> Unit,
+    onSetLabel: (Long, String) -> Unit,
+    onDelete: (Long) -> Unit,
+    onConfigure: (Long, String) -> Unit,
+) {
+    val rows = groupInput?.activators
+        ?.sortedWith(activatorRenderOrder)
+        ?.flatMap { ag -> ag.bindings.map { b -> b to ag.activator.type } }
+        .orEmpty()
+    val canDelete = rows.size > 1
+    rows.forEach { (binding, type) ->
+        InputRow(
+            source = source,
+            subInputKey = subInputKey,
+            subInputLabel = subInputLabel,
+            binding = binding,
+            pressType = type,
+            config = config,
+            canDelete = canDelete,
+            onEditCommand = onEditCommand,
+            onSetPressType = onSetPressType,
+            onSetLabel = onSetLabel,
+            onDelete = onDelete,
+            onConfigure = onConfigure,
+            onAddAnother = { groupInput?.let { onAddInputRow(it.input.id, ActivatorType.FULL_PRESS) } },
+        )
+    }
+    // One divider per physical input, between groups only (not after the card's last group). Inset
+    // to the card's content — same treatment as the "Other buttons" card.
+    if (!isLastGroup && rows.isNotEmpty()) {
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
+    }
+}
+
+/** Banner image for an input mode header — a clipped, cropped vector (placeholder art for now). */
+@Composable
+private fun ModeBanner(mode: BindingMode) {
+    androidx.compose.foundation.Image(
+        painter = androidx.compose.ui.res.painterResource(com.mapo.R.drawable.mode_banner_placeholder),
+        contentDescription = null,
+        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        modifier = Modifier
+            .size(width = 76.dp, height = 36.dp)
+            .clip(MaterialTheme.shapes.small),
+    )
+}
+
+/**
+ * One input mode as a Card. The header row carries a banner image + the mode name with a trailing
+ * dropdown arrow (taps open a full-card-width mode menu that drops over the card) + a kebab
+ * (Configure / Delete-if-added), with a full-width divider beneath. Body = the mode's sub-input
+ * groups. `surfaceContainerLow` per the role table.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun ModeCard(
+    source: InputSource,
+    groupGraph: com.mapo.data.model.steam.BindingGroupGraph,
+    config: ControllerConfig?,
+    validModes: List<BindingMode>,
+    isAdded: Boolean,
+    shift: SourceModeShiftGraph?,
+    firstRowFocusRequester: FocusRequester?,
+    onSetBindingGroupMode: (Long, BindingMode) -> Unit,
+    onOpenModeSettings: (Long, InputSource) -> Unit,
+    onRemoveModeShift: (Long) -> Unit,
+    onSetModeShiftTrigger: (Long, InputSource?, String?) -> Unit,
+    onEditCommand: (Long, BindingOutput, String) -> Unit,
+    onAddInputRow: (Long, ActivatorType) -> Unit,
+    onSetPressType: (Long, ActivatorType) -> Unit,
+    onSetLabel: (Long, String) -> Unit,
+    onDelete: (Long) -> Unit,
+    onConfigure: (Long, String) -> Unit,
+) {
+    val group = groupGraph.group
+    val mode = group.mode
+    val modeName = mode.displayNameFor(source)
+    var showAddedSettings by remember { mutableStateOf(false) }
+    var modeMenu by remember { mutableStateOf(false) }
+    var kebab by remember { mutableStateOf(false) }
+    var cardWidthPx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+    val canChangeMode = validModes.size > 1
+
+    // OutlinedCard — outlined variant grouping one input mode's inputs.
+    androidx.compose.material3.OutlinedCard(
+        modifier = Modifier.onGloballyPositioned { cardWidthPx = it.size.width },
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // ── Header row ──────────────────────────────────────────────────────
+            Box {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ModeBanner(mode)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .then(if (firstRowFocusRequester != null) Modifier.focusRequester(firstRowFocusRequester) else Modifier)
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable(enabled = canChangeMode) { modeMenu = true }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
+                            if (isAdded) {
+                                Text("Added mode", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(modeName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        }
+                        if (canChangeMode) {
+                            Spacer(Modifier.width(8.dp))
+                            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Change input mode", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { kebab = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Mode options")
+                        }
+                        DropdownMenu(expanded = kebab, onDismissRequest = { kebab = false }) {
+                            RichMenuItem(
+                                title = "Configure $modeName",
+                                helper = if (isAdded) "Activation button + mode settings." else "Deadzones, curves, and other tuning.",
+                                icon = Icons.Filled.Settings,
+                                enabled = isAdded || SourceModeSettingsSchema.hasSettings(source, mode),
+                                onClick = {
+                                    kebab = false
+                                    if (isAdded) showAddedSettings = true else onOpenModeSettings(group.id, source)
+                                },
+                            )
+                            if (isAdded) {
+                                RichMenuItem(
+                                    title = "Delete $modeName",
+                                    helper = "Remove this added input mode.",
+                                    icon = Icons.Filled.Delete,
+                                    onClick = { kebab = false; shift?.let { onRemoveModeShift(it.shift.id) } },
+                                )
+                            }
+                        }
+                    }
+                }
+                // Mode-selection menu: full card width, drops over the card.
+                DropdownMenu(
+                    expanded = modeMenu,
+                    onDismissRequest = { modeMenu = false },
+                    modifier = Modifier.width(with(density) { cardWidthPx.toDp() }),
+                ) {
+                    validModes.forEach { m ->
+                        DropdownMenuItem(
+                            leadingIcon = { Icon(com.mapo.ui.glyph.InputGlyphs.modeIcon(m), contentDescription = null) },
+                            text = { Text(m.displayNameFor(source)) },
+                            trailingIcon = if (m == mode) { { Icon(Icons.Filled.Check, contentDescription = null) } } else null,
+                            onClick = { modeMenu = false; if (m != mode) onSetBindingGroupMode(group.id, m) },
+                        )
+                    }
+                }
+            }
+            HorizontalDivider()
+
+            if (isAdded && shift != null) {
+                val src = shift.shift.triggerSource
+                val sub = shift.shift.triggerSubInput
+                val triggerLabel = if (src != null && sub != null) {
+                    val match = RemapSections.TRIGGER_INPUT_CATALOG.firstOrNull { it.source == src && it.subInput == sub }
+                    match?.let { "Active while holding ${it.label}" } ?: "Active while holding ${src.displayName()} / $sub"
+                } else "No activation button — tap Configure to assign one"
+                Text(
+                    text = triggerLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (src == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+
+            // ── Body: sub-input groups for this mode ────────────────────────────
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp)) {
+                val subInputs = RemapSections.bindableSubInputsFor(source, mode)
+                subInputs.forEachIndexed { index, (key, label) ->
+                    SubInputGroup(
+                        source = source,
+                        subInputKey = key,
+                        subInputLabel = label,
+                        groupInput = groupGraph.inputByKey(key),
+                        config = config,
+                        isLastGroup = index == subInputs.lastIndex,
+                        onEditCommand = onEditCommand,
+                        onAddInputRow = onAddInputRow,
+                        onSetPressType = onSetPressType,
+                        onSetLabel = onSetLabel,
+                        onDelete = onDelete,
+                        onConfigure = onConfigure,
+                    )
+                }
+            }
+        }
+    }
+
+    if (showAddedSettings && shift != null) {
+        ModeShiftSettingsSheet(
+            modeShiftId = shift.shift.id,
+            modeBindingGroupId = group.id,
+            ownerSource = source,
+            mode = mode,
+            currentTriggerSource = shift.shift.triggerSource,
+            currentTriggerSubInput = shift.shift.triggerSubInput,
+            onSetTrigger = onSetModeShiftTrigger,
+            onOpenModeSettings = onOpenModeSettings,
+            onDismiss = { showAddedSettings = false },
+        )
+    }
+}
+
+/**
+ * Everything for one mode-aware source: its base-mode Card, an "Added mode" Card per mode shift,
+ * and a dashed "+ Add additional input mode" button (for mode-shift-capable sources).
+ */
+@Composable
+private fun SourceModeBlock(
+    source: InputSource,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph,
+    config: ControllerConfig?,
+    firstRowFocusRequester: FocusRequester?,
+    onSetBindingGroupMode: (Long, BindingMode) -> Unit,
+    onOpenModeSettings: (Long, InputSource) -> Unit,
+    onAddModeShift: (InputSource) -> Unit,
+    onRemoveModeShift: (Long) -> Unit,
+    onSetModeShiftTrigger: (Long, InputSource?, String?) -> Unit,
+    onEditCommand: (Long, BindingOutput, String) -> Unit,
+    onAddInputRow: (Long, ActivatorType) -> Unit,
+    onSetPressType: (Long, ActivatorType) -> Unit,
+    onSetLabel: (Long, String) -> Unit,
+    onDelete: (Long) -> Unit,
+    onConfigure: (Long, String) -> Unit,
+) {
+    val baseGroup = viewingSet.presetFor(source)?.group ?: return
+    val validModes = SourceModeCatalog.modesValidFor(source)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ModeCard(
+            source = source, groupGraph = baseGroup, config = config, validModes = validModes,
+            isAdded = false, shift = null, firstRowFocusRequester = firstRowFocusRequester,
+            onSetBindingGroupMode = onSetBindingGroupMode, onOpenModeSettings = onOpenModeSettings,
+            onRemoveModeShift = onRemoveModeShift, onSetModeShiftTrigger = onSetModeShiftTrigger,
+            onEditCommand = onEditCommand, onAddInputRow = onAddInputRow, onSetPressType = onSetPressType,
+            onSetLabel = onSetLabel, onDelete = onDelete, onConfigure = onConfigure,
+        )
+        viewingSet.modeShifts.filter { it.shift.ownerSource == source }.forEach { shift ->
+            ModeCard(
+                source = source, groupGraph = shift.group, config = config, validModes = validModes,
+                isAdded = true, shift = shift, firstRowFocusRequester = null,
+                onSetBindingGroupMode = onSetBindingGroupMode, onOpenModeSettings = onOpenModeSettings,
+                onRemoveModeShift = onRemoveModeShift, onSetModeShiftTrigger = onSetModeShiftTrigger,
+                onEditCommand = onEditCommand, onAddInputRow = onAddInputRow, onSetPressType = onSetPressType,
+                onSetLabel = onSetLabel, onDelete = onDelete, onConfigure = onConfigure,
+            )
+        }
+        if (source in RemapSections.MODE_SHIFT_OWNERS) {
+            DashedAddButton(text = "Add additional input mode", onClick = { onAddModeShift(source) })
+        }
+    }
+}
+
+/**
+ * The "Other buttons" Card (bumpers + Start/Select). No mode dropdown — each button has a passthrough
+ * toggle ((Device default) ↔ intercept); when intercepting, its input rows + "Add additional input".
+ */
+@Composable
+private fun OtherButtonsCard(
+    sources: List<InputSource>,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph,
+    config: ControllerConfig?,
+    onSetBindingGroupMode: (Long, BindingMode) -> Unit,
+    onEditCommand: (Long, BindingOutput, String) -> Unit,
+    onAddInputRow: (Long, ActivatorType) -> Unit,
+    onSetPressType: (Long, ActivatorType) -> Unit,
+    onSetLabel: (Long, String) -> Unit,
+    onDelete: (Long) -> Unit,
+    onConfigure: (Long, String) -> Unit,
+) {
+    // OutlinedCard — outlined variant grouping the single-button "other" inputs.
+    androidx.compose.material3.OutlinedCard {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            sources.forEachIndexed { index, source ->
+                val groupGraph = viewingSet.presetFor(source)?.group ?: return@forEachIndexed
+                val group = groupGraph.group
+                val intercept = group.mode == BindingMode.SINGLE_BUTTON
+                if (index > 0) HorizontalDivider()
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.mapo.ui.glyph.InputGlyphs.SubInputGlyph(source, "click")
+                    Column(Modifier.weight(1f)) {
+                        Text(otherButtonName(source), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            text = if (intercept) "Intercepted by Mapo" else "Passes through to the system",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = intercept,
+                        onCheckedChange = { on -> onSetBindingGroupMode(group.id, if (on) BindingMode.SINGLE_BUTTON else BindingMode.DEVICE_DEFAULT) },
+                    )
+                }
+                if (intercept) {
+                    SubInputGroup(
+                        source = source,
+                        subInputKey = "click",
+                        subInputLabel = otherButtonName(source),
+                        groupInput = groupGraph.inputByKey("click"),
+                        config = config,
+                        isLastGroup = true,
+                        onEditCommand = onEditCommand,
+                        onAddInputRow = onAddInputRow,
+                        onSetPressType = onSetPressType,
+                        onSetLabel = onSetLabel,
+                        onDelete = onDelete,
+                        onConfigure = onConfigure,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Phase 6 base-set detail content: a scroll of per-source mode Cards + the Other-buttons card. */
+@Composable
+private fun BaseModeContent(
+    sectionId: String,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    config: ControllerConfig?,
+    firstRowFocusRequester: FocusRequester,
+    onSetBindingGroupMode: (Long, BindingMode) -> Unit,
+    onOpenModeSettings: (Long, InputSource) -> Unit,
+    onAddModeShift: (InputSource) -> Unit,
+    onRemoveModeShift: (Long) -> Unit,
+    onSetModeShiftTrigger: (Long, InputSource?, String?) -> Unit,
+    onEditCommand: (Long, BindingOutput, String) -> Unit,
+    onAddInputRow: (Long, ActivatorType) -> Unit,
+    onSetPressType: (Long, ActivatorType) -> Unit,
+    onSetLabel: (Long, String) -> Unit,
+    onDelete: (Long) -> Unit,
+    onConfigure: (Long, String) -> Unit,
+) {
+    if (viewingSet == null) {
+        DetailPlaceholder(RemapSections.UNIMPLEMENTED_SECTION_PLACEHOLDER)
+        return
+    }
+    val sources = RemapSections.sectionSources(sectionId)
+    val modeSources = sources.filter { it !in RemapSections.OTHER_BUTTON_SOURCES }
+    val otherButtons = sources.filter { it in RemapSections.OTHER_BUTTON_SOURCES }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        modeSources.forEachIndexed { index, source ->
+            SourceModeBlock(
+                source = source,
+                viewingSet = viewingSet,
+                config = config,
+                firstRowFocusRequester = if (index == 0) firstRowFocusRequester else null,
+                onSetBindingGroupMode = onSetBindingGroupMode,
+                onOpenModeSettings = onOpenModeSettings,
+                onAddModeShift = onAddModeShift,
+                onRemoveModeShift = onRemoveModeShift,
+                onSetModeShiftTrigger = onSetModeShiftTrigger,
+                onEditCommand = onEditCommand,
+                onAddInputRow = onAddInputRow,
+                onSetPressType = onSetPressType,
+                onSetLabel = onSetLabel,
+                onDelete = onDelete,
+                onConfigure = onConfigure,
+            )
+        }
+        if (otherButtons.isNotEmpty()) {
+            OtherButtonsCard(
+                sources = otherButtons,
+                viewingSet = viewingSet,
+                config = config,
+                onSetBindingGroupMode = onSetBindingGroupMode,
+                onEditCommand = onEditCommand,
+                onAddInputRow = onAddInputRow,
+                onSetPressType = onSetPressType,
+                onSetLabel = onSetLabel,
+                onDelete = onDelete,
+                onConfigure = onConfigure,
+            )
+        }
+    }
+}
+
 @Composable
 private fun SubheaderRow(
     item: RemapPaneItem.Subheader,
@@ -761,64 +1563,59 @@ private fun SubheaderRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
     ) {
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // Section header. titleSmall is the M3 section-header role; M3 has no dedicated Header
+        // component, so a styled Text + leading source glyph is the conventional treatment.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(
+                com.mapo.ui.glyph.InputGlyphs.sourceGlyph(item.inputSource),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
         val source = item.inputSource
         if (source != null && viewingSet != null) {
-            // Phase 6 Brick 1: real mode dropdown. Resolves the effective mode from
-            // (a) the viewing layer's override, falling back to (b) the base set.
-            // Layer-mode-override editing isn't exposed yet — the picker is read-only
-            // when a layer is being viewed and the source has no layer override; the
-            // user changes mode by switching back to the base set's view.
+            // Resolve the effective mode from (a) the viewing layer's override, falling back to
+            // (b) the base set. Layer-mode-override editing isn't exposed yet — the dropdown is
+            // read-only when a layer is being viewed and the source has no layer override.
             val setBindingGroup = viewingSet.presetFor(source)?.group?.group
             val layerBindingGroup = viewingLayer?.presetFor(source)?.group?.group
             val effectiveGroup = layerBindingGroup ?: setBindingGroup
             val validModes = SourceModeCatalog.modesValidFor(source)
             if (effectiveGroup != null && validModes.isNotEmpty()) {
-                Spacer(Modifier.height(4.dp))
-                // Mode picker + settings cog + (optionally) "+ Mode Shift" side by side.
+                Spacer(Modifier.height(8.dp))
                 val pickerEnabled = viewingLayer == null && validModes.size > 1
-                // Cog navigates to the full-screen settings editor for (source, mode).
-                // Base-set view only for now — layer-override settings editing is a
-                // later slice (mirrors the mode picker being base-only).
+                // Cog opens the settings editor for (source, mode). Base-set view only for now.
                 val showCog = viewingLayer == null &&
                     SourceModeSettingsSchema.hasSettings(source, effectiveGroup.mode)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ModePicker(
+                    InputModeDropdown(
                         source = source,
                         currentMode = effectiveGroup.mode,
                         validModes = validModes,
                         enabled = pickerEnabled,
                         onPick = { mode -> onSetBindingGroupMode(effectiveGroup.id, mode) },
+                        modifier = Modifier.weight(1f),
                     )
                     if (showCog) {
-                        Spacer(Modifier.width(4.dp))
-                        IconButton(
-                            onClick = { onOpenModeSettings(effectiveGroup.id, source) },
-                            modifier = Modifier.size(IconButtonDefaults.smallContainerSize()),
-                        ) {
-                            Icon(
-                                Icons.Filled.Settings,
-                                contentDescription = "Mode settings",
-                                modifier = Modifier.size(IconButtonDefaults.smallIconSize),
-                            )
+                        IconButton(onClick = { onOpenModeSettings(effectiveGroup.id, source) }) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Mode settings")
                         }
                     }
+                    // "Add mode" (replaces "+ Mode Shift"): adds another mode instance for this
+                    // source. Generalized across all mode-capable sources in a later phase.
                     if (source in RemapSections.MODE_SHIFT_OWNERS) {
-                        Spacer(Modifier.width(8.dp))
                         TextButton(onClick = { onAddModeShift(source) }) {
-                            Icon(
-                                Icons.Default.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Mode Shift", style = MaterialTheme.typography.labelLarge)
+                            Text("Add mode", style = MaterialTheme.typography.labelLarge)
                         }
                     }
                 }
@@ -827,69 +1624,59 @@ private fun SubheaderRow(
     }
 }
 
+/**
+ * The "Input mode" dropdown — a compact M3 outlined-label field ([CompactDropdownField]) whose
+ * field + menu rows carry shared mode glyphs ([InputGlyphs.modeIcon]). Replaces the old home-spun
+ * pill picker. Mode names are source-aware (`displayNameFor`).
+ */
 @Composable
-private fun ModePicker(
+private fun InputModeDropdown(
     source: InputSource,
     currentMode: BindingMode,
     validModes: List<BindingMode>,
     enabled: Boolean,
     onPick: (BindingMode) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        Surface(
-            shape = MaterialTheme.shapes.small,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            modifier = Modifier
-                .alpha(if (enabled) 1.0f else 0.5f)
-                .clickable(enabled = enabled) { expanded = true },
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    // Phase 7 Brick A: source-aware label — same BindingMode reads
-                    // differently per source (e.g. SINGLE_BUTTON on a trigger source
-                    // is "Trigger (Digital)", on a bumper it's "Single Button").
-                    text = "Mode: ${currentMode.displayNameFor(source)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    imageVector = Icons.Filled.ArrowDropDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
+    com.mapo.ui.compact.CompactDropdownField(
+        label = "Input mode",
+        selectedText = currentMode.displayNameFor(source),
+        enabled = enabled,
+        modifier = modifier,
+        // surface — the detail pane plane the field sits on (so the notch masks the right color).
+        labelBackground = MaterialTheme.colorScheme.surface,
+        selectedLeadingIcon = {
+            Icon(
+                com.mapo.ui.glyph.InputGlyphs.modeIcon(currentMode),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        menuContent = { dismiss ->
             validModes.forEach { mode ->
-                DropdownMenuItem(
-                    text = { Text(mode.displayNameFor(source)) },
-                    onClick = {
-                        expanded = false
-                        if (mode != currentMode) onPick(mode)
-                    },
+                com.mapo.ui.compact.CompactDropdownMenuItem(
+                    text = mode.displayNameFor(source),
+                    leadingIcon = { Icon(com.mapo.ui.glyph.InputGlyphs.modeIcon(mode), contentDescription = null) },
+                    trailingIcon = if (mode == currentMode) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.padding(start = 8.dp)) }
+                    } else null,
+                    onClick = { dismiss(); if (mode != currentMode) onPick(mode) },
                 )
             }
-        }
-    }
+        },
+    )
 }
 
 /**
- * Phase 7 Brick B.6: header row for a mode-shift section. Renders the source's
- * display name with "(Mode Shift)" suffix, the shift's mode picker, a settings
- * cog (opens [ModeShiftSettingsSheet]), and a remove button.
+ * An **added mode** block (formerly the "mode shift" header). Visually a sibling of the base mode
+ * block ([SubheaderRow]): an "Added mode" overline, the same [InputModeDropdown] picking the added
+ * mode's behavior, a ⚙ settings button (folds in both the activation trigger and the mode's own
+ * settings — see [ModeShiftSettingsSheet]), and a 🗑 Delete-mode button. A trigger summary line
+ * shows how the added mode activates.
  *
- * Resolves the shift's [SourceModeShiftGraph] from the viewing context. If the
- * shift can't be found (e.g. just deleted), the row renders nothing — its
- * absence is the deletion signal to the user.
+ * Resolves the backing [SourceModeShiftGraph] from the viewing context; renders nothing if it's
+ * gone (e.g. just deleted) — its absence is the deletion signal.
  */
 @Composable
 private fun ModeShiftHeaderRow(
@@ -899,31 +1686,46 @@ private fun ModeShiftHeaderRow(
     onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
     onRemoveModeShift: (modeShiftId: Long) -> Unit,
     onSetModeShiftTrigger: (modeShiftId: Long, triggerSource: InputSource?, triggerSubInput: String?) -> Unit,
+    onOpenModeSettings: (bindingGroupId: Long, source: InputSource) -> Unit,
 ) {
     val shifts = viewingLayer?.modeShifts ?: viewingSet?.modeShifts ?: return
     val shift = shifts.firstOrNull { it.shift.id == item.modeShiftId } ?: return
     var showSettings by remember { mutableStateOf(false) }
+    val source = item.ownerSource
+    val mode = shift.group.group.mode
+    val validModes = SourceModeCatalog.modesValidFor(source)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
     ) {
+        // Overline marking this as an additional mode for the same input.
+        Text(
+            text = "Added mode",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "${item.ownerSource.displayName()} (Mode Shift)",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
+            InputModeDropdown(
+                source = source,
+                currentMode = mode,
+                validModes = validModes,
+                enabled = validModes.size > 1,
+                onPick = { picked -> onSetBindingGroupMode(shift.group.group.id, picked) },
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { showSettings = true }) {
-                Icon(Icons.Default.Settings, contentDescription = "Mode shift settings")
+                Icon(Icons.Filled.Settings, contentDescription = "Mode settings")
             }
+            // Delete mode — only on added modes (the base mode block has no delete).
             IconButton(onClick = { onRemoveModeShift(item.modeShiftId) }) {
-                Icon(Icons.Default.Delete, contentDescription = "Remove mode shift")
+                Icon(Icons.Filled.Delete, contentDescription = "Delete mode")
             }
         }
-        // Trigger summary
+        Spacer(Modifier.height(4.dp))
+        // How this added mode activates.
         val triggerLabel = remember(shift.shift.triggerSource, shift.shift.triggerSubInput) {
             val src = shift.shift.triggerSource
             val sub = shift.shift.triggerSubInput
@@ -931,36 +1733,29 @@ private fun ModeShiftHeaderRow(
                 val match = RemapSections.TRIGGER_INPUT_CATALOG.firstOrNull {
                     it.source == src && it.subInput == sub
                 }
-                match?.let { "Triggered by ${it.label}" } ?: "Triggered by ${src.displayName()} / $sub"
+                match?.let { "Active while holding ${it.label}" } ?: "Active while holding ${src.displayName()} / $sub"
             } else {
-                "Trigger unassigned — tap settings to pick"
+                "No activation button — tap settings to assign one"
             }
         }
         Text(
             text = triggerLabel,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = if (shift.shift.triggerSource == null) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(4.dp))
-        val validModes = SourceModeCatalog.modesValidFor(item.ownerSource)
-        if (validModes.isNotEmpty()) {
-            ModePicker(
-                source = item.ownerSource,
-                currentMode = shift.group.group.mode,
-                validModes = validModes,
-                enabled = validModes.size > 1,
-                onPick = { mode -> onSetBindingGroupMode(shift.group.group.id, mode) },
-            )
-        }
     }
 
     if (showSettings) {
         ModeShiftSettingsSheet(
             modeShiftId = item.modeShiftId,
+            modeBindingGroupId = shift.group.group.id,
+            ownerSource = source,
+            mode = mode,
             currentTriggerSource = shift.shift.triggerSource,
             currentTriggerSubInput = shift.shift.triggerSubInput,
             onSetTrigger = onSetModeShiftTrigger,
+            onOpenModeSettings = onOpenModeSettings,
             onDismiss = { showSettings = false },
         )
     }
@@ -1013,18 +1808,13 @@ private fun ModeShiftBindingRowItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = item.label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = item.ownerSource.displayName() + " (Mode Shift) · " + item.groupInputKey,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        com.mapo.ui.glyph.InputGlyphs.SubInputGlyph(item.ownerSource, item.groupInputKey)
+        Text(
+            text = item.label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
         Column(horizontalAlignment = Alignment.End) {
             Text(
                 text = output.displayLabel(config),
@@ -1055,9 +1845,13 @@ private fun ModeShiftBindingRowItem(
 @Composable
 private fun ModeShiftSettingsSheet(
     modeShiftId: Long,
+    modeBindingGroupId: Long,
+    ownerSource: InputSource,
+    mode: BindingMode,
     currentTriggerSource: InputSource?,
     currentTriggerSubInput: String?,
     onSetTrigger: (modeShiftId: Long, triggerSource: InputSource?, triggerSubInput: String?) -> Unit,
+    onOpenModeSettings: (bindingGroupId: Long, source: InputSource) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1066,34 +1860,40 @@ private fun ModeShiftSettingsSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             Text(
-                text = "Mode shift settings",
+                text = "Mode settings",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
             HorizontalDivider()
+            // Activation button — what the user holds to make this added mode active.
             ListItem(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { pickingTrigger = true },
-                headlineContent = { Text("Trigger input", style = MaterialTheme.typography.bodyLarge) },
+                headlineContent = { Text("Activation button", style = MaterialTheme.typography.bodyLarge) },
                 supportingContent = {
                     val label = if (currentTriggerSource != null && currentTriggerSubInput != null) {
                         val match = RemapSections.TRIGGER_INPUT_CATALOG.firstOrNull {
                             it.source == currentTriggerSource && it.subInput == currentTriggerSubInput
                         }
                         match?.label ?: "${currentTriggerSource.displayName()} / $currentTriggerSubInput"
-                    } else "Not assigned"
+                    } else "Not assigned — the mode won't activate until you pick one"
                     Text(label, style = MaterialTheme.typography.bodyMedium)
-                },
-                trailingContent = {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = null,
-                        modifier = Modifier.size(0.dp),  // hidden — disclosure conveys tap
-                    )
                 },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             )
+            // The added mode's own behavior settings (deadzones, curves…), when the mode has any.
+            if (SourceModeSettingsSchema.hasSettings(ownerSource, mode)) {
+                HorizontalDivider()
+                ListItem(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onDismiss(); onOpenModeSettings(modeBindingGroupId, ownerSource) },
+                    headlineContent = { Text("${mode.displayNameFor(ownerSource)} settings", style = MaterialTheme.typography.bodyLarge) },
+                    supportingContent = { Text("Deadzones, curves, and other tuning for this mode.", style = MaterialTheme.typography.bodyMedium) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
             if (currentTriggerSource != null) {
                 HorizontalDivider()
                 ListItem(
@@ -1183,6 +1983,85 @@ private fun TriggerInputPickerSheet(
     }
 }
 
+/**
+ * A row in the "Other buttons" section (bumpers + Start/Select) — single-button switch sources
+ * with no behavioral modes. Instead of a mode dropdown, a **passthrough toggle** flips the source
+ * between `(Device default)` (passes through to the OS — Switch off) and `SINGLE_BUTTON` (Mapo
+ * intercepts — Switch on). When intercepting, the inline activator/command editor appears; leaving
+ * a command Unbound under intercept silences the button (the "None" case). Base set only.
+ */
+@Composable
+private fun OtherButtonRow(
+    item: RemapPaneItem.BindingRow,
+    viewingSet: com.mapo.data.model.steam.ActionSetGraph?,
+    config: ControllerConfig?,
+    modifier: Modifier = Modifier,
+    onSetBindingGroupMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
+    onEditCommand: (bindingId: Long, current: BindingOutput, title: String) -> Unit,
+    onAddActivator: (groupInputId: Long, type: ActivatorType) -> Unit,
+    onRemoveActivator: (activatorId: Long) -> Unit,
+    onSetActivatorType: (activatorId: Long, type: ActivatorType) -> Unit,
+    onOpenActivatorSettings: (activatorId: Long, label: String) -> Unit,
+    onAddCommand: (activatorId: Long) -> Unit,
+    onRemoveCommand: (bindingId: Long) -> Unit,
+) {
+    val preset = viewingSet?.presetFor(item.inputSource)?.group ?: return
+    val group = preset.group
+    val groupInput = preset.inputByKey(item.groupInputKey)
+    val intercept = group.mode == BindingMode.SINGLE_BUTTON
+    val activators = groupInput?.activators.orEmpty().sortedWith(activatorRenderOrder)
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        // Settings-row treatment: label + passthrough state + trailing Switch.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            com.mapo.ui.glyph.InputGlyphs.SubInputGlyph(item.inputSource, item.groupInputKey)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(item.label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    text = if (intercept) "Intercepted by Mapo" else "Passes through to the system",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = intercept,
+                onCheckedChange = { on ->
+                    onSetBindingGroupMode(group.id, if (on) BindingMode.SINGLE_BUTTON else BindingMode.DEVICE_DEFAULT)
+                },
+            )
+        }
+        if (intercept) {
+            activators.forEachIndexed { idx, graph ->
+                val title = "${item.label} · ${graph.activator.type.displayLabel()}"
+                ActivatorRow(
+                    graph = graph,
+                    config = config,
+                    onTapCommand = { bindingId, current -> onEditCommand(bindingId, current, title) },
+                    onChangeType = { newType -> onSetActivatorType(graph.activator.id, newType) },
+                    onOpenSettings = { onOpenActivatorSettings(graph.activator.id, title) },
+                    onRemoveActivator = { onRemoveActivator(graph.activator.id) },
+                    onAddCommand = { onAddCommand(graph.activator.id) },
+                    onRemoveCommand = onRemoveCommand,
+                    canRemoveActivator = activators.size > 1,
+                )
+                if (idx < activators.size - 1) {
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            }
+            groupInput?.let { gi ->
+                AddActivatorButton(onAdd = { type -> onAddActivator(gi.input.id, type) })
+            }
+        }
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+    }
+}
+
 @Composable
 private fun BindingRowItem(
     item: RemapPaneItem.BindingRow,
@@ -1190,14 +2069,19 @@ private fun BindingRowItem(
     viewingLayer: com.mapo.data.model.steam.ActionLayerGraph?,
     config: ControllerConfig?,
     modifier: Modifier = Modifier,
+    collapsed: Boolean,
+    onToggleCollapsed: () -> Unit,
+    onEditCommand: (bindingId: Long, current: BindingOutput, title: String) -> Unit,
+    onAddActivator: (groupInputId: Long, type: ActivatorType) -> Unit,
+    onRemoveActivator: (activatorId: Long) -> Unit,
+    onSetActivatorType: (activatorId: Long, type: ActivatorType) -> Unit,
+    onOpenActivatorSettings: (activatorId: Long, label: String) -> Unit,
+    onAddCommand: (activatorId: Long) -> Unit,
+    onRemoveCommand: (bindingId: Long) -> Unit,
     onOpenInputEditor: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String, label: String) -> Unit,
     onClearOverride: (inputSource: com.mapo.data.model.steam.InputSource, groupInputKey: String) -> Unit,
 ) {
-    // Brick 5.5.c: overlay mode resolution.
-    //  - Layer's groupInput (if any) wins → "override" visual (primary color, trailing
-    //    [⋮] menu offering Clear Override).
-    //  - Else fall through to the base set's groupInput → in overlay mode this renders
-    //    as ghost text (alpha 0.5); in base mode it renders normally.
+    // Resolve the effective group input: layer override wins, else the base set's row.
     val layerGroupInput =
         viewingLayer?.presetFor(item.inputSource)?.group?.inputByKey(item.groupInputKey)
     val baseGroupInput =
@@ -1211,67 +2095,112 @@ private fun BindingRowItem(
         ?: activators.firstOrNull()
     val output = primary?.primaryOutput ?: BindingOutput.Unbound
     val extraCount = (activators.size - 1).coerceAtLeast(0)
-    // In overlay mode the row is always tappable (a tap on a ghost row materializes the
-    // override). In base mode we still gate on `baseGroupInput != null` so we don't try
-    // to edit a non-existent row.
-    val ready = viewingLayer != null || baseGroupInput != null
-    val contentAlpha = if (isGhost) 0.5f else 1f
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(enabled = ready) {
-                onOpenInputEditor(item.inputSource, item.groupInputKey, item.label)
-            }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .alpha(contentAlpha),
+    // Layer (overlay) mode keeps the tap-to-navigate flow: inline editing of a layer override
+    // would need explicit materialization (a ghost row has no real group input to edit yet), so
+    // Phase 2 scopes inline editing to the base set. Ghost = base binding shown dimmed.
+    if (viewingLayer != null) {
+        val contentAlpha = if (isGhost) 0.5f else 1f
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .clickable { onOpenInputEditor(item.inputSource, item.groupInputKey, item.label) }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            com.mapo.ui.glyph.InputGlyphs.SubInputGlyph(
+                item.inputSource, item.groupInputKey, modifier = Modifier.alpha(contentAlpha),
+            )
             Text(
                 text = item.label,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f).alpha(contentAlpha),
             )
-            // Helper subtext per memory: short, one-line, tutorializing.
-            Text(
-                text = item.inputSource.displayName() + " · " + item.groupInputKey,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Column(
-            horizontalAlignment = Alignment.End,
-            modifier = Modifier.alpha(contentAlpha),
-        ) {
-            Text(
-                text = output.displayLabel(config),
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (output == BindingOutput.Unbound)
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.primary,
-            )
-            if (extraCount > 0) {
+            Column(horizontalAlignment = Alignment.End, modifier = Modifier.alpha(contentAlpha)) {
                 Text(
-                    text = "+$extraCount more",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = output.displayLabel(config),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (output == BindingOutput.Unbound) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.primary,
                 )
+                if (extraCount > 0) {
+                    Text("+$extraCount more", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (hasOverride) {
+                BindingRowOverflowMenu(onClearOverride = { onClearOverride(item.inputSource, item.groupInputKey) })
             }
         }
-        if (hasOverride) {
-            BindingRowOverflowMenu(
-                onClearOverride = {
-                    onClearOverride(item.inputSource, item.groupInputKey)
-                },
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+        return
+    }
+
+    // Base mode: inline, expand-on-tap activator/command editor (default expanded). Collapsed
+    // shows a "<primary command> +N more" summary; the chevron flips the state.
+    val sortedActivators = activators.sortedWith(activatorRenderOrder)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            // `modifier` carries the cross-pane focus requester; it must sit on the focusable
+            // (clickable) header so D-pad Right from the rail lands here.
+            modifier = modifier
+                .fillMaxWidth()
+                .clickable { onToggleCollapsed() }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            com.mapo.ui.glyph.InputGlyphs.SubInputGlyph(item.inputSource, item.groupInputKey)
+            Text(
+                text = item.label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            if (collapsed) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = output.displayLabel(config),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (output == BindingOutput.Unbound) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.primary,
+                    )
+                    if (extraCount > 0) {
+                        Text("+$extraCount more", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Icon(
+                imageVector = if (collapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                contentDescription = if (collapsed) "Expand" else "Collapse",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (!collapsed) {
+            sortedActivators.forEachIndexed { idx, graph ->
+                val title = "${item.label} · ${graph.activator.type.displayLabel()}"
+                ActivatorRow(
+                    graph = graph,
+                    config = config,
+                    onTapCommand = { bindingId, current -> onEditCommand(bindingId, current, title) },
+                    onChangeType = { newType -> onSetActivatorType(graph.activator.id, newType) },
+                    onOpenSettings = { onOpenActivatorSettings(graph.activator.id, title) },
+                    onRemoveActivator = { onRemoveActivator(graph.activator.id) },
+                    onAddCommand = { onAddCommand(graph.activator.id) },
+                    onRemoveCommand = onRemoveCommand,
+                    canRemoveActivator = sortedActivators.size > 1,
+                )
+                if (idx < sortedActivators.size - 1) {
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            }
+            effectiveGroupInput?.let { gi ->
+                AddActivatorButton(onAdd = { type -> onAddActivator(gi.input.id, type) })
+            }
+        }
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
     }
-    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 }
 
 /**

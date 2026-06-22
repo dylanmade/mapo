@@ -66,7 +66,6 @@ import androidx.compose.material.icons.filled.AlignVerticalBottom
 import androidx.compose.material.icons.filled.AlignVerticalCenter
 import androidx.compose.material.icons.filled.AlignVerticalTop
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.ControlCamera
@@ -87,6 +86,8 @@ import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VerticalDistribute
+import androidx.compose.material.icons.filled.ViewAgenda
+import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.DrawerDefaults
@@ -245,16 +246,18 @@ class OverlayLiveEditController @Inject constructor(
     private var toolbarParams: WindowManager.LayoutParams? = null
     private var configWindow: Pair<View, OverlayLifecycleOwner>? = null
     private var confirmWindow: Pair<View, OverlayLifecycleOwner>? = null
-    // The "Positioner": a separate, grab-anywhere-draggable dpad window for single-pixel nudging of
-    // the selection. Like the toolbar, the whole window is the drag surface (no handle) and its
-    // buttons are hit-tested by the raw-coord filter (no `clickable`) — [posTargets] holds their
-    // window-local bounds + ripple sources, keyed "up"/"down"/"left"/"right"/"close".
+    // The "Positioner": a separate, grab-anywhere-draggable dpad window for nudging the selection.
+    // Like the toolbar, the whole window is the drag surface (no handle) and its icons are hit-tested
+    // by the raw-coord filter (no `clickable`) — the plus-shaped background carries bare icons (no
+    // per-button fill / disabled state); a tap drives a real M3 ripple on that icon via its source.
     private var positioner: Pair<View, OverlayLifecycleOwner>? = null
     private var positionerParams: WindowManager.LayoutParams? = null
     private val positionerOpen = MutableStateFlow(false)
-    // Which control is pressed ("up"/"down"/"left"/"right"/"close"/null) — drives the press highlight.
-    // The diamond is drawn (not laid-out buttons), so the raw-coord filter hit-tests it geometrically.
-    private val positionerPressed = MutableStateFlow<String?>(null)
+    // One stable ripple source per icon zone (keyed up/down/left/right + *_big + close). The raw-coord
+    // filter emits Press/Release/Cancel here; the matching zone attaches it via Modifier.indication.
+    private val positionerSources: Map<String, MutableInteractionSource> =
+        listOf("up", "up_big", "down", "down_big", "left", "left_big", "right", "right_big")
+            .associateWith { MutableInteractionSource() }
     private var nudgeRepeatJob: Job? = null
     // The editor menu's ROOT is always-visible — it IS the toolbar window (a vertical panel with a
     // drag handle top + bottom). Its submenus open as cascading fly-out windows, one per open
@@ -262,10 +265,13 @@ class OverlayLiveEditController @Inject constructor(
     // Outside taps dismiss submenus via each fly-out window's FLAG_WATCH_OUTSIDE_TOUCH (no scrim, so
     // the tap also lands on whatever's underneath — another menu button, a virtual button, etc.).
     private val menuStack = mutableListOf<MenuWindow>()
-    // Editor-local toggles surfaced under Options. "Show grid" has no renderer yet (gap); held
-    // here as an inert flag (like clipboardHasContent) so the switch animates. Grid size likewise
-    // displays the snap grid's division count but isn't editable yet.
-    private val showGrid = MutableStateFlow(false)
+    // Which side a submenu cascade opens toward, decided by the FIRST fly-out (right if it fits, else
+    // left) and inherited by deeper levels so they don't stack back over their parents. Reset to null
+    // whenever a fresh root submenu opens.
+    private var menuCascadeSide: MenuSide? = null
+    // Editor-local toggles surfaced under Options. Grid is ON by default; grid size displays the snap
+    // grid's division count but isn't editable yet.
+    private val showGrid = MutableStateFlow(true)
     private val gridDivisions = MutableStateFlow(OverlaySettings.GRID_DIVISIONS)
     // Align submenu's reference (Selection vs Canvas) — gates which align/space buttons are enabled.
     private val alignTo = MutableStateFlow(AlignTarget.Selection)
@@ -830,14 +836,15 @@ class OverlayLiveEditController @Inject constructor(
                     )
                 }
                 .drawBehind {
-                    // Grid guide (behind buttons): [divisions] cells across + down.
+                    // Grid guide (behind buttons): SQUARE cells. [divisions] sets the columns across the
+                    // width; the cell size derives from that, and the rows are however many such squares
+                    // fit the height (so cells stay square on a non-square screen).
                     if (gridOn && divisions > 1) {
-                        val stepX = size.width / divisions
-                        val stepY = size.height / divisions
-                        for (i in 1 until divisions) {
-                            drawLine(gridColor, Offset(i * stepX, 0f), Offset(i * stepX, size.height), 1f)
-                            drawLine(gridColor, Offset(0f, i * stepY), Offset(size.width, i * stepY), 1f)
-                        }
+                        val cell = size.width / divisions
+                        var x = cell
+                        while (x < size.width - 0.5f) { drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), 1f); x += cell }
+                        var y = cell
+                        while (y < size.height - 0.5f) { drawLine(gridColor, Offset(0f, y), Offset(size.width, y), 1f); y += cell }
                     }
                     val s = start ?: return@drawBehind
                     val left = minOf(s.x, current.x); val top = minOf(s.y, current.y)
@@ -912,23 +919,29 @@ class OverlayLiveEditController @Inject constructor(
         positioner?.let { detach(it) }
         positioner = null
         positionerParams = null
-        positionerPressed.value = null
         positionerOpen.value = false
     }
 
     @OptIn(ExperimentalComposeUiApi::class)
     private fun addPositioner() {
         if (positioner != null) return
-        positionerPressed.value = null
         val owner = OverlayLifecycleOwner()
         // ONE raw-coord filter over the whole window (like the toolbar): drag past slop moves the
-        // window; otherwise a press geometrically hit-tests the dpad buttons ([positionerHit]) — a
-        // direction nudges (tap once / hold to repeat), close dismisses. The pressed control highlights
-        // via [positionerPressed]; empty corners (between the arms) and disabled directions just drag.
+        // window; otherwise a press geometrically hit-tests the dpad icons ([positionerHit]) — a
+        // direction nudges (tap once / hold to repeat), close dismisses. The pressed icon shows a real
+        // M3 ripple (Press/Release/Cancel emitted to its [positionerSources] entry). Empty corners
+        // (between the arms) just drag. No disabled state — directions are always live (a nudge with
+        // nothing selected is simply a no-op).
         var startRawX = 0f; var startRawY = 0f; var startX = 0; var startY = 0
         var dragging = false
         var pressedKey: String? = null
+        var press: PressInteraction.Press? = null
         var nudging = false
+        fun settlePress(release: Boolean) {
+            val k = pressedKey; val pr = press ?: return
+            positionerSources[k]?.tryEmit(if (release) PressInteraction.Release(pr) else PressInteraction.Cancel(pr))
+            press = null
+        }
         val onTouch: (MotionEvent) -> Boolean = { ev ->
             val p = positionerParams
             when (ev.actionMasked) {
@@ -936,10 +949,13 @@ class OverlayLiveEditController @Inject constructor(
                     startRawX = ev.rawX; startRawY = ev.rawY; startX = p?.x ?: 0; startY = p?.y ?: 0
                     dragging = false; nudging = false
                     val key = positionerHit(ev.x, ev.y)
-                        ?.takeUnless { it != "close" && selectedIds.value.isEmpty() } // disabled dir → drag
                     pressedKey = key
-                    positionerPressed.value = key
-                    if (key != null && key != "close") {
+                    if (key != null) {
+                        val pr = PressInteraction.Press(positionerPressOffset(key, ev.x, ev.y))
+                        press = pr
+                        positionerSources[key]?.tryEmit(pr) // ripple on the pressed icon
+                    }
+                    if (key != null) {
                         val (dx, dy) = nudgeDelta(key)
                         // Hold → after a delay, begin nudging and repeat (a quick tap fires on UP).
                         nudgeRepeatJob = scope.launch {
@@ -956,7 +972,8 @@ class OverlayLiveEditController @Inject constructor(
                         dragging = true
                         nudgeRepeatJob?.cancel(); nudgeRepeatJob = null
                         if (nudging) { endNudge(); nudging = false }
-                        pressedKey = null; positionerPressed.value = null // a drag → no tap action
+                        settlePress(release = false) // a drag → cancel the ripple, no tap action
+                        pressedKey = null
                     }
                     if (dragging && p != null) {
                         val v = positioner?.first
@@ -971,17 +988,15 @@ class OverlayLiveEditController @Inject constructor(
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     nudgeRepeatJob?.cancel(); nudgeRepeatJob = null
                     val released = ev.actionMasked == MotionEvent.ACTION_UP && !dragging
+                    settlePress(release = released)
                     val key = pressedKey
                     if (released && key != null) {
-                        when {
-                            key == "close" -> removePositioner()
-                            !nudging -> { val (dx, dy) = nudgeDelta(key); beginNudge(); stepNudge(dx, dy); endNudge() }
-                            else -> endNudge() // a hold just finished
-                        }
+                        if (!nudging) { val (dx, dy) = nudgeDelta(key); beginNudge(); stepNudge(dx, dy); endNudge() }
+                        else endNudge() // a hold just finished
                     } else if (nudging) {
                         endNudge()
                     }
-                    pressedKey = null; positionerPressed.value = null; nudging = false; dragging = false
+                    pressedKey = null; nudging = false; dragging = false
                     true
                 }
                 else -> true
@@ -1018,59 +1033,47 @@ class OverlayLiveEditController @Inject constructor(
      * half-side. Both the renderer ([PositionerContent]) and the hit-test ([positionerHit]) derive
      * from this single source so the visible button and its touch region always coincide.
      *
-     * Along each axis out from center: close occupies [0, closeHalf]; then a gap; the SMALL button;
-     * a gap; the LARGE button reaching the edge (±1). Arms are [armHalf] wide (perpendicular).
+     * EVERY zone is a uniform [POS_BTN_HALF_F]-square. Along each axis out from center: the bare center
+     * (no button — drag handle) spans [-bh, bh]; then a gap; the SMALL square; a gap; the LARGE square.
+     * Total half-extent = 5·bh + 2·gap (kept under 1 so the dpad fits the window).
      */
     private fun positionerRects(): List<PosRect> {
-        val ch = POS_CLOSE_HALF_F; val ah = POS_ARM_HALF_F
-        val inner = ch + POS_GAP_F                       // inner edge of the small button
-        val seg = (1f - inner - POS_GAP_F) / 2f          // each button's length along its axis
-        val s0 = inner; val s1 = inner + seg             // small button span
-        val l0 = s1 + POS_GAP_F; val l1 = l0 + seg       // large button span (l1 ≈ 1)
+        val bh = POS_BTN_HALF_F; val g = POS_GAP_F
+        val sNear = bh + g; val sFar = 3f * bh + g            // small square span out from center
+        val lNear = 3f * bh + 2f * g; val lFar = 5f * bh + 2f * g  // large square span
         return listOf(
-            PosRect("close", -ch, -ch, ch, ch),
-            PosRect("up", -ah, -s1, ah, -s0),
-            PosRect("up_big", -ah, -l1, ah, -l0),
-            PosRect("down", -ah, s0, ah, s1),
-            PosRect("down_big", -ah, l0, ah, l1),
-            PosRect("left", -s1, -ah, -s0, ah),
-            PosRect("left_big", -l1, -ah, -l0, ah),
-            PosRect("right", s0, -ah, s1, ah),
-            PosRect("right_big", l0, -ah, l1, ah),
+            PosRect("up", -bh, -sFar, bh, -sNear),
+            PosRect("up_big", -bh, -lFar, bh, -lNear),
+            PosRect("down", -bh, sNear, bh, sFar),
+            PosRect("down_big", -bh, lNear, bh, lFar),
+            PosRect("left", -sFar, -bh, -sNear, bh),
+            PosRect("left_big", -lFar, -bh, -lNear, bh),
+            PosRect("right", sNear, -bh, sFar, bh),
+            PosRect("right_big", lNear, -bh, lFar, bh),
         )
     }
 
     /**
-     * The Positioner: a dpad-shaped panel (menu-colored plus background) carrying nine **M3 filled
-     * buttons** — a small (1px) + large (10px) move button on each arm, plus a stacked **× / "Close"**
-     * in the center. Drawn (not laid-out) so [addPositioner]'s raw-coord filter can hit-test it
-     * geometrically ([positionerHit]) while the whole window stays grab-anywhere draggable. Each
-     * direction nudges per tap and auto-repeats while held; directions take the disabled button look
-     * (and just drag) when nothing is selected. Close is always enabled.
+     * The Positioner: a plus made of two fully-rounded "toolbar" bars (the menu container color, like
+     * the vertical/horizontal toolbars) carrying BARE icons directly on the background — a small (1px)
+     * + large (10px) arrow per arm. The center is empty (a bare drag area — no close button; the
+     * Positioner is dismissed from the Options menu toggle). No per-button fill or disabled state; just
+     * the icons, each with a real M3 ripple on tap (driven from [addPositioner]'s raw-coord filter via
+     * [positionerSources], since the filter consumes touches so children can't use `clickable`). The
+     * whole window stays grab-anywhere draggable; directions nudge per tap and auto-repeat while held.
      */
     @OptIn(ExperimentalComposeUiApi::class)
     @Composable
     private fun PositionerContent(onTouch: (MotionEvent) -> Boolean) {
-        val sel by selectedIds.collectAsStateWithLifecycle()
-        val enabled = sel.isNotEmpty()
-        val pressed by positionerPressed.collectAsStateWithLifecycle()
         // Background = the menu container color (matches the vertical/horizontal toolbars).
         val bgFill = MaterialTheme.colorScheme.surfaceContainerHigh.toArgb()
-        // M3 filled-button roles: primary container / onPrimary content; disabled = onSurface @ 0.12 /
-        // 0.38; pressed = the onPrimary state layer over the container.
-        val btnFill = MaterialTheme.colorScheme.primary.toArgb()
-        val btnDisabledFill = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f).toArgb()
-        val btnPress = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f).toArgb()
-        val onBtn = MaterialTheme.colorScheme.onPrimary
-        val onBtnDisabled = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        val dirTint = if (enabled) onBtn else onBtnDisabled
+        // Icons use the normal menu content color (same as the toolbar rows) — always, no disabled tint.
+        val iconTint = MaterialTheme.colorScheme.onSurface
 
-        // Icon offsets out from center (dp), to the small/large button centers.
+        // Icon offsets out from center (dp), to the small/large zone centers (see positionerRects).
         val halfDp = POSITIONER_DP / 2f
-        val inner = POS_CLOSE_HALF_F + POS_GAP_F
-        val seg = (1f - inner - POS_GAP_F) / 2f
-        val smallOff = ((inner + seg / 2f) * halfDp).dp
-        val largeOff = ((inner + seg + POS_GAP_F + seg / 2f) * halfDp).dp
+        val smallOff = ((2f * POS_BTN_HALF_F + POS_GAP_F) * halfDp).dp
+        val largeOff = ((4f * POS_BTN_HALF_F + 2f * POS_GAP_F) * halfDp).dp
 
         Box(
             Modifier
@@ -1081,11 +1084,12 @@ class OverlayLiveEditController @Inject constructor(
                     val d = size.width / 2f; val cx = d; val cy = d
                     fun rectPx(l: Float, t: Float, r: Float, b: Float) =
                         android.graphics.RectF(cx + l * d, cy + t * d, cx + r * d, cy + b * d)
-                    // Plus-shaped background = vertical bar ∪ horizontal bar (overlapping round rects).
-                    val bgCorner = POS_BG_CORNER_DP.dp.toPx()
+                    // Plus = a vertical pill ∪ a horizontal pill (each fully rounded: corner = bar
+                    // half-width → semicircular prong-end caps). Single fill = union (no inner seams).
+                    val barHalf = POS_BG_HALF_F * d
                     val plus = android.graphics.Path().apply {
-                        addRoundRect(rectPx(-POS_BG_HALF_F, -1f, POS_BG_HALF_F, 1f), bgCorner, bgCorner, android.graphics.Path.Direction.CW)
-                        addRoundRect(rectPx(-1f, -POS_BG_HALF_F, 1f, POS_BG_HALF_F), bgCorner, bgCorner, android.graphics.Path.Direction.CW)
+                        addRoundRect(rectPx(-POS_BG_HALF_F, -1f, POS_BG_HALF_F, 1f), barHalf, barHalf, android.graphics.Path.Direction.CW)
+                        addRoundRect(rectPx(-1f, -POS_BG_HALF_F, 1f, POS_BG_HALF_F), barHalf, barHalf, android.graphics.Path.Direction.CW)
                     }
                     drawIntoCanvas { canvas ->
                         val nc = canvas.nativeCanvas
@@ -1096,55 +1100,58 @@ class OverlayLiveEditController @Inject constructor(
                         }
                         nc.save(); nc.translate(0f, 2.dp.toPx()); nc.drawPath(plus, shadow); nc.restore()
                         nc.drawPath(plus, android.graphics.Paint().apply { color = bgFill; isAntiAlias = true })
-                        val fillPaint = android.graphics.Paint().apply { isAntiAlias = true }
-                        val pressPaint = android.graphics.Paint().apply { color = btnPress; isAntiAlias = true }
-                        val btnCornerPx = POS_BTN_CORNER_DP.dp.toPx()
-                        positionerRects().forEach { pr ->
-                            val rf = rectPx(pr.l, pr.t, pr.r, pr.b)
-                            // Squarer M3-button corner: a fixed radius, clamped so it never fully rounds.
-                            val rad = minOf(btnCornerPx, minOf(rf.width(), rf.height()) / 2f)
-                            val btnEnabled = pr.key == "close" || enabled
-                            fillPaint.color = if (btnEnabled) btnFill else btnDisabledFill
-                            nc.drawRoundRect(rf, rad, rad, fillPaint)
-                            if (pr.key == pressed) nc.drawRoundRect(rf, rad, rad, pressPaint)
-                        }
                     }
                 },
             contentAlignment = Alignment.Center,
         ) {
-            // Single filled triangles on the small buttons; double (fast-forward style) on the large.
-            PosIcon(offsetY = -smallOff, icon = Icons.Default.PlayArrow, rotation = -90f, sizeDp = POS_SMALL_ICON_DP, tint = dirTint, desc = "Up 1")
-            PosIcon(offsetY = smallOff, icon = Icons.Default.PlayArrow, rotation = 90f, sizeDp = POS_SMALL_ICON_DP, tint = dirTint, desc = "Down 1")
-            PosIcon(offsetX = -smallOff, icon = Icons.Default.PlayArrow, rotation = 180f, sizeDp = POS_SMALL_ICON_DP, tint = dirTint, desc = "Left 1")
-            PosIcon(offsetX = smallOff, icon = Icons.Default.PlayArrow, rotation = 0f, sizeDp = POS_SMALL_ICON_DP, tint = dirTint, desc = "Right 1")
-            PosIcon(offsetY = -largeOff, icon = Icons.Default.FastForward, rotation = -90f, sizeDp = POS_LARGE_ICON_DP, tint = dirTint, desc = "Up 10")
-            PosIcon(offsetY = largeOff, icon = Icons.Default.FastForward, rotation = 90f, sizeDp = POS_LARGE_ICON_DP, tint = dirTint, desc = "Down 10")
-            PosIcon(offsetX = -largeOff, icon = Icons.Default.FastRewind, rotation = 0f, sizeDp = POS_LARGE_ICON_DP, tint = dirTint, desc = "Left 10")
-            PosIcon(offsetX = largeOff, icon = Icons.Default.FastForward, rotation = 0f, sizeDp = POS_LARGE_ICON_DP, tint = dirTint, desc = "Right 10")
-            Column(
-                modifier = Modifier.align(Alignment.Center),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = onBtn, modifier = Modifier.requiredSize(20.dp))
-                Text("Close", style = MaterialTheme.typography.labelSmall, color = onBtn)
-            }
+            // Single filled triangles on the small zones; double (fast-forward style) on the large.
+            PosZone("up", offsetY = -smallOff) { PosIcon(Icons.Default.PlayArrow, -90f, POS_SMALL_ICON_DP, iconTint, "Up 1") }
+            PosZone("down", offsetY = smallOff) { PosIcon(Icons.Default.PlayArrow, 90f, POS_SMALL_ICON_DP, iconTint, "Down 1") }
+            PosZone("left", offsetX = -smallOff) { PosIcon(Icons.Default.PlayArrow, 180f, POS_SMALL_ICON_DP, iconTint, "Left 1") }
+            PosZone("right", offsetX = smallOff) { PosIcon(Icons.Default.PlayArrow, 0f, POS_SMALL_ICON_DP, iconTint, "Right 1") }
+            PosZone("up_big", offsetY = -largeOff) { PosIcon(Icons.Default.FastForward, -90f, POS_LARGE_ICON_DP, iconTint, "Up 10") }
+            PosZone("down_big", offsetY = largeOff) { PosIcon(Icons.Default.FastForward, 90f, POS_LARGE_ICON_DP, iconTint, "Down 10") }
+            PosZone("left_big", offsetX = -largeOff) { PosIcon(Icons.Default.FastRewind, 0f, POS_LARGE_ICON_DP, iconTint, "Left 10") }
+            PosZone("right_big", offsetX = largeOff) { PosIcon(Icons.Default.FastForward, 0f, POS_LARGE_ICON_DP, iconTint, "Right 10") }
         }
     }
 
+    /** One bare icon "hot zone" centered at ([offsetX], [offsetY]) from the dpad center, sized to its
+     *  [positionerRects] square, with a circular M3 ripple driven by [key]'s shared source (mirrors the
+     *  toolbar's [RoutedIcon]: clip to a circle + bounded ripple, router-driven since there's no
+     *  `clickable`). */
     @Composable
-    private fun BoxScope.PosIcon(
+    private fun BoxScope.PosZone(
+        key: String,
         offsetX: Dp = 0.dp,
         offsetY: Dp = 0.dp,
-        icon: ImageVector,
-        rotation: Float,
-        sizeDp: Int,
-        tint: androidx.compose.ui.graphics.Color,
-        desc: String,
+        content: @Composable () -> Unit,
     ) {
-        Icon(
-            icon, contentDescription = desc, tint = tint,
-            modifier = Modifier.align(Alignment.Center).offset(offsetX, offsetY).rotate(rotation).requiredSize(sizeDp.dp),
+        val zoneDp = (POS_BTN_HALF_F * POSITIONER_DP).dp // = 2·half · (DP/2)
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .offset(offsetX, offsetY)
+                .requiredSize(zoneDp)
+                .clip(CircleShape)
+                .indication(positionerSources.getValue(key), ripple(bounded = true)),
+            contentAlignment = Alignment.Center,
+            content = { content() },
         )
+    }
+
+    @Composable
+    private fun PosIcon(icon: ImageVector, rotation: Float, sizeDp: Int, tint: androidx.compose.ui.graphics.Color, desc: String) {
+        Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.rotate(rotation).requiredSize(sizeDp.dp))
+    }
+
+    /** The press position relative to [key]'s zone (window-local px) — the ripple's origin. */
+    private fun positionerPressOffset(key: String, xF: Float, yF: Float): Offset {
+        val density = context.resources.displayMetrics.density
+        val d = POSITIONER_DP * density / 2f
+        val c = MENU_SHADOW_MARGIN * density + d
+        val rect = positionerRects().first { it.key == key }
+        return Offset(xF - (c + rect.l * d), yF - (c + rect.t * d))
     }
 
     /** Geometric hit-test at window-local ([xF], [yF]) → button key, or null (empty space → drag). */
@@ -1719,6 +1726,9 @@ class OverlayLiveEditController @Inject constructor(
         val sourceKey: String,
     )
 
+    /** Which way a horizontally-expanding submenu cascade opens (see [menuCascadeSide], [placeMenuX]). */
+    private enum class MenuSide { LEFT, RIGHT }
+
     /**
      * Routes a tap (window-local x/y) to the row/icon under it for the interop-dragged core menu.
      * Rows register their current bounds + action keyed by label (unique per window) as they lay out.
@@ -1825,10 +1835,12 @@ class OverlayLiveEditController @Inject constructor(
     ) = runOnMain {
         truncateMenusTo(parentDepth)
         val (px, pw, py) = parentMenuGeometry(parentDepth) ?: return@runOnMain
+        // Deeper levels open to the same side the cascade already chose (inherited via [menuCascadeSide]),
+        // so they don't fold back over their parents. Fly-out parents carry no shadow margin.
         pushMenuLevel(
             depth = parentDepth + 1,
             sourceKey = sourceKey,
-            anchorLeft = px + pw,
+            sideParent = px to (px + pw),
             anchorTop = py + rowTopInParent,
             builder = builder,
         )
@@ -1836,8 +1848,8 @@ class OverlayLiveEditController @Inject constructor(
 
     /**
      * Open/close (toggle) a submenu of a ROOT item, anchored by its bounds in the toolbar window.
-     * Orientation-aware (see [rootSubmenuAnchor]): vertical menu → fly-out to the right; horizontal
-     * menu → fly-out below or above depending on which screen half the menu sits in.
+     * Orientation-aware: vertical menu → fly-out to a side (right if it fits, else left, via
+     * [placeMenuX]); horizontal menu → fly-out below or above depending on which screen half it sits in.
      */
     private fun toggleRootSubmenu(
         sourceKey: String,
@@ -1850,35 +1862,47 @@ class OverlayLiveEditController @Inject constructor(
             return@runOnMain
         }
         truncateMenusTo(0)
+        menuCascadeSide = null // a fresh cascade decides its side anew
         val tp = toolbarParams ?: return@runOnMain
         val tv = toolbar?.first ?: return@runOnMain
-        val (left, top, growUp) = rootSubmenuAnchor(tp, tv.width, tv.height, itemBounds)
-        pushMenuLevel(depth = 1, sourceKey = sourceKey, anchorLeft = left, anchorTop = top, growUp = growUp, builder = builder)
+        // The toolbar window carries a transparent [MENU_SHADOW_MARGIN] inset for its shadow, so the
+        // VISIBLE menu edges are inset by [margin]; anchor to those so the fly-out sits flush.
+        val margin = (MENU_SHADOW_MARGIN * context.resources.displayMetrics.density).roundToInt()
+        if (!menuHorizontal.value) {
+            // Vertical menu: fly-out opens to a side (right if it fits, else left), at the row's top.
+            pushMenuLevel(
+                depth = 1, sourceKey = sourceKey,
+                sideParent = (tp.x + margin) to (tp.x + tv.width - margin),
+                anchorTop = tp.y + itemBounds.top, builder = builder,
+            )
+        } else {
+            // Horizontal menu: fly-out below (menu in top half) or above (bottom half), at the icon's
+            // left edge. The cascade's left/right side is then decided by the NEXT (depth-2) level.
+            val left = tp.x + itemBounds.left
+            val inTopHalf = (tp.y + tv.height / 2) < (displaySizePx().y / 2)
+            if (inTopHalf) pushMenuLevel(depth = 1, sourceKey = sourceKey, fixedLeft = left, anchorTop = tp.y + tv.height - margin, builder = builder)
+            else pushMenuLevel(depth = 1, sourceKey = sourceKey, fixedLeft = left, anchorTop = tp.y + margin, growUp = true, builder = builder)
+        }
     }
 
     /**
-     * (anchorLeft, anchorTop, growUp) for a root item's fly-out. The toolbar window carries a
-     * transparent [MENU_SHADOW_MARGIN] inset for its shadow, so the VISIBLE menu edges are inset by
-     * [margin] from the window edges — we anchor to the visible edge so the fly-out sits flush
-     * against the menu, not [margin] away from it.
+     * Choose the on-screen x for a horizontally-expanding fly-out whose parent's visible edges are
+     * [parentLeft]…[parentRight]. The first fly-out of a cascade picks a side — RIGHT if the child fits
+     * to the right, else LEFT (else RIGHT and clamp) — and stores it in [menuCascadeSide]; deeper
+     * levels inherit that side so they open into the same open space instead of over their parents.
      */
-    private fun rootSubmenuAnchor(
-        tp: WindowManager.LayoutParams,
-        toolbarW: Int,
-        toolbarH: Int,
-        itemBounds: android.graphics.Rect,
-    ): Triple<Int, Int, Boolean> {
-        val margin = (MENU_SHADOW_MARGIN * context.resources.displayMetrics.density).roundToInt()
-        if (!menuHorizontal.value) {
-            // Vertical menu: fly-out to the right of the visible menu, aligned to the row's top.
-            return Triple(tp.x + toolbarW - margin, tp.y + itemBounds.top, false)
+    private fun placeMenuX(parentLeft: Int, parentRight: Int, width: Int, screenW: Int): Int {
+        val side = menuCascadeSide ?: run {
+            val chosen = when {
+                parentRight + width <= screenW -> MenuSide.RIGHT
+                parentLeft - width >= 0 -> MenuSide.LEFT
+                else -> MenuSide.RIGHT
+            }
+            menuCascadeSide = chosen
+            chosen
         }
-        // Horizontal menu: fly-out below (menu in top half) or above (menu in bottom half), aligned
-        // to the icon's left edge. Anchor to the visible bottom/top (inset by the shadow margin).
-        val left = tp.x + itemBounds.left
-        val inTopHalf = (tp.y + toolbarH / 2) < (displaySizePx().y / 2)
-        return if (inTopHalf) Triple(left, tp.y + toolbarH - margin, false)
-        else Triple(left, tp.y + margin, true)
+        val x = if (side == MenuSide.RIGHT) parentRight else parentLeft - width
+        return x.coerceIn(0, maxOf(0, screenW - width))
     }
 
     /**
@@ -1905,15 +1929,16 @@ class OverlayLiveEditController @Inject constructor(
     }
 
     /**
-     * Add a fly-out window at ([anchorLeft], [anchorTop]), then clamp it fully on-screen once
+     * Add a fly-out window anchored at [anchorTop] (x from [fixedLeft] or [sideParent]), then clamp it on-screen once
      * measured (a ComposeView only composes after it's attached, so we measure post-add and nudge).
      */
     private fun pushMenuLevel(
         depth: Int,
         sourceKey: String,
-        anchorLeft: Int,
         anchorTop: Int,
         growUp: Boolean = false,
+        fixedLeft: Int? = null,              // x is fixed (clamped) — used by the horizontal root fly-out
+        sideParent: Pair<Int, Int>? = null,  // (visibleLeft, visibleRight): place left/right via [placeMenuX]
         builder: @Composable () -> List<MenuEntry>,
     ) {
         val owner = OverlayLifecycleOwner()
@@ -1939,7 +1964,7 @@ class OverlayLiveEditController @Inject constructor(
             watchOutside = true,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = anchorLeft
+            x = fixedLeft ?: sideParent?.second ?: 0 // provisional; real x set post-measure
             y = anchorTop
             // Start INVISIBLE: a ComposeView only composes after attach, so we don't know the size
             // until a frame later. Showing it at the un-measured anchor (and worse, growing UP from
@@ -1957,7 +1982,10 @@ class OverlayLiveEditController @Inject constructor(
             // growUp: [anchorTop] is the menu's TOP edge and the fly-out opens upward, so its BOTTOM
             // sits at anchorTop (used by the horizontal menu when it's in the screen's bottom half).
             val baseY = if (growUp) anchorTop - view.measuredHeight else anchorTop
-            params.x = anchorLeft.coerceIn(0, maxOf(0, size.x - view.measuredWidth))
+            params.x = when {
+                sideParent != null -> placeMenuX(sideParent.first, sideParent.second, view.measuredWidth, size.x)
+                else -> (fixedLeft ?: 0).coerceIn(0, maxOf(0, size.x - view.measuredWidth))
+            }
             params.y = baseY.coerceIn(0, maxOf(0, size.y - view.measuredHeight))
             params.alpha = 1f
             runCatching { windowManager.updateViewLayout(view, params) }
@@ -2180,7 +2208,7 @@ class OverlayLiveEditController @Inject constructor(
             add(MenuEntry.Item("Redo", leadingIcon = Icons.AutoMirrored.Filled.Redo, enabled = canRedo, onClick = { overlayEditor.redo() }))
             add(MenuEntry.Divider)
             add(MenuEntry.Item("Options", leadingIcon = Icons.Default.Tune, submenu = { OptionsEntries() }))
-            add(MenuEntry.Item("Exit", leadingIcon = Icons.AutoMirrored.Filled.ExitToApp, onClick = { stop() }))
+            add(MenuEntry.Item("Exit", leadingIcon = Icons.AutoMirrored.Filled.ExitToApp, onClick = { showExitConfirm(reForegroundOnCancel = false) }))
         }
     }
 
@@ -2240,7 +2268,7 @@ class OverlayLiveEditController @Inject constructor(
     private enum class AlignTarget(val label: String) { Selection("Selection"), Canvas("Canvas") }
 
     /** The align/distribute operations (mapped to the menu rows). */
-    private enum class AlignOp { LEFT, CENTER_X, RIGHT, TOP, CENTER_Y, BOTTOM, DIST_X, DIST_Y }
+    private enum class AlignOp { LEFT, CENTER_X, RIGHT, TOP, CENTER_Y, BOTTOM, STACK_V, STACK_H, DIST_X, DIST_Y }
 
     /**
      * Align / space submenu. The "Align to" row picks the reference (Selection vs Canvas); the
@@ -2278,11 +2306,14 @@ class OverlayLiveEditController @Inject constructor(
             add(align("Align left", Icons.Default.AlignHorizontalLeft, AlignOp.LEFT))
             add(align("Align vertically", Icons.Default.AlignHorizontalCenter, AlignOp.CENTER_X))
             add(align("Align right", Icons.Default.AlignHorizontalRight, AlignOp.RIGHT))
-            add(align("Space vertically", Icons.Default.VerticalDistribute, AlignOp.DIST_Y))
-            add(MenuEntry.Divider)
             add(align("Align top", Icons.Default.AlignVerticalTop, AlignOp.TOP))
             add(align("Align horizontally", Icons.Default.AlignVerticalCenter, AlignOp.CENTER_Y))
             add(align("Align bottom", Icons.Default.AlignVerticalBottom, AlignOp.BOTTOM))
+            add(MenuEntry.Divider)
+            add(align("Stack vertically", Icons.Default.ViewAgenda, AlignOp.STACK_V))
+            add(align("Stack horizontally", Icons.Default.ViewColumn, AlignOp.STACK_H))
+            add(MenuEntry.Divider)
+            add(align("Space vertically", Icons.Default.VerticalDistribute, AlignOp.DIST_Y))
             add(align("Space horizontally", Icons.Default.HorizontalDistribute, AlignOp.DIST_X))
         }
     }
@@ -2314,6 +2345,16 @@ class OverlayLiveEditController @Inject constructor(
             AlignOp.TOP -> els.map { rect(it, y = refT) }
             AlignOp.BOTTOM -> els.map { rect(it, y = refB - it.height) }
             AlignOp.CENTER_Y -> els.map { rect(it, y = (refT + refB) / 2f - it.height / 2f) }
+            // Stack = pack the elements edge-to-edge along one axis (no gap, no overlap), anchored at
+            // the selection's current top-left and aligned on the cross axis. Independent of [target].
+            AlignOp.STACK_V -> {
+                val x0 = els.minOf { it.x }; var cy = els.minOf { it.y }
+                els.sortedBy { it.y }.map { el -> rect(el, x = x0, y = cy).also { cy += el.height } }
+            }
+            AlignOp.STACK_H -> {
+                val y0 = els.minOf { it.y }; var cx = els.minOf { it.x }
+                els.sortedBy { it.x }.map { el -> rect(el, x = cx, y = y0).also { cx += el.width } }
+            }
             AlignOp.DIST_X -> distribute(els, horizontal = true, target, refL, refR) { el, v -> rect(el, x = v) }
             AlignOp.DIST_Y -> distribute(els, horizontal = false, target, refT, refB) { el, v -> rect(el, y = v) }
         }
@@ -2889,8 +2930,10 @@ class OverlayLiveEditController @Inject constructor(
      */
     private fun snapPosition(x: Int, y: Int, w: Int, h: Int, size: Point, exclude: Set<Long>): Point {
         val others = overlayEditor.elements.value.filter { it.id !in exclude }
-        val gridX = size.x.toFloat() / OverlaySettings.GRID_DIVISIONS
-        val gridY = size.y.toFloat() / OverlaySettings.GRID_DIVISIONS
+        // SQUARE grid (matches the rendered guide): one cell size derived from the width, used on both
+        // axes — so snapping lines up with the visible square grid rather than a stretched one.
+        val gridX = size.x.toFloat() / gridDivisions.value
+        val gridY = gridX
 
         val xCandidates = mutableListOf(((x / gridX).roundToInt() * gridX).roundToInt())
         val yCandidates = mutableListOf(((y / gridY).roundToInt() * gridY).roundToInt())
@@ -3013,12 +3056,9 @@ class OverlayLiveEditController @Inject constructor(
         // Positioner dpad geometry. The window content is a POSITIONER_DP square; the button-rect
         // fractions below ([positionerRects]) are of the half-side D = POSITIONER_DP/2, out from center.
         private const val POSITIONER_DP = 196
-        private const val POS_CLOSE_HALF_F = 0.27f  // close button: square half-side
-        private const val POS_ARM_HALF_F = 0.205f   // arm half-width (perpendicular); <= close half
-        private const val POS_GAP_F = 0.045f        // gap between adjacent buttons (close↔small↔large)
-        private const val POS_BG_HALF_F = 0.30f     // plus-background bar half-width (> close half)
-        private const val POS_BG_CORNER_DP = 18     // plus-background corner radius
-        private const val POS_BTN_CORNER_DP = 10    // button corner radius (squarer than full-round)
+        private const val POS_BTN_HALF_F = 0.176f   // each icon's square hit/ripple zone is 2·this
+        private const val POS_GAP_F = 0.04f         // gap between adjacent zones (close↔small↔large)
+        private const val POS_BG_HALF_F = 0.21f     // plus-background bar half-width (fully rounded ends)
         private const val POS_SMALL_ICON_DP = 18    // single-arrow legend (small / 1px move)
         private const val POS_LARGE_ICON_DP = 22    // double-arrow legend (large / 10px move)
     }

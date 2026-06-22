@@ -208,7 +208,7 @@ private val ACTIVATOR_RENDER_ORDER = listOf(
     ActivatorType.CHORDED_PRESS,
 )
 
-private val activatorRenderOrder = compareBy<ActivatorGraph>(
+internal val activatorRenderOrder = compareBy<ActivatorGraph>(
     { ACTIVATOR_RENDER_ORDER.indexOf(it.activator.type).coerceAtLeast(0) },
     { it.activator.orderIndex },
     { it.activator.id },
@@ -241,7 +241,7 @@ fun ActivatorType.displayLabel(): String = when (this) {
 private val UNIMPLEMENTED_ACTIVATORS = emptySet<ActivatorType>()
 
 @Composable
-private fun ActivatorRow(
+internal fun ActivatorRow(
     graph: ActivatorGraph,
     config: ControllerConfig?,
     onTapCommand: (bindingId: Long, current: BindingOutput) -> Unit,
@@ -429,7 +429,7 @@ private fun ActivatorTypeDropdown(
 }
 
 @Composable
-private fun AddActivatorButton(
+internal fun AddActivatorButton(
     onAdd: (ActivatorType) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }

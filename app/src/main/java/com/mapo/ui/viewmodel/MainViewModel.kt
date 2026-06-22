@@ -457,6 +457,32 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch { controllerConfigRepository.removeCommand(bindingId) }
     }
 
+    // ── Phase 6: unified "input rows" ────────────────────────────────────────
+
+    /** Add an input row of [type] to a group input (defaults to a regular press). */
+    fun addInputRow(groupInputId: Long, type: com.mapo.data.model.steam.ActivatorType = com.mapo.data.model.steam.ActivatorType.FULL_PRESS) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.addInputRow(groupInputId, type) }
+    }
+
+    /** Change an input row's press type (reparents the binding into the type's bucket). */
+    fun setInputRowPressType(bindingId: Long, type: com.mapo.data.model.steam.ActivatorType) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.setInputRowPressType(bindingId, type) }
+    }
+
+    /** Set an input row's user label ([com.mapo.data.model.steam.Binding.label]). */
+    fun setInputRowLabel(bindingId: Long, label: String) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.setInputRowLabel(bindingId, label) }
+    }
+
+    /** Delete an input row. UI disables this when it's the group input's last remaining row. */
+    fun deleteInputRow(bindingId: Long) {
+        if (activeProfile.value == null) return
+        viewModelScope.launch { controllerConfigRepository.deleteInputRow(bindingId) }
+    }
+
     /**
      * Brick 4.3: editor-side viewing selection. Pass a set id to view that set in the
      * `RemapControlsScreen` overview / row previews, or null to fall back to the

@@ -19,6 +19,7 @@ import com.mapo.service.foreground.ForegroundAppFilter
 import com.mapo.service.input.InputDispatcher
 import com.mapo.service.keyboard.KeyboardController
 import com.mapo.service.overlay.element.OverlayLiveEditController
+import com.mapo.service.overlay.element.ToolbarOverlayManager
 import com.mapo.service.overlay.element.OverlayPresenter
 import com.mapo.steam.auth.SteamCredentialStore
 import io.mockk.coEvery
@@ -65,6 +66,7 @@ class MainViewModelMultiBindTest {
     private lateinit var inputDispatcher: InputDispatcher
     private lateinit var overlayPresenter: OverlayPresenter
     private lateinit var overlayLiveEditController: OverlayLiveEditController
+    private lateinit var toolbarOverlayManager: ToolbarOverlayManager
     private lateinit var steamCredentialStore: SteamCredentialStore
     private lateinit var keyboardController: KeyboardController
 
@@ -100,6 +102,7 @@ class MainViewModelMultiBindTest {
         inputDispatcher = mockk(relaxed = true)
         overlayPresenter = mockk(relaxed = true)
         overlayLiveEditController = mockk(relaxed = true)
+        toolbarOverlayManager = mockk(relaxed = true)
         steamCredentialStore = mockk(relaxed = true)
         // SharedFlow.collect returns Nothing — a relaxed mock throws on collect.
         every { overlayPresenter.errorMessages } returns MutableSharedFlow()
@@ -138,6 +141,7 @@ class MainViewModelMultiBindTest {
             inputDispatcher = inputDispatcher,
             overlayPresenter = overlayPresenter,
             overlayLiveEditController = overlayLiveEditController,
+            toolbarOverlayManager = toolbarOverlayManager,
             steamCredentialStore = steamCredentialStore,
             keyboardController = keyboardController,
             ioDispatcher = testDispatcher,

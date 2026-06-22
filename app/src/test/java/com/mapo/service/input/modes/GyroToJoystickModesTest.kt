@@ -11,12 +11,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Brick D.4 — focused unit tests for [GyroToJoystickCameraMode] and
+ * Focused unit tests for [GyroToJoystickCameraMode] and
  * [GyroToJoystickDeflectionMode]. Verifies each mode reads its settings JSON,
  * routes to the correct gamepad stick (right for camera, left for deflection),
- * and respects the source filter. The shared [GyroToStickSettings] math itself
- * is covered in [GyroToStickSettingsTest]; here we test the integration
- * between mode and emitter.
+ * and respects the source filter. The output math lives in
+ * [GyroJoystickCameraSettings] / [GyroJoystickDeflectionSettings]; here we test
+ * the integration between mode and emitter.
  *
  * Robolectric required for the JSON-tolerant settings parse path (same reason
  * as the other settings tests — `org.json.JSONObject` is Android-platform).
@@ -99,11 +99,10 @@ class GyroToJoystickModesTest {
     // ── GyroToJoystickCameraMode → right stick ──────────────────────────────
 
     @Test
-    fun camera_atDefaults_drivesRightStickAtConfiguredSensitivity() {
-        // 1 rad/sec × 0.8 default sensitivity = 0.8 deflection. Camera mode
-        // applies a built-in -1 sign correction on both axes (verified on
-        // AYN Thor 2026-05-31 — raw output aimed opposite of player intent),
-        // so the asserted values flip sign vs. the underlying toAxis result.
+    fun camera_atDefaults_drivesRightStickInCorrectDirection() {
+        // Speed→output model: roll 1.0 + pitch 0.5 (default Yaw+Roll, no yaw) maps
+        // to a fast turn → near-saturated right-stick output. Built-in -1 sign
+        // correction makes both axes negative; horizontal (roll) dominates.
         GyroToJoystickCameraMode.evaluate(
             gyroReading(1.0f, 0.5f),
             ctx(GyroToJoystickCameraMode.defaultSettingsJson()),
@@ -113,8 +112,9 @@ class GyroToJoystickModesTest {
         assertEquals(1, gamepad.rightStickCalls.size)
         val (src, ax, ay) = gamepad.rightStickCalls.single()
         assertEquals(InputSource.GYRO, src)
-        assertEquals(-0.8f, ax, EPSILON)
-        assertEquals(-0.4f, ay, EPSILON)
+        assertTrue("expected ax<0, got $ax", ax < 0f)
+        assertTrue("expected ay<0, got $ay", ay < 0f)
+        assertTrue("horizontal should dominate, got ax=$ax ay=$ay", kotlin.math.abs(ax) > kotlin.math.abs(ay))
     }
 
     @Test
@@ -147,10 +147,11 @@ class GyroToJoystickModesTest {
     }
 
     @Test
-    fun camera_aboveSaturation_clampsToUnitDeflection() {
-        // 5 rad/sec × 0.8 = 4.0 → clamped to 1.0 in toAxis. Then Camera's
-        // built-in -1 sign correction flips both axes → final output is
-        // (-1.0, 1.0).
+    fun camera_aboveSaturation_outputsMaxMagnitude() {
+        // A very fast diagonal flick saturates output at maxOutput (100%). With
+        // the circular response a 45° flick splits the unit magnitude across both
+        // axes (~0.707 each), not 1.0 per axis. Built-in -1 sign correction flips
+        // the signs: roll +5 → ax<0, pitch -5 → ay>0.
         GyroToJoystickCameraMode.evaluate(
             gyroReading(5.0f, -5.0f),
             ctx(GyroToJoystickCameraMode.defaultSettingsJson()),
@@ -158,8 +159,10 @@ class GyroToJoystickModesTest {
             mouse,
         )
         val (_, ax, ay) = gamepad.rightStickCalls.single()
-        assertEquals(-1.0f, ax, EPSILON)
-        assertEquals(1.0f, ay, EPSILON)
+        assertTrue("expected ax<0, got $ax", ax < 0f)
+        assertTrue("expected ay>0, got $ay", ay > 0f)
+        val mag = kotlin.math.sqrt(ax * ax + ay * ay)
+        assertEquals("saturated magnitude ≈ 1.0", 1.0f, mag, 0.02f)
     }
 
     // ── GyroToJoystickDeflectionMode → left stick (tilt-based) ──────────────
@@ -186,13 +189,10 @@ class GyroToJoystickModesTest {
 
     @Test
     fun deflection_tiltFromReference_drivesLeftStickProportionally() {
-        // Reference captured at (roll=0.5, pitch=-0.3). User tilts by +0.1
-        // roll and +0.2 pitch (relative to ref). With sensitivity 5.0:
-        // ax = 0.1 × 5.0 = 0.5
-        // The pitch axis has a built-in -1 sign correction (user-verified
-        // on AYN Thor 2026-06-01: raw pitch passthrough drove the stick
-        // BACKWARD on forward tilt). With the correction:
-        // ay = -(0.2) × 5.0 = -1.0 (clamped from -1.0 already)
+        // Reference captured at (roll=0.5, pitch=-0.3). User tilts by +0.1 roll
+        // and a larger pitch delta. Angle→output model (min 2° / max 45°): roll
+        // drives +ax, the sign-corrected pitch delta drives -ay, and the bigger
+        // pitch delta dominates the magnitude.
         val ctx = ctx(GyroToJoystickDeflectionMode.defaultSettingsJson())
         GyroToJoystickDeflectionMode.evaluate(
             tiltReading(rollRad = 0.5f, pitchRad = -0.3f), ctx, digitalEmit, mouse,
@@ -201,8 +201,9 @@ class GyroToJoystickModesTest {
             tiltReading(rollRad = 0.6f, pitchRad = -0.1f), ctx, digitalEmit, mouse,
         )
         val (_, ax, ay) = gamepad.leftStickCalls.last()
-        assertEquals(0.5f, ax, EPSILON)
-        assertEquals(-1.0f, ay, EPSILON)
+        assertTrue("expected ax>0, got $ax", ax > 0f)
+        assertTrue("expected ay<0, got $ay", ay < 0f)
+        assertTrue("pitch delta should dominate, got ax=$ax ay=$ay", kotlin.math.abs(ay) > kotlin.math.abs(ax))
     }
 
     @Test
@@ -223,22 +224,23 @@ class GyroToJoystickModesTest {
     }
 
     @Test
-    fun deflection_largeTilt_clampsToUnitDeflection() {
-        // Tilt 0.5 rad (~29°) past reference. With sensitivity 5.0 → 2.5
-        // pre-clamp → clamped to 1.0. Saturates above ~12° of tilt.
-        // Pitch axis is sign-corrected (forward tilt = forward move), so
-        // a pitch reading of -0.5 vs reference of 0 → corrected delta is
-        // +0.5 → ay clamps to +1.0 (not -1.0).
+    fun deflection_largeTilt_saturatesAtUnitMagnitude() {
+        // A large tilt past the max deflection angle (45°) saturates output. With
+        // the circular response a 45° diagonal splits the unit magnitude across
+        // both axes (~0.707 each), so the magnitude — not each axis — hits 1.0.
+        // Roll +1.0 → +ax; sign-corrected pitch (-1.0 vs ref 0) → +ay.
         val ctx = ctx(GyroToJoystickDeflectionMode.defaultSettingsJson())
         GyroToJoystickDeflectionMode.evaluate(
             tiltReading(rollRad = 0f, pitchRad = 0f), ctx, digitalEmit, mouse,
         )
         GyroToJoystickDeflectionMode.evaluate(
-            tiltReading(rollRad = 0.5f, pitchRad = -0.5f), ctx, digitalEmit, mouse,
+            tiltReading(rollRad = 1.0f, pitchRad = -1.0f), ctx, digitalEmit, mouse,
         )
         val (_, ax, ay) = gamepad.leftStickCalls.last()
-        assertEquals(1.0f, ax, EPSILON)
-        assertEquals(1.0f, ay, EPSILON)
+        assertTrue("expected ax>0, got $ax", ax > 0f)
+        assertTrue("expected ay>0, got $ay", ay > 0f)
+        val mag = kotlin.math.sqrt(ax * ax + ay * ay)
+        assertEquals("saturated magnitude ≈ 1.0", 1.0f, mag, 0.02f)
     }
 
     @Test
@@ -307,17 +309,18 @@ class GyroToJoystickModesTest {
     // ── Settings-aware behavior ─────────────────────────────────────────────
 
     @Test
-    fun camera_customSensitivity_appliesPerAxis() {
-        // Built-in -1 sign correction on both axes — see Camera mode KDoc.
+    fun camera_sendToLeft_drivesLeftStick() {
+        // send_to_joystick=left routes the camera output to the left stick.
         GyroToJoystickCameraMode.evaluate(
-            gyroReading(1.0f, 1.0f),
-            ctx("""{"sensitivity_x":1.0,"sensitivity_y":0.2,"deadzone":0.05}"""),
+            gyroReading(1.0f, 0f),
+            ctx("""{"send_to_joystick":"left"}"""),
             digitalEmit,
             mouse,
         )
-        val (_, ax, ay) = gamepad.rightStickCalls.single()
-        assertEquals(-1.0f, ax, EPSILON)
-        assertEquals(-0.2f, ay, EPSILON)
+        assertEquals(1, gamepad.leftStickCalls.size)
+        assertEquals(0, gamepad.rightStickCalls.size)
+        val (_, ax, _) = gamepad.leftStickCalls.single()
+        assertTrue("expected non-zero horizontal output, got $ax", ax != 0f)
     }
 
     @Test

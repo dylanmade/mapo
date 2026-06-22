@@ -9,6 +9,7 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.pow
+import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.math.sqrt
 import org.json.JSONException
@@ -757,9 +758,7 @@ internal data class DpadSettings(
         // GYRO-only: scales integrated tilt angle (radians) into stick-
         // deflection-equivalent units before the deadzone check. 5.0 means
         // ~0.2 rad (≈11.5°) of tilt clamps to full direction-active range.
-        // Same value as [GyroToStickSettings.DEFAULT_DEFLECTION_SENSITIVITY]
-        // so dpad-on-gyro and deflection feel symmetric. Ignored for
-        // joystick sources.
+        // Ignored for joystick sources.
         const val DEFAULT_TILT_SENSITIVITY = 5.0f
 
         // Deadzone exposed in the joystick Directional Pad menu as a raw 0..32767
@@ -1283,8 +1282,7 @@ object JoystickMouseMode : SourceMode {
  * the stick after the flick.
  *
  * **Source filter.** Stick sources only (LEFT_JOYSTICK / RIGHT_JOYSTICK).
- * GYRO and other sources are no-ops; the gyro variant lives in
- * [GyroFlickStickMode] when that lands.
+ * GYRO and other sources are no-ops.
  *
  * **Per-source state** lives in [stateBySource]; cleared via [resetState]
  * from [com.mapo.service.input.InputEvaluator.handleConfigChange] on mode
@@ -2389,6 +2387,74 @@ internal enum class GyroEnableMode(val id: String) {
 }
 
 /**
+ * Shared gyro output-shaping primitives used by the joystick-output gyro modes
+ * (Camera / Deflection). The conversion-style fold mirrors
+ * [GyroToMouseSettings]'s private `screenRates` — kept standalone so the tested
+ * Gyro-to-Mouse path isn't disturbed. The gravity-relative styles
+ * (Local/Player/World/Laser) are faithful approximations of Steam's unpublished
+ * algorithms — verify signs on device.
+ */
+internal object GyroShared {
+    const val DEG_TO_RAD = (Math.PI / 180.0).toFloat()
+
+    /** Fold device-frame rates (x=roll, y=pitch, z=yaw) + tilt into screen (h, v) rates. */
+    fun screenRates(
+        style: GyroConversionStyle,
+        rollRate: Float, pitchRate: Float, yawRate: Float,
+        tiltRoll: Float, tiltPitch: Float,
+        rollContribution: Float, primaryAxisOffsetRad: Float, complementaryContribution: Float,
+    ): Pair<Float, Float> = when (style) {
+        GyroConversionStyle.ROLL -> rollRate to pitchRate
+        GyroConversionStyle.YAW -> yawRate to pitchRate
+        GyroConversionStyle.YAW_ROLL -> (yawRate + rollRate * rollContribution) to pitchRate
+        GyroConversionStyle.LOCAL_SPACE -> {
+            val th = primaryAxisOffsetRad
+            val primary = yawRate * cos(th) + rollRate * sin(th)
+            val complementary = -yawRate * sin(th) + rollRate * cos(th)
+            (primary + complementaryContribution * complementary) to pitchRate
+        }
+        GyroConversionStyle.PLAYER_SPACE -> {
+            val gx = sin(tiltPitch); val gz = -cos(tiltRoll) * cos(tiltPitch)
+            (yawRate * gz + rollRate * gx) to pitchRate
+        }
+        GyroConversionStyle.WORLD_SPACE, GyroConversionStyle.LASER_POINTER -> {
+            val gx = sin(tiltPitch); val gy = -sin(tiltRoll); val gz = -cos(tiltRoll) * cos(tiltPitch)
+            val h = rollRate * gx + pitchRate * gy + yawRate * gz
+            h to pitchRate * cos(tiltRoll)
+        }
+    }
+
+    /**
+     * Radial speed shaping: subtract the deadzone (recovered at high speed) and
+     * scale down below the precision speed. Inputs/threshold in rad/s. Returns
+     * the shaped magnitude (≥ 0).
+     */
+    fun shapeMagnitude(speed: Float, deadzoneDeg: Float, precisionDeg: Float): Float {
+        val dz = deadzoneDeg * DEG_TO_RAD
+        val ps = precisionDeg * DEG_TO_RAD
+        var mag = (speed - dz).coerceAtLeast(0f)
+        if (ps > 0f && speed < ps) mag *= (speed / ps)
+        return mag
+    }
+
+    private const val ACCEL_REF_DEG = 300f
+    private const val ACCEL_MAX = 2f
+
+    /** Speed-based acceleration multiplier. [hasOff] true => OFF returns 1× (Gyro to Mouse). */
+    fun accelMultiplier(accel: GyroAccel, speedRadPerSec: Float): Float {
+        if (accel == GyroAccel.OFF) return 1f
+        val t = (speedRadPerSec / (ACCEL_REF_DEG * DEG_TO_RAD)).coerceIn(0f, 1f)
+        val shaped = when (accel) {
+            GyroAccel.LINEAR -> t
+            GyroAccel.RELAXED -> t * t
+            GyroAccel.AGGRESSIVE -> sqrt(t)
+            GyroAccel.OFF -> 0f
+        }
+        return 1f + (ACCEL_MAX - 1f) * shaped
+    }
+}
+
+/**
  * Parsed settings + output-shaping math for [GyroToMouseMode]. Tolerant of
  * missing keys; falls back to [DEFAULTS]. Models the full Steam "Gyro to Mouse"
  * menu (SOURCE_MODE_SETTINGS_SPEC.txt) — the helper text is the behavior spec.
@@ -2658,7 +2724,16 @@ internal data class GyroToMouseSettings(
 object GyroToJoystickCameraMode : SourceMode {
     override val mode: BindingMode = BindingMode.GYRO_TO_JOYSTICK_CAMERA
     override fun validInputs(): Set<String> = emptySet()
-    override fun defaultSettingsJson(): String = GyroToStickSettings.CAMERA_DEFAULT_JSON
+    override fun defaultSettingsJson(): String = GyroJoystickCameraSettings.DEFAULT_JSON
+
+    private const val MAX_DT_SEC = 0.1f
+    private const val HAPTIC_DEG_PER_BUMP = 10f
+    // Per-source scratch: [lastTsMs, hapticAccumRad, momentumAx, momentumAy].
+    private val state = mutableMapOf<InputSource, FloatArray>()
+
+    fun resetState() {
+        state.clear()
+    }
 
     override fun evaluate(
         reading: AnalogEvent,
@@ -2667,17 +2742,184 @@ object GyroToJoystickCameraMode : SourceMode {
         mouse: MouseEmitter,
     ) {
         if (reading.source != InputSource.GYRO) return
-        val settings = GyroToStickSettings.parse(ctx.settingsJson, GyroToStickSettings.CAMERA_DEFAULTS)
-        val (rawAx, rawAy) = settings.toAxis(reading.x, reading.y)
-        // Built-in -1 sign correction on both axes — same pattern + reason as
-        // [GyroToMouseSettings.toVelocity] (2026-05-31 user-verified on AYN
-        // Thor: raw passthrough aimed the right stick opposite of player
-        // intent on both axes). The fix lives here (mode-local) rather than
-        // in the shared [GyroToStickSettings.toAxis] so Deflection's
-        // tilt-as-movement direction stays untouched.
-        // `invert_x` / `invert_y` settings continue to layer on top as
-        // user-preference toggles applied inside toAxis().
-        ctx.gamepad.setRightStick(reading.source, -rawAx, -rawAy)
+        val s = GyroJoystickCameraSettings.parse(ctx.settingsJson)
+        val st = state.getOrPut(reading.source) { floatArrayOf(reading.timestampMs.toFloat(), 0f, 0f, 0f) }
+        val dt = ((reading.timestampMs - st[0].toLong()).toFloat() / 1000f).coerceIn(0f, MAX_DT_SEC)
+        st[0] = reading.timestampMs.toFloat()
+
+        var (ax, ay) = s.toStick(reading.x, reading.y, reading.z, reading.tiltRollRad, reading.tiltPitchRad)
+
+        // Trigger-press dampening.
+        val damp = ctx.gyroTriggerDampenFactor(s.triggerDampen, s.triggerDampenAmount)
+        if (damp != 1f) { ax *= damp; ay *= damp }
+
+        // Enable-button gating + momentum (camera output coasts after disable).
+        if (!ctx.gyroEnabled) {
+            if (s.enableMomentum && dt > 0f) {
+                st[2] = decayToward0(st[2], dt); st[3] = decayToward0(st[3], dt)
+            } else {
+                st[2] = 0f; st[3] = 0f
+            }
+            ax = st[2]; ay = st[3]
+        } else {
+            st[2] = ax; st[3] = ay
+            // Rotational haptics.
+            if (s.rotationalHaptics != HapticIntensity.OFF && dt > 0f) {
+                val speed = sqrt(reading.x * reading.x + reading.y * reading.y + reading.z * reading.z)
+                st[1] += speed * dt
+                val perBump = HAPTIC_DEG_PER_BUMP * GyroShared.DEG_TO_RAD
+                while (st[1] >= perBump) { ctx.haptic(s.rotationalHaptics); st[1] -= perBump }
+            } else {
+                st[1] = 0f
+            }
+        }
+
+        // Built-in -1 sign correction on both axes (AYN Thor 2026-05-31) — invert
+        // toggles already layered inside toStick. Output to the chosen stick.
+        if (s.outputLeftStick) {
+            ctx.gamepad.setLeftStick(reading.source, -ax, -ay)
+        } else {
+            ctx.gamepad.setRightStick(reading.source, -ax, -ay)
+        }
+    }
+
+    // Camera momentum decays the stick output toward center after the gyro is
+    // disabled — simple linear coast. Tunable; verified on device.
+    private fun decayToward0(v: Float, dt: Float): Float {
+        if (v == 0f) return 0f
+        val dec = MOMENTUM_DECAY_PER_SEC * dt
+        return if (v > 0f) (v - dec).coerceAtLeast(0f) else (v + dec).coerceAtMost(0f)
+    }
+    private const val MOMENTUM_DECAY_PER_SEC = 2f
+}
+
+/**
+ * Parsed settings + output math for [GyroToJoystickCameraMode] — the Steam
+ * "Gyro to Joystick Camera" menu. Rate-based: gyro **speed** maps to joystick
+ * **output** through an input-speed window → output window with a power curve.
+ *
+ * Pipeline: conversion style → ×degree sensitivity → radial speed deadzone /
+ * precision → acceleration → speed→output map (per-axis or circular) → invert /
+ * mixer / lock-at-edges. Tolerant of missing keys.
+ *
+ * **On-device tuning:** the gravity-relative conversion styles + acceleration
+ * curves are approximations (see [GyroShared]); **Angle Catch-Up** is parsed and
+ * stored but not yet actuated (default Off is faithful) — its "stick stuck at
+ * extreme after a fast flick" behavior is a follow-up.
+ */
+internal data class GyroJoystickCameraSettings(
+    val outputLeftStick: Boolean,
+    val minInputSpeedDeg: Float,
+    val maxInputSpeedDeg: Float,
+    val minOutput: Float,
+    val maxOutput: Float,
+    val perAxisResponse: Boolean,
+    val powerCurve: Float,
+    val lockAtEdges: Boolean,
+    val angleCatchUp: String, // off / only_while_active / always (stored; not yet actuated)
+    val degreeSensitivity: Float,
+    val invertX: Boolean,
+    val invertY: Boolean,
+    val speedDeadzoneDeg: Float,
+    val precisionSpeedDeg: Float,
+    val outputMixer: Float,
+    val accel: GyroAccel,
+    val enableMomentum: Boolean,
+    val conversionStyle: GyroConversionStyle,
+    val rollContribution: Float,
+    val primaryAxisOffsetRad: Float,
+    val complementaryContribution: Float,
+    val triggerDampen: GyroTriggerDampen,
+    val triggerDampenAmount: Float,
+    val rotationalHaptics: HapticIntensity,
+) {
+    private fun mapMagnitudeToOutput(magRad: Float): Float {
+        val degs = magRad / GyroShared.DEG_TO_RAD
+        val t = when {
+            maxInputSpeedDeg > minInputSpeedDeg ->
+                ((degs - minInputSpeedDeg) / (maxInputSpeedDeg - minInputSpeedDeg)).coerceIn(0f, 1f)
+            degs >= minInputSpeedDeg -> 1f
+            else -> 0f
+        }
+        val curved = t.pow(powerCurve)
+        val out = minOutput + (maxOutput - minOutput) * curved
+        return out.coerceIn(0f, if (lockAtEdges) maxOutput else 1f)
+    }
+
+    fun toStick(
+        rollRate: Float, pitchRate: Float, yawRate: Float, tiltRoll: Float, tiltPitch: Float,
+    ): Pair<Float, Float> {
+        val (h0, v0) = GyroShared.screenRates(
+            conversionStyle, rollRate, pitchRate, yawRate, tiltRoll, tiltPitch,
+            rollContribution, primaryAxisOffsetRad, complementaryContribution,
+        )
+        val h = h0 * degreeSensitivity
+        val v = v0 * degreeSensitivity
+        val speed = sqrt(h * h + v * v)
+        if (speed <= 0f) return 0f to 0f
+        var mag = GyroShared.shapeMagnitude(speed, speedDeadzoneDeg, precisionSpeedDeg)
+        if (mag <= 0f) return 0f to 0f
+        mag *= GyroShared.accelMultiplier(accel, speed)
+        val ux = h / speed
+        val uy = v / speed
+        var ax: Float
+        var ay: Float
+        if (perAxisResponse) {
+            // Response curve applied to each axis independently (biases toward axes).
+            ax = sign(ux) * mapMagnitudeToOutput(abs(ux) * mag)
+            ay = sign(uy) * mapMagnitudeToOutput(abs(uy) * mag)
+        } else {
+            val outMag = mapMagnitudeToOutput(mag)
+            ax = ux * outMag
+            ay = uy * outMag
+        }
+        if (invertX) ax = -ax
+        if (invertY) ay = -ay
+        if (outputMixer > 0f) ax *= (1f - outputMixer) else if (outputMixer < 0f) ay *= (1f + outputMixer)
+        return ax.coerceIn(-1f, 1f) to ay.coerceIn(-1f, 1f)
+    }
+
+    companion object {
+        val DEFAULT_JSON = """{"send_to_joystick":"right"}"""
+
+        fun parse(json: String): GyroJoystickCameraSettings {
+            val obj = try {
+                if (json.isBlank()) JSONObject() else JSONObject(json)
+            } catch (_: JSONException) {
+                JSONObject()
+            }
+            return GyroJoystickCameraSettings(
+                outputLeftStick = obj.optString("send_to_joystick", "right") == "left",
+                minInputSpeedDeg = obj.optDouble("min_input_speed", 5.0).toFloat().coerceIn(0f, 1800f),
+                maxInputSpeedDeg = obj.optDouble("max_input_speed", 180.0).toFloat().coerceIn(0f, 1800f),
+                minOutput = (obj.optDouble("min_output", 0.0).toFloat() / 100f).coerceIn(0f, 1f),
+                maxOutput = (obj.optDouble("max_output", 100.0).toFloat() / 100f).coerceIn(0f, 1f),
+                perAxisResponse = obj.optString("response_axis_style", "circular") == "per_axis",
+                powerCurve = obj.optDouble("joystick_power_curve", 1.0).toFloat().coerceIn(0.1f, 4f),
+                lockAtEdges = obj.optBoolean("lock_at_edges", false),
+                angleCatchUp = obj.optString("angle_catch_up", "off"),
+                degreeSensitivity = obj.optDouble("gyro_degree_sensitivity", 2.5).toFloat().coerceIn(0f, 30f),
+                invertX = obj.optBoolean("invert_x", false),
+                invertY = obj.optBoolean("invert_y", false),
+                speedDeadzoneDeg = obj.optDouble("gyro_speed_deadzone", 0.0).toFloat().coerceIn(0f, 90f),
+                precisionSpeedDeg = obj.optDouble("gyro_precision_speed", 0.0).toFloat().coerceIn(0f, 90f),
+                outputMixer = (obj.optDouble("output_mixer", 0.0).toFloat() / 100f).coerceIn(-1f, 1f),
+                accel = GyroAccel.fromId(obj.optString("acceleration", GyroAccel.LINEAR.id)),
+                enableMomentum = obj.optBoolean("enable_momentum", false),
+                conversionStyle = GyroConversionStyle.fromId(
+                    obj.optString("conversion_style", GyroConversionStyle.YAW_ROLL.id),
+                ),
+                rollContribution = (obj.optDouble("roll_contribution", 100.0).toFloat() / 100f).coerceIn(-1f, 1f),
+                primaryAxisOffsetRad = obj.optDouble("primary_axis_offset", 0.0).toFloat()
+                    .coerceIn(-180f, 180f) * GyroShared.DEG_TO_RAD,
+                complementaryContribution = (obj.optDouble("complementary_axis_contribution", 100.0).toFloat() / 100f)
+                    .coerceIn(-1f, 1f),
+                triggerDampen = GyroTriggerDampen.fromId(obj.optString("trigger_dampening", GyroTriggerDampen.OFF.id)),
+                triggerDampenAmount = (obj.optDouble("trigger_dampening_amount", 90.0).toFloat() / 100f).coerceIn(0f, 1f),
+                rotationalHaptics = HapticIntensity.fromId(obj.optString("rotational_haptics", HapticIntensity.OFF.id))
+                    ?: HapticIntensity.OFF,
+            )
+        }
     }
 }
 
@@ -2702,9 +2944,9 @@ object GyroToJoystickCameraMode : SourceMode {
  * natural holding angle becomes "neutral." Reset across profile / set
  * boundaries via [InputEvaluator.flushAnalog].
  *
- * **Per-axis sensitivity** lives in [GyroToStickSettings] (reused from the
- * earlier rate-based version). With the default of 5.0, ~12° of tilt
- * (~0.2 rad) saturates the stick — small lean = full walking speed.
+ * **Output mapping** lives in [GyroJoystickDeflectionSettings]: the
+ * tilt-from-reference angle maps through a deflection-angle window
+ * (default 2°–45°) to a joystick-output window with a power curve.
  *
  * **Companion to Camera, but different primitive.** Camera stays rate-based
  * because FPS aim feels right as "rotate-to-look-around"; Deflection is
@@ -2718,7 +2960,10 @@ object GyroToJoystickCameraMode : SourceMode {
 object GyroToJoystickDeflectionMode : SourceMode {
     override val mode: BindingMode = BindingMode.GYRO_TO_JOYSTICK_DEFLECTION
     override fun validInputs(): Set<String> = emptySet()
-    override fun defaultSettingsJson(): String = GyroToStickSettings.DEFLECTION_DEFAULT_JSON
+    override fun defaultSettingsJson(): String = GyroJoystickDeflectionSettings.DEFAULT_JSON
+
+    private const val HAPTIC_DEG_PER_BUMP = 10f
+    private const val MAX_DT_SEC = 0.1f
 
     // Per-source reference orientation (roll, pitch) in radians, captured
     // on the first event after [resetState]. Subsequent events compute
@@ -2727,6 +2972,8 @@ object GyroToJoystickDeflectionMode : SourceMode {
     //
     // Layout: floatArrayOf(refRoll, refPitch)
     private val referenceOrientation = mutableMapOf<InputSource, FloatArray>()
+    // Per-source rotational-haptic accumulator: [accumRad, lastTimestampMs].
+    private val hapticAccum = mutableMapOf<InputSource, FloatArray>()
 
     /**
      * Test seam + public reset hook. Called from
@@ -2735,6 +2982,7 @@ object GyroToJoystickDeflectionMode : SourceMode {
      */
     fun resetState() {
         referenceOrientation.clear()
+        hapticAccum.clear()
     }
 
     /** Test seam — the captured reference for the given source. */
@@ -2749,31 +2997,173 @@ object GyroToJoystickDeflectionMode : SourceMode {
         mouse: MouseEmitter,
     ) {
         if (reading.source != InputSource.GYRO) return
-        val settings = GyroToStickSettings.parse(ctx.settingsJson, GyroToStickSettings.DEFLECTION_DEFAULTS)
+        val s = GyroJoystickDeflectionSettings.parse(ctx.settingsJson)
+        val emit = { ax: Float, ay: Float ->
+            if (s.outputLeftStick) {
+                ctx.gamepad.setLeftStick(reading.source, ax, ay)
+            } else {
+                ctx.gamepad.setRightStick(reading.source, ax, ay)
+            }
+        }
+        // Enable-button gating: drop output + drop the reference so a re-enable
+        // recalibrates against the user's current pose. No momentum (tilt-based).
+        if (!ctx.gyroEnabled) {
+            referenceOrientation.remove(reading.source)
+            hapticAccum.remove(reading.source)
+            emit(0f, 0f)
+            return
+        }
         val ref = referenceOrientation[reading.source]
         if (ref == null) {
             // First event since reset — capture the user's natural holding
-            // angle as neutral. Emit a zero-stick contribution so the cache
-            // has the GYRO slot at (0, 0) until the user actually tilts.
+            // angle as neutral. Emit a zero-stick contribution until they tilt.
             referenceOrientation[reading.source] = floatArrayOf(reading.tiltRollRad, reading.tiltPitchRad)
-            ctx.gamepad.setLeftStick(reading.source, 0f, 0f)
+            emit(0f, 0f)
             return
         }
-        val deltaRoll = reading.tiltRollRad - ref[0]
-        // Built-in -1 sign correction on the pitch axis. User-verified on
-        // AYN Thor 2026-06-01: tilting the device forward (top edge dips
-        // toward player) drove the left stick BACKWARD — opposite of
-        // player intent. Inverting the delta lines it up: forward tilt →
-        // forward move. The roll axis was empirically correct without a
-        // flip. `invert_y` on the settings continues to layer on top as a
-        // user-preference toggle inside `toAxis`.
-        val deltaPitch = ref[1] - reading.tiltPitchRad
-        // Feed the delta to the shared toAxis math. Units shift from
-        // "deflection per rad/sec" (rate) to "deflection per rad of tilt"
-        // (angle); the new DEFLECTION_DEFAULTS sensitivity (5.0) targets
-        // ~12° of tilt for saturation.
-        val (ax, ay) = settings.toAxis(deltaRoll, deltaPitch)
-        ctx.gamepad.setLeftStick(reading.source, ax, ay)
+        // Roll → horizontal; pitch → vertical. Relative = vs the captured
+        // reference; absolute = vs Earth's horizon. The pitch delta keeps the
+        // built-in sign correction (forward tilt → forward move, AYN Thor
+        // 2026-06-01); invert_y layers on top inside toStick.
+        var dRoll = if (s.useRelativeRoll) reading.tiltRollRad - ref[0] else reading.tiltRollRad
+        var dPitch = if (s.useRelativePitch) ref[1] - reading.tiltPitchRad else -reading.tiltPitchRad
+        // Drag center point: when exceeding the max deflection angle, drag the
+        // reference along so returning from an extreme stays responsive (only
+        // meaningful for the relative axes, which own a reference).
+        if (s.dragCenterPoint) {
+            val maxRad = s.maxDeflectionDeg * GyroShared.DEG_TO_RAD
+            if (s.useRelativeRoll && abs(dRoll) > maxRad) {
+                ref[0] += dRoll - sign(dRoll) * maxRad
+                dRoll = sign(dRoll) * maxRad
+            }
+            if (s.useRelativePitch && abs(dPitch) > maxRad) {
+                ref[1] -= dPitch - sign(dPitch) * maxRad
+                dPitch = sign(dPitch) * maxRad
+            }
+        }
+        val (ax, ay) = s.toStick(dRoll, dPitch)
+        rotationalHaptics(reading, s.rotationalHaptics, ctx)
+        emit(ax, ay)
+    }
+
+    /** Buzz every [HAPTIC_DEG_PER_BUMP] of gyro rotation while [intensity] != OFF. */
+    private fun rotationalHaptics(reading: AnalogEvent, intensity: HapticIntensity, ctx: ModeContext) {
+        if (intensity == HapticIntensity.OFF) {
+            hapticAccum.remove(reading.source)
+            return
+        }
+        val st = hapticAccum[reading.source]
+        if (st == null) {
+            hapticAccum[reading.source] = floatArrayOf(0f, reading.timestampMs.toFloat())
+            return
+        }
+        val dt = ((reading.timestampMs.toFloat() - st[1]) / 1000f).coerceIn(0f, MAX_DT_SEC)
+        st[1] = reading.timestampMs.toFloat()
+        val speed = sqrt(reading.x * reading.x + reading.y * reading.y + reading.z * reading.z)
+        st[0] += speed * dt
+        val perBump = HAPTIC_DEG_PER_BUMP * GyroShared.DEG_TO_RAD
+        while (st[0] >= perBump) { ctx.haptic(intensity); st[0] -= perBump }
+    }
+}
+
+/**
+ * Parsed settings + output math for [GyroToJoystickDeflectionMode] — the Steam
+ * "Gyro to Joystick Deflection" menu. Tilt-angle based: the tilt-from-reference
+ * angle maps to joystick output through a deflection-angle window → output
+ * window with a power curve (per-axis or circular). Roll drives horizontal,
+ * pitch drives vertical — no conversion styles (the device IS the stick).
+ * Tolerant of missing keys.
+ *
+ * **On-device tuning:** `gyro_speed_deadzone` / `gyro_precision_speed` appear in
+ * the menu for parity but are rate concepts that don't map cleanly to a
+ * tilt-angle mode — parsed and stored, not yet actuated (both default 0).
+ */
+internal data class GyroJoystickDeflectionSettings(
+    val outputLeftStick: Boolean,
+    val useRelativeRoll: Boolean,
+    val useRelativePitch: Boolean,
+    val minDeflectionDeg: Float,
+    val maxDeflectionDeg: Float,
+    val minOutput: Float,
+    val maxOutput: Float,
+    val powerCurve: Float,
+    val perAxisResponse: Boolean,
+    val lockAtEdges: Boolean,
+    val dragCenterPoint: Boolean,
+    val invertX: Boolean,
+    val invertY: Boolean,
+    val outputMixer: Float,
+    val rotateOutputDeg: Float,
+    val rotationalHaptics: HapticIntensity,
+) {
+    private fun mapAngleToOutput(angleRad: Float): Float {
+        val deg = abs(angleRad) / GyroShared.DEG_TO_RAD
+        val t = when {
+            maxDeflectionDeg > minDeflectionDeg ->
+                ((deg - minDeflectionDeg) / (maxDeflectionDeg - minDeflectionDeg)).coerceIn(0f, 1f)
+            deg >= minDeflectionDeg -> 1f
+            else -> 0f
+        }
+        val curved = t.pow(powerCurve)
+        val out = minOutput + (maxOutput - minOutput) * curved
+        return out.coerceIn(0f, if (lockAtEdges) maxOutput else 1f)
+    }
+
+    fun toStick(dRoll: Float, dPitch: Float): Pair<Float, Float> {
+        var ax: Float
+        var ay: Float
+        if (perAxisResponse) {
+            ax = sign(dRoll) * mapAngleToOutput(dRoll)
+            ay = sign(dPitch) * mapAngleToOutput(dPitch)
+        } else {
+            val mag = sqrt(dRoll * dRoll + dPitch * dPitch)
+            if (mag <= 0f) return 0f to 0f
+            val out = mapAngleToOutput(mag)
+            ax = (dRoll / mag) * out
+            ay = (dPitch / mag) * out
+        }
+        if (invertX) ax = -ax
+        if (invertY) ay = -ay
+        if (outputMixer > 0f) ax *= (1f - outputMixer) else if (outputMixer < 0f) ay *= (1f + outputMixer)
+        if (rotateOutputDeg != 0f) {
+            val r = (rotateOutputDeg * GyroShared.DEG_TO_RAD).toDouble()
+            val c = cos(r).toFloat(); val sn = sin(r).toFloat()
+            val nx = ax * c - ay * sn
+            val ny = ax * sn + ay * c
+            ax = nx; ay = ny
+        }
+        return ax.coerceIn(-1f, 1f) to ay.coerceIn(-1f, 1f)
+    }
+
+    companion object {
+        val DEFAULT_JSON = """{"send_to_joystick":"left"}"""
+
+        fun parse(json: String): GyroJoystickDeflectionSettings {
+            val obj = try {
+                if (json.isBlank()) JSONObject() else JSONObject(json)
+            } catch (_: JSONException) {
+                JSONObject()
+            }
+            return GyroJoystickDeflectionSettings(
+                outputLeftStick = obj.optString("send_to_joystick", "left") != "right",
+                useRelativeRoll = obj.optBoolean("use_relative_roll", true),
+                useRelativePitch = obj.optBoolean("use_relative_pitch", true),
+                minDeflectionDeg = obj.optDouble("min_deflection_angle", 2.0).toFloat().coerceIn(0f, 180f),
+                maxDeflectionDeg = obj.optDouble("max_deflection_angle", 45.0).toFloat().coerceIn(0f, 180f),
+                minOutput = (obj.optDouble("min_output", 0.0).toFloat() / 100f).coerceIn(0f, 1f),
+                maxOutput = (obj.optDouble("max_output", 100.0).toFloat() / 100f).coerceIn(0f, 1f),
+                powerCurve = obj.optDouble("joystick_power_curve", 1.0).toFloat().coerceIn(0.1f, 4f),
+                perAxisResponse = obj.optString("response_axis_style", "circular") == "per_axis",
+                lockAtEdges = obj.optBoolean("lock_at_edges", false),
+                dragCenterPoint = obj.optBoolean("drag_center_point", true),
+                invertX = obj.optBoolean("invert_x", false),
+                invertY = obj.optBoolean("invert_y", false),
+                outputMixer = (obj.optDouble("output_mixer", 0.0).toFloat() / 100f).coerceIn(-1f, 1f),
+                rotateOutputDeg = obj.optDouble("rotate_output", 0.0).toFloat().coerceIn(-180f, 180f),
+                rotationalHaptics = HapticIntensity.fromId(obj.optString("rotational_haptics", HapticIntensity.OFF.id))
+                    ?: HapticIntensity.OFF,
+            )
+        }
     }
 }
 
@@ -2812,138 +3202,43 @@ object GyroToJoystickDeflectionMode : SourceMode {
  * **Stateless** — no per-source integrator state. The previous-emit state
  * lives in [ModeContext.priorLatched], same idiom as [DpadMode].
  */
+/** Spec "Scroll Wheel Mode" — which axes get momentum multi-fire (vs single-fire). */
+internal enum class SwipeScrollMode(val id: String) {
+    OFF("off"), BOTH("both"), HORIZONTAL("horizontal"), VERTICAL("vertical");
+    val doHorizontal get() = this == BOTH || this == HORIZONTAL
+    val doVertical get() = this == BOTH || this == VERTICAL
+    companion object {
+        fun fromId(id: String?): SwipeScrollMode = entries.firstOrNull { it.id == id } ?: OFF
+    }
+}
+
+/** Spec "Scroll Wheel Friction" — momentum decay rate (per second). */
+internal enum class SwipeScrollFriction(val id: String, val decayPerSec: Float) {
+    OFF("off", 0.5f), NONE("none", 0f), LOW("low", 2f), MEDIUM("medium", 5f), HIGH("high", 12f);
+    companion object {
+        fun fromId(id: String?): SwipeScrollFriction = entries.firstOrNull { it.id == id } ?: MEDIUM
+    }
+}
+
 object DirectionalSwipeMode : SourceMode {
     override val mode: BindingMode = BindingMode.DIRECTIONAL_SWIPE
     override fun validInputs(): Set<String> = INPUTS
     override fun defaultSettingsJson(): String = DirectionalSwipeSettings.DEFAULT_JSON
     private val INPUTS = setOf("dpad_up", "dpad_down", "dpad_left", "dpad_right")
 
-    override fun evaluate(
-        reading: AnalogEvent,
-        ctx: ModeContext,
-        digitalEmit: (subInput: String, isDown: Boolean) -> Unit,
-        mouse: MouseEmitter,
-    ) {
-        if (reading.source != InputSource.GYRO) return
-        val settings = DirectionalSwipeSettings.parse(ctx.settingsJson)
+    private const val MAX_DT_SEC = 0.1f
+    // Lowpass time constant at max smoothing (smoothing 40 → ~0.12s).
+    private const val MAX_TAU_SEC = 0.12f
+    // Rotation between scroll-wheel-mode taps (~11.5°). Tunable on device.
+    private const val DETENT_RAD = 0.2f
+    // Scroll velocity below which momentum stops (rad/s).
+    private const val MIN_SCROLL_VEL = 0.05f
 
-        val priorUp = ctx.priorLatched["dpad_up"] == true
-        val priorDown = ctx.priorLatched["dpad_down"] == true
-        val priorLeft = ctx.priorLatched["dpad_left"] == true
-        val priorRight = ctx.priorLatched["dpad_right"] == true
+    // Per-source scratch: [lastTsMs, smH, smV, scrollAngH, scrollAngV, scrollVelH, scrollVelV].
+    private val state = mutableMapOf<InputSource, FloatArray>()
 
-        val pitch = reading.y  // sign-corrected: forward pitch → y < 0
-        val yaw = reading.z
-
-        // Per-direction hysteresis: latch ON at threshold, release at floor.
-        // Up / down ride the pitch axis; left / right ride the yaw axis.
-        // Negative y = pitch forward = up; positive y = pitch back = down.
-        // Positive z = CCW around screen-normal = yaw left; negative z = yaw right.
-        val wantUp = if (priorUp) pitch < -settings.releaseFloor else pitch < -settings.rateThreshold
-        val wantDown = if (priorDown) pitch > settings.releaseFloor else pitch > settings.rateThreshold
-        val wantLeft = if (priorLeft) yaw > settings.releaseFloor else yaw > settings.rateThreshold
-        val wantRight = if (priorRight) yaw < -settings.releaseFloor else yaw < -settings.rateThreshold
-
-        if (wantUp != priorUp) digitalEmit("dpad_up", wantUp)
-        if (wantDown != priorDown) digitalEmit("dpad_down", wantDown)
-        if (wantLeft != priorLeft) digitalEmit("dpad_left", wantLeft)
-        if (wantRight != priorRight) digitalEmit("dpad_right", wantRight)
-    }
-}
-
-/**
- * Parsed [DirectionalSwipeMode] settings. Tolerant of missing keys; falls
- * back to defaults so a binding_group seeded with `{}` keeps working.
- *
- * Defaults target deliberate flicks. Typical hand rotation rates:
- *  - Idle / drift: 0.01–0.1 rad/sec.
- *  - Slow tilt: 0.1–0.5 rad/sec.
- *  - Deliberate flick: 2–5 rad/sec.
- *
- * `rate_threshold = 2.0` cleanly distinguishes flicks from tilts.
- * `release_floor = 0.5` provides hysteresis so the deceleration phase of
- * a flick doesn't re-fire the opposite direction. Both are user-tunable
- * in the Cog menu (Phase 7 Brick F).
- */
-internal data class DirectionalSwipeSettings(
-    val rateThreshold: Float,
-    val releaseFloor: Float,
-) {
-    companion object {
-        const val DEFAULT_RATE_THRESHOLD = 2.0f
-        const val DEFAULT_RELEASE_FLOOR = 0.5f
-
-        val DEFAULTS = DirectionalSwipeSettings(
-            rateThreshold = DEFAULT_RATE_THRESHOLD,
-            releaseFloor = DEFAULT_RELEASE_FLOOR,
-        )
-        val DEFAULT_JSON =
-            """{"rate_threshold":$DEFAULT_RATE_THRESHOLD,"release_floor":$DEFAULT_RELEASE_FLOOR}"""
-
-        fun parse(json: String): DirectionalSwipeSettings {
-            if (json.isBlank()) return DEFAULTS
-            return try {
-                val obj = JSONObject(json)
-                val threshold = obj.optDouble("rate_threshold", DEFAULT_RATE_THRESHOLD.toDouble())
-                    .toFloat().coerceAtLeast(0f)
-                val floor = obj.optDouble("release_floor", DEFAULT_RELEASE_FLOOR.toDouble())
-                    .toFloat().coerceAtLeast(0f)
-                // Clamp floor below threshold — if a user typo'd them
-                // equal/reversed, fall back to a small hysteresis margin
-                // rather than producing a no-release latch.
-                val safeFloor = if (floor >= threshold) (threshold * 0.25f) else floor
-                DirectionalSwipeSettings(
-                    rateThreshold = threshold,
-                    releaseFloor = safeFloor,
-                )
-            } catch (_: JSONException) {
-                DEFAULTS
-            }
-        }
-    }
-}
-
-/**
- * **Mapo extension — no Steam equivalent.** Gyro yaw → mouse_dx
- * continuous mapping with an additive flick burst on rapid yaw gestures.
- * Loose analog to the joystick [FlickStickMode]: a quick wrist-flick
- * fires a one-shot rotation boost, while sustained slow yaw flows as
- * 1:1 (or settings-scaled) gyro→mouse. **Yaw-only — pitch is ignored**
- * (the design intent is camera turning, not look-up/down).
- *
- * **Steady-state** — every evaluate() emits a velocity proportional to
- * `reading.z` (yaw rate, rad/sec). Below `deadzone` (drift suppression),
- * the source's velocity slot is zeroed.
- *
- * **Flick gesture** — when `|yaw rate|` crosses `flick_threshold` AND
- * the source is armed (no recent flick in flight), schedule a
- * `flick_angle * velocity` burst via [MouseEmitter.scheduleSmoothDelta]
- * over `flick_time` ms. The burst is *additive* on top of the continuous
- * velocity — the user's flick gesture contributes its native yaw motion
- * PLUS the configured boost angle. Disarms until yaw rate drops below
- * the deadzone (rearm hysteresis), so one sustained rotation = one flick.
- *
- * **Sign convention** — positive `reading.z` = CCW yaw (top-edge-rotates-
- * left), which the user intends as "look left." Mouse-dx convention is
- * positive = look right, so the math sign-flips internally.
- *
- * **Source filter** — gyro only. Other sources are a no-op.
- *
- * **Per-source state** — armed/disarmed boolean keyed by [InputSource];
- * cleared via [resetState] from
- * [com.mapo.service.input.InputEvaluator.handleConfigChange] on mode
- * change.
- */
-object GyroFlickStickMode : SourceMode {
-    override val mode: BindingMode = BindingMode.GYRO_FLICK_STICK
-    override fun validInputs(): Set<String> = emptySet()
-    override fun defaultSettingsJson(): String = GyroFlickStickSettings.DEFAULT_JSON
-
-    private val armedBySource = mutableMapOf<InputSource, Boolean>()
-
-    /** Reset per-source arming state. Called on mode change. */
     fun resetState() {
-        synchronized(armedBySource) { armedBySource.clear() }
+        state.clear()
     }
 
     override fun evaluate(
@@ -2953,218 +3248,160 @@ object GyroFlickStickMode : SourceMode {
         mouse: MouseEmitter,
     ) {
         if (reading.source != InputSource.GYRO) return
-        val settings = GyroFlickStickSettings.parse(ctx.settingsJson)
+        val s = DirectionalSwipeSettings.parse(ctx.settingsJson)
+        val st = state.getOrPut(reading.source) {
+            floatArrayOf(reading.timestampMs.toFloat(), 0f, 0f, 0f, 0f, 0f, 0f)
+        }
+        val dt = ((reading.timestampMs - st[0].toLong()).toFloat() / 1000f).coerceIn(0f, MAX_DT_SEC)
+        st[0] = reading.timestampMs.toFloat()
 
-        val yawRate = reading.z  // rad/sec
-        val absRate = kotlin.math.abs(yawRate)
-
-        // Below deadzone: zero contribution and re-arm for the next flick.
-        if (absRate < settings.deadzone) {
-            mouse.setStickVelocity(reading.source, 0f, 0f)
-            synchronized(armedBySource) { armedBySource[reading.source] = true }
+        // Enable-button gating: release any held swipe + clear momentum.
+        if (!ctx.gyroEnabled) {
+            releaseHeld(ctx, digitalEmit)
+            for (i in 1..6) st[i] = 0f
             return
         }
 
-        // Continuous yaw → mouse_dx velocity. Sign-flip from sensor
-        // convention (+z = CCW = left) to mouse_dx convention (+dx = right).
-        val baseVx = -yawRate * settings.velocityPxPerRad
-        mouse.setStickVelocity(reading.source, baseVx, 0f)
+        // Horizontal driver = yaw (z) or roll (x) per Steering Axis; vertical = pitch (y,
+        // already sign-corrected). +h = swipe left, -h = right; -v = up, +v = down.
+        var h = if (s.steeringYaw) reading.z else reading.x
+        var v = reading.y
+        // Rotate the 2D swipe vector to align with the thumb's natural angle.
+        if (s.rotationRad != 0f) {
+            val c = cos(s.rotationRad)
+            val sn = sin(s.rotationRad)
+            val nh = h * c - v * sn
+            val nv = h * sn + v * c
+            h = nh; v = nv
+        }
+        // Smoothing: dt-aware exponential lowpass (smoothing 0 = none).
+        val tau = (s.smoothing / 40f) * MAX_TAU_SEC
+        val alpha = if (tau <= 0f || dt <= 0f) 1f else dt / (tau + dt)
+        st[1] += alpha * (h - st[1])
+        st[2] += alpha * (v - st[2])
+        val sh = st[1]
+        val sv = st[2]
 
-        // Flick detection: rate above threshold AND armed → fire burst.
-        val armed = synchronized(armedBySource) {
-            armedBySource.getOrPut(reading.source) { true }
+        if (s.scrollMode == SwipeScrollMode.OFF) {
+            // Single-fire: latch a direction while swiping, release below the floor.
+            // One press per swipe; the activator engine sees a normal press/release.
+            st[3] = 0f; st[4] = 0f; st[5] = 0f; st[6] = 0f
+            latch(ctx, digitalEmit, "dpad_left", sh > 0f, abs(sh), s.rateThreshold, s.releaseFloor)
+            latch(ctx, digitalEmit, "dpad_right", sh < 0f, abs(sh), s.rateThreshold, s.releaseFloor)
+            latch(ctx, digitalEmit, "dpad_up", sv < 0f, abs(sv), s.rateThreshold, s.releaseFloor)
+            latch(ctx, digitalEmit, "dpad_down", sv > 0f, abs(sv), s.rateThreshold, s.releaseFloor)
+        } else {
+            // Momentum: a flick spins up a scroll velocity that coasts down by
+            // friction, firing a tap each detent. Per-axis enabled by scroll mode.
+            if (s.scrollMode.doHorizontal) {
+                scrollAxis(sh, dt, s, st, velIdx = 5, angIdx = 3, posDir = "dpad_left", negDir = "dpad_right", digitalEmit)
+            }
+            if (s.scrollMode.doVertical) {
+                scrollAxis(sv, dt, s, st, velIdx = 6, angIdx = 4, posDir = "dpad_down", negDir = "dpad_up", digitalEmit)
+            }
         }
-        if (armed && absRate >= settings.flickThreshold) {
-            // Sign matches the yaw direction (positive yaw rate → look-left
-            // mouse, so negative dx; negative yaw → positive dx).
-            val flickSign = if (yawRate > 0f) -1f else 1f
-            val flickPx = flickSign * settings.flickAngleRad * settings.velocityPxPerRad
-            mouse.scheduleSmoothDelta(flickPx, 0f, settings.flickTimeMs.toLong())
-            synchronized(armedBySource) { armedBySource[reading.source] = false }
+    }
+
+    /** Hysteresis latch for one direction via the synthetic-edge path. */
+    private fun latch(
+        ctx: ModeContext,
+        digitalEmit: (String, Boolean) -> Unit,
+        dir: String,
+        directionMatches: Boolean,
+        magnitude: Float,
+        threshold: Float,
+        floor: Float,
+    ) {
+        val prior = ctx.priorLatched[dir] == true
+        val want = directionMatches && (if (prior) magnitude > floor else magnitude > threshold)
+        if (want != prior) digitalEmit(dir, want)
+    }
+
+    /** Momentum scroll for one axis: drive velocity from the rate, coast by friction, tap per detent. */
+    private fun scrollAxis(
+        rate: Float,
+        dt: Float,
+        s: DirectionalSwipeSettings,
+        st: FloatArray,
+        velIdx: Int,
+        angIdx: Int,
+        posDir: String,
+        negDir: String,
+        digitalEmit: (String, Boolean) -> Unit,
+    ) {
+        if (abs(rate) >= s.rateThreshold) {
+            st[velIdx] = rate
+        } else {
+            st[velIdx] *= (1f - s.scrollFriction.decayPerSec * dt).coerceIn(0f, 1f)
         }
+        if (abs(st[velIdx]) < MIN_SCROLL_VEL) { st[velIdx] = 0f; st[angIdx] = 0f; return }
+        st[angIdx] += st[velIdx] * dt
+        while (st[angIdx] >= DETENT_RAD) { tap(digitalEmit, posDir); st[angIdx] -= DETENT_RAD }
+        while (st[angIdx] <= -DETENT_RAD) { tap(digitalEmit, negDir); st[angIdx] += DETENT_RAD }
+    }
+
+    private fun tap(digitalEmit: (String, Boolean) -> Unit, dir: String) {
+        digitalEmit(dir, true)
+        digitalEmit(dir, false)
+    }
+
+    private fun releaseHeld(ctx: ModeContext, digitalEmit: (String, Boolean) -> Unit) {
+        for (dir in INPUTS) if (ctx.priorLatched[dir] == true) digitalEmit(dir, false)
     }
 }
 
 /**
- * Parsed [GyroFlickStickMode] settings. Tolerant of missing keys; falls
- * back to defaults tuned for FPS camera use.
- *
- * **Mapo-only — no VDF mapping** since Steam doesn't expose a gyro flick
- * stick mode. The settings live entirely in Mapo's JSON namespace.
+ * Parsed [DirectionalSwipeMode] settings (the Steam "Gyro Directional Swipe"
+ * menu). Tolerant of missing keys. **Sensitivity** scales the flick threshold
+ * (higher % = easier to fire); **Steering Axis** picks yaw or roll for the
+ * horizontal swipe; **Scroll Wheel Mode** + **Friction** turn a flick into a
+ * coasting multi-fire; **Smoothing** lowpasses the rate; **Rotation** rotates
+ * the swipe horizon.
  */
-internal data class GyroFlickStickSettings(
-    val deadzone: Float,
-    val velocityPxPerRad: Float,
-    val flickThreshold: Float,
-    val flickAngleRad: Float,
-    val flickTimeMs: Int,
+internal data class DirectionalSwipeSettings(
+    val sensitivityPct: Float,
+    val scrollMode: SwipeScrollMode,
+    val scrollFriction: SwipeScrollFriction,
+    val smoothing: Float,
+    val rotationRad: Float,
+    val steeringYaw: Boolean,
 ) {
-    companion object {
-        /** Drift-suppression floor. Yaw rates below this emit zero. */
-        const val DEFAULT_DEADZONE = 0.05f
-
-        /**
-         * Continuous yaw→mouse sensitivity. Comparable to the joystick Flick
-         * Stick's derived px/radian (its Dots Per 360 ÷ 2π) so the two flick
-         * stick modes feel consistent in their hold-phase sensitivity.
-         */
-        const val DEFAULT_VELOCITY_PX_PER_RAD = 1500f
-
-        /**
-         * Yaw rate at which a flick burst fires. ~2 rad/sec is a
-         * deliberate-flick speed — slow tilts and fine aim don't trigger
-         * it. Same value [DirectionalSwipeSettings] uses for its rate
-         * threshold (gesture-detection symmetry).
-         */
-        const val DEFAULT_FLICK_THRESHOLD = 2.0f
-
-        /**
-         * Flick burst rotation amount. π/2 = 90° turn. Mapo extension —
-         * user can dial to π (180°), 2π (full spin), etc.
-         */
-        val DEFAULT_FLICK_ANGLE_RAD = (kotlin.math.PI / 2.0).toFloat()
-
-        /** Flick playout duration. Same default as joystick FLICK_STICK. */
-        const val DEFAULT_FLICK_TIME_MS = 100
-
-        val DEFAULTS = GyroFlickStickSettings(
-            deadzone = DEFAULT_DEADZONE,
-            velocityPxPerRad = DEFAULT_VELOCITY_PX_PER_RAD,
-            flickThreshold = DEFAULT_FLICK_THRESHOLD,
-            flickAngleRad = DEFAULT_FLICK_ANGLE_RAD,
-            flickTimeMs = DEFAULT_FLICK_TIME_MS,
-        )
-
-        val DEFAULT_JSON =
-            """{"deadzone":$DEFAULT_DEADZONE,"velocity":$DEFAULT_VELOCITY_PX_PER_RAD,""" +
-                """"flick_threshold":$DEFAULT_FLICK_THRESHOLD,""" +
-                """"flick_angle":$DEFAULT_FLICK_ANGLE_RAD,"flick_time":$DEFAULT_FLICK_TIME_MS}"""
-
-        fun parse(json: String): GyroFlickStickSettings {
-            if (json.isBlank()) return DEFAULTS
-            return try {
-                val obj = JSONObject(json)
-                GyroFlickStickSettings(
-                    deadzone = obj.optDouble("deadzone", DEFAULT_DEADZONE.toDouble())
-                        .toFloat().coerceAtLeast(0f),
-                    velocityPxPerRad = obj.optDouble("velocity", DEFAULT_VELOCITY_PX_PER_RAD.toDouble())
-                        .toFloat().coerceAtLeast(1f),
-                    flickThreshold = obj.optDouble("flick_threshold", DEFAULT_FLICK_THRESHOLD.toDouble())
-                        .toFloat().coerceAtLeast(0f),
-                    flickAngleRad = obj.optDouble("flick_angle", DEFAULT_FLICK_ANGLE_RAD.toDouble())
-                        .toFloat(),
-                    flickTimeMs = obj.optInt("flick_time", DEFAULT_FLICK_TIME_MS).coerceAtLeast(1),
-                )
-            } catch (_: JSONException) {
-                DEFAULTS
-            }
-        }
-    }
-}
-
-/**
- * Parsed settings + math for the gyro→stick modes
- * ([GyroToJoystickCameraMode], [GyroToJoystickDeflectionMode]). Sibling
- * of [StickToMouseSettings]: same "caller-supplied defaults" pattern so
- * the two modes can share the parser while shipping different tuning
- * presets.
- *
- * **toAxis math:**
- *  1. Per-axis deadzone — `|rate| < deadzone` → 0 on that axis. Same
- *     rationale as [GyroToMouseSettings]: a still hand emits independent
- *     low-magnitude noise on each axis; per-axis nukes both
- *     independently. A radial threshold would let (0.04, 0.04) slip
- *     through.
- *  2. Multiply by per-axis sensitivity → raw deflection in stick units.
- *  3. Apply `invert_x` / `invert_y` sign flips.
- *  4. Clamp to [-1, +1] — virtual stick deflection saturates at the rim;
- *     beyond-saturation rotation has no further effect, matching Steam.
- *
- * **Units of sensitivity:** stick-deflection units per rad/sec of gyro
- * rate. With camera default 0.8, a sustained 1 rad/sec rotation
- * (~57°/sec) produces 0.8 deflection — strong but not saturated. With
- * deflection default 0.4, same rotation produces 0.4 deflection —
- * moderate. Users tune for feel via the Cog menu (Phase 7 Brick F).
- *
- * **No response curve** (`exponent`) like [StickToMouseSettings] has:
- * gyro→stick is linear by Steam convention, matching the linear
- * [GyroToMouseSettings] choice. Add a curve setting later if needed.
- */
-internal data class GyroToStickSettings(
-    val sensitivityX: Float,
-    val sensitivityY: Float,
-    val deadzone: Float,
-    val invertX: Boolean,
-    val invertY: Boolean,
-) {
-    /**
-     * Convert (roll_rate, pitch_rate) in rad/sec to (ax, ay) normalized
-     * stick deflection in [-1, +1]. See class KDoc for the math steps.
-     */
-    fun toAxis(rollRadPerSec: Float, pitchRadPerSec: Float): Pair<Float, Float> {
-        val roll = if (abs(rollRadPerSec) < deadzone) 0f else rollRadPerSec
-        val pitch = if (abs(pitchRadPerSec) < deadzone) 0f else pitchRadPerSec
-        val ax = (roll * sensitivityX * if (invertX) -1f else 1f).coerceIn(-1f, 1f)
-        val ay = (pitch * sensitivityY * if (invertY) -1f else 1f).coerceIn(-1f, 1f)
-        return ax to ay
-    }
+    /** Flick rate threshold (rad/s), scaled down as sensitivity rises. */
+    val rateThreshold: Float get() = BASE_THRESHOLD * 100f / sensitivityPct.coerceAtLeast(1f)
+    val releaseFloor: Float get() = rateThreshold * 0.25f
 
     companion object {
-        // Camera defaults — high sensitivity for FPS aim feel. 1 rad/sec
-        // gyro → 0.8 deflection (strong but not saturated); saturates
-        // around 1.25 rad/sec (~72°/sec, a moderately fast turn).
-        // Camera is rate-based; sensitivity units are "deflection per
-        // rad/sec".
-        const val DEFAULT_CAMERA_SENSITIVITY = 0.8f
-        // Deflection defaults — tilt-based (2026-06-01), so sensitivity
-        // units are "deflection per radian of tilt-from-rest", NOT
-        // "deflection per rad/sec of rate". Higher numeric value at the
-        // same feel because typical tilt angles are fractions of a radian.
-        // 5.0 → ~12° of tilt (0.2 rad) saturates the stick — small lean =
-        // full walking speed. Tune in the Cog menu (Phase 7 Brick F).
-        const val DEFAULT_DEFLECTION_SENSITIVITY = 5.0f
-        // 0.05 rad/sec ≈ 2.9°/sec. Same noise-floor threshold as
-        // [GyroToMouseSettings]; both modes consume the same gyro stream.
-        const val DEFAULT_DEADZONE = 0.05f
+        // Base flick threshold at 100% sensitivity — distinguishes flicks (2–5
+        // rad/s) from slow tilt (0.1–0.5 rad/s).
+        const val BASE_THRESHOLD = 2.0f
+        private const val DEG_TO_RAD = (Math.PI / 180.0).toFloat()
 
-        val CAMERA_DEFAULTS = GyroToStickSettings(
-            sensitivityX = DEFAULT_CAMERA_SENSITIVITY,
-            sensitivityY = DEFAULT_CAMERA_SENSITIVITY,
-            deadzone = DEFAULT_DEADZONE,
-            invertX = false,
-            invertY = false,
+        val DEFAULTS = DirectionalSwipeSettings(
+            sensitivityPct = 100f,
+            scrollMode = SwipeScrollMode.OFF,
+            scrollFriction = SwipeScrollFriction.MEDIUM,
+            smoothing = 20f,
+            rotationRad = 0f,
+            steeringYaw = true,
         )
-        val DEFLECTION_DEFAULTS = GyroToStickSettings(
-            sensitivityX = DEFAULT_DEFLECTION_SENSITIVITY,
-            sensitivityY = DEFAULT_DEFLECTION_SENSITIVITY,
-            deadzone = DEFAULT_DEADZONE,
-            invertX = false,
-            invertY = false,
-        )
-        val CAMERA_DEFAULT_JSON =
-            """{"sensitivity_x":$DEFAULT_CAMERA_SENSITIVITY,"sensitivity_y":$DEFAULT_CAMERA_SENSITIVITY,"deadzone":$DEFAULT_DEADZONE,"invert_x":false,"invert_y":false}"""
-        val DEFLECTION_DEFAULT_JSON =
-            """{"sensitivity_x":$DEFAULT_DEFLECTION_SENSITIVITY,"sensitivity_y":$DEFAULT_DEFLECTION_SENSITIVITY,"deadzone":$DEFAULT_DEADZONE,"invert_x":false,"invert_y":false}"""
+        val DEFAULT_JSON = "{}"
 
-        fun parse(json: String, defaults: GyroToStickSettings): GyroToStickSettings {
-            if (json.isBlank()) return defaults
-            return try {
-                val obj = JSONObject(json)
-                GyroToStickSettings(
-                    sensitivityX = obj.optDouble("sensitivity_x", defaults.sensitivityX.toDouble()).toFloat()
-                        .coerceAtLeast(0f),
-                    sensitivityY = obj.optDouble("sensitivity_y", defaults.sensitivityY.toDouble()).toFloat()
-                        .coerceAtLeast(0f),
-                    // Same 5 rad/sec ceiling as [GyroToMouseSettings] — past any
-                    // deliberate hand motion; clamp protects against pathological JSON.
-                    deadzone = obj.optDouble("deadzone", defaults.deadzone.toDouble()).toFloat()
-                        .coerceIn(0f, 5f),
-                    invertX = obj.optBoolean("invert_x", defaults.invertX),
-                    invertY = obj.optBoolean("invert_y", defaults.invertY),
-                )
+        fun parse(json: String): DirectionalSwipeSettings {
+            val obj = try {
+                if (json.isBlank()) JSONObject() else JSONObject(json)
             } catch (_: JSONException) {
-                defaults
+                return DEFAULTS
             }
+            return DirectionalSwipeSettings(
+                sensitivityPct = obj.optDouble("sensitivity", 100.0).toFloat().coerceIn(1f, 3000f),
+                scrollMode = SwipeScrollMode.fromId(obj.optString("scroll_wheel_mode", SwipeScrollMode.OFF.id)),
+                scrollFriction = SwipeScrollFriction.fromId(
+                    obj.optString("scroll_wheel_friction", SwipeScrollFriction.MEDIUM.id),
+                ),
+                smoothing = obj.optDouble("smoothing", 20.0).toFloat().coerceIn(0f, 40f),
+                rotationRad = obj.optDouble("rotation", 0.0).toFloat().coerceIn(-180f, 180f) * DEG_TO_RAD,
+                steeringYaw = obj.optString("gyro_steering_axis", "yaw") != "roll",
+            )
         }
     }
 }
@@ -3504,7 +3741,6 @@ fun BindingMode.handler(): SourceMode = when (this) {
     BindingMode.GYRO_TO_JOYSTICK_DEFLECTION -> GyroToJoystickDeflectionMode
     BindingMode.DIRECTIONAL_SWIPE -> DirectionalSwipeMode
     BindingMode.FLICK_STICK -> FlickStickMode
-    BindingMode.GYRO_FLICK_STICK -> GyroFlickStickMode
     BindingMode.SCROLL_WHEEL -> ScrollWheelMode
     BindingMode.REFERENCE,
     BindingMode.RADIAL_MENU,
@@ -3593,7 +3829,6 @@ val MODES_REQUIRING_SHIZUKU: Set<BindingMode> = ANALOG_MODES_REQUIRING_MOTION_CA
     BindingMode.GYRO_TO_MOUSE,                // uinput mouse for clean cursor (else dispatchGesture click-drag)
     BindingMode.GYRO_TO_JOYSTICK_CAMERA,      // uinput gamepad axes
     BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,  // uinput gamepad axes
-    BindingMode.GYRO_FLICK_STICK,             // uinput mouse for continuous yaw + flick burst
     // DIRECTIONAL_SWIPE outputs synthetic digital edges via the normal key
     // inject path — works without Shizuku via reflection. Intentionally
     // omitted.
@@ -3708,7 +3943,6 @@ fun validInputsFor(source: InputSource, mode: BindingMode): Set<String> = when (
         BindingMode.GYRO_TO_MOUSE,
         BindingMode.GYRO_TO_JOYSTICK_CAMERA,
         BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
-        BindingMode.GYRO_FLICK_STICK,
         BindingMode.MOUSE_REGION -> emptySet()
         BindingMode.RADIAL_MENU, BindingMode.TOUCH_MENU, BindingMode.HOTBAR_MENU -> emptySet()
         else -> mode.handler().validInputs()
@@ -3809,7 +4043,6 @@ object SourceModeCatalog {
             BindingMode.GYRO_TO_MOUSE,
             BindingMode.GYRO_TO_JOYSTICK_CAMERA,
             BindingMode.GYRO_TO_JOYSTICK_DEFLECTION,
-            BindingMode.GYRO_FLICK_STICK,  // Mapo extension; no Steam equivalent
             // MOUSE_REGION hidden for the same reason as the joystick rows.
             BindingMode.DPAD,
             BindingMode.DIRECTIONAL_SWIPE,

@@ -156,7 +156,8 @@ UI reacts. We're adding an index + a target list + an activation channel to the 
 1. **Launcher-icon behavior → shows the overlay toolbar.** Tapping the Mapo icon reveals the
    passthrough toolbar over the current foreground app (and routes to permission setup if
    overlay/accessibility perms are missing). It no longer opens a modal activity home. This
-   is the same reveal path as the QS tile (decision 3).
+   is the same reveal path as the QS tile (decision 3). *Implemented at Brick 6 (the cutover),
+   not earlier — it's irreversible and must wait until the overlay is gamepad-navigable.*
 2. **Toolbar-nav entry trigger → long-press Select + A (chord), later configurable.** Default
    is the chord *hold Select, then A*. This is authored as a normal binding so it later flows
    through Mapo's standard activator configuration (regular / long-press / etc., per
@@ -189,30 +190,62 @@ Mounted via a temporary "Toolbar overlay (dev)" entry in the in-activity toolbar
 overlay's own copy). Coexists with the in-activity toolbar; nothing deleted. **Verify on
 device:** touch works, out-of-bounds passthrough works, game keeps gamepad input while up.
 
-### Brick 2 — Config-host routing + launcher reveal
-`MainActivity` becomes launchable directly into a deep route via an intent extra; remove the
-home route from the NavHost. Toolbar elements that need a full screen (Edit Controls, Edit
-Overlay, Change Profile, options items) fire that intent. The **launcher icon now reveals the
-toolbar overlay** instead of opening the home (decision 1) — the icon's entry point shows the
-overlay (and routes to permission setup if perms are missing) rather than hosting chrome.
-Everything is now drivable by touch end-to-end.
+### Brick 2 — Config-host deep-route launching (additive) — ✅ LANDED (awaiting device verify)
+`MainActivity` takes `EXTRA_ROUTE` (a `MapoRoute` string), consumed in `onCreate` +
+`onNewIntent` (singleTask) into `pendingRoute`/`routeNonce` snapshot state; `MainScreen` gained
+`deepLinkRoute`/`deepLinkNonce` params and a `LaunchedEffect(deepLinkNonce)` that navigates
+there. Keyed on the **nonce, not the route**, so re-tapping the same destination after backing
+out re-navigates (a plain String wouldn't re-fire). `startDestination` stays MAIN, so Back from
+a deep screen returns to the Mapo home. `ToolbarOverlayManager.launchRoute(route)` puts the
+extra; every deep-screen callback fires its exact route. **Purely additive** — in-activity home,
+MAIN route, and launcher behavior untouched. Launcher repoint + MAIN-home removal remain the
+**Brick 6 cutover** (must wait until the overlay is gamepad-navigable). **Verify on device:**
+from the dev overlay, each menu item opens the right screen; Back returns to home; re-tapping a
+destination after backing out re-opens it.
 
-### Brick 3 — Implementation-B selection engine (the heart)
-`InputDispatcher` gains the four toolbar state members. `InputAccessibilityService.onKeyEvent`
-gains a `toolbarNavActive` branch: DPAD moves selection (consumed), A emits `activateToolbar`
-(consumed), B exits (consumed); all other keys pass through. The toolbar composable publishes
-its target list, renders the highlight, and runs the activated target's action.
-**Enter-nav trigger (decision 2): long-press Select + A.** MVP seeds this chord; detection
-should route through the existing activator/chord machinery (`captureMode` + the evaluator's
-chord handling, `feedback_soft_press_unified_to_soft_pull` / `reference_steam_input_activators`)
-rather than a bespoke `onKeyEvent` special-case, so the later "make it configurable" step is
-a UI addition, not a rewrite. **Verify on device:** hold Select + A enters nav, walk
-switch→profile→options with DPAD, A toggles/opens, B exits, game input restored on exit.
+### Brick 3 — Implementation-B selection engine (the heart) — ✅ LANDED (awaiting device verify)
+`InputDispatcher` gained the four toolbar members (`toolbarNavActive`, `toolbarSelection`,
+`toolbarTargets`, `activateToolbar`) + ops (`setToolbarTargets`/`enter`/`exit`/`move`/`activate`;
+republish resets selection to 0, empty list force-exits nav). `InputAccessibilityService.onKeyEvent`
+gained a `toolbarNavActive` branch **before** the remap-enabled gate (so the toolbar stays
+navigable with remap off): DPAD L/R move (consumed), DPAD U/D consumed (reserved for Brick 4),
+A activates (consumed), B exits (consumed); all else passes. `ToolbarOverlayManager.ToolbarContent`
+publishes targets + collects nav state + bumps an activate tick; `MainBottomToolbar` gained
+`navEnabled/navActive/navSelection/navActivateTick`, renders a constant-footprint selection ring
+(`navRingModifier`, no reflow on enter, in-activity copy untouched) and self-activates.
 
-### Brick 4 — Menu nav stack
-Opening the profile/options menus republishes `toolbarTargets` (now the menu items); a UI-side
-nav stack handles descend/ascend; selection resets to 0 on each republish; highlight follows.
-Activating a leaf either performs its action inline or launches the config host (Brick 2).
+**As-built deviations** (vs. the plan-as-written, per living-plan workflow):
+- **3 top-level targets, not 4:** `switch` / `split-button` / `options`. The split button is
+  one ring; A on it opens the profile menu (which already contains "Profile options" =
+  the leading button's direct action), so collapsing leading+trailing into one target loses
+  nothing and gives a clean single highlight. Brick 4 adds gamepad descent into the menus.
+- **Enter trigger detected inline** (Select-held + A) as the Brick-3 MVP, *not* yet routed
+  through the activator/chord machinery. Deferred to Brick 5 with the configurability work.
+- **Known MVP artifacts** (clean up in Brick 4/5): (a) entering nav lets the game see a stray
+  Select tap (we can't buffer the Select edge without the activator flow); (b) A on
+  split/options opens a `focusable` popup over the game — transient focus-steal, and not yet
+  gamepad-navigable (service consumes DPAD during nav). B exits nav but doesn't dismiss an open
+  menu. Both resolved when Brick 4 makes menu nav service-driven.
+
+**Verify on device:** with the dev overlay up, hold **Select + A** → selection ring appears;
+**DPAD L/R** walks switch→split→options; **A on the switch** toggles Mapo on/off (toolbar stays
+up); **A on split/options** opens that menu; **B** exits (ring gone, game DPAD restored). Confirm
+the game keeps gamepad input when *not* in nav mode, and DPAD doesn't leak to the game *during* nav.
+
+### Brick 4 — Menu nav stack — ✅ LANDED (awaiting device verify)
+Both menus are modeled as ordered `ToolbarMenuEntry` lists in `MainBottomToolbar` (the nav-stack
+owner). Opening a menu republishes `toolbarTargets` to its item ids (selection resets to 0);
+the per-item highlight (`secondaryContainer` background) follows `navSelection`; activating a leaf
+runs its action, closes the menu, and exits nav. New plumbing: `InputDispatcher.backToolbar` +
+`signalToolbarBack()`; the service routes **B → back signal** (no longer a direct exit) so the UI
+decides **ascend-out-of-menu vs. exit-at-top**; DPAD axes unified (Left/Up = prev, Right/Down =
+next) so the same cursor drives the horizontal toolbar and the vertical menu. `MainBottomToolbar`
+gained `navBackTick` / `onPublishTargets` / `onExitNav`; live target publishing moved from the host
+into the toolbar (host keeps only teardown cleanup). This **resolves the Brick-3 menu-descent
+artifact**; the focusable popup still transiently takes focus while open (cosmetic; service-driven
+nav works through it) and the stray Select tap on entry remains for Brick 5. **Verify on device:**
+A on split/options opens the menu with item 0 highlighted; DPAD moves the highlight; A runs the
+item (and exits nav); B closes the menu back to the top-level rings; B again exits nav.
 
 ### Brick 5 — Reveal triggers, tile & polish
 Finalize the shown-on-demand reveal (decision 3): QS tile + nav-trigger + launcher icon all
@@ -221,6 +254,30 @@ accessibility) consistent with the Shizuku pattern. Highlight enter/exit + move 
 `feedback_handrolled_components_animations` (reproduce conventional focus-traversal motion,
 not just a static ring). Sentence-case all strings; M3 surface roles per
 `feedback_m3_compose_standards`.
+
+- **Brick 5a — gamepad summon + auto-hide — ✅ LANDED (awaiting device verify).** Select+A now
+  *summons* a hidden toolbar and enters nav, and a gamepad-summoned toolbar auto-hides when the
+  user exits nav. `InputDispatcher.requestEnterToolbarNavWhenReady()` + a `pendingEnterNav` latch
+  honored in `setToolbarTargets` bridge the async mount (targets publish a frame after
+  `addView`). `ToolbarOverlayManager` split into `show()` (persistent, dev/QS) vs `showForNav()`
+  (returns false if overlay perm missing → trigger's A falls through to the game) with a
+  `summonedByNav` flag; `onExitNav` hides only a summoned session. Service injects the manager and
+  reveals-then-enters on Select+A. A/B (and the enter chord) guarded on `repeatCount == 0` so a
+  held button doesn't spam activate/back; DPAD repeat left on for menu scroll. **Verify on device:**
+  with the toolbar hidden, Select+A makes it appear in nav (ring on switch); B at top makes it
+  vanish; a dev/QS-shown toolbar stays after B (only its nav exits).
+- **Brick 5a-fix — PIVOT to transient-focusable nav — ✅ LANDED (awaiting device verify).** On-device,
+  the stick AND D-pad turned out to be **MotionEvents** (HAT axis) the AccessibilityService can't see
+  (only face buttons are key events) — so the onKeyEvent cursor of Bricks 3–4 fundamentally can't drive
+  movement. User chose transient-focusable over the Shizuku-motion path. Now: while `navActive` the
+  toolbar window is made **focusable** (`setWindowFocusable`), so the platform's focus traversal drives
+  stick/D-pad for free; `overlayFocus = TOOLBAR` makes `onKeyEvent` inject **A→ENTER / B→BACK** (reusing
+  the PROMPT path) so Compose's native key-activation fires. Movement/highlight = Compose focus + M3
+  focus indication. The Bricks 3–4 service cursor + `InputDispatcher` target/selection/activate/back
+  machinery are now **vestigial** (cleanup later). Highlight prominence + motion = polish (Brick 5c).
+- **Brick 5b — QS tile reveal** (pending).
+- **Brick 5c — trigger via activator flow + permission/health surfacing + highlight motion polish**
+  (pending). Resolves the remaining MVP artifacts (Select-tap on entry; menu-popup focus).
 
 ### Brick 6 — Retire the in-activity home
 Remove the home route, backdrop tap-to-background, and dead drawer/menu code; the launcher

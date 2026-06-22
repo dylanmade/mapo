@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
@@ -65,6 +66,8 @@ fun CompactDropdownField(
     options: List<Pair<String, String>> = emptyList(),
     selectedKey: String? = null,
     onPick: (String) -> Unit = {},
+    /** Optional glyph shown at the leading edge of the field, before [selectedText]. */
+    selectedLeadingIcon: (@Composable () -> Unit)? = null,
     menuContent: (@Composable (dismiss: () -> Unit) -> Unit)? = null,
 ) {
     val density = LocalCompactDensity.current
@@ -106,6 +109,10 @@ fun CompactDropdownField(
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (selectedLeadingIcon != null) {
+                    selectedLeadingIcon()
+                    androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+                }
                 Text(
                     text = selectedText,
                     // Match the menu rows (CompactDropdownMenuItem also uses compactLabelStyle).

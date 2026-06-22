@@ -31,6 +31,29 @@ import com.themestudio.core.LocalThemeStudioController
 import com.themestudio.core.LocalThemeStudioVariantOverride
 import com.themestudio.core.applyOverrides
 import com.themestudio.core.rememberThemeFontResolver
+import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamiccolor.ColorSpec
+import com.materialkolor.rememberDynamicMaterialThemeState
+
+/**
+ * MaterialKolor seed — DodgerBlue (#1E90FF). The base color scheme is generated from this seed
+ * (SPEC_2025 expressive, TonalSpot) rather than a hand-authored palette, via materialkolor.com.
+ * Change the seed to re-tint the whole app.
+ */
+private val MapoSeedColor = Color(0xFF1E90FF)
+
+/** Map a Theme-Studio palette-style name (see `ColorGenerationOverrides.STYLE_NAMES`) to MaterialKolor's. */
+private fun paletteStyleFromName(name: String?): PaletteStyle = when (name) {
+    "Neutral" -> PaletteStyle.Neutral
+    "Vibrant" -> PaletteStyle.Vibrant
+    "Expressive" -> PaletteStyle.Expressive
+    "Rainbow" -> PaletteStyle.Rainbow
+    "FruitSalad" -> PaletteStyle.FruitSalad
+    "Monochrome" -> PaletteStyle.Monochrome
+    "Fidelity" -> PaletteStyle.Fidelity
+    "Content" -> PaletteStyle.Content
+    else -> PaletteStyle.TonalSpot
+}
 
 private val lightScheme = lightColorScheme(
     primary = primaryLight,
@@ -126,17 +149,28 @@ fun MapoTheme(
     // when it has overrides, merge them onto the chosen base scheme/typography/shapes.
     val variantOverride = LocalThemeStudioVariantOverride.current
     val effectiveDark = variantOverride ?: darkTheme
+    val controller = LocalThemeStudioController.current
+    val overrides = controller.overrides
+    // MaterialKolor generates the base scheme from a seed (SPEC_2025 expressive). The seed, palette
+    // style, and contrast are live-editable from Theme Studio's Colors tab (colorGeneration
+    // overrides), falling back to [MapoSeedColor] / TonalSpot / 0. This replaces the hand-authored
+    // lightScheme/darkScheme (kept below as a fallback reference). Wallpaper dynamicColor still wins.
+    val gen = overrides.colorGeneration
+    val materialKolorState = rememberDynamicMaterialThemeState(
+        isDark = effectiveDark,
+        style = paletteStyleFromName(gen.style),
+        contrastLevel = (gen.contrast ?: 0f).toDouble(),
+        specVersion = ColorSpec.SpecVersion.SPEC_2025,
+        seedColor = gen.seed ?: MapoSeedColor,
+    )
     val baseScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (effectiveDark) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)
         }
-        effectiveDark -> darkScheme
-        else -> lightScheme
+        else -> materialKolorState.colorScheme
     }
-    val controller = LocalThemeStudioController.current
-    val overrides = controller.overrides
     val variantColors =
         if (effectiveDark) overrides.colors.dark else overrides.colors.light
     val colorScheme = baseScheme.applyOverrides(variantColors)
@@ -147,10 +181,10 @@ fun MapoTheme(
     val extraColors = if (effectiveDark) MapoExtraColors.Dark else MapoExtraColors.Light
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
-        // Standard (critically-damped) springs instead of expressive (bouncy):
-        // expressive's intentional overshoot caused the drawer to slide past its
-        // open anchor and snap back, looking like a glitch. Switch back any time.
-        motionScheme = MotionScheme.standard(),
+        // Expressive (bouncy) motion — enabled with the MaterialKolor expressive palette. NOTE:
+        // expressive overshoot previously made the ModalNavigationDrawer slide past its open anchor
+        // and snap back; re-verify the drawer + other overshoot-sensitive components on device.
+        motionScheme = MotionScheme.expressive(),
         typography = typography,
         shapes = shapes,
     ) {

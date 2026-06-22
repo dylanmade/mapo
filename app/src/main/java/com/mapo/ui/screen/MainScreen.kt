@@ -158,7 +158,14 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
-fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
+fun MainScreen(
+    viewModel: MainViewModel = hiltViewModel(),
+    // Deep-route launch from the toolbar overlay (OVERLAY_TOOLBAR_PLAN.md, Brick 2). When
+    // [deepLinkNonce] increments with a non-null [deepLinkRoute], navigate there. Keyed on the
+    // nonce so re-requesting the same route re-navigates.
+    deepLinkRoute: String? = null,
+    deepLinkNonce: Int = 0,
+) {
     val selectedIndex by viewModel.selectedIndex.collectAsStateWithLifecycle()
     val isEditMode by viewModel.isEditMode.collectAsStateWithLifecycle()
     val layouts by viewModel.layouts.collectAsStateWithLifecycle()
@@ -234,6 +241,15 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     var menuVisible by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val navController = rememberNavController()
+
+    // Toolbar-overlay deep launch: navigate to the requested route. Keyed on the nonce (not the
+    // route) so re-tapping the same destination after backing out re-navigates. startDestination
+    // stays MAIN, so Back from the deep screen returns to the Mapo home. nonce 0 = no request.
+    LaunchedEffect(deepLinkNonce) {
+        if (deepLinkNonce > 0 && deepLinkRoute != null) {
+            navController.navigate(deepLinkRoute)
+        }
+    }
 
     // Toggle window flags + back-gesture suppression based on which destination is showing
     // and whether the drawer is open. Keeping these conditional (vs. unconditional in
@@ -508,7 +524,12 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            composable(MapoRoute.REMAP_CONTROLS) {
+            composable(MapoRoute.REMAP_CONTROLS) { entry ->
+                // Phase 2: the inline command picker pops back here, delivering its result via this
+                // entry's savedStateHandle (same key the InputEditor route used).
+                val remapPickerResult by entry.savedStateHandle
+                    .getStateFlow<String?>(MapoRoute.PICKER_RESULT_KEY, null)
+                    .collectAsStateWithLifecycle()
                 RemapControlsScreen(
                     config = activeControllerConfig,
                     profileName = activeProfile?.name,
@@ -624,6 +645,47 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             )
                         }
                     },
+                    // Phase 2: inline input-assignment editor callbacks (same VM methods the
+                    // standalone InputEditor route uses).
+                    pickerResult = remapPickerResult?.let { BindingOutput.decode(it) },
+                    onConsumePickerResult = {
+                        entry.savedStateHandle.remove<String>(MapoRoute.PICKER_RESULT_KEY)
+                    },
+                    onPickResult = { bindingId, output ->
+                        viewModel.setControllerCommand(bindingId, output)
+                    },
+                    onOpenPicker = { title, current ->
+                        navController.navigate(
+                            MapoRoute.remapTargetPicker(
+                                title = title,
+                                currentEncoded = current.encode(),
+                                showActionSets = true,
+                                showLayers = true,
+                            )
+                        )
+                    },
+                    onAddActivator = { groupInputId, type ->
+                        viewModel.addControllerActivator(groupInputId, type)
+                    },
+                    onRemoveActivator = { activatorId ->
+                        viewModel.removeControllerActivator(activatorId)
+                    },
+                    onSetActivatorType = { activatorId, type ->
+                        viewModel.setControllerActivatorType(activatorId, type)
+                    },
+                    onOpenActivatorSettings = { activatorId, label ->
+                        navController.navigate(MapoRoute.activatorEditor(activatorId, label))
+                    },
+                    onAddCommand = { activatorId ->
+                        viewModel.addControllerCommand(activatorId)
+                    },
+                    onRemoveCommand = { bindingId ->
+                        viewModel.removeControllerCommand(bindingId)
+                    },
+                    onAddInputRow = { groupInputId, type -> viewModel.addInputRow(groupInputId, type) },
+                    onSetInputRowPressType = { bindingId, type -> viewModel.setInputRowPressType(bindingId, type) },
+                    onSetInputRowLabel = { bindingId, label -> viewModel.setInputRowLabel(bindingId, label) },
+                    onDeleteInputRow = { bindingId -> viewModel.deleteInputRow(bindingId) },
                     modifier = Modifier.fillMaxSize()
                 )
             }

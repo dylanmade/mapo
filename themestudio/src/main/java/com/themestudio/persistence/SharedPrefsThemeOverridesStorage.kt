@@ -7,6 +7,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.themestudio.core.ColorGenerationOverrides
 import com.themestudio.core.ColorOverrides
 import com.themestudio.core.ColorRoles
 import com.themestudio.core.ColorThemeOverrides
@@ -50,6 +51,7 @@ class SharedPrefsThemeOverridesStorage(
         ),
         typography = readTypography(),
         shapes = readShapes(),
+        colorGeneration = readColorGeneration(),
     )
 
     override fun save(overrides: ThemeOverrides) {
@@ -58,7 +60,22 @@ class SharedPrefsThemeOverridesStorage(
         writeColors(edit, COLOR_DARK_PREFIX, overrides.colors.dark)
         writeTypography(edit, overrides.typography)
         writeShapes(edit, overrides.shapes)
+        writeColorGeneration(edit, overrides.colorGeneration)
         edit.apply()
+    }
+
+    // ── Color generation (seed-based) ───────────────────────────────────────
+
+    private fun readColorGeneration(): ColorGenerationOverrides = ColorGenerationOverrides(
+        seed = if (prefs.contains(GEN_SEED_KEY)) Color(prefs.getInt(GEN_SEED_KEY, 0)) else null,
+        style = prefs.getString(GEN_STYLE_KEY, null),
+        contrast = if (prefs.contains(GEN_CONTRAST_KEY)) prefs.getFloat(GEN_CONTRAST_KEY, 0f) else null,
+    )
+
+    private fun writeColorGeneration(edit: SharedPreferences.Editor, gen: ColorGenerationOverrides) {
+        if (gen.seed != null) edit.putInt(GEN_SEED_KEY, gen.seed.toArgb()) else edit.remove(GEN_SEED_KEY)
+        if (gen.style != null) edit.putString(GEN_STYLE_KEY, gen.style) else edit.remove(GEN_STYLE_KEY)
+        if (gen.contrast != null) edit.putFloat(GEN_CONTRAST_KEY, gen.contrast) else edit.remove(GEN_CONTRAST_KEY)
     }
 
     // ── Colors ────────────────────────────────────────────────────────────
@@ -151,5 +168,8 @@ class SharedPrefsThemeOverridesStorage(
         private const val TYPE_DISPLAY_FAMILY_KEY = "type.displayFontFamilyName"
         private const val TYPE_BODY_FAMILY_KEY = "type.bodyFontFamilyName"
         private const val SHAPE_PREFIX = "shape."
+        private const val GEN_SEED_KEY = "gen.seed"
+        private const val GEN_STYLE_KEY = "gen.style"
+        private const val GEN_CONTRAST_KEY = "gen.contrast"
     }
 }

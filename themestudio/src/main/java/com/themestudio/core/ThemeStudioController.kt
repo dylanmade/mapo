@@ -43,6 +43,23 @@ class ThemeStudioController(
         storage.save(_overrides)
     }
 
+    // ── Color generation (seed-based) ───────────────────────────────────────
+
+    fun setSeedColor(color: Color?) {
+        _overrides = _overrides.copy(colorGeneration = _overrides.colorGeneration.copy(seed = color))
+        storage.save(_overrides)
+    }
+
+    fun setPaletteStyle(style: String?) {
+        _overrides = _overrides.copy(colorGeneration = _overrides.colorGeneration.copy(style = style?.takeIf { it.isNotBlank() }))
+        storage.save(_overrides)
+    }
+
+    fun setColorContrast(contrast: Float?) {
+        _overrides = _overrides.copy(colorGeneration = _overrides.colorGeneration.copy(contrast = contrast))
+        storage.save(_overrides)
+    }
+
     // ── Typography ────────────────────────────────────────────────────────
 
     fun setTypographyRole(role: TypographyRole, value: TextStyleOverride) {

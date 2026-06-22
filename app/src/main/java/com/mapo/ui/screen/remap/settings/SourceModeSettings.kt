@@ -892,6 +892,238 @@ object SourceModeSettingsSchema {
         control = SettingControl.Toggle(default = true),
     )
 
+    // ── Gyro to Joystick Camera specs ────────────────────────────────────────
+    private val GYRO_SEND_TO_JOYSTICK_OPTIONS = listOf(
+        DropdownOption("left", "Left joystick"),
+        DropdownOption("right", "Right joystick"),
+    )
+    private val GYRO_ACCEL_NO_OFF_OPTIONS = listOf(
+        DropdownOption("linear", "Linear"),
+        DropdownOption("relaxed", "Relaxed"),
+        DropdownOption("aggressive", "Aggressive"),
+    )
+    private val GYRO_ANGLE_CATCHUP_OPTIONS = listOf(
+        DropdownOption("off", "Off", "Don't catch up to the desired angle after large gyro flicks saturate output."),
+        DropdownOption("only_while_active", "Only while gyro active", "Catch up to the desired angle, but only while the gyro is active."),
+        DropdownOption("always", "Always", "Always catch up — keep serving remaining catch-up angles even when the gyro is inactive."),
+    )
+    private val GYRO_SEND_TO_JOYSTICK = SettingSpec(
+        key = "send_to_joystick",
+        label = "Send to joystick",
+        helper = "Which joystick the gyro camera drives.",
+        control = SettingControl.Dropdown(GYRO_SEND_TO_JOYSTICK_OPTIONS, defaultId = "right"),
+    )
+    private val GYRO_MIN_INPUT_SPEED = SettingSpec(
+        key = "min_input_speed",
+        label = "Minimum gyro input speed",
+        control = SettingControl.Slider(0f, 1800f, default = 5f, unitSuffix = " °/s"),
+    )
+    private val GYRO_MAX_INPUT_SPEED = SettingSpec(
+        key = "max_input_speed",
+        label = "Maximum gyro input speed",
+        helper = "The in-game camera turn rate (°/s) at maximum joystick deflection. Set in-game aim sensitivity high; if it clamps, use Angle Catch-Up.",
+        control = SettingControl.Slider(0f, 1800f, default = 180f, unitSuffix = " °/s"),
+    )
+    private val GYRO_MIN_OUTPUT = SettingSpec(
+        key = "min_output",
+        label = "Minimum joystick output",
+        helper = "Minimum gyro input speed maps to this output. Try to match the game's joystick deadzone.",
+        control = SettingControl.Slider(0f, 100f, default = 0f, unitSuffix = "%"),
+    )
+    private val GYRO_MAX_OUTPUT = SettingSpec(
+        key = "max_output",
+        label = "Maximum joystick output",
+        helper = "Maximum gyro input speed maps to this output. Reduce it to avoid triggering a game's extra-yaw setting.",
+        control = SettingControl.Slider(0f, 100f, default = 100f, unitSuffix = "%"),
+    )
+    private val GYRO_RESPONSE_AXIS = SettingSpec(
+        key = "response_axis_style",
+        label = "Response axis style",
+        control = SettingControl.Dropdown(RESPONSE_AXIS_OPTIONS, defaultId = "circular"),
+    )
+    private val GYRO_POWER_CURVE = SettingSpec(
+        key = "joystick_power_curve",
+        label = "Joystick power curve",
+        helper = "How aggressively output deflects: 0.1 = extremely aggressive, 1 = linear, 4 = extremely relaxed.",
+        control = SettingControl.Slider(0.1f, 4f, default = 1f, step = 0.1f, decimals = 1),
+    )
+    private val GYRO_LOCK_AT_EDGES_SWITCH = SettingSpec(
+        key = "lock_at_edges",
+        label = "Lock at edges",
+        helper = "Locks output to the maximum deflection angle. Off allows the full output range into the diagonals.",
+        control = SettingControl.Toggle(),
+    )
+    private val GYRO_ANGLE_CATCHUP = SettingSpec(
+        key = "angle_catch_up",
+        label = "Angle catch-up mode",
+        helper = "When demanded rotation exceeds the in-game max turn rate, store the remaining angle to catch up. Can feel like the stick is stuck at its extreme after fast flicks.",
+        control = SettingControl.Dropdown(GYRO_ANGLE_CATCHUP_OPTIONS, defaultId = "off"),
+    )
+    private val GYRO_DEGREE_SENSITIVITY = SettingSpec(
+        key = "gyro_degree_sensitivity",
+        label = "Gyro degree sensitivity",
+        control = SettingControl.Slider(0f, 30f, default = 2.5f, step = 0.1f, unitSuffix = "x", decimals = 1),
+    )
+    private val GYRO_SPEED_DEADZONE_ZERO = SettingSpec(
+        key = "gyro_speed_deadzone",
+        label = "Gyro speed deadzone",
+        helper = "Minimum gyro speed before there's a reaction on screen. Mitigates hand shake and flick bounce-back.",
+        control = SettingControl.Slider(0f, 1f, default = 0f, step = 0.01f, unitSuffix = " °/s", decimals = 2),
+    )
+    private val GYRO_PRECISION_SPEED_ZERO = SettingSpec(
+        key = "gyro_precision_speed",
+        label = "Gyro precision speed",
+        helper = "Below this speed, sensitivity is reduced so small motions are even smaller in-game.",
+        control = SettingControl.Slider(0f, 15f, default = 0f, step = 0.01f, unitSuffix = " °/s", decimals = 2),
+    )
+    private val GYRO_ACCELERATION_NO_OFF = SettingSpec(
+        key = "acceleration",
+        label = "Acceleration",
+        control = SettingControl.Dropdown(GYRO_ACCEL_NO_OFF_OPTIONS, defaultId = "linear"),
+    )
+
+    /** The "Gyro to Joystick Camera" menu (device rotation rate → camera stick). */
+    private val GYRO_CAMERA_CATEGORIES = listOf(
+        GYRO_GENERAL_CATEGORY,
+        SettingCategory(
+            "Joystick output",
+            listOf(
+                GYRO_SEND_TO_JOYSTICK, GYRO_MIN_INPUT_SPEED, GYRO_MAX_INPUT_SPEED,
+                GYRO_MIN_OUTPUT, GYRO_MAX_OUTPUT, GYRO_RESPONSE_AXIS, GYRO_POWER_CURVE,
+                GYRO_LOCK_AT_EDGES_SWITCH,
+            ),
+        ),
+        SettingCategory("Angle calibration", listOf(GYRO_ANGLE_CATCHUP)),
+        SettingCategory(
+            "Gyro sensitivity",
+            listOf(
+                GYRO_DEGREE_SENSITIVITY, GYRO_INVERT_Y, GYRO_INVERT_X, GYRO_SPEED_DEADZONE_ZERO,
+                GYRO_PRECISION_SPEED_ZERO, GYRO_OUTPUT_MIXER, GYRO_ACCELERATION_NO_OFF, GYRO_ENABLE_MOMENTUM,
+            ),
+        ),
+        SettingCategory(
+            "Gyro orientation",
+            listOf(GYRO_CONVERSION_STYLE, GYRO_ROLL_CONTRIBUTION, GYRO_PRIMARY_AXIS_OFFSET, GYRO_COMPLEMENTARY_AXIS),
+        ),
+        SettingCategory("Trigger dampening", listOf(GYRO_TRIGGER_DAMPENING, GYRO_TRIGGER_DAMPENING_AMOUNT)),
+        SettingCategory("Haptics", listOf(GYRO_ROTATIONAL_HAPTICS)),
+    )
+
+    // ── Gyro to Joystick Deflection specs ────────────────────────────────────
+    private val GYRO_SEND_TO_JOYSTICK_LEFT_DEFAULT = SettingSpec(
+        key = "send_to_joystick",
+        label = "Send to joystick",
+        helper = "Which joystick the gyro deflection drives.",
+        control = SettingControl.Dropdown(GYRO_SEND_TO_JOYSTICK_OPTIONS, defaultId = "left"),
+    )
+    private val GYRO_USE_RELATIVE_ROLL = SettingSpec(
+        key = "use_relative_roll",
+        label = "Use relative roll",
+        helper = "On: horizontal output is the roll relative to the device's starting pose. Off: relative to Earth's horizon.",
+        control = SettingControl.Toggle(default = true),
+    )
+    private val GYRO_USE_RELATIVE_PITCH = SettingSpec(
+        key = "use_relative_pitch",
+        label = "Use relative pitch",
+        helper = "On: vertical output is the pitch relative to the device's starting pose. Off: relative to Earth's horizon.",
+        control = SettingControl.Toggle(default = true),
+    )
+    private val GYRO_MIN_DEFLECTION_ANGLE = SettingSpec(
+        key = "min_deflection_angle",
+        label = "Minimum gyro deflection angle",
+        control = SettingControl.Slider(0f, 180f, default = 2f, unitSuffix = "°"),
+    )
+    private val GYRO_MAX_DEFLECTION_ANGLE = SettingSpec(
+        key = "max_deflection_angle",
+        label = "Maximum gyro deflection angle",
+        helper = "The real-world tilt angles (from the gyro's starting orientation) that map to the joystick. Use the gyro activation button to reset orientation.",
+        control = SettingControl.Slider(0f, 180f, default = 45f, unitSuffix = "°"),
+    )
+    private val GYRO_DRAG_CENTER_POINT = SettingSpec(
+        key = "drag_center_point",
+        label = "Drag center point",
+        helper = "When exceeding the max deflection angle, drag the gyro reference with the device — more responsive moving back from an extreme, but less consistent returning to center.",
+        control = SettingControl.Toggle(default = true),
+    )
+
+    /** The "Gyro to Joystick Deflection" menu (device tilt → movement stick). */
+    private val GYRO_DEFLECTION_CATEGORIES = listOf(
+        GYRO_GENERAL_CATEGORY,
+        SettingCategory(
+            "Gyro orientation",
+            listOf(
+                GYRO_USE_RELATIVE_ROLL, GYRO_USE_RELATIVE_PITCH, GYRO_SEND_TO_JOYSTICK_LEFT_DEFAULT,
+                GYRO_MIN_DEFLECTION_ANGLE, GYRO_MAX_DEFLECTION_ANGLE, GYRO_MIN_OUTPUT, GYRO_MAX_OUTPUT,
+                GYRO_POWER_CURVE, GYRO_RESPONSE_AXIS, GYRO_LOCK_AT_EDGES_SWITCH, GYRO_DRAG_CENTER_POINT,
+                GYRO_INVERT_Y, GYRO_INVERT_X, GYRO_SPEED_DEADZONE_ZERO, GYRO_PRECISION_SPEED_ZERO,
+                GYRO_OUTPUT_MIXER,
+            ),
+        ),
+        SettingCategory("Output", listOf(GYRO_ROTATE_OUTPUT)),
+        SettingCategory("Haptics", listOf(GYRO_ROTATIONAL_HAPTICS)),
+    )
+
+    // ── Gyro Directional Swipe specs ─────────────────────────────────────────
+    private val SWIPE_SCROLL_MODE_OPTIONS = listOf(
+        DropdownOption("off", "Off", "Each swipe fires once and resets before another can fire."),
+        DropdownOption("both", "Both horizontal & vertical"),
+        DropdownOption("horizontal", "Horizontal only"),
+        DropdownOption("vertical", "Vertical only"),
+    )
+    private val SWIPE_SCROLL_FRICTION_OPTIONS = listOf(
+        DropdownOption("off", "Off"),
+        DropdownOption("none", "None"),
+        DropdownOption("low", "Low"),
+        DropdownOption("medium", "Medium"),
+        DropdownOption("high", "High"),
+    )
+    private val GYRO_STEERING_AXIS_OPTIONS = listOf(
+        DropdownOption("yaw", "Yaw"),
+        DropdownOption("roll", "Roll"),
+    )
+    private val SWIPE_SENSITIVITY = SettingSpec(
+        key = "sensitivity",
+        label = "Sensitivity",
+        control = SettingControl.Slider(1f, 3000f, default = 100f, unitSuffix = "%"),
+    )
+    private val SWIPE_SCROLL_MODE = SettingSpec(
+        key = "scroll_wheel_mode",
+        label = "Scroll wheel mode",
+        helper = "When on, a swipe has momentum and fires multiple times. When off, a swipe fires once and resets.",
+        control = SettingControl.Dropdown(SWIPE_SCROLL_MODE_OPTIONS, defaultId = "off"),
+    )
+    private val SWIPE_SCROLL_FRICTION = SettingSpec(
+        key = "scroll_wheel_friction",
+        label = "Scroll wheel friction",
+        helper = "How quickly the swipe momentum slows down.",
+        control = SettingControl.Dropdown(SWIPE_SCROLL_FRICTION_OPTIONS, defaultId = "medium"),
+        visibleWhen = { it.raw("scroll_wheel_mode")?.let { v -> v != "off" } ?: false },
+    )
+    private val SWIPE_SMOOTHING = SettingSpec(
+        key = "smoothing",
+        label = "Smoothing",
+        control = SettingControl.Slider(0f, 40f, default = 20f),
+    )
+    private val SWIPE_ROTATION = SettingSpec(
+        key = "rotation",
+        label = "Rotation",
+        helper = "Rotate the horizon line of swipe movement to better align with your thumb's natural swiping angle.",
+        control = SettingControl.Slider(-180f, 180f, default = 0f, unitSuffix = "°"),
+    )
+    private val GYRO_STEERING_AXIS = SettingSpec(
+        key = "gyro_steering_axis",
+        label = "Gyro steering axis",
+        helper = "Limits the horizontal output to either the yaw or the roll of the device.",
+        control = SettingControl.Dropdown(GYRO_STEERING_AXIS_OPTIONS, defaultId = "yaw"),
+    )
+
+    /** The "Directional Swipe" menu for the gyro source (flick → directional taps). */
+    private val GYRO_SWIPE_CATEGORIES = listOf(
+        SettingCategory("General", listOf(SWIPE_SENSITIVITY, SWIPE_SCROLL_MODE, SWIPE_SCROLL_FRICTION)),
+        SettingCategory("Output", listOf(SWIPE_SMOOTHING, SWIPE_ROTATION)),
+        SettingCategory("Gyro", listOf(GYRO_BUTTONS, GYRO_ENABLE_MODE, GYRO_STEERING_AXIS)),
+    )
+
     /** The "Directional Pad" menu for the gyro source (tilt → directional pad). */
     private val GYRO_DPAD_CATEGORIES = listOf(
         SettingCategory("General", listOf(DIRECTIONAL_PAD_LAYOUT, DPAD_OVERLAP_REGION)),
@@ -945,6 +1177,9 @@ object SourceModeSettingsSchema {
         // Gyro source — built menu-by-menu.
         source == InputSource.GYRO -> when (mode) {
             BindingMode.GYRO_TO_MOUSE -> GYRO_TO_MOUSE_CATEGORIES
+            BindingMode.GYRO_TO_JOYSTICK_CAMERA -> GYRO_CAMERA_CATEGORIES
+            BindingMode.GYRO_TO_JOYSTICK_DEFLECTION -> GYRO_DEFLECTION_CATEGORIES
+            BindingMode.DIRECTIONAL_SWIPE -> GYRO_SWIPE_CATEGORIES
             BindingMode.DPAD -> GYRO_DPAD_CATEGORIES
             else -> emptyList()
         }

@@ -160,6 +160,93 @@ class InputDispatcher @Inject constructor() {
     )
     val capturedInputs: SharedFlow<InputAddress> = _capturedInputs.asSharedFlow()
 
+    // ── Toolbar gamepad navigation (Implementation B — OVERLAY_TOOLBAR_PLAN.md, Brick 3) ──
+    //
+    // The toolbar overlay is FLAG_NOT_FOCUSABLE so gamepad input flows to the game; it can
+    // never receive key events through the window system. So the accessibility service drives
+    // a selection cursor over it, and the toolbar UI publishes its topology + renders the
+    // highlight + runs the activated action. The contract: **service = cursor + activation
+    // signal; UI = topology + actions + highlight** (mirrors [overlayFocus]).
+
+    /** True while physical input is driving the toolbar (service-owned). */
+    private val _toolbarNavActive = MutableStateFlow(false)
+    val toolbarNavActive: StateFlow<Boolean> = _toolbarNavActive.asStateFlow()
+
+    /** Selected target index within [toolbarTargets] (service-owned). */
+    private val _toolbarSelection = MutableStateFlow(0)
+    val toolbarSelection: StateFlow<Int> = _toolbarSelection.asStateFlow()
+
+    /** Ordered focusable target ids, published by the toolbar UI (UI-owned). */
+    private val _toolbarTargets = MutableStateFlow<List<String>>(emptyList())
+    val toolbarTargets: StateFlow<List<String>> = _toolbarTargets.asStateFlow()
+
+    /** One-shot "A pressed on the selected index" signal, service → UI. */
+    private val _activateToolbar = MutableSharedFlow<Int>(
+        replay = 0,
+        extraBufferCapacity = 4,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val activateToolbar: SharedFlow<Int> = _activateToolbar.asSharedFlow()
+
+    /**
+     * One-shot "B pressed" signal, service → UI. The UI owns the nav stack, so it decides what
+     * back means: ascend out of an open menu (republishing the top-level targets) or, at the top
+     * level, [exitToolbarNav]. The service no longer exits nav directly on B.
+     */
+    private val _backToolbar = MutableSharedFlow<Unit>(
+        replay = 0,
+        extraBufferCapacity = 4,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val backToolbar: SharedFlow<Unit> = _backToolbar.asSharedFlow()
+
+    /**
+     * UI publishes its current ordered targets. A topology change (menu open/close) resets the
+     * selection to 0; an unchanged republish (recomposition) leaves it where it is. An empty list
+     * (toolbar torn down) force-exits nav.
+     */
+    fun setToolbarTargets(targets: List<String>) {
+        if (targets == _toolbarTargets.value) return
+        _toolbarTargets.value = targets
+        _toolbarSelection.value = 0
+        if (targets.isEmpty()) _toolbarNavActive.value = false
+    }
+
+    /**
+     * Service: enter toolbar gamepad-nav mode. Sets [overlayFocus] = TOOLBAR so `onKeyEvent`
+     * translates A → ENTER / B → BACK; the toolbar UI makes its window focusable so the platform's
+     * focus traversal drives the stick / D-pad (MotionEvents the service can't see). Flipped
+     * synchronously so the mode is live on the very next key.
+     */
+    fun requestEnterToolbarNavWhenReady() {
+        _toolbarNavActive.value = true
+        _overlayFocus.value = OverlayFocusKind.TOOLBAR
+    }
+
+    /** End toolbar nav (B at the top level, activation that navigates away, or teardown). */
+    fun exitToolbarNav() {
+        _toolbarNavActive.value = false
+        if (_overlayFocus.value == OverlayFocusKind.TOOLBAR) _overlayFocus.value = OverlayFocusKind.NONE
+    }
+
+    /** Service: move the cursor by [delta], clamped to the published targets. */
+    fun moveToolbarSelection(delta: Int) {
+        val size = _toolbarTargets.value.size
+        if (size == 0) return
+        _toolbarSelection.value = (_toolbarSelection.value + delta).coerceIn(0, size - 1)
+    }
+
+    /** Service: signal "activate the current selection" to the UI. */
+    fun activateToolbarSelection() {
+        val idx = _toolbarSelection.value
+        if (idx in _toolbarTargets.value.indices) _activateToolbar.tryEmit(idx)
+    }
+
+    /** Service: signal "back" (B) to the UI, which decides ascend-menu vs. exit-nav. */
+    fun signalToolbarBack() {
+        _backToolbar.tryEmit(Unit)
+    }
+
     fun setCompiledConfig(config: CompiledConfig) {
         _compiledConfig.value = config
     }

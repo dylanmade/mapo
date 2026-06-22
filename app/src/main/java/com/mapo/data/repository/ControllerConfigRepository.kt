@@ -1082,6 +1082,76 @@ class ControllerConfigRepository @Inject constructor(
         configDirtyTick.value = configDirtyTick.value + 1
     }
 
+    // ── Phase 6: unified "input rows" ────────────────────────────────────────
+    // An input row in the UI = one Binding, bucketed under an Activator by press type. Same-type
+    // rows are multiple Bindings under one Activator (the runtime fires them together or cycles per
+    // the activator's settings). This replaces the separate "extra command" / "sub command" model
+    // with a single "add additional input" affordance — no schema change.
+
+    /**
+     * Add a new input row of [type] to [groupInputId]. Appends a Binding to the existing same-type
+     * Activator, or creates that Activator (with its seeded Unbound binding) if absent. Returns the
+     * new bindingId.
+     */
+    suspend fun addInputRow(groupInputId: Long, type: ActivatorType): Long {
+        val existing = activatorDao.getByGroupInputs(listOf(groupInputId)).firstOrNull { it.type == type }
+        return if (existing != null) {
+            addCommand(existing.id)
+        } else {
+            val newActivatorId = addActivator(groupInputId, type)
+            bindingDao.getByActivators(listOf(newActivatorId)).first().id
+        }
+    }
+
+    /**
+     * Change an input row's press type by reparenting its Binding into the [newType] Activator
+     * bucket for the same group input (created without a seed when absent). The old Activator is
+     * deleted if the move leaves it empty.
+     */
+    suspend fun setInputRowPressType(bindingId: Long, newType: ActivatorType) {
+        val binding = bindingDao.getById(bindingId) ?: return
+        val oldActivator = activatorDao.getById(binding.activatorId) ?: return
+        if (oldActivator.type == newType) return
+        val groupInputId = oldActivator.groupInputId
+        val siblings = activatorDao.getByGroupInputs(listOf(groupInputId))
+        val targetId = siblings.firstOrNull { it.type == newType }?.id ?: run {
+            val nextOrder = (siblings.maxOfOrNull { it.orderIndex } ?: -1) + 1
+            // Create the bucket directly (no seeded binding — the moved binding fills it).
+            activatorDao.insert(
+                Activator(groupInputId = groupInputId, type = newType, settingsJson = "{}", orderIndex = nextOrder)
+            )
+        }
+        val nextBindingOrder = (bindingDao.getByActivators(listOf(targetId)).maxOfOrNull { it.orderIndex } ?: -1) + 1
+        bindingDao.update(binding.copy(activatorId = targetId, orderIndex = nextBindingOrder))
+        if (bindingDao.getByActivators(listOf(oldActivator.id)).isEmpty()) {
+            activatorDao.deleteById(oldActivator.id)
+        }
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /** Set an input row's user label ([Binding.label]); a blank value clears it. */
+    suspend fun setInputRowLabel(bindingId: Long, label: String) {
+        val binding = bindingDao.getById(bindingId) ?: return
+        val normalized = label.trim().ifEmpty { null }
+        if (binding.label == normalized) return
+        bindingDao.update(binding.copy(label = normalized))
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
+    /**
+     * Delete an input row (Binding); its Activator is removed too if now empty. Callers disable this
+     * when it's the group input's last remaining row.
+     */
+    suspend fun deleteInputRow(bindingId: Long) {
+        val binding = bindingDao.getById(bindingId) ?: return
+        val activatorId = binding.activatorId
+        bindingDao.deleteById(bindingId)
+        if (bindingDao.getByActivators(listOf(activatorId)).isEmpty()) {
+            activatorDao.deleteById(activatorId)
+        }
+        configDirtyTick.value = configDirtyTick.value + 1
+    }
+
     // ── Phase 7 Brick B.5: Source Mode Shifts ────────────────────────────────
 
     /**

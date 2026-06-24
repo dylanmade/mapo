@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import com.mapo.ui.compact.CompactButton
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.ImportExport
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TouchApp
@@ -995,7 +997,7 @@ private fun RowKebab(onClick: () -> Unit, contentDescription: String = "Options"
         androidx.compose.material3.LocalMinimumInteractiveComponentSize provides androidx.compose.ui.unit.Dp.Unspecified,
     ) {
         CompactIconButton(
-            icon = Icons.Filled.MoreVert,
+            icon = Icons.Filled.MoreHoriz,
             contentDescription = contentDescription,
             onClick = onClick,
             size = CompactButtonSize.Slim,
@@ -1059,7 +1061,7 @@ private fun InputRow(
     Row(
         // Left padding bumped (start=16) so glyphs aren't crammed against the card edge. No vertical
         // padding — the card body's spacedBy controls inter-row spacing uniformly.
-        modifier = Modifier.fillMaxWidth().heightIn(min = InputRowMinHeight).padding(start = 16.dp, end = 12.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = InputRowMinHeight).padding(start = InputRowStartPadding, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -1189,7 +1191,6 @@ private fun SubInputGroup(
     subInputLabel: String,
     groupInput: com.mapo.data.model.steam.GroupInputGraph?,
     config: ControllerConfig?,
-    isLastGroup: Boolean,
     onEditCommand: (Long, BindingOutput, String) -> Unit,
     onAddInputRow: (groupInputId: Long, type: ActivatorType) -> Unit,
     onSetPressType: (Long, ActivatorType) -> Unit,
@@ -1202,36 +1203,59 @@ private fun SubInputGroup(
         ?.flatMap { ag -> ag.bindings.map { b -> b to ag.activator.type } }
         .orEmpty()
     val canDelete = rows.size > 1
-    // Emit rows directly into the parent card body (no wrapping Column) so the body's single
-    // `spacedBy` gives a uniform vertical gap everywhere — header→first row, row→row, last
-    // row→card bottom. A divider after the group (unless it's the card's last) is the only extra
-    // separation between different physical inputs.
-    rows.forEach { (binding, type) ->
-        InputRow(
-            source = source,
-            subInputKey = subInputKey,
-            subInputLabel = subInputLabel,
-            binding = binding,
-            pressType = type,
-            config = config,
-            canDelete = canDelete,
-            onEditCommand = onEditCommand,
-            onSetPressType = onSetPressType,
-            onSetLabel = onSetLabel,
-            onDelete = onDelete,
-            onConfigure = onConfigure,
-            onAddAnother = { groupInput?.let { onAddInputRow(it.input.id, ActivatorType.FULL_PRESS) } },
-        )
-    }
-    if (!isLastGroup && rows.isNotEmpty()) {
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
+    val connected = rows.size > 1
+    // No dividers, no inter-row spacing — rows are flush; their fixed height supplies uniform air,
+    // and the card body's edge padding matches it (see CardBodyGap). When an input has multiple
+    // rows (added inputs), a thin vertical line links their glyphs to show they're one input.
+    val connectorColor = MaterialTheme.colorScheme.outlineVariant
+    val density = LocalDensity.current
+    Column(
+        modifier = if (!connected) Modifier else Modifier.drawBehind {
+            val rowH = InputRowMinHeight.toPx()
+            val glyphHalf = with(density) { com.mapo.ui.glyph.InputGlyphs.GlyphSize.toPx() } / 2f
+            val cx = with(density) { (InputRowStartPadding + com.mapo.ui.glyph.InputGlyphs.GlyphSize / 2).toPx() }
+            val stroke = with(density) { 1.dp.toPx() }
+            // One segment per adjacent glyph pair: glyph i's lower edge → glyph i+1's upper edge
+            // (rows are flush, so the row pitch is just the row height).
+            for (i in 0 until rows.size - 1) {
+                val y1 = i * rowH + rowH / 2f + glyphHalf
+                val y2 = (i + 1) * rowH + rowH / 2f - glyphHalf
+                drawLine(
+                    color = connectorColor,
+                    start = Offset(cx, y1),
+                    end = Offset(cx, y2),
+                    strokeWidth = stroke,
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                )
+            }
+        },
+    ) {
+        rows.forEach { (binding, type) ->
+            InputRow(
+                source = source,
+                subInputKey = subInputKey,
+                subInputLabel = subInputLabel,
+                binding = binding,
+                pressType = type,
+                config = config,
+                canDelete = canDelete,
+                onEditCommand = onEditCommand,
+                onSetPressType = onSetPressType,
+                onSetLabel = onSetLabel,
+                onDelete = onDelete,
+                onConfigure = onConfigure,
+                onAddAnother = { groupInput?.let { onAddInputRow(it.input.id, ActivatorType.FULL_PRESS) } },
+            )
+        }
     }
 }
 
-/** Uniform vertical gap inside a card: body edge padding AND inter-row spacing both use it. */
+/** Uniform vertical gap inside a card: body edge padding, between-group spacing, and intra-group spacing. */
 private val CardBodyGap = 6.dp
 /** Input-row height; the mode-card header matches it so the header reads as a peer row. */
 private val InputRowMinHeight = 48.dp
+/** Leading inset of an input row's glyph (kept in sync with the connector-line geometry). */
+private val InputRowStartPadding = 16.dp
 
 /**
  * Banner image for an input mode header — a cropped vector that fills the header's top-left corner
@@ -1382,22 +1406,18 @@ private fun ModeCard(
             }
 
             // ── Body: sub-input groups for this mode ────────────────────────────
-            // Single uniform gap (CardBodyGap) as both edge padding and inter-row spacing — rows
-            // are emitted flat by SubInputGroup so every gap (header→first, row→row, last→bottom)
-            // is identical; only the between-input divider adds extra separation.
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(vertical = CardBodyGap),
-                verticalArrangement = Arrangement.spacedBy(CardBodyGap),
-            ) {
+            // Rows are flush (no spacedBy); each row's fixed height centers its content, giving
+            // symmetric air, and the body's edge padding (CardBodyGap) equals that air — so every
+            // gap (header→first, row→row, group→group, last→bottom) reads as the same uniform span.
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = CardBodyGap)) {
                 val subInputs = RemapSections.bindableSubInputsFor(source, mode)
-                subInputs.forEachIndexed { index, (key, label) ->
+                subInputs.forEach { (key, label) ->
                     SubInputGroup(
                         source = source,
                         subInputKey = key,
                         subInputLabel = label,
                         groupInput = groupGraph.inputByKey(key),
                         config = config,
-                        isLastGroup = index == subInputs.lastIndex,
                         onEditCommand = onEditCommand,
                         onAddInputRow = onAddInputRow,
                         onSetPressType = onSetPressType,
@@ -1497,19 +1517,15 @@ private fun OtherButtonsCard(
 ) {
     // OutlinedCard — outlined variant grouping the single-button "other" inputs.
     androidx.compose.material3.OutlinedCard {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(vertical = CardBodyGap),
-            verticalArrangement = Arrangement.spacedBy(CardBodyGap),
-        ) {
-            sources.forEachIndexed { index, source ->
-                val groupGraph = viewingSet.presetFor(source)?.group ?: return@forEachIndexed
+        Column(modifier = Modifier.fillMaxWidth().padding(vertical = CardBodyGap)) {
+            sources.forEach { source ->
+                val groupGraph = viewingSet.presetFor(source)?.group ?: return@forEach
                 SubInputGroup(
                     source = source,
                     subInputKey = "click",
                     subInputLabel = otherButtonName(source),
                     groupInput = groupGraph.inputByKey("click"),
                     config = config,
-                    isLastGroup = index == sources.lastIndex,
                     onEditCommand = onEditCommand,
                     onAddInputRow = onAddInputRow,
                     onSetPressType = onSetPressType,

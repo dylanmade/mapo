@@ -9,6 +9,10 @@ import com.mapo.data.db.steam.ControllerProfileDao
 import com.mapo.data.db.steam.GameActionDao
 import com.mapo.data.db.steam.GroupInputDao
 import com.mapo.data.db.steam.PresetBindingDao
+import com.mapo.data.io.vdf.ImportedCommand
+import com.mapo.data.io.vdf.ImportedConfig
+import com.mapo.data.io.vdf.ImportedPresetGroup
+import com.mapo.data.io.vdf.VdfMappings
 import com.mapo.data.model.steam.ActionLayer
 import com.mapo.data.model.steam.ActionLayerGraph
 import com.mapo.data.model.steam.ActionSet
@@ -31,6 +35,7 @@ import com.mapo.data.model.steam.InputSource
 import com.mapo.data.model.steam.LayerPresetBinding
 import com.mapo.data.model.steam.PresetBinding
 import com.mapo.data.model.steam.PresetEntry
+import com.mapo.data.model.steam.SourceModeShift
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -186,6 +191,232 @@ class ControllerConfigRepository @Inject constructor(
             )
         )
     }
+
+    // ── VDF import persistence (Phase 8a) ────────────────────────────────────
+
+    /**
+     * Persist a translated [ImportedConfig] (from `com.mapo.data.io.vdf.VdfImporter`)
+     * as a new [ControllerProfile] under [profileId]. Returns the new
+     * controller_profile id.
+     *
+     * Walks the id-free import model inserting entities in dependency order, so every
+     * row gets a fresh Room id (`feedback_duplicates_own_their_data`) — the imported
+     * config is independently addressable and never shares ids with another profile.
+     *
+     * **Mode shifts** are wired in a second pass: a `mode_shift` VDF command became an
+     * [ImportedCommand.ModeShiftTrigger]; we collect those during the walk and, once
+     * every group has an id, resolve each one's `targetVdfGroupId` to the inserted
+     * `modeshift`-state group and create the [SourceModeShift]. Per
+     * `project_mode_shift_per_source_architecture` a mode shift is its own entity, NOT
+     * a binding — so `modeshift`-state preset groups are inserted as addressable groups
+     * but get no [PresetBinding] / [LayerPresetBinding]; they exist only as shift targets.
+     *
+     * **Absent sources** are intentionally not back-filled here: a source the VDF never
+     * binds simply has no group, which the runtime treats as `DEVICE_DEFAULT`, and
+     * [ensureSeededInputSources] (run on startup) materializes the visible default rows.
+     *
+     * **Deferred** (already surfaced as `ImportWarning`s at translate time): `switches`
+     * fan-out, VDF setting-key schema translation (carried under a namespaced `_vdf`
+     * key the runtime ignores), and remapping `CHANGE_PRESET` / `add_layer` argument ids
+     * from VDF-preset space to Mapo Room ids.
+     */
+    suspend fun importConfig(profileId: Long, imported: ImportedConfig): Long {
+        val controllerProfileId = controllerProfileDao.insert(
+            ControllerProfile(
+                profileId = profileId,
+                controllerType = imported.controllerType,
+                name = imported.title,
+                legacySet = imported.isLegacyRawBindings,
+            )
+        )
+
+        // VDF group id → inserted binding_group id, for mode-shift target resolution.
+        val groupIdByVdfId = HashMap<String, Long>()
+        val pendingShifts = ArrayList<PendingModeShift>()
+
+        for (set in imported.sets) {
+            val actionSetId = actionSetDao.insert(
+                ActionSet(
+                    controllerProfileId = controllerProfileId,
+                    name = set.name,
+                    title = set.title,
+                    legacy = set.legacy,
+                    orderIndex = set.orderIndex,
+                )
+            )
+            for (pg in set.groups) {
+                insertImportedPresetGroup(actionSetId, null, pg, groupIdByVdfId, pendingShifts)
+            }
+            set.layers.forEachIndexed { layerIndex, layer ->
+                val layerId = actionLayerDao.insert(
+                    ActionLayer(
+                        parentActionSetId = actionSetId,
+                        name = layer.name,
+                        title = layer.title,
+                        orderIndex = layerIndex,
+                    )
+                )
+                for (pg in layer.groups) {
+                    insertImportedPresetGroup(actionSetId, layerId, pg, groupIdByVdfId, pendingShifts)
+                }
+            }
+        }
+
+        // Second pass — wire mode shifts now that every binding_group has an id.
+        val shiftOrderCounters = HashMap<Triple<Long?, Long?, InputSource>, Int>()
+        for (ps in pendingShifts) {
+            val targetGroupId = groupIdByVdfId[ps.targetVdfGroupId]
+            if (targetGroupId == null) {
+                android.util.Log.w(
+                    "ControllerConfigRepo",
+                    "importConfig: mode_shift target group '${ps.targetVdfGroupId}' not materialized; skipping",
+                )
+                continue
+            }
+            val orderKey = Triple(ps.ownerSetId, ps.ownerLayerId, ps.ownerSource)
+            val order = shiftOrderCounters.getOrDefault(orderKey, 0)
+            shiftOrderCounters[orderKey] = order + 1
+            sourceModeShiftDao.insert(
+                SourceModeShift(
+                    actionSetId = ps.ownerSetId,
+                    actionLayerId = ps.ownerLayerId,
+                    ownerSource = ps.ownerSource,
+                    triggerSource = ps.triggerSource,
+                    triggerSubInput = ps.triggerSubInput,
+                    bindingGroupId = targetGroupId,
+                    displayOrder = order,
+                )
+            )
+        }
+
+        configDirtyTick.value = configDirtyTick.value + 1
+        return controllerProfileId
+    }
+
+    /**
+     * Insert one [ImportedPresetGroup] — the binding_group plus its inputs /
+     * activators / bindings — under either an action set (when [actionLayerId] is null)
+     * or an action layer. Records the group in [groupIdByVdfId] and collects any
+     * mode-shift triggers into [pendingShifts] for the caller's second pass.
+     */
+    private suspend fun insertImportedPresetGroup(
+        actionSetId: Long,
+        actionLayerId: Long?,
+        pg: ImportedPresetGroup,
+        groupIdByVdfId: MutableMap<String, Long>,
+        pendingShifts: MutableList<PendingModeShift>,
+    ) {
+        val groupId = bindingGroupDao.insert(
+            BindingGroup(
+                actionSetId = if (actionLayerId == null) actionSetId else null,
+                actionLayerId = actionLayerId,
+                name = pg.group.name.ifBlank { pg.sourceToken },
+                mode = pg.group.mode,
+                settingsJson = wrapVdfSettings(pg.group.settingsJson),
+            )
+        )
+        pg.group.vdfId?.let { groupIdByVdfId[it] = groupId }
+
+        for ((inputIdx, input) in pg.group.inputs.withIndex()) {
+            val groupInputId = groupInputDao.insert(
+                GroupInput(bindingGroupId = groupId, inputKey = input.inputKey, orderIndex = inputIdx),
+            )
+            for ((actIdx, activator) in input.activators.withIndex()) {
+                val activatorId = activatorDao.insert(
+                    Activator(
+                        groupInputId = groupInputId,
+                        type = activator.type,
+                        settingsJson = wrapVdfSettings(activator.settingsJson),
+                        orderIndex = actIdx,
+                    ),
+                )
+                var bindingOrder = 0
+                for (command in activator.commands) {
+                    when (command) {
+                        is ImportedCommand.Output -> {
+                            val (outputType, args) = command.output.toEntity()
+                            bindingDao.insert(
+                                Binding(
+                                    activatorId = activatorId,
+                                    outputType = outputType,
+                                    args = args,
+                                    label = command.label,
+                                    iconRef = command.icon,
+                                    orderIndex = bindingOrder++,
+                                ),
+                            )
+                        }
+                        is ImportedCommand.ModeShiftTrigger -> {
+                            val ownerSource = VdfMappings.inputSource(command.ownerSourceToken)
+                            if (ownerSource == null) {
+                                android.util.Log.w(
+                                    "ControllerConfigRepo",
+                                    "importConfig: mode_shift owner source '${command.ownerSourceToken}' unmapped; skipping",
+                                )
+                            } else {
+                                pendingShifts += PendingModeShift(
+                                    ownerSetId = if (actionLayerId == null) actionSetId else null,
+                                    ownerLayerId = actionLayerId,
+                                    ownerSource = ownerSource,
+                                    triggerSource = pg.inputSource,
+                                    triggerSubInput = input.inputKey,
+                                    targetVdfGroupId = command.targetVdfGroupId,
+                                )
+                            }
+                        }
+                    }
+                }
+                // Keep every activator with at least one binding (matches the seed
+                // convention) — e.g. an activator whose only command was a mode shift.
+                if (bindingOrder == 0) {
+                    bindingDao.insert(
+                        Binding(activatorId = activatorId, outputType = BindingOutputType.UNBOUND, args = "", orderIndex = 0),
+                    )
+                }
+            }
+        }
+
+        // A `modeshift`-state group is a mode-shift *target*, not a live preset binding
+        // (its trigger lives on another source's button). Insert the group as an
+        // addressable shift target but no preset row.
+        if (pg.state != "modeshift") {
+            if (actionLayerId == null) {
+                presetBindingDao.insert(
+                    PresetBinding(
+                        actionSetId = actionSetId,
+                        inputSource = pg.inputSource,
+                        state = pg.state,
+                        bindingGroupId = groupId,
+                    ),
+                )
+            } else {
+                layerPresetBindingDao.insert(
+                    LayerPresetBinding(
+                        actionLayerId = actionLayerId,
+                        inputSource = pg.inputSource,
+                        state = pg.state,
+                        bindingGroupId = groupId,
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Wrap raw VDF group/activator settings under a namespaced `_vdf` key so they
+     *  survive import losslessly without the runtime mis-reading a VDF key as a Mapo
+     *  setting (schema-key translation is a later brick). Empty → "{}". */
+    private fun wrapVdfSettings(rawJson: String): String =
+        if (rawJson.isBlank() || rawJson == "{}") "{}" else """{"_vdf":$rawJson}"""
+
+    /** A mode shift awaiting its target group's id (resolved in [importConfig]'s second pass). */
+    private data class PendingModeShift(
+        val ownerSetId: Long?,
+        val ownerLayerId: Long?,
+        val ownerSource: InputSource,
+        val triggerSource: InputSource,
+        val triggerSubInput: String,
+        val targetVdfGroupId: String,
+    )
 
     /**
      * Back-fill any [DEFAULT_INPUT_SOURCE_SEEDS] entry that's missing from

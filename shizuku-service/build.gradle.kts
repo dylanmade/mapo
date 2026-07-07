@@ -13,7 +13,7 @@ plugins {
 // The class IS bundled into :app's APK (Shizuku loads it from there). The
 // manifest declaration here is merged into :app's manifest automatically.
 android {
-    namespace = "com.mapo.shizuku.service"
+    namespace = "com.mappo.shizuku.service"
     compileSdk = 37
 
     defaultConfig {

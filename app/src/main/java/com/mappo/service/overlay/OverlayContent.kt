@@ -1,0 +1,174 @@
+package com.mappo.service.overlay
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+
+/**
+ * Snackbar-shaped informational message. Used for "Loaded profile X for Y".
+ * Auto-dismisses after [autoDismissMs]; not focusable / non-interactive.
+ *
+ * The window is full screen width; this Box centers the snackbar horizontally
+ * within that width and caps it at a reasonable max so it doesn't stretch on
+ * very wide displays.
+ */
+@Composable
+fun OverlayToast(
+    message: String,
+    autoDismissMs: Long,
+    onDismiss: () -> Unit
+) {
+    LaunchedEffect(message) {
+        kotlinx.coroutines.delay(autoDismissMs)
+        onDismiss()
+    }
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        // surfaceContainerHigh — elevated overlay surface (per Reply convention for floating containers)
+        Surface(
+            modifier = Modifier.widthIn(min = 240.dp, max = 600.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Three-button create-profile prompt. Layout is a single Row with the message
+ * taking weighted remaining space and the button group on the right. On narrow
+ * displays the message ellipsizes rather than wrapping, keeping the layout stable.
+ *
+ * Initial focus is requested after one frame so the focusRequester is guaranteed
+ * to be attached to the focus tree (otherwise the request silently no-ops and the
+ * default first-focusable button gets focus).
+ *
+ * Gamepad B (mapped to BACK by InputAccessibilityService while overlayFocus == PROMPT) is
+ * intercepted via onPreviewKeyEvent and dismisses as if "No" was tapped.
+ *
+ * Buttons use stock Material 3 TextButton — Material's normal focused-state
+ * highlight is the visible focus indicator. The Android-level system focus frame
+ * on the ComposeView container is suppressed in OverlayManager via
+ * defaultFocusHighlightEnabled = false.
+ */
+@Composable
+fun OverlayCreatePrompt(
+    appLabel: String,
+    onYes: () -> Unit,
+    onNo: () -> Unit,
+    onNever: () -> Unit
+) {
+    val yesRequester = remember { FocusRequester() }
+    LaunchedEffect(appLabel) {
+        withFrameNanos { /* let composition + layout attach the focusRequester */ }
+        runCatching { yesRequester.requestFocus() }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyUp && event.key == Key.Back) {
+                    onNo(); true
+                } else false
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        // surfaceContainerHigh — elevated overlay prompt (per Reply convention for floating containers)
+        Surface(
+            modifier = Modifier.widthIn(min = 320.dp, max = 720.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "Create profile for $appLabel?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    PromptButton(
+                        label = "Never for this app",
+                        onClick = onNever,
+                        contentColor = MaterialTheme.colorScheme.error,
+                    )
+                    PromptButton(
+                        label = "No",
+                        onClick = onNo,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    PromptButton(
+                        label = "Yes",
+                        onClick = onYes,
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        focusRequester = yesRequester,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptButton(
+    label: String,
+    onClick: () -> Unit,
+    contentColor: Color,
+    focusRequester: FocusRequester? = null
+) {
+    TextButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+        colors = ButtonDefaults.textButtonColors(contentColor = contentColor),
+        modifier = Modifier
+            .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
+    ) { Text(label, style = MaterialTheme.typography.labelMedium) }
+}

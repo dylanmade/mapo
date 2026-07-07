@@ -1,10 +1,10 @@
-# Steam Input Parity for Mapo — Phased Roadmap
+# Steam Input Parity for Mappo — Phased Roadmap
 
 ## Context
 
 > **2026-05-27 renumbering note.** Phase 7 (Steam Input parity foundation) was inserted between the original Phase 6 (input source modes) and the original Phase 7 (VDF import). The original Phase 7 + 8 shifted down to Phase 8 + 9. Inline cross-references throughout this document predate the renumbering and use the old numbers — read "Phase 7 (VDF import)" as "Phase 8 (VDF import)" and "Phase 8 (menu scaffold)" as "Phase 9 (menu scaffold)". The new Phase 7 details live in `~/.claude/plans/phase-7-steam-input-parity-foundation.md`.
 
-Mapo's `Remap Controls` feature today is a 1-to-1 physical-button → output mapping (16 digital buttons; keyboard / mouse / gamepad outputs). Steam Input is the gold-standard configurability model on the market: it adds **action sets**, **action layers**, **mode-shift**, **input source modes** (joystick variants, mouse modes, scroll, radial / touch menus), **activators** (long / double / start / release / chord / soft press, with turbo, toggle, cycle, delays), and a rich on-disk **VDF profile format** that already has a free Workshop ecosystem of community configurations.
+Mappo's `Remap Controls` feature today is a 1-to-1 physical-button → output mapping (16 digital buttons; keyboard / mouse / gamepad outputs). Steam Input is the gold-standard configurability model on the market: it adds **action sets**, **action layers**, **mode-shift**, **input source modes** (joystick variants, mouse modes, scroll, radial / touch menus), **activators** (long / double / start / release / chord / soft press, with turbo, toggle, cycle, delays), and a rich on-disk **VDF profile format** that already has a free Workshop ecosystem of community configurations.
 
 The long-term goal is parity with Steam Input + the ability to import community VDF configurations on Android. This plan is the staged execution of that goal.
 
@@ -18,7 +18,7 @@ Before any of that, Phase 0 fixes a regression: the existing Remap Controls flow
 
 ### Root cause
 
-In `app/src/main/java/com/mapo/ui/screen/RemapControlsScreen.kt`, both `draft` and `editingButton` were held in `remember { ... }` inside the screen composable. When the user tapped **Edit** → navigated to the full-screen `REMAP_TARGET_PICKER`, NavHost removed `RemapControlsScreen` from composition. On return, the screen recomposed from scratch — `editingButton` reset to `null`. The `LaunchedEffect(pickerResult)` fired, but `editingButton?.let { ... }` was a no-op, and the picker result was consumed without ever being written to the draft. The row stayed "Unbound". Regression from the dialog → full-screen refactor (dialogs overlay the parent, preserving `remember`; nav destinations don't).
+In `app/src/main/java/com/mappo/ui/screen/RemapControlsScreen.kt`, both `draft` and `editingButton` were held in `remember { ... }` inside the screen composable. When the user tapped **Edit** → navigated to the full-screen `REMAP_TARGET_PICKER`, NavHost removed `RemapControlsScreen` from composition. On return, the screen recomposed from scratch — `editingButton` reset to `null`. The `LaunchedEffect(pickerResult)` fired, but `editingButton?.let { ... }` was a no-op, and the picker result was consumed without ever being written to the draft. The row stayed "Unbound". Regression from the dialog → full-screen refactor (dialogs overlay the parent, preserving `remember`; nav destinations don't).
 
 ### Fix (commit-on-select)
 
@@ -36,13 +36,13 @@ Match the virtual-keyboard `ConfigureButtonScreen` pattern: every picker result 
 
 ### Files touched
 
-- `app/src/main/java/com/mapo/data/db/GamepadMappingDao.kt`
-- `app/src/main/java/com/mapo/data/repository/GamepadMappingRepository.kt`
-- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt`
-- `app/src/main/java/com/mapo/ui/screen/RemapControlsScreen.kt`
-- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (REMAP_CONTROLS destination block only)
-- `app/src/test/java/com/mapo/data/repository/GamepadMappingRepositoryTest.kt` (5 new tests for `setMapping`)
-- `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (2 new tests for `setRemapMapping`)
+- `app/src/main/java/com/mappo/data/db/GamepadMappingDao.kt`
+- `app/src/main/java/com/mappo/data/repository/GamepadMappingRepository.kt`
+- `app/src/main/java/com/mappo/ui/viewmodel/MainViewModel.kt`
+- `app/src/main/java/com/mappo/ui/screen/RemapControlsScreen.kt`
+- `app/src/main/java/com/mappo/ui/screen/MainScreen.kt` (REMAP_CONTROLS destination block only)
+- `app/src/test/java/com/mappo/data/repository/GamepadMappingRepositoryTest.kt` (5 new tests for `setMapping`)
+- `app/src/test/java/com/mappo/ui/viewmodel/MainViewModelTest.kt` (2 new tests for `setRemapMapping`)
 
 ### Verify
 
@@ -71,13 +71,13 @@ Phase 1 is split into four sub-bricks so each lands the build green:
 - **`group_setting` table removed.** Originally planned as a per-(group, key) row store with `valueJson`. Collapsed into a single `BindingGroup.settingsJson` column instead — matches how `Activator.settingsJson` already works, fewer joins, parser layer is the same code path for both. Net: 9 tables instead of 10. Sealed-class parsing in the repository layer makes the table-vs-column choice invisible upstream, so this is safe to revisit later if we ever need queryable settings (we don't).
 - **`BindingGroup` ownership uses two nullable FKs** (`actionSetId?` + `actionLayerId?`) rather than a polymorphic `(ownerKind, ownerId)` pair. Real FKs + cascades work; polymorphic FKs don't. Repository invariant: exactly one is non-null.
 - **Schema bump uses existing `fallbackToDestructiveMigration(dropAllTables = true)`.** No hand-written Room `Migration` block needed.
-- **Legacy `gamepad_mappings` data is wiped on v6→v7 upgrade** (decided in 1.2). Pre-release stance ([memory: project_mapo_pre_release.md](../.claude/projects/-Users-dylanbperry-projects-mapo/memory/project_mapo_pre_release.md)) said destructive OK; the user confirmed they're fine re-creating any test profiles. The repository's `ensureSeeded` path is the only seed mechanism — there is no migrator that reads old rows. If a release-ready migration path is ever needed, write a real Room `Migration(6, 7)` and the repository can stay as-is.
+- **Legacy `gamepad_mappings` data is wiped on v6→v7 upgrade** (decided in 1.2). Pre-release stance ([memory: project_mappo_pre_release.md](../.claude/projects/-Users-dylanbperry-projects-mappo/memory/project_mappo_pre_release.md)) said destructive OK; the user confirmed they're fine re-creating any test profiles. The repository's `ensureSeeded` path is the only seed mechanism — there is no migrator that reads old rows. If a release-ready migration path is ever needed, write a real Room `Migration(6, 7)` and the repository can stay as-is.
 - **`BindingGroup.settingsJson` defaults to `"{}"`** at seed time. Mode-specific settings (deadzones, sensitivities, etc.) parse from this string in later phases; for brick 1.2 every group has empty settings and a single default sub-input set per mode.
 - **Default seed excludes trackpads, back paddles, gyro.** The schema supports them (for VDF import compatibility) but Generic Android doesn't expose them, so seeding configurable-but-never-fireable groups would just be UI clutter. Imports can still create groups for these sources.
 
 #### Brick 1.3 deviations + decisions
 
-- **Master-detail layout is custom, not `ListDetailPaneScaffold`.** M3's adaptive scaffold is designed for phone↔tablet adaptation; we always want both panes. Built a `SectionedListDetailPane` composable in `app/src/main/java/com/mapo/ui/component/layout/` instead — 30/70 split, M3-styled rail (`surfaceContainer` background, `surfaceContainerHighest` for selection), gamepad focus with wraparound, cross-pane focus handoff via shared `FocusRequester`.
+- **Master-detail layout is custom, not `ListDetailPaneScaffold`.** M3's adaptive scaffold is designed for phone↔tablet adaptation; we always want both panes. Built a `SectionedListDetailPane` composable in `app/src/main/java/com/mappo/ui/component/layout/` instead — 30/70 split, M3-styled rail (`surfaceContainer` background, `surfaceContainerHighest` for selection), gamepad focus with wraparound, cross-pane focus handoff via shared `FocusRequester`.
 - **Section hierarchy reorganized from Steam's input-source taxonomy** into Buttons (face + bumpers + menu) / D-Pad / Triggers / Joysticks / Gyro. Lives in `RemapSections.kt` as a typed registry, not in the data layer — section grouping is a UI concept and the user wants flexibility to evolve it independently.
 - **Soft Pull / Analog Output Trigger / Behavior dropdowns / Gyro section ship as disabled placeholders.** Visible in the UI now (so the eventual feature lands without re-doing layout); none have wire-up. SOFT_PRESS activator is Phase 3, behavior-dropdown mode picker is Phase 6, gyro requires Phase 2 motion capture + AYN Thor IMU validation.
 - **Back / Home buttons are NOT added to `DeviceButton` / `InputSource`.** They're inconsistent across Android devices and the user explicitly opted out of including them in 1.3's data layer. Revisit when device-specific capability detection lands.
@@ -88,8 +88,8 @@ Phase 1 is split into four sub-bricks so each lands the build green:
 #### Brick 1.4 deviations + decisions
 
 - **Runtime input dispatch is intentionally dead between brick 1.4 and Phase 2.** Removing the legacy `activeProfileMappings → inputDispatcher.setCurrentMappings` collector means physical remaps don't fire at runtime until Phase 2's evaluator reads bindings directly from `ControllerConfigRepository`. The user confirmed this gap is acceptable; bindings still persist correctly through the editor, they just don't drive output yet.
-- **No interim adapter built.** Considered mirroring new-schema writes into the legacy table to keep the dispatcher alive across the gap, but it'd be throwaway code on the wrong side of the deletion, and Phase 2 lands soon. Pre-release status ([memory: project_mapo_pre_release.md](../.claude/projects/-Users-dylanbperry-projects-mapo/memory/project_mapo_pre_release.md)) means no end-user impact.
-- **`ProfileRepository.duplicateProfile`'s `copyMappings` call replaced with `ControllerConfigRepository.copyConfig`** — deep-clones the full controller_profile → action_set → action_layer → binding_group → group_input → activator → binding + preset_binding + game_action graph with fresh autogenerated PKs at every level. Honors [`feedback_duplicates_own_their_data`](../.claude/projects/-Users-dylanbperry-projects-mapo/memory/feedback_duplicates_own_their_data.md): the duplicate is fully independently addressable; editing the copy never bleeds back into the source. Verified by the new `copyConfig_editsToDestDoNotAffectSource` test.
+- **No interim adapter built.** Considered mirroring new-schema writes into the legacy table to keep the dispatcher alive across the gap, but it'd be throwaway code on the wrong side of the deletion, and Phase 2 lands soon. Pre-release status ([memory: project_mappo_pre_release.md](../.claude/projects/-Users-dylanbperry-projects-mappo/memory/project_mappo_pre_release.md)) means no end-user impact.
+- **`ProfileRepository.duplicateProfile`'s `copyMappings` call replaced with `ControllerConfigRepository.copyConfig`** — deep-clones the full controller_profile → action_set → action_layer → binding_group → group_input → activator → binding + preset_binding + game_action graph with fresh autogenerated PKs at every level. Honors [`feedback_duplicates_own_their_data`](../.claude/projects/-Users-dylanbperry-projects-mappo/memory/feedback_duplicates_own_their_data.md): the duplicate is fully independently addressable; editing the copy never bleeds back into the source. Verified by the new `copyConfig_editsToDestDoNotAffectSource` test.
 - **AppDatabase v7→v8 bump.** `fallbackToDestructiveMigration(dropAllTables=true)` handles the entity removal (legacy `gamepad_mappings` table); no migration code written, matching the rest of Phase 1's destructive-OK stance.
 - **`DeviceButton` model class kept.** Still used by the virtual-keyboard `GridButton` gesture system (unrelated to physical remap). `RemapTarget` likewise stays — both are loadbearing for the on-screen keyboard layouts.
 
@@ -115,10 +115,10 @@ Settings live in JSON columns (`binding_group.settingsJson` and `activator.setti
 
 ### Domain models + repositories
 
-- New Kotlin domain models under `app/src/main/java/com/mapo/data/model/steam/`:
+- New Kotlin domain models under `app/src/main/java/com/mappo/data/model/steam/`:
   - `ControllerProfile`, `ActionSet`, `ActionLayer`, `BindingGroup`, `GroupInput`, `Activator`, `Binding`, `PresetBinding`, `GameAction`
   - Sealed-class settings types: `GroupSettings` (per-mode), `ActivatorSettings` (universal + type-specific), `BindingOutput` (typed args)
-- DAOs per entity under `app/src/main/java/com/mapo/data/db/steam/`
+- DAOs per entity under `app/src/main/java/com/mappo/data/db/steam/`
 - Repository: `ControllerConfigRepository` exposes `getActiveConfig(profileId): Flow<ControllerConfig>` returning a materialized graph (controller_profile + all sets + all layers + all groups + all inputs + all activators + all bindings + all preset_bindings). Use Room's `@Relation` / `@Transaction` for one-shot reads; emit a precompiled in-memory form (`CompiledConfig`) for the runtime evaluator (Phase 2).
 
 ### Migration
@@ -165,13 +165,13 @@ The Action Set / Layers UI is present-but-empty for Phase 1 — no add/remove ye
 
 ### Files
 
-- **Create** `app/src/main/java/com/mapo/data/db/steam/` (full directory)
-- **Create** `app/src/main/java/com/mapo/data/model/steam/` (full directory)
-- **Create** `app/src/main/java/com/mapo/data/repository/ControllerConfigRepository.kt`
-- **Edit** `app/src/main/java/com/mapo/data/db/AppDatabase.kt` — add entities, bump version, add migration
-- **Edit** `app/src/main/java/com/mapo/data/repository/GamepadMappingRepository.kt` — deprecate (keep as thin adapter during transition or delete outright)
-- **Edit** `app/src/main/java/com/mapo/ui/screen/RemapControlsScreen.kt` — rewrite to the section-grouped layout
-- **Edit** `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` — switch from `activeProfileMappings` (legacy) to `activeControllerConfig` flow
+- **Create** `app/src/main/java/com/mappo/data/db/steam/` (full directory)
+- **Create** `app/src/main/java/com/mappo/data/model/steam/` (full directory)
+- **Create** `app/src/main/java/com/mappo/data/repository/ControllerConfigRepository.kt`
+- **Edit** `app/src/main/java/com/mappo/data/db/AppDatabase.kt` — add entities, bump version, add migration
+- **Edit** `app/src/main/java/com/mappo/data/repository/GamepadMappingRepository.kt` — deprecate (keep as thin adapter during transition or delete outright)
+- **Edit** `app/src/main/java/com/mappo/ui/screen/RemapControlsScreen.kt` — rewrite to the section-grouped layout
+- **Edit** `app/src/main/java/com/mappo/ui/viewmodel/MainViewModel.kt` — switch from `activeProfileMappings` (legacy) to `activeControllerConfig` flow
 
 ### Verify
 
@@ -188,7 +188,7 @@ The Action Set / Layers UI is present-but-empty for Phase 1 — no add/remove ye
 
 Phase 2 ships as three sub-bricks (one moved out — see 2.3 below):
 
-- **2.1 — CompiledConfig + plumbing** ✅ COMPLETED. New `CompiledConfig` / `InputAddress` / `CompiledInput` / `CompiledActivator` types + `ControllerConfig.toCompiled()` compiler under `app/src/main/java/com/mapo/service/input/CompiledConfig.kt`. `InputDispatcher.compiledConfig` StateFlow added alongside the legacy `currentMappings` (not replacing it yet); `MainViewModel` collects `activeControllerConfig` and publishes compiled snapshots into the dispatcher. Compiler tests under `app/src/test/java/com/mapo/service/input/CompiledConfigTest.kt` cover round-trip, state-filter, multi-activator preservation, cycle-binding order, and missing-address null. Nothing fires at runtime yet — that's brick 2.2.
+- **2.1 — CompiledConfig + plumbing** ✅ COMPLETED. New `CompiledConfig` / `InputAddress` / `CompiledInput` / `CompiledActivator` types + `ControllerConfig.toCompiled()` compiler under `app/src/main/java/com/mappo/service/input/CompiledConfig.kt`. `InputDispatcher.compiledConfig` StateFlow added alongside the legacy `currentMappings` (not replacing it yet); `MainViewModel` collects `activeControllerConfig` and publishes compiled snapshots into the dispatcher. Compiler tests under `app/src/test/java/com/mappo/service/input/CompiledConfigTest.kt` cover round-trip, state-filter, multi-activator preservation, cycle-binding order, and missing-address null. Nothing fires at runtime yet — that's brick 2.2.
 - **2.2 — InputEvaluator + OutputEmitter (digital, FULL_PRESS-only)** ✅ COMPLETED. Built `OutputEmitter` (BindingOutput → dispatcher calls with press/release semantics for key+gamepad, fire-and-done for mouse/wheel, log-stubs for game_action/controller_action/mode_shift). Built `InputEvaluator` (FULL_PRESS-only state machine, `held: Map<InputAddress, List<BindingOutput>>` tracking pressed bindings, with defensive guards for duplicate DOWN and config-change-while-held). Extended `InputSink` + `InputDispatcher` with string-taking `injectKeyDown`/`injectKeyUp`. `InputAccessibilityService` injects the evaluator, exposes a `KEYCODE_TO_INPUT_ADDRESS` map matching the default seed, and `onKeyEvent` now routes every gamepad keycode through `evaluator.handleDigital(...)`. 24 new tests across `OutputEmitterTest` and `InputEvaluatorTest`. **Physical button remap is alive again on the new schema.**
 - **2.3 — Analog capture** ⏭ DESCOPED to Phase 6. The original plan assumed we could override `onGenericMotionEvent` on `AccessibilityService`; that method **does not exist on `AccessibilityService`** — it's only on `View`. Motion events from controllers flow to focused views, not accessibility services. Practical impact is minimal: digital `KEYCODE_BUTTON_L2`/`R2` and `KEYCODE_DPAD_*` already cover triggers + dpad on the Thor (user-verified — L2 → MOUSE_RIGHT fires correctly in a native game). The first feature that genuinely needs analog values is `JOYSTICK_MOVE` mode (Phase 6), so we'll design the motion-capture mechanism then. See Phase 6 notes + Phase 3 note about `SOFT_PRESS` deferral.
 - **2.4 — Cleanup** ✅ COMPLETED. Deleted `InputDispatcher.currentMappings` + `setCurrentMappings` + the unused `DeviceButton` import; deleted `InputAccessibilityService.dispatchRemapTarget` (no longer reachable). `GAMEPAD_KEYCODE_MAP`/`DEVICE_BUTTON_TO_KEYCODE` stay alive — still used by `dispatchTargetAsClick` for trackpad-gesture → gamepad-button output in the virtual keyboard (legacy `RemapTarget.Gamepad` shape, unrelated to physical remap).
@@ -242,7 +242,7 @@ Normalize axis values, apply deadzones from the binding_group's settings, feed i
 
 ### Runtime evaluator (`InputEvaluator`)
 
-A new class under `app/src/main/java/com/mapo/service/input/InputEvaluator.kt`. Inputs:
+A new class under `app/src/main/java/com/mappo/service/input/InputEvaluator.kt`. Inputs:
 
 - Current `CompiledConfig` (snapshot from `ControllerConfigRepository`)
 - Live physical input state: digital button states, axis values, timestamps
@@ -277,13 +277,13 @@ No new UI. This is plumbing.
 
 ### Files
 
-- **Create** `app/src/main/java/com/mapo/service/input/InputEvaluator.kt`
-- **Create** `app/src/main/java/com/mapo/service/input/OutputEmitter.kt`
-- **Create** `app/src/main/java/com/mapo/service/input/CompiledConfig.kt` (in-memory representation)
-- **Edit** `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` — add `onGenericMotionEvent`; route both key + motion events through `InputEvaluator`
+- **Create** `app/src/main/java/com/mappo/service/input/InputEvaluator.kt`
+- **Create** `app/src/main/java/com/mappo/service/input/OutputEmitter.kt`
+- **Create** `app/src/main/java/com/mappo/service/input/CompiledConfig.kt` (in-memory representation)
+- **Edit** `app/src/main/java/com/mappo/service/InputAccessibilityService.kt` — add `onGenericMotionEvent`; route both key + motion events through `InputEvaluator`
 - **Edit** `app/src/main/res/xml/accessibility_service_config.xml` — verify capability flags (do not flip `canRetrieveWindowContent` — load-bearing for cross-display auto-switch + planned screen-scrape)
-- **Edit** `app/src/main/java/com/mapo/service/input/InputDispatcher.kt` — replace `currentMappings` with `compiledConfig`
-- **Edit** `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` — publish `CompiledConfig` to the dispatcher
+- **Edit** `app/src/main/java/com/mappo/service/input/InputDispatcher.kt` — replace `currentMappings` with `compiledConfig`
+- **Edit** `app/src/main/java/com/mappo/ui/viewmodel/MainViewModel.kt` — publish `CompiledConfig` to the dispatcher
 - **Edit** `app/src/main/AndroidManifest.xml` if joystick capability needs declaring
 
 ### Verify
@@ -357,11 +357,11 @@ Adding a binding opens the existing `RemapTargetPickerScreen` (with Phase 0's fi
 
 ### Files
 
-- **Create** `app/src/main/java/com/mapo/ui/screen/binding/InputEditorScreen.kt` (the activator list)
-- **Create** `app/src/main/java/com/mapo/ui/screen/binding/ActivatorEditorScreen.kt`
-- **Edit** `app/src/main/java/com/mapo/ui/nav/MapoRoute.kt` — add `INPUT_EDITOR`, `ACTIVATOR_EDITOR` routes
-- **Edit** `app/src/main/java/com/mapo/service/input/InputEvaluator.kt` — implement the full state machine
-- **Edit** `app/src/main/java/com/mapo/data/model/steam/Activator.kt` — flesh out settings sealed class
+- **Create** `app/src/main/java/com/mappo/ui/screen/binding/InputEditorScreen.kt` (the activator list)
+- **Create** `app/src/main/java/com/mappo/ui/screen/binding/ActivatorEditorScreen.kt`
+- **Edit** `app/src/main/java/com/mappo/ui/nav/MappoRoute.kt` — add `INPUT_EDITOR`, `ACTIVATOR_EDITOR` routes
+- **Edit** `app/src/main/java/com/mappo/service/input/InputEvaluator.kt` — implement the full state machine
+- **Edit** `app/src/main/java/com/mappo/data/model/steam/Activator.kt` — flesh out settings sealed class
 
 ### Decision points (flag before implementing)
 
@@ -380,7 +380,7 @@ Reordered after 3.1 to put the **per-input editor UI ahead of further runtime br
 | 3.2 | `Double_Press` window state machine + Full/Double coexistence semantics (hardcoded interruptable=true) | ✅ COMPLETED 2026-05-12 |
 | 3.5 | `ActivatorEditorScreen` + per-type settings panels (long_press_time slider, double_tap_time slider) — universal settings as placeholders | ✅ COMPLETED 2026-05-12 |
 | 3.3 | `Chorded_Press` (physical partner) + universal settings (toggle, turbo / `hold_to_repeat`, `fire_start_delay` / `fire_end_delay`, `cycle_binding`, `interruptable`) | ✅ COMPLETED 2026-05-13 |
-| 3.6 | **Multi-command authoring** per activator (`[+ Add Command]` list under each activator row) — required for `cycle_bindings` to be user-exercisable. Steam exposes this as "Cycle Commands" with sub-command rows; same data shape as Mapo's. Data model and runtime were ready since Phase 1 / Brick 3.3; only the UI was missing. | ✅ COMPLETED 2026-05-13 |
+| 3.6 | **Multi-command authoring** per activator (`[+ Add Command]` list under each activator row) — required for `cycle_bindings` to be user-exercisable. Steam exposes this as "Cycle Commands" with sub-command rows; same data shape as Mappo's. Data model and runtime were ready since Phase 1 / Brick 3.3; only the UI was missing. | ✅ COMPLETED 2026-05-13 |
 
 ### Brick 3.6 deviations + decisions
 
@@ -491,11 +491,11 @@ A new binding output category in the picker: **Steam → Switch Action Set**, ta
 
 ### Files
 
-- **Edit** `app/src/main/java/com/mapo/ui/screen/RemapControlsScreen.kt` — wire up set tabs
-- **Create** `app/src/main/java/com/mapo/ui/screen/binding/ActionSetManagementDialogs.kt`
-- **Edit** `app/src/main/java/com/mapo/data/repository/ControllerConfigRepository.kt` — `addActionSet`, `renameActionSet`, `duplicateActionSet`, `deleteActionSet`
-- **Edit** `app/src/main/java/com/mapo/service/input/InputEvaluator.kt` — `CHANGE_PRESET` verb
-- **Edit** `app/src/main/java/com/mapo/data/defaults/RemapInputOptions.kt` — add `ControllerAction` category
+- **Edit** `app/src/main/java/com/mappo/ui/screen/RemapControlsScreen.kt` — wire up set tabs
+- **Create** `app/src/main/java/com/mappo/ui/screen/binding/ActionSetManagementDialogs.kt`
+- **Edit** `app/src/main/java/com/mappo/data/repository/ControllerConfigRepository.kt` — `addActionSet`, `renameActionSet`, `duplicateActionSet`, `deleteActionSet`
+- **Edit** `app/src/main/java/com/mappo/service/input/InputEvaluator.kt` — `CHANGE_PRESET` verb
+- **Edit** `app/src/main/java/com/mappo/data/defaults/RemapInputOptions.kt` — add `ControllerAction` category
 
 ### Verify
 
@@ -531,7 +531,7 @@ A new binding output category in the picker: **Steam → Switch Action Set**, ta
 - **Why strip it.** Reviewed Steam's actual UX during 4.4 verification: Steam has no exposed "set as default" affordance and no analog for re-pointing which set loads first. The starting set is simply whichever appears first in the VDF — creation order. The "default" concept I introduced in 4.1 was foundation-laying I rationalized at the time, but it didn't map to user-visible Steam semantics; it just hung around as a stale-feeling menu item with a UI sync bug to fix.
 - **User-visible bug it fixed.** Brick 4.4's `[⋮]` overflow menu read "Set as default" → "Default set" inconsistently across profile switches (the dropdown captured a stale snapshot of `defaultActionSetId`). Removing the concept removes the bug surface; no menu item, no inconsistency.
 - **Naming.** Renamed `CompiledConfig.defaultActionSetId` → `startingActionSetId` to match Steam's mental model: "this is the set the controller boots into," not "this is a user-chosen default." `InputEvaluator.activeSetId` lazy-inits from `cfg.startingActionSetId`; the fallback path when the active set disappears from a config swap also reads `startingActionSetId`. `ControllerConfig.activeActionSet` collapses to `actionSets.firstOrNull()`.
-- **DB version bump.** Destructive v11 → v12 because the column is removed. Pre-release per `project_mapo_pre_release.md`, so no migration needed; `fallbackToDestructiveMigration` does its job.
+- **DB version bump.** Destructive v11 → v12 because the column is removed. Pre-release per `project_mappo_pre_release.md`, so no migration needed; `fallbackToDestructiveMigration` does its job.
 - **Repo simplification.** `deleteActionSet` lost its default-reassignment branch (the starting set is whatever's first by orderIndex on whatever remains — no pointer to chase). `copyConfig` lost its post-loop default-pointer remap. `seedDefaultConfig` no longer does a second `controllerProfileDao.update()` after seeding.
 - **UI simplification.** `RemapControlsScreen` drops the `onSetDefaultActionSet` param + the "Set as default" / "Default set" `DropdownMenuItem`. `ActionSetAndLayersBar` no longer reads `controllerProfile.defaultActionSetId`. `ActionSetOverflowMenu` is now 3 items (Rename / Duplicate / Delete).
 - **Future "starting set" control, if needed.** If users ever want to choose which set boots first, the answer is drag-to-reorder the tab row — the starting set becomes whatever ends up at index 0. No need for a separate pointer concept. YAGNI for now.
@@ -542,7 +542,7 @@ A new binding output category in the picker: **Steam → Switch Action Set**, ta
 - **No typed `BindingOutput.ChangePreset(setId)` variant.** The original brick description floated a typed subclass, but `BindingOutput.ControllerAction(verb="CHANGE_PRESET", args=[setId])` is already the on-disk form, the runtime path (`tryHandleControllerAction` in `InputEvaluator`) is already wired against it, and the picker's emit/decode is just one call site. Adding a typed wrapper would duplicate every encoding/decoding/runtime-handler edge for marginal type-safety gain — and would silently diverge from how VDF import (Phase 7) will land Steam configs (as `CONTROLLER_ACTION` rows). Sticking with the generic shape keeps one path live.
 - **Picker generalization, not split.** Two reasonable options to host the new category: (a) split into `SteamBindingPickerScreen` + keep the legacy `RemapTargetPickerScreen`, or (b) generalize the existing picker to speak `BindingOutput`, with the legacy trackpad call site (`ConfigureButtonScreen`) converting at the boundary. Picked (b) — one screen, one URL, one saved-state encoding. Trackpad picks still degrade gracefully: `BindingOutput.toRemapTarget()` for Steam-only outputs already returns `Unbound`, and the new category is hidden when `availableActionSets` is empty.
 - **Picker encoding switched to `BindingOutput`.** Added `BindingOutput.encode()` / `BindingOutput.decode(String)` mirroring `toEntity` / `fromEntity` — same `<type>|<args>` shape. The picker route's `currentEncoded` arg now carries a `BindingOutput`-encoded string. `MainScreen` decodes the picker's saved-state result as `BindingOutput` and passes through to `InputEditorScreen.pickerResult: BindingOutput?` (was `RemapTarget?`). `ConfigureButtonScreen` keeps its `RemapTarget` shape; conversion happens at the boundary in `MainScreen` via `BindingOutput.toRemapTarget()` / `fromRemapTarget()`.
-- **`showActionSets: Boolean` nav arg gates the new category.** Added to `MapoRoute.REMAP_TARGET_PICKER` so the picker only renders the category when called from the Steam-Input flow. ConfigureButton sets false; InputEditor sets true. Defended-in-depth: even if the flag flipped accidentally, the trackpad's `BindingOutput.toRemapTarget()` already drops Steam-only outputs.
+- **`showActionSets: Boolean` nav arg gates the new category.** Added to `MappoRoute.REMAP_TARGET_PICKER` so the picker only renders the category when called from the Steam-Input flow. ConfigureButton sets false; InputEditor sets true. Defended-in-depth: even if the flag flipped accidentally, the trackpad's `BindingOutput.toRemapTarget()` already drops Steam-only outputs.
 - **Context-aware display label.** `BindingOutput.displayLabel()` (no args) only knows the binding shape, so it would have to read "Switch to: Set #42" — useless to the user. Added `BindingOutput.displayLabel(config: ControllerConfig?)` which resolves the target set's `title` from the config. Falls back to the numeric form when the config is null (legacy callers) or the set isn't in the config (stale binding after delete). Wired into `InputEditorScreen.CommandRow` and `RemapControlsScreen.BindingRowItem`, both of which thread `config` down.
 - **`InputEditorScreen` API change.** `pickerResult: RemapTarget?` → `BindingOutput?`; `onOpenPicker: (String, RemapTarget) -> Unit` → `(String, BindingOutput) -> Unit`. The screen no longer wraps with `BindingOutput.fromRemapTarget()` — picker results arrive already in the right shape. Existing `InputEditorScreenTest` tests didn't need a churn pass; they always passed Steam-shaped inputs.
 - **Saved-state result key is unchanged.** `PICKER_RESULT_KEY` still carries a `String`; only the encoded shape inside changed. Both call sites are updated, so nothing else reads the key.
@@ -577,7 +577,7 @@ A new binding output category in the picker: **Steam → Switch Action Set**, ta
 
 - **Default-set tracking.** Added `defaultActionSetId: Long?` to `ControllerProfile` rather than `isDefault: Boolean` on `ActionSet`. The pointer lives on the parent → at-most-one-default is enforced by data shape, and "which set is default" is a property of the controller_profile, not of any individual set. **No FK declared** on the column — declaring one would create a cyclic FK between `controller_profile` and `action_set` (both tables already cross-reference each other), and Room's migration story for circular FKs is fragile. Repo maintains integrity instead: `deleteActionSet` clears/reassigns the pointer on delete, `setDefaultActionSet` rejects sets that don't belong to the named controller_profile, and `ControllerConfig.activeActionSet` falls back to "first set by orderIndex" if the pointer is null or stale.
 - **`activeActionSet` semantics.** Updated `ControllerConfig.activeActionSet` to prefer `controllerProfile.defaultActionSetId`, falling back to `actionSets.firstOrNull()`. "Active" here means *default-active at config load time*; **runtime set switching** (which set is *currently* in effect after a `CHANGE_PRESET` fired) is Brick 4.2 territory, lives in the evaluator's mutable state, and is not reflected in the materialized graph.
-- **Db version bump.** `AppDatabase` v10 → v11. Pre-release `fallbackToDestructiveMigration(dropAllTables = true)` (per `project_mapo_pre_release.md`) means no manual migration code — the field arrives via destructive wipe on first launch after upgrade.
+- **Db version bump.** `AppDatabase` v10 → v11. Pre-release `fallbackToDestructiveMigration(dropAllTables = true)` (per `project_mappo_pre_release.md`) means no manual migration code — the field arrives via destructive wipe on first launch after upgrade.
 - **`copyConfig` default-pointer remap.** `copyConfig` was previously copying `defaultActionSetId` verbatim — which left the cloned controller_profile pointing at the *source* set's id, not the clone's. Fixed by remapping through the `setIdMap` after the per-set clone loop. Test `copyConfig_remapsDefaultActionSetIdToClonedSet` covers it.
 - **Add / duplicate consolidation.** `addActionSet(controllerProfileId, name, title, inheritFromSetId = null)` handles both "blank seeded set" and "inherit from existing set"; `duplicateActionSet(sourceSetId, name, title)` is a one-line wrapper that resolves the source's parent + delegates. UI layer can call either depending on which dialog flow the user is in (Brick 4.4).
 - **Set-content seeding refactored.** Extracted `seedDefaultSetContents(actionSetId)` out of `seedDefaultConfig`; `addActionSet`'s blank path calls the same helper. Avoids duplicating the default-input-source seed loop. `cloneSetContents(sourceSetId, destSetId)` is the parallel helper for the inherit path — adapts the per-set portion of `copyConfig`'s logic to a single set.
@@ -640,11 +640,11 @@ In any activator's binding list: **Steam → Mode Shift**, target = (input sourc
 
 ### Files
 
-- **Edit** `app/src/main/java/com/mapo/ui/screen/RemapControlsScreen.kt` — Layers row + ghost-text overlay rendering
-- **Create** `app/src/main/java/com/mapo/ui/screen/binding/LayerManagementDialogs.kt`
-- **Create** `app/src/main/java/com/mapo/ui/screen/binding/LayerActivationPickerScreen.kt`
-- **Create** `app/src/main/java/com/mapo/ui/screen/binding/ModeShiftPickerScreen.kt`
-- **Edit** `app/src/main/java/com/mapo/service/input/InputEvaluator.kt` — layer stack + mode_shifts table
+- **Edit** `app/src/main/java/com/mappo/ui/screen/RemapControlsScreen.kt` — Layers row + ghost-text overlay rendering
+- **Create** `app/src/main/java/com/mappo/ui/screen/binding/LayerManagementDialogs.kt`
+- **Create** `app/src/main/java/com/mappo/ui/screen/binding/LayerActivationPickerScreen.kt`
+- **Create** `app/src/main/java/com/mappo/ui/screen/binding/ModeShiftPickerScreen.kt`
+- **Edit** `app/src/main/java/com/mappo/service/input/InputEvaluator.kt` — layer stack + mode_shifts table
 
 ### Decision points
 
@@ -658,7 +658,7 @@ In any activator's binding list: **Steam → Mode Shift**, target = (input sourc
 
 ### Brick 5.6 deviations + decisions
 
-- **What it covers**: a new "Layer" category in `RemapTargetPickerScreen` (Brick 4.5's generalized picker). Two-step flow — pick verb → pick layer. The picker emits `BindingOutput.ControllerAction(verb, [layerId])` for one of three verbs. New `MapoRoute.ARG_SHOW_LAYERS` follows the same call-site rule as `ARG_SHOW_ACTION_SETS` (InputEditor true; ConfigureButton false). `availableLayers` is sourced from the viewing action set's layers in `MainScreen` (Steam-faithful — layers are scoped to a set's namespace).
+- **What it covers**: a new "Layer" category in `RemapTargetPickerScreen` (Brick 4.5's generalized picker). Two-step flow — pick verb → pick layer. The picker emits `BindingOutput.ControllerAction(verb, [layerId])` for one of three verbs. New `MappoRoute.ARG_SHOW_LAYERS` follows the same call-site rule as `ARG_SHOW_ACTION_SETS` (InputEditor true; ConfigureButton false). `availableLayers` is sourced from the viewing action set's layers in `MainScreen` (Steam-faithful — layers are scoped to a set's namespace).
 - **Three verbs, not four**: parity plan listed four options ("Add Layer sticky", "Add Layer while-held with auto-release", "Hold Layer", "Remove Layer"). Collapsed to **three** — `add_layer` (sticky), `hold_layer` (while held), `remove_layer`. The dropped "Add Layer while-held with auto-release" is Steam UI sugar that generates an explicit `FULL_PRESS add_layer` + `RELEASE_PRESS remove_layer` activator pair; `hold_layer` is Steam's single-verb shorthand that does the same thing. Exposing both as user-facing options would have been duplicative and confusing — the user would have no way to know which to pick. The pair form can still be authored manually (FULL_PRESS bound to `add_layer` + a RELEASE activator bound to `remove_layer`); a future brick can add a one-tap sugar option if the manual path turns out to be too friction-heavy.
 - **`displayLabel(config)` extended** to resolve all three layer verbs to their layer's title — "Add Layer: Scope" / "Hold Layer: Vehicle" / "Remove Layer: Scope". Falls back to "Add Layer: Layer #N" form when config is null or the layer is missing (stale binding after delete), mirroring the `CHANGE_PRESET` "Set #N" fallback.
 - **Verb-then-layer order** (not layer-then-verb). With 3 verbs × N layers, the matrix grows on the layer side. Putting the verb first keeps the verb list a stable 3 rows and lets the layer list expand independently. Also makes the picker's "current selection" check work cleanly — the verb screen highlights the bound verb if any.
@@ -698,7 +698,7 @@ In any activator's binding list: **Steam → Mode Shift**, target = (input sourc
 
 - **What it covers**: schema + compiled-config wiring for layer-scoped preset bindings. New `LayerPresetBinding` entity + `LayerPresetBindingDao` (separate table — Option 2 from the schema-shape discussion); `ActionLayerGraph` gains a `preset: List<PresetEntry>` field parallel to `ActionSetGraph.preset`; `ControllerConfigRepository.loadConfigSnapshot` hydrates it from the new DAO; `ControllerConfig.toCompiled()` folds each layer's preset into `CompiledLayer.inputs` so the runtime layer-stack walk (Brick 5.1) actually produces overrides. `duplicateLayer` extended to also clone `LayerPresetBinding` rows, remapping `bindingGroupId` through the existing groupIdMap.
 - **Schema shape — Option 2 (separate `layer_preset_binding` table)** chosen over a nullable column on `preset_binding` or a polymorphic owner column. Reasoning: each table has a single, unambiguous purpose; FK constraints stay clean both sides; the boilerplate cost is bounded (one entity + DAO, doesn't grow with feature work). The inconsistency with `BindingGroup.ownerKind/ownerId` (which is polymorphic) is logged in `project_schema_polymorphic_owner_audit_deferred` as a post-parity audit item — harmonization isn't a no-brainer because option-3 → option-2 just relocates polymorphism into another FK.
-- **DB version bumped to 13** (destructive migration via `fallbackToDestructiveMigration(dropAllTables = true)` per `project_mapo_pre_release`).
+- **DB version bumped to 13** (destructive migration via `fallbackToDestructiveMigration(dropAllTables = true)` per `project_mappo_pre_release`).
 - **No 5.5.a runtime change to `InputEvaluator`**: the layer-stack walk landed in 5.1 with `CompiledLayer.inputs` as an empty map placeholder. 5.5.a only populates that map. Verified by the new `actionLayer_presetEntries_areFoldedIntoCompiledLayerInputs` test — the existing 5.1 walk produces overrides as soon as the map is non-empty.
 - **Hilt provider added** for `LayerPresetBindingDao` (`provideLayerPresetBindingDao` in `AppModule`). `FakeLayerPresetBindingDao` added under `app/src/test/.../FakeSteamDaos.kt` for the repo tests.
 - **Tests added (5)**: `CompiledConfigTest.actionLayer_presetEntries_areFoldedIntoCompiledLayerInputs` (base + layer override both compile correctly), `CompiledConfigTest.actionLayer_inactiveStatePresetEntries_areSkipped` (mirror of base-set inactive-state behavior), `ControllerConfigRepositoryTest.observeActiveConfig_hydratesActionLayerGraphPreset_fromLayerPresetBindingDao`, `ControllerConfigRepositoryTest.duplicateLayer_clonesLayerPresetBindingRows_pointingAtClonedGroups`, `ControllerConfigRepositoryTest.observeActiveConfig_layerWithNoPreset_yieldsEmptyPresetList`. The 5.1 `actionLayers_areMaterializedIntoCompiledActionSetLayersMap` test's docstring updated to reflect that empty inputs now means "no preset entries" rather than "schema doesn't exist yet."
@@ -743,7 +743,7 @@ In any activator's binding list: **Steam → Mode Shift**, target = (input sourc
 
 ## Phase 6 — Input source modes — ✅ COMPLETED (via Shizuku pivot 2026-05-25)
 
-> **Closed 2026-05-25.** The original Phase 6 plan below was reduced-scoped on 2026-05-16, then reopened via a Shizuku-based motion-capture pivot 2026-05-23 and fully shipped 2026-05-25. The shipped architecture differs substantially from the original plan — analog modes ride on a Shizuku UserService reading `/dev/input/event*` and a `/dev/uinput` virtual mouse, rather than the focused-overlay capture path originally outlined here. See `~/.claude/projects/-Users-dylanbperry-projects-mapo/memory/project_phase_6_shipped.md` for the final architecture and `~/.claude/plans/i-have-the-biggest-jazzy-micali.md` for the detailed brick-by-brick implementation record. Original plan content retained below for historical reference.
+> **Closed 2026-05-25.** The original Phase 6 plan below was reduced-scoped on 2026-05-16, then reopened via a Shizuku-based motion-capture pivot 2026-05-23 and fully shipped 2026-05-25. The shipped architecture differs substantially from the original plan — analog modes ride on a Shizuku UserService reading `/dev/input/event*` and a `/dev/uinput` virtual mouse, rather than the focused-overlay capture path originally outlined here. See `~/.claude/projects/-Users-dylanbperry-projects-mappo/memory/project_phase_6_shipped.md` for the final architecture and `~/.claude/plans/i-have-the-biggest-jazzy-micali.md` for the detailed brick-by-brick implementation record. Original plan content retained below for historical reference.
 
 ### Scope
 
@@ -781,7 +781,7 @@ Each mode is a class implementing `BindingMode`:
 - `evaluate(physical: PhysicalSourceState, settings: GroupSettings, state: ModeRuntimeState): List<GroupInputEvent>` — translates source state into per-input events the activator engine consumes
 - `defaultSettings(): GroupSettings` — sensible defaults per mode
 
-Mode classes live under `app/src/main/java/com/mapo/service/input/modes/` (one file per mode).
+Mode classes live under `app/src/main/java/com/mappo/service/input/modes/` (one file per mode).
 
 ### UI: source mode picker
 
@@ -814,11 +814,11 @@ Each mode swaps both the settings panel and the inputs list. Switching modes pre
 
 ### Files
 
-- **Create** `app/src/main/java/com/mapo/service/input/modes/` (one file per mode + a `BindingMode` interface)
-- **Create** `app/src/main/java/com/mapo/ui/screen/binding/SourceEditorScreen.kt`
-- **Create** `app/src/main/java/com/mapo/ui/screen/binding/ModeSettingsPanels/` — one composable per mode's settings panel
-- **Edit** `app/src/main/java/com/mapo/service/input/InputEvaluator.kt` — delegate sub-input event production to the active mode class
-- **Edit** `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` — output side: emit analog mouse moves (existing gesture infra), relative-mouse via accessibility cursor
+- **Create** `app/src/main/java/com/mappo/service/input/modes/` (one file per mode + a `BindingMode` interface)
+- **Create** `app/src/main/java/com/mappo/ui/screen/binding/SourceEditorScreen.kt`
+- **Create** `app/src/main/java/com/mappo/ui/screen/binding/ModeSettingsPanels/` — one composable per mode's settings panel
+- **Edit** `app/src/main/java/com/mappo/service/input/InputEvaluator.kt` — delegate sub-input event production to the active mode class
+- **Edit** `app/src/main/java/com/mappo/service/InputAccessibilityService.kt` — output side: emit analog mouse moves (existing gesture infra), relative-mouse via accessibility cursor
 
 ### Decision points
 
@@ -881,7 +881,7 @@ So the analog tail of Phase 6 waits for architecture work that waits for its own
 
 ### Brick 6.3 deviations + decisions
 
-**Scope landed.** `DpadMode` `SourceMode` handler in `app/src/main/java/com/mapo/service/input/modes/SourceMode.kt`. `validInputs = {dpad_north, dpad_south, dpad_east, dpad_west, click}`. `defaultSettingsJson` returns `{"dpad_layout":"4_way"}` — Steam-default layout, runtime-inert until analog source feeds the gating.
+**Scope landed.** `DpadMode` `SourceMode` handler in `app/src/main/java/com/mappo/service/input/modes/SourceMode.kt`. `validInputs = {dpad_north, dpad_south, dpad_east, dpad_west, click}`. `defaultSettingsJson` returns `{"dpad_layout":"4_way"}` — Steam-default layout, runtime-inert until analog source feeds the gating.
 
 **Registry update.** `BindingMode.DPAD.handler()` now returns `DpadMode` (was `StubMode(DPAD)`). The change makes DPAD strictly validate sub-input keys at compile time — misseeded `button_a` under a DPAD group is dropped with a WARN log instead of silently passing through.
 
@@ -901,15 +901,15 @@ So the analog tail of Phase 6 waits for architecture work that waits for its own
 **Status: scaffold landed; motion-capture path identified but tabled for a wider refactor.** The brick went through three states:
 
 1. **First attempt — non-focusable overlay**: silent, confirmed Android's documented behavior. Overlays with `FLAG_NOT_FOCUSABLE` don't receive motion events.
-2. **AYN Thor "Focus Lock" discovery + single-screen pivot mid-brick**: surfaced that Thor has a firmware setting governing which screen owns physical input (captured as `reference_thor_focus_lock_setting.md`); user redirected Mapo's primary target from Thor dual-screen to single-screen overlay-over-game (captured as `project_target_single_screen_pivot.md`).
-3. **Second attempt — focusable overlay**: the motion-capture path itself **works** — gamepad motion events reach the overlay and the foreground game continues to render. But wider on-device testing surfaced significant system side effects from the focus competition: IME couldn't appear in other apps, back gesture failed in some apps, GameNative's cursor went invisible, launcher's app-switcher swipe-up broke, Mapo's own layer / non-default-set runtime mutations stopped taking effect. **Reverted.** The motion-capture path is valid but ships only when paired with a solution for the side effects — that's a wider refactor than a single brick. Captured as `project_motion_capture_via_focusable_overlay.md`.
+2. **AYN Thor "Focus Lock" discovery + single-screen pivot mid-brick**: surfaced that Thor has a firmware setting governing which screen owns physical input (captured as `reference_thor_focus_lock_setting.md`); user redirected Mappo's primary target from Thor dual-screen to single-screen overlay-over-game (captured as `project_target_single_screen_pivot.md`).
+3. **Second attempt — focusable overlay**: the motion-capture path itself **works** — gamepad motion events reach the overlay and the foreground game continues to render. But wider on-device testing surfaced significant system side effects from the focus competition: IME couldn't appear in other apps, back gesture failed in some apps, GameNative's cursor went invisible, launcher's app-switcher swipe-up broke, Mappo's own layer / non-default-set runtime mutations stopped taking effect. **Reverted.** The motion-capture path is valid but ships only when paired with a solution for the side effects — that's a wider refactor than a single brick. Captured as `project_motion_capture_via_focusable_overlay.md`.
 
 **Lesson:** focus is a logical property, not a visual one. A 1×1 transparent non-touchable focusable overlay still wins focus competition globally and breaks anything that keys off "the focused window" — IME placement, system gesture handling, cursor rendering, etc. Solving that is its own problem, distinct from motion-event reachability.
 
 **What still landed (scaffolding kept for future motion-capture approaches):**
 
-- `app/src/main/java/com/mapo/service/input/AnalogEvent.kt` — `AnalogEvent` data class + `MotionEventNormalizer.extract()`. Covers LEFT_JOYSTICK (AXIS_X/Y), RIGHT_JOYSTICK (AXIS_Z/RZ), DPAD (AXIS_HAT_X/Y), LEFT_TRIGGER (max of AXIS_LTRIGGER, AXIS_BRAKE), RIGHT_TRIGGER (max of AXIS_RTRIGGER, AXIS_GAS). Joint-magnitude deadzone for sticks; single-axis for triggers.
-- `app/src/main/java/com/mapo/service/input/MotionCaptureOverlay.kt` — non-focusable `TYPE_ACCESSIBILITY_OVERLAY` (silent in production, doesn't disrupt anything). Kept as the call site for a future viable motion-capture mechanism; class doc lays out what was tried.
+- `app/src/main/java/com/mappo/service/input/AnalogEvent.kt` — `AnalogEvent` data class + `MotionEventNormalizer.extract()`. Covers LEFT_JOYSTICK (AXIS_X/Y), RIGHT_JOYSTICK (AXIS_Z/RZ), DPAD (AXIS_HAT_X/Y), LEFT_TRIGGER (max of AXIS_LTRIGGER, AXIS_BRAKE), RIGHT_TRIGGER (max of AXIS_RTRIGGER, AXIS_GAS). Joint-magnitude deadzone for sticks; single-axis for triggers.
+- `app/src/main/java/com/mappo/service/input/MotionCaptureOverlay.kt` — non-focusable `TYPE_ACCESSIBILITY_OVERLAY` (silent in production, doesn't disrupt anything). Kept as the call site for a future viable motion-capture mechanism; class doc lays out what was tried.
 - `InputEvaluator.handleMotion(MotionEvent)` — extract + log stub. No analog mode consumes anything because nothing's flowing.
 - Tests: 7 in `AnalogEventTest` (covers axis extraction + deadzone behavior). Full suite green.
 
@@ -926,7 +926,7 @@ Single Button, Button Pad, Dpad (digital — via `KEYCODE_DPAD_*`), Trigger (dig
 - Different overlay window TYPE constants beyond TYPE_ACCESSIBILITY_OVERLAY.
 - ADB pre-grant patterns (`WRITE_SECURE_SETTINGS`, etc.) — some Android remap apps use these without root.
 - Vendor SDKs that may expose controller state without focus competition.
-- IME-based capture (Mapo as a custom IME).
+- IME-based capture (Mappo as a custom IME).
 - Investigation of how Octopus / Mantis / GamePad Mapper actually solve motion capture in production.
 
 **Constraint reminders applicable here:**
@@ -938,7 +938,7 @@ Single Button, Button Pad, Dpad (digital — via `KEYCODE_DPAD_*`), Trigger (dig
 
 ### Brick 6.1 deviations + decisions
 
-**Scope landed.** `SourceMode` sealed interface + `SingleButtonMode` + `ButtonPadMode` + `StubMode` + `BindingMode.handler()` registry, all under `app/src/main/java/com/mapo/service/input/modes/SourceMode.kt`. Compile path in `CompiledConfig.kt::compileInputs` now consults the handler and drops sub-inputs that an implemented mode rejects (logs a warning at WARN level). No runtime / UI change for the user.
+**Scope landed.** `SourceMode` sealed interface + `SingleButtonMode` + `ButtonPadMode` + `StubMode` + `BindingMode.handler()` registry, all under `app/src/main/java/com/mappo/service/input/modes/SourceMode.kt`. Compile path in `CompiledConfig.kt::compileInputs` now consults the handler and drops sub-inputs that an implemented mode rejects (logs a warning at WARN level). No runtime / UI change for the user.
 
 **Interface shape — `evaluate(...)` deferred.** The plan's sketch was three methods: `validInputs`, `evaluate`, `defaultSettings`. Brick 6.1 only ships `validInputs` + `defaultSettingsJson` + an `accepts` helper. The `evaluate(physical, settings, state)` analog-translation hook lives on later subclasses (lands in 6.3 with Trigger — the first mode that actually needs to translate analog state into sub-input events). Digital modes have nothing meaningful to translate, so adding the method now would be a dead-code surface.
 
@@ -963,7 +963,7 @@ Single Button, Button Pad, Dpad (digital — via `KEYCODE_DPAD_*`), Trigger (dig
 Close the parity gaps surfaced by the 2026-05-25 → 2026-05-27 Steam Input documentation audit so that Phase 8 (VDF import) can round-trip Steam configs cleanly. Major work groups:
 
 - **Vocabulary + catalog rework** — rename `MOUSE_JOYSTICK` → `JOYSTICK_MOUSE`, drop `JOYSTICK_CAMERA` (fold to settings preset), drop `TWO_D_SCROLL`, rename `UNBOUND` → `DEVICE_DEFAULT`, add new `BindingMode.NONE` (Steam-parity silence), add `FLICK_STICK` / `MOUSE_REGION` / `HOTBAR_MENU` / `DIRECTIONAL_SWIPE` / `GYRO_TO_*` enum values. Sub-input names rename to Steam-verbatim. `SourceModeCatalog.modesValidFor` matches the canonical Steam per-source dropdowns. `SourceMode.validInputs()` becomes source-and-mode aware. Outer Ring Command sub-input added across joystick modes. Pass-through bug fix for face buttons.
-- **`DEVICE_DEFAULT` + `NONE` runtime distinction** — Mapo's `[Device Default]` (passthrough) and Steam-parity `None` (intercept + silence) are both available across all source dropdowns with distinct runtime behavior.
+- **`DEVICE_DEFAULT` + `NONE` runtime distinction** — Mappo's `[Device Default]` (passthrough) and Steam-parity `None` (intercept + silence) are both available across all source dropdowns with distinct runtime behavior.
 - **Trigger picker rework** — `[Device Default]` / `None` / `Trigger (Digital)` / `Trigger (Analog)` source-aware display labels.
 - **Mode Shifting runtime** — dynamic mode swap while a designated button is held; data model has the slot, runtime currently a stub.
 - **Real Joystick Move** — XInput stick passthrough via `/dev/uinput` virtual gamepad (parallel to Phase 6's mouse uinput work).
@@ -979,7 +979,7 @@ A — Vocabulary + catalog rework. B — Mode Shifting runtime. C — Real Joyst
 ### Out of scope (deferred post-Steam-Input-parity)
 
 - Scroll Wheel runtime (rare feature)
-- Mapo-extension mode dropdowns (e.g., dpad-as-mouse) — additive post-Phase-8
+- Mappo-extension mode dropdowns (e.g., dpad-as-mouse) — additive post-Phase-8
 - Menu rendering (Phase 9)
 - VDF export
 
@@ -993,7 +993,7 @@ LJ in Joystick Move → GameNative game reads virtual XInput stick. LJ in Mouse 
 
 ### Scope
 
-Import Steam Input controller configs into Mapo's Phase 1+ schema. Action-based configs (`legacy_set "0"`) are parsed and warned-about but not auto-resolved — `game_action` bindings land as placeholder bindings flagged "Unresolved game action: <set>/<action>" (manifest registry is out-of-scope; would require a Mapo-hosted action-manifest service).
+Import Steam Input controller configs into Mappo's Phase 1+ schema. Action-based configs (`legacy_set "0"`) are parsed and warned-about but not auto-resolved — `game_action` bindings land as placeholder bindings flagged "Unresolved game action: <set>/<action>" (manifest registry is out-of-scope; would require a Mappo-hosted action-manifest service).
 
 **Architecture decision (2026-06-04, see `project_vdf_import_in_app_browser_primary.md` + `feedback_steam_login_on_android_is_fine.md`):** the primary import UX is an **in-app browser** equivalent to Steam Deck's "Browse Configs" screen, backed by **on-device Steam Guard QR login** and Steam's `IPublishedFile.QueryFiles` unified-messaging service. File-picker and paste-by-ID are demoted to secondary/fallback paths. Phase splits into three subphases.
 
@@ -1003,7 +1003,7 @@ Shared infrastructure that every later subphase rides on.
 
 #### Parser / translator
 
-> **Progress — VDF reader landed (2026-06-22).** The parser half is done and tested. New files under `app/src/main/java/com/mapo/data/io/vdf/`:
+> **Progress — VDF reader landed (2026-06-22).** The parser half is done and tested. New files under `app/src/main/java/com/mappo/data/io/vdf/`:
 > - `VdfValue.kt` — node model (`Str` leaf / `Obj` block). `Obj` is an **ordered, duplicate-tolerant list** of entries with `all()`/`objects()` (list) + `first()`/`string()`/`obj()` (first-wins) + `toStringMap()`. Case-insensitive key lookup; original casing preserved for export.
 > - `VdfTokenStream.kt` — KV1 tokenizer: quoted (with `\n \t \r \" \\` escapes) + unquoted strings, `//` line comments, `[$COND]` tags skipped. `VdfParseException` on malformed input.
 > - `VdfParser.kt` — recursive-descent, one-token lookahead → `VdfValue.Obj`.
@@ -1018,10 +1018,10 @@ Shared infrastructure that every later subphase rides on.
 >
 > **Persistence landed (2026-06-22) — `ControllerConfigRepository.importConfig(profileId, ImportedConfig): Long`.** Walks the import model inserting `ControllerProfile`/`ActionSet`/`ActionLayer`/`BindingGroup`/`GroupInput`/`Activator`/`Binding`/`PresetBinding`/`LayerPresetBinding` in dependency order — every row a fresh Room id ([[feedback_duplicates_own_their_data]]). Mode shifts wired in a **second pass**: `ImportedCommand.ModeShiftTrigger`s collected during the walk, then resolved (`targetVdfGroupId` → inserted `modeshift`-state group) into `SourceModeShift` rows (owner = trigger's set/layer, `triggerSource`/`triggerSubInput` = the button location). `modeshift`-state groups are inserted as addressable shift targets with **no** preset row (mode shift is its own entity, not a binding — [[project_mode_shift_per_source_architecture]]). Group/activator VDF settings carried under a namespaced `_vdf` key (runtime-ignored) until schema-key translation lands. Absent sources not back-filled (runtime treats no-group as `DEVICE_DEFAULT`; `ensureSeededInputSources` materializes the visible rows on startup). Integration test `ControllerConfigImportTest` (6 cases, fake-DAO harness, no Robolectric) green.
 >
-> **Still TODO.** (1) `switches` mode fan-out (one VDF group → many single-button sources; currently UNMAPPED_SOURCE-skipped). (2) group/activator setting-key schema translation (now carried raw under `_vdf`). (3) remap `CHANGE_PRESET` / `add_layer` arg ids from VDF-preset space → Mapo Room ids (currently stored raw). (4) localization `#token` resolution. (5) The summary/confirm-dialog UI + `data/steam/` acquisition wiring (protocol/auth/workshop already scaffolded in `steam-client/`) + the profile-drawer entry points + nav routes.
+> **Still TODO.** (1) `switches` mode fan-out (one VDF group → many single-button sources; currently UNMAPPED_SOURCE-skipped). (2) group/activator setting-key schema translation (now carried raw under `_vdf`). (3) remap `CHANGE_PRESET` / `add_layer` arg ids from VDF-preset space → Mappo Room ids (currently stored raw). (4) localization `#token` resolution. (5) The summary/confirm-dialog UI + `data/steam/` acquisition wiring (protocol/auth/workshop already scaffolded in `steam-client/`) + the profile-drawer entry points + nav routes.
 
-- **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfParser.kt` — Kotlin VDF parser. Honor duplicate-key semantics (collect into lists, not maps) — many `"group"` blocks, multiple `"preset"` blocks at the same level are intentional and a naive JSON-style parser will silently lose data. ✅ done
-- **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfImporter.kt` — schema translator:
+- **Create** `app/src/main/java/com/mappo/data/io/vdf/VdfParser.kt` — Kotlin VDF parser. Honor duplicate-key semantics (collect into lists, not maps) — many `"group"` blocks, multiple `"preset"` blocks at the same level are intentional and a naive JSON-style parser will silently lose data. ✅ done
+- **Create** `app/src/main/java/com/mappo/data/io/vdf/VdfImporter.kt` — schema translator:
   - `controller_mappings.actions` → `ActionSet` records
   - `controller_mappings.action_layers` → `ActionLayer` records (`parent_set_name` resolved)
   - `group` blocks → `BindingGroup` + `GroupInput` + `Activator` + `Binding`
@@ -1036,7 +1036,7 @@ VDF targets a specific controller (`controller_neptune` / `controller_xboxelite`
 ```
 ┌─ Import: Guild Wars 2 (Steam Deck) ──────── [×] ─┐
 │ Source controller: Steam Deck (controller_neptune)│
-│ Mapo will create a new controller profile for the │
+│ Mappo will create a new controller profile for the │
 │ Steam Deck. Some inputs may not exist on your     │
 │ device (back paddles, capacitive sticks).         │
 │                                                   │
@@ -1055,7 +1055,7 @@ The summary + optional preview run regardless of how the VDF was acquired (brows
 #### Steam protocol layer
 
 - Stand up a Kotlin/JVM SteamKit-equivalent module under `data/steam/` that supports:
-  - **Steam Guard QR device-grant login** (no password handling in Mapo) — refresh token persisted via Android Keystore
+  - **Steam Guard QR device-grant login** (no password handling in Mappo) — refresh token persisted via Android Keystore
   - `IPublishedFile.QueryFiles` against appid 241100 (Steam Controller Configs) over Steam unified messaging
   - VDF body download (direct URL when the QueryFiles response provides one; CDN depot fetch via app-ownership-ticket + depot-decryption-key + manifest+chunks otherwise)
   - `ICloudService` access to the user's own `userdata/<steamid32>/241100/remote/controller_config/` tree
@@ -1068,7 +1068,7 @@ The summary + optional preview run regardless of how the VDF was acquired (brows
 
 ### Phase 8b — In-app browser (primary UX)
 
-The headline acquisition path. Functionally equivalent to Steam Deck's per-game "Browse Configs" screen, rendered natively in Mapo.
+The headline acquisition path. Functionally equivalent to Steam Deck's per-game "Browse Configs" screen, rendered natively in Mappo.
 
 #### Entry point
 
@@ -1085,7 +1085,7 @@ The headline acquisition path. Functionally equivalent to Steam Deck's per-game 
 #### Per-config row
 
 - Title, author, vote score, subscription count
-- Mapo-glyph-rendered binding summary (uses our own glyph system, not Steam's)
+- Mappo-glyph-rendered binding summary (uses our own glyph system, not Steam's)
 - One-tap **Apply** → fetches VDF body → runs through the 8a import pipeline → shows the summary dialog → lands as a new `ControllerProfile` under the current `Profile`
 
 ### Phase 8c — Polish
@@ -1097,15 +1097,15 @@ The headline acquisition path. Functionally equivalent to Steam Deck's per-game 
 
 ### Files
 
-- **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfParser.kt`
-- **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfImporter.kt`
-- **Create** `app/src/main/java/com/mapo/data/io/vdf/VdfTokenStream.kt` (tokenizer)
-- **Create** `app/src/main/java/com/mapo/data/steam/` (whole tree — protocol client, QR login flow, token storage, QueryFiles wrapper, CDN downloader)
-- **Create** `app/src/main/java/com/mapo/ui/screen/import/SteamLoginScreen.kt`
-- **Create** `app/src/main/java/com/mapo/ui/screen/import/SteamConfigBrowserScreen.kt`
-- **Create** `app/src/main/java/com/mapo/ui/screen/import/VdfImportScreen.kt` (shared summary dialog + fallback paste/file UI)
-- **Edit** `app/src/main/java/com/mapo/ui/nav/MapoRoute.kt` — add `IMPORT_STEAM_LOGIN`, `IMPORT_STEAM_BROWSER`, `IMPORT_VDF`
-- **Edit** `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` — add the entries
+- **Create** `app/src/main/java/com/mappo/data/io/vdf/VdfParser.kt`
+- **Create** `app/src/main/java/com/mappo/data/io/vdf/VdfImporter.kt`
+- **Create** `app/src/main/java/com/mappo/data/io/vdf/VdfTokenStream.kt` (tokenizer)
+- **Create** `app/src/main/java/com/mappo/data/steam/` (whole tree — protocol client, QR login flow, token storage, QueryFiles wrapper, CDN downloader)
+- **Create** `app/src/main/java/com/mappo/ui/screen/import/SteamLoginScreen.kt`
+- **Create** `app/src/main/java/com/mappo/ui/screen/import/SteamConfigBrowserScreen.kt`
+- **Create** `app/src/main/java/com/mappo/ui/screen/import/VdfImportScreen.kt` (shared summary dialog + fallback paste/file UI)
+- **Edit** `app/src/main/java/com/mappo/ui/nav/MappoRoute.kt` — add `IMPORT_STEAM_LOGIN`, `IMPORT_STEAM_BROWSER`, `IMPORT_VDF`
+- **Edit** `app/src/main/java/com/mappo/ui/screen/ProfileDrawerContent.kt` — add the entries
 - **Edit** `app/src/main/AndroidManifest.xml` — SAF intent filter for `.vdf` files if desired (open-with from a file manager)
 
 ### Verify
@@ -1151,17 +1151,17 @@ Triggering a menu from a binding: the picker gets a new category **Menu → Open
 
 ### Files
 
-- **Create** `app/src/main/java/com/mapo/service/input/modes/RadialMenuMode.kt` (stub)
-- **Create** `app/src/main/java/com/mapo/service/input/modes/TouchMenuMode.kt` (stub)
-- **Create** `app/src/main/java/com/mapo/ui/screen/menus/MenusScreen.kt`
-- **Create** `app/src/main/java/com/mapo/ui/screen/menus/MenuEditorScreen.kt`
-- **Edit** `app/src/main/java/com/mapo/ui/nav/MapoRoute.kt` — add `MENUS`, `MENU_EDITOR`
-- **Edit** `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` — add "Menus" entry
+- **Create** `app/src/main/java/com/mappo/service/input/modes/RadialMenuMode.kt` (stub)
+- **Create** `app/src/main/java/com/mappo/service/input/modes/TouchMenuMode.kt` (stub)
+- **Create** `app/src/main/java/com/mappo/ui/screen/menus/MenusScreen.kt`
+- **Create** `app/src/main/java/com/mappo/ui/screen/menus/MenuEditorScreen.kt`
+- **Edit** `app/src/main/java/com/mappo/ui/nav/MappoRoute.kt` — add `MENUS`, `MENU_EDITOR`
+- **Edit** `app/src/main/java/com/mappo/ui/screen/ProfileDrawerContent.kt` — add "Menus" entry
 
 ### Verify
 
 - Create a menu, set 8 items, bind each item to keys. Bind a physical input → "Open menu: Weapons". Trigger it — logcat shows "menu activation requested"; nothing visible yet (expected).
-- VDF import (Phase 7) of a config containing a `radial_menu` / `touch_menu` group lands as a Mapo menu with the right item count + bindings.
+- VDF import (Phase 7) of a config containing a `radial_menu` / `touch_menu` group lands as a Mappo menu with the right item count + bindings.
 
 ---
 
@@ -1185,7 +1185,7 @@ Robolectric under `app/src/test/` (the AYN Thor backgrounds test-launched activi
 
 ### Migrations and pre-release status
 
-Mapo is pre-release; destructive changes are OK. Phase 1's schema rebuild wipes and migrates from `gamepad_mappings`. Subsequent phases are additive (no destructive migrations expected). When release approaches, this plan's migration story will need re-examining.
+Mappo is pre-release; destructive changes are OK. Phase 1's schema rebuild wipes and migrates from `gamepad_mappings`. Subsequent phases are additive (no destructive migrations expected). When release approaches, this plan's migration story will need re-examining.
 
 ### Things explicitly NOT in this plan
 
@@ -1199,11 +1199,11 @@ Mapo is pre-release; destructive changes are OK. Phase 1's schema rebuild wipes 
 - Controller HUD / debug overlay
 - Gyro capture + flickstick mode (Phase 6 ships without)
 
-### Post-parity Mapo extensions (deferred until parity work is done)
+### Post-parity Mappo extensions (deferred until parity work is done)
 
-Mapo-specific enhancements that go *beyond* Steam Input parity. Recorded here so we don't lose them; not in scope until the parity roadmap is largely complete.
+Mappo-specific enhancements that go *beyond* Steam Input parity. Recorded here so we don't lose them; not in scope until the parity roadmap is largely complete.
 
-- **Long_Press "fire as tap" mode** — per-activator toggle to emit DOWN+UP at threshold instead of holding while the physical button is held. Current Steam-parity behavior holds the key, which on Wine/Windows targets (GameNative) produces OS-level key auto-repeat — undesirable for menu keys like ESC. User verified (2026-05-12) that Steam Deck exhibits identical Wine-repeat behavior with the same config, so this is true Steam parity, not a Mapo bug. The extension would add an opt-in alternative mode. See `project_fire_as_tap_post_parity.md` in memory.
+- **Long_Press "fire as tap" mode** — per-activator toggle to emit DOWN+UP at threshold instead of holding while the physical button is held. Current Steam-parity behavior holds the key, which on Wine/Windows targets (GameNative) produces OS-level key auto-repeat — undesirable for menu keys like ESC. User verified (2026-05-12) that Steam Deck exhibits identical Wine-repeat behavior with the same config, so this is true Steam parity, not a Mappo bug. The extension would add an opt-in alternative mode. See `project_fire_as_tap_post_parity.md` in memory.
 
 - **Virtual-keyboard buttons as chord partners** — today's chord partner is a physical input only (captured via the listen-for-press picker in 3.3). User direction (2026-05-13): the broader virtual-keyboard rework will explore on-screen overlay use of virtual keyboards, and that work may change the right way to use virtual buttons in chord activators. Punted to wait on that direction. Data shape doesn't preclude it — `chord_partner_source` could grow a new enum value for virtual buttons later without migrating existing rows.
 
@@ -1215,55 +1215,55 @@ A consolidated list for quick scanning at execution time.
 
 **Touched in multiple phases:**
 
-- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt`
-- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt`
-- `app/src/main/java/com/mapo/ui/screen/RemapControlsScreen.kt`
-- `app/src/main/java/com/mapo/ui/nav/MapoRoute.kt`
-- `app/src/main/java/com/mapo/service/InputAccessibilityService.kt`
-- `app/src/main/java/com/mapo/service/input/InputDispatcher.kt`
-- `app/src/main/java/com/mapo/data/db/AppDatabase.kt`
+- `app/src/main/java/com/mappo/ui/viewmodel/MainViewModel.kt`
+- `app/src/main/java/com/mappo/ui/screen/MainScreen.kt`
+- `app/src/main/java/com/mappo/ui/screen/RemapControlsScreen.kt`
+- `app/src/main/java/com/mappo/ui/nav/MappoRoute.kt`
+- `app/src/main/java/com/mappo/service/InputAccessibilityService.kt`
+- `app/src/main/java/com/mappo/service/input/InputDispatcher.kt`
+- `app/src/main/java/com/mappo/data/db/AppDatabase.kt`
 
 **New in Phase 1 (data model):**
 
-- `app/src/main/java/com/mapo/data/model/steam/` (whole tree)
-- `app/src/main/java/com/mapo/data/db/steam/` (whole tree)
-- `app/src/main/java/com/mapo/data/repository/ControllerConfigRepository.kt`
+- `app/src/main/java/com/mappo/data/model/steam/` (whole tree)
+- `app/src/main/java/com/mappo/data/db/steam/` (whole tree)
+- `app/src/main/java/com/mappo/data/repository/ControllerConfigRepository.kt`
 
 **New in Phase 2 (runtime):**
 
-- `app/src/main/java/com/mapo/service/input/InputEvaluator.kt`
-- `app/src/main/java/com/mapo/service/input/OutputEmitter.kt`
-- `app/src/main/java/com/mapo/service/input/CompiledConfig.kt`
+- `app/src/main/java/com/mappo/service/input/InputEvaluator.kt`
+- `app/src/main/java/com/mappo/service/input/OutputEmitter.kt`
+- `app/src/main/java/com/mappo/service/input/CompiledConfig.kt`
 
 **New in Phase 3 (activators UI):**
 
-- `app/src/main/java/com/mapo/ui/screen/binding/InputEditorScreen.kt`
-- `app/src/main/java/com/mapo/ui/screen/binding/ActivatorEditorScreen.kt`
+- `app/src/main/java/com/mappo/ui/screen/binding/InputEditorScreen.kt`
+- `app/src/main/java/com/mappo/ui/screen/binding/ActivatorEditorScreen.kt`
 
 **New in Phase 5 (layers + mode-shift UI):**
 
-- `app/src/main/java/com/mapo/ui/screen/binding/LayerActivationPickerScreen.kt`
-- `app/src/main/java/com/mapo/ui/screen/binding/ModeShiftPickerScreen.kt`
+- `app/src/main/java/com/mappo/ui/screen/binding/LayerActivationPickerScreen.kt`
+- `app/src/main/java/com/mappo/ui/screen/binding/ModeShiftPickerScreen.kt`
 
 **New in Phase 6 (modes):**
 
-- `app/src/main/java/com/mapo/service/input/modes/` (one file per mode)
-- `app/src/main/java/com/mapo/ui/screen/binding/SourceEditorScreen.kt`
+- `app/src/main/java/com/mappo/service/input/modes/` (one file per mode)
+- `app/src/main/java/com/mappo/ui/screen/binding/SourceEditorScreen.kt`
 
 **New in Phase 8 (Steam config import + in-app browser):**
 
-- `app/src/main/java/com/mapo/data/io/vdf/` (parser + importer)
-- `app/src/main/java/com/mapo/data/steam/` (Steam protocol client, QR login, QueryFiles, CDN downloader)
-- `app/src/main/java/com/mapo/ui/screen/import/SteamLoginScreen.kt`
-- `app/src/main/java/com/mapo/ui/screen/import/SteamConfigBrowserScreen.kt`
-- `app/src/main/java/com/mapo/ui/screen/import/VdfImportScreen.kt`
+- `app/src/main/java/com/mappo/data/io/vdf/` (parser + importer)
+- `app/src/main/java/com/mappo/data/steam/` (Steam protocol client, QR login, QueryFiles, CDN downloader)
+- `app/src/main/java/com/mappo/ui/screen/import/SteamLoginScreen.kt`
+- `app/src/main/java/com/mappo/ui/screen/import/SteamConfigBrowserScreen.kt`
+- `app/src/main/java/com/mappo/ui/screen/import/VdfImportScreen.kt`
 
 **New in Phase 8 (menu scaffold):**
 
-- `app/src/main/java/com/mapo/service/input/modes/RadialMenuMode.kt`
-- `app/src/main/java/com/mapo/service/input/modes/TouchMenuMode.kt`
-- `app/src/main/java/com/mapo/ui/screen/menus/MenusScreen.kt`
-- `app/src/main/java/com/mapo/ui/screen/menus/MenuEditorScreen.kt`
+- `app/src/main/java/com/mappo/service/input/modes/RadialMenuMode.kt`
+- `app/src/main/java/com/mappo/service/input/modes/TouchMenuMode.kt`
+- `app/src/main/java/com/mappo/ui/screen/menus/MenusScreen.kt`
+- `app/src/main/java/com/mappo/ui/screen/menus/MenuEditorScreen.kt`
 
 ---
 
@@ -1279,5 +1279,5 @@ A consolidated list for quick scanning at execution time.
 | 5 | Holding RB activates a layer that overrides A's binding; releasing reverts. |
 | 6 ✅ | Right joystick set to Joystick Mouse mode moves the cursor (shipped via Shizuku pivot 2026-05-25). |
 | 7 | Real Joystick Move + Mouse Region + gyro modes work on AYN Thor; Mode Shift swap on button-hold reverts on release; face buttons in `[Device Default]` pass through cleanly. |
-| 8 | A real community Steam Deck VDF imports and the resulting Mapo config plays back equivalently. |
+| 8 | A real community Steam Deck VDF imports and the resulting Mappo config plays back equivalently. |
 | 9 | A menu can be authored end-to-end; firing its open-binding logs activation (overlay deferred). |

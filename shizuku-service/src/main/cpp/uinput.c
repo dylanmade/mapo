@@ -1,4 +1,4 @@
-// Mapo virtual SOURCE_MOUSE InputDevice via /dev/uinput.
+// Mappo virtual SOURCE_MOUSE InputDevice via /dev/uinput.
 //
 // Background: synthetic MotionEvents injected via IInputManager.injectInputEvent
 // with SOURCE_MOUSE require an existing SOURCE_MOUSE InputDevice to be
@@ -45,7 +45,7 @@ static int set_bit(int fd, unsigned long req, int bit, const char *desc) {
 // Open /dev/uinput and create a virtual SOURCE_MOUSE InputDevice.
 // Returns the uinput fd on success (>=0), or -1 on any failure.
 JNIEXPORT jint JNICALL
-Java_com_mapo_shizuku_service_UinputMouse_nativeOpen(JNIEnv *env, jclass clazz) {
+Java_com_mappo_shizuku_service_UinputMouse_nativeOpen(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
 
     int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
@@ -56,7 +56,7 @@ Java_com_mapo_shizuku_service_UinputMouse_nativeOpen(JNIEnv *env, jclass clazz) 
     LOGI("opened /dev/uinput, fd=%d", fd);
 
     // Buttons (EV_KEY): left/right/middle/back/forward — full mouse complement
-    // so a downstream brick can wire BTN_LEFT to Mapo's analog stick click
+    // so a downstream brick can wire BTN_LEFT to Mappo's analog stick click
     // without re-opening the device.
     if (set_bit(fd, UI_SET_EVBIT, EV_KEY, "UI_SET_EVBIT EV_KEY") < 0) goto fail;
     if (set_bit(fd, UI_SET_KEYBIT, BTN_LEFT, "BTN_LEFT") < 0) goto fail;
@@ -80,7 +80,7 @@ Java_com_mapo_shizuku_service_UinputMouse_nativeOpen(JNIEnv *env, jclass clazz) 
     // it clear in `getevent -i` output that this is a synthetic device.
     struct uinput_user_dev uidev;
     memset(&uidev, 0, sizeof(uidev));
-    snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "Mapo Virtual Mouse");
+    snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "Mappo Virtual Mouse");
     uidev.id.bustype = BUS_VIRTUAL;
     uidev.id.vendor = 0x4D41;   // 'MA'
     uidev.id.product = 0x504F;  // 'PO'
@@ -107,7 +107,7 @@ fail:
 // Write a relative motion event group to the uinput fd.
 // Emits REL_X (if dx != 0), REL_Y (if dy != 0), then SYN_REPORT to dispatch.
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputMouse_nativeMove(JNIEnv *env, jclass clazz, jint fd, jint dx, jint dy) {
+Java_com_mappo_shizuku_service_UinputMouse_nativeMove(JNIEnv *env, jclass clazz, jint fd, jint dx, jint dy) {
     (void)env; (void)clazz;
     if (fd < 0) return;
 
@@ -145,7 +145,7 @@ Java_com_mapo_shizuku_service_UinputMouse_nativeMove(JNIEnv *env, jclass clazz, 
 // one notch up/right, -1 means one notch down/left. Skips axes whose value
 // is zero so the SYN_REPORT only batches non-trivial events.
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputMouse_nativeScroll(JNIEnv *env, jclass clazz, jint fd, jint dx, jint dy) {
+Java_com_mappo_shizuku_service_UinputMouse_nativeScroll(JNIEnv *env, jclass clazz, jint fd, jint dx, jint dy) {
     (void)env; (void)clazz;
     if (fd < 0) return;
 
@@ -183,7 +183,7 @@ Java_com_mapo_shizuku_service_UinputMouse_nativeScroll(JNIEnv *env, jclass clazz
 // btnCode is BTN_LEFT/BTN_RIGHT/etc; pressed = 1 for down, 0 for up.
 // Unused in the spike but exposed for the eventual click-binding brick.
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputMouse_nativeButton(JNIEnv *env, jclass clazz, jint fd, jint btnCode, jint pressed) {
+Java_com_mappo_shizuku_service_UinputMouse_nativeButton(JNIEnv *env, jclass clazz, jint fd, jint btnCode, jint pressed) {
     (void)env; (void)clazz;
     if (fd < 0) return;
 
@@ -205,7 +205,7 @@ Java_com_mapo_shizuku_service_UinputMouse_nativeButton(JNIEnv *env, jclass clazz
 
 // Destroy the virtual device and close the fd. Idempotent on -1.
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputMouse_nativeClose(JNIEnv *env, jclass clazz, jint fd) {
+Java_com_mappo_shizuku_service_UinputMouse_nativeClose(JNIEnv *env, jclass clazz, jint fd) {
     (void)env; (void)clazz;
     if (fd < 0) return;
     if (ioctl(fd, UI_DEV_DESTROY) < 0) {

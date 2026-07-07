@@ -26,11 +26,11 @@
     </queries>
 
     <application
-        android:name=".MapoApplication"
+        android:name=".MappoApplication"
         android:allowBackup="false"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Mapo">
+        android:theme="@style/Theme.Mappo">
 
         <!-- Shizuku provider. The Shizuku Manager app talks to us via this
              ContentProvider to deliver the binder + permission grant results.
@@ -56,7 +56,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:theme="@style/Theme.Mapo.Translucent"
+            android:theme="@style/Theme.Mappo.Translucent"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -74,7 +74,7 @@
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
             android:taskAffinity=""
-            android:theme="@style/Theme.Mapo.Translucent"
+            android:theme="@style/Theme.Mappo.Translucent"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
         <service

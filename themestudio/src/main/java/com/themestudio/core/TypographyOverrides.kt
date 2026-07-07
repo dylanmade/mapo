@@ -66,7 +66,7 @@ data class TypographyOverrides(
  *
  * [resolveFamily] turns a stored name into a [FontFamily]. The default
  * resolves through GMS Fonts, which keeps non-Composable callers and unit
- * tests working unchanged. Composable call sites (notably MapoTheme) should
+ * tests working unchanged. Composable call sites (notably MappoTheme) should
  * pass `rememberThemeFontResolver()` so asset-bundled families in
  * [LocalFontRegistry] resolve too.
  */

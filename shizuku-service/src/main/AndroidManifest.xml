@@ -3,5 +3,5 @@
     <!-- No <application> Hilt entry on purpose: this module is consumed by :app,
          which owns the <application>. Shizuku locates the UserService class via
          ComponentName at runtime — the <service> declaration here is for tooling
-         and PackageManager discovery, NOT for Mapo to bind locally. -->
+         and PackageManager discovery, NOT for Mappo to bind locally. -->
 </manifest>

@@ -8,7 +8,7 @@ plugins {
 // MINIMAL: no Hilt, no Compose, no Room, no Coroutines. Just the AIDL interfaces
 // and their Parcelable DTOs. Anything bigger lands in the consumer modules.
 android {
-    namespace = "com.mapo.shizuku"
+    namespace = "com.mappo.shizuku"
     compileSdk = 37
 
     defaultConfig {
@@ -21,7 +21,7 @@ android {
     }
 
     buildFeatures {
-        // AIDL generation runs at build time and emits Java classes for IMapoInputService.Stub
+        // AIDL generation runs at build time and emits Java classes for IMappoInputService.Stub
         // and friends. Both :app and :shizuku-service consume those via this module's AAR.
         aidl = true
     }

@@ -1,0 +1,2392 @@
+package com.mappo.ui.screen
+
+import android.app.Activity
+import android.graphics.Rect
+import android.os.Build
+import android.util.Log
+import android.view.ViewTreeObserver
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mouse
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.SecurityUpdateGood
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
+import com.mappo.R
+import com.mappo.data.model.GridButton
+import com.mappo.data.model.GridLayout
+import com.mappo.data.model.RemapTarget
+import com.mappo.data.model.steam.BindingOutput
+import com.mappo.data.model.steam.resolveActionSet
+import com.mappo.data.model.steam.toRemapTarget
+import com.mappo.data.model.TrackpadGesture
+import com.mappo.data.model.ButtonRegion
+import com.mappo.data.model.RegionPosition
+import com.mappo.data.model.gestureTarget
+import com.mappo.data.model.onDoubleTapTarget
+import com.mappo.data.model.onHoldTarget
+import com.mappo.data.model.onTapTarget
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.Shape
+import com.mappo.ui.component.MappoIcons
+import com.mappo.ui.util.keyboardButtonParentColor
+import com.mappo.ui.util.resolveAutoColors
+import com.mappo.ui.util.resolveAutoLayoutColors
+import com.mappo.data.model.isTrackpad
+import com.mappo.data.model.displayLabel
+import com.mappo.data.model.wouldOverlap
+import com.mappo.data.model.TemplateRef
+import com.mappo.service.InputAccessibilityService
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.mappo.ui.MappoGesture
+import com.mappo.ui.nav.MappoRoute
+import com.mappo.ui.screen.home.HandheldFrame
+import com.mappo.ui.screen.home.HandheldFrameSlideMillis
+import com.mappo.ui.screen.home.HomeFlower
+import com.mappo.ui.screen.home.HomeMenuEntry
+import com.mappo.ui.screen.keyboard.KeyboardHost
+import com.mappo.ui.screen.keyboard.KeyboardHostMode
+import com.mappo.service.autoswitch.ProfileAutoSwitcher
+import com.mappo.ui.screen.keyboard.KeyboardTabBar
+import com.mappo.ui.screen.keyboard.TabActionDialog
+import com.mappo.ui.screen.keyboard.TabActionDialogHost
+import com.mappo.ui.viewmodel.MainViewModel
+import com.mappo.ui.viewmodel.TabUiEvent
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+
+@Composable
+fun MainScreen(
+    viewModel: MainViewModel = hiltViewModel(),
+    // Deep-route launch from the toolbar overlay (OVERLAY_TOOLBAR_PLAN.md, Brick 2). When
+    // [deepLinkNonce] increments with a non-null [deepLinkRoute], navigate there. Keyed on the
+    // nonce so re-requesting the same route re-navigates.
+    deepLinkRoute: String? = null,
+    deepLinkNonce: Int = 0,
+) {
+    val selectedIndex by viewModel.selectedIndex.collectAsStateWithLifecycle()
+    val isEditMode by viewModel.isEditMode.collectAsStateWithLifecycle()
+    val layouts by viewModel.layouts.collectAsStateWithLifecycle()
+    val displayLayout by viewModel.displayLayout.collectAsStateWithLifecycle()
+    val selectedButtonId by viewModel.selectedButtonId.collectAsStateWithLifecycle()
+    val activeProfile by viewModel.activeProfile.collectAsStateWithLifecycle()
+    val steamAccountName by viewModel.steamAccountName.collectAsStateWithLifecycle()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val tabContextMenuFor by viewModel.tabContextMenuFor.collectAsStateWithLifecycle()
+    val templates by viewModel.templates.collectAsStateWithLifecycle()
+    val userTemplates = remember(templates) {
+        templates.filterIsInstance<TemplateRef.User>().toImmutableList()
+    }
+
+    var tabActionDialog by remember { mutableStateOf<TabActionDialog?>(null) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        viewModel.toastMessage.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+    val context = LocalContext.current
+    var pendingPrompt by remember {
+        mutableStateOf<ProfileAutoSwitcher.UiEvent.PromptCreate?>(null)
+    }
+    LaunchedEffect(Unit) {
+        viewModel.autoSwitchEvents.collect { event ->
+            // Defensive fallback only: when the overlay permission is granted, the
+            // OverlayCoordinator renders these on the primary screen and we don't
+            // want a second copy on Mappo's screen.
+            if (isOverlayPermissionGranted(context)) return@collect
+            when (event) {
+                is ProfileAutoSwitcher.UiEvent.Switched -> {
+                    snackbarHostState.showSnackbar(
+                        context.getString(R.string.auto_switch_snackbar_switched, event.profileName, event.appLabel)
+                    )
+                }
+                is ProfileAutoSwitcher.UiEvent.PromptCreate -> {
+                    pendingPrompt = event
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.tabUiEvents.collect { event ->
+            when (event) {
+                is TabUiEvent.TemplateNameConflict -> {
+                    tabActionDialog = TabActionDialog.TemplateNameConflict(
+                        layoutId = event.layoutId,
+                        keyboardName = (tabActionDialog as? TabActionDialog.SaveAsNewTemplate)
+                            ?.keyboardName ?: "",
+                        templateName = event.templateName,
+                        existing = event.existing
+                    )
+                }
+            }
+        }
+    }
+
+    val activeControllerConfig by viewModel.activeControllerConfig.collectAsStateWithLifecycle()
+    val viewingActionSetId by viewModel.viewingActionSetId.collectAsStateWithLifecycle()
+    val viewingLayerId by viewModel.viewingLayerId.collectAsStateWithLifecycle()
+    val remapEnabled by viewModel.remapEnabled.collectAsStateWithLifecycle()
+    val overlayShowing by viewModel.overlayShowing.collectAsStateWithLifecycle()
+    val shizukuRequiredAcked by viewModel.shizukuRequiredAcknowledged.collectAsStateWithLifecycle()
+    val shizukuReady by viewModel.shizukuReady.collectAsStateWithLifecycle()
+    val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
+
+    // Home is the handheld-device frame floating over the apps underneath (translucent window),
+    // shown on launch. `frameVisible` drives its slide-up entrance / slide-down exit; dismissing
+    // it on MAIN means "leave Mappo" (see the effects below). Replaces the old floating toolbar.
+    var frameVisible by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    val navController = rememberNavController()
+
+    // Toolbar-overlay deep launch: navigate to the requested route. Keyed on the nonce (not the
+    // route) so re-tapping the same destination after backing out re-navigates. startDestination
+    // stays MAIN, so Back from the deep screen returns to the Mappo home. nonce 0 = no request.
+    LaunchedEffect(deepLinkNonce) {
+        if (deepLinkNonce > 0 && deepLinkRoute != null) {
+            navController.navigate(deepLinkRoute)
+        }
+    }
+
+    // Toggle window flags + back-gesture suppression based on which destination is showing
+    // and whether the drawer is open. Keeping these conditional (vs. unconditional in
+    // MainActivity) is what makes back-gesture / back-button work on the secondary screens
+    // and on the drawer (drawer-open implies the user is choosing nav, not playing a game).
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val isMainRoute = currentBackStackEntry?.destination?.route == MappoRoute.MAIN
+    val keyboardViewActive = isMainRoute && !frameVisible
+    SuppressEdgeBackGesture(active = keyboardViewActive)
+    // Back on the home dismisses the frame (which backgrounds the task — see the frameVisible
+    // effect below). Sub-screens pop via Navigation's own back handling, so this is scoped to
+    // the visible home only.
+    BackHandler(enabled = isMainRoute && frameVisible) {
+        frameVisible = false
+    }
+
+    // The home is a fullscreen *transparent* window, so a dismissed frame on the MAIN route is
+    // an invisible trap: nothing is drawn, yet the activity still swallows every touch over
+    // the app the user can see underneath. Treat "frame dismissed on MAIN" (scrim tap / back /
+    // B) as "leave Mappo" — send the task to the back so touches fall through to that app.
+    // Navigations off MAIN don't touch frameVisible, so they never background the task.
+    val activity = context as? Activity
+    val currentIsMainRoute by rememberUpdatedState(isMainRoute)
+    // Dismissing the home on MAIN means "leave Mappo": background the task so touches fall
+    // through to the app underneath. The delay lets the frame's slide-down exit play before
+    // the task disappears.
+    LaunchedEffect(frameVisible) {
+        if (!frameVisible && currentIsMainRoute) {
+            delay(HandheldFrameSlideMillis + 60L)
+            activity?.moveTaskToBack(true)
+        }
+    }
+    // Re-entering MAIN (popping back from a settings screen) restores the frame, rather than
+    // dropping the user onto the empty transparent trap. First composition is already visible,
+    // so this is a no-op there.
+    LaunchedEffect(isMainRoute) {
+        if (isMainRoute) frameVisible = true
+    }
+
+    var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
+    var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                accessibilityGranted = isAccessibilityServiceEnabled(context)
+                overlayGranted = isOverlayPermissionGranted(context)
+                // Dual-screen flow: opening Mappo while a bound app is already running
+                // on the primary screen wouldn't fire a fresh WINDOW_STATE_CHANGED for
+                // the game, so the auto-switcher's distinctUntilChanged would suppress
+                // it. Force a re-evaluation on every resume.
+                viewModel.reevaluateAutoSwitch()
+                // Reopened from the launcher after a dismiss backgrounded us: the composition is
+                // retained (menu hidden, route unchanged), so neither route effect re-fires.
+                // Restore the home frame here so reopening Mappo never lands on the empty
+                // transparent trap.
+                if (currentIsMainRoute) frameVisible = true
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    if (!accessibilityGranted || !overlayGranted) {
+        PermissionsRequiredDialog(
+            accessibilityGranted = accessibilityGranted,
+            overlayGranted = overlayGranted
+        )
+    }
+
+    // Everything Mappo renders — every route — lives inside the handheld frame's 1:1 screen
+    // canvas (the frame is mounted at the bottom of this function). The canvas itself paints
+    // the opaque surfaceContainerLowest "lit screen" base, so the NavHost no longer needs a
+    // per-route background. Declared as a lambda so the frame call site stays readable.
+    val screenContent: @Composable () -> Unit = {
+        NavHost(
+            navController = navController,
+            startDestination = MappoRoute.MAIN,
+            // Size routes to the area above the (docked) soft keyboard so a focused field can
+            // scroll into view instead of hiding behind it. The window uses FLAG_LAYOUT_NO_LIMITS
+            // and won't resize for the IME, so we consume the IME inset here — inset modifiers
+            // are position-aware, so only the IME's overlap with the screen canvas is consumed.
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding(),
+            // Crossfade at 250 ms with default FastOutSlowInEasing.
+            enterTransition = { fadeIn(tween(250)) },
+            exitTransition = { fadeOut(tween(250)) },
+            popEnterTransition = { fadeIn(tween(250)) },
+            popExitTransition = { fadeOut(tween(250)) },
+        ) {
+            composable(MappoRoute.MAIN) {
+                // surfaceContainerLowest — root app Scaffold (M3 default; do not override to colorScheme.background)
+                Scaffold(
+                    snackbarHost = {
+                        val prompt = pendingPrompt
+                        if (prompt != null) {
+                            // Non-blocking inline banner (Card) instead of a Snackbar — the
+                            // 3-action prompt violates Snackbar's single-action contract,
+                            // and a banner-shaped card communicates "decision required" without
+                            // pretending to be a passive toast.
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurface,
+                                ),
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.auto_switch_prompt_title, prompt.appLabel),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                                    ) {
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.ignorePackageForever(prompt.pkg)
+                                                pendingPrompt = null
+                                            },
+                                            colors = ButtonDefaults.textButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.error
+                                            )
+                                        ) { Text(stringResource(R.string.auto_switch_prompt_never)) }
+                                        TextButton(
+                                            onClick = { pendingPrompt = null },
+                                            colors = ButtonDefaults.textButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        ) { Text(stringResource(R.string.auto_switch_prompt_no)) }
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.acceptCreateProfilePrompt(prompt.pkg, prompt.appLabel)
+                                                pendingPrompt = null
+                                            }
+                                        ) { Text(stringResource(R.string.auto_switch_prompt_yes)) }
+                                    }
+                                }
+                            }
+                        } else {
+                            SnackbarHost(snackbarHostState) { data ->
+                                Snackbar(
+                                    snackbarData = data,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurface,
+                                    actionColor = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    },
+                    // Transparent so the app underneath shows through the translucent window.
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
+                ) { _ ->
+                    // The d-pad flower home, rendered on the handheld's screen canvas.
+                    HomeFlower(
+                        profileName = activeProfile?.name,
+                        onOpenProfile = { navController.navigate(MappoRoute.CHANGE_PROFILE) },
+                        onEditOverlay = {
+                            // Live overlay editing happens over the game — slide the handheld
+                            // away (backgrounding Mappo via the frameVisible effect) so the
+                            // editor chrome sits over the app underneath.
+                            viewModel.startLiveOverlayEdit()
+                            frameVisible = false
+                        },
+                        onEditControls = { navController.navigate(MappoRoute.REMAP_CONTROLS) },
+                        onDismiss = { frameVisible = false },
+                        settingsEntries = listOf(
+                            HomeMenuEntry("auto_switch", "Auto switch", Icons.Filled.SwapHoriz) {
+                                navController.navigate(MappoRoute.AUTO_SWITCH)
+                            },
+                            HomeMenuEntry("blocklist", "Blocklist", Icons.Filled.Block) {
+                                navController.navigate(MappoRoute.BLOCKLIST)
+                            },
+                            HomeMenuEntry("theme_studio", "Theme studio", Icons.Filled.Palette) {
+                                navController.navigate(MappoRoute.THEME_STUDIO)
+                            },
+                            HomeMenuEntry("shizuku_setup", "Shizuku setup", Icons.Filled.SecurityUpdateGood) {
+                                navController.navigate(MappoRoute.SHIZUKU_SETUP)
+                            },
+                            HomeMenuEntry(
+                                "steam",
+                                if (steamAccountName != null) "Steam account" else "Connect to Steam",
+                                Icons.Filled.Person,
+                            ) { navController.navigate(MappoRoute.STEAM_SETUP) },
+                            HomeMenuEntry("compact_gallery", "Compact component gallery", Icons.Filled.Dashboard) {
+                                navController.navigate(MappoRoute.COMPACT_GALLERY)
+                            },
+                            HomeMenuEntry("color_picker", "Color picker (preview)", Icons.Filled.Colorize) {
+                                navController.navigate(MappoRoute.COLOR_PICKER_DEMO)
+                            },
+                            // Brick 1 dev affordance (OVERLAY_TOOLBAR_PLAN.md): mount the old
+                            // toolbar as a system overlay to verify passthrough.
+                            HomeMenuEntry("toolbar_overlay_dev", "Toolbar overlay (dev)", Icons.Filled.Dashboard) {
+                                viewModel.toggleToolbarOverlayDev()
+                            },
+                        ),
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    // The in-activity virtual-keyboard host is hidden for now but kept — flip
+                    // `showKeyboardHome` (or wire a future "Edit keyboards" entry) to bring it
+                    // back; its edit wiring + VM logic stay intact.
+                    val showKeyboardHome = remember { false }
+                    if (showKeyboardHome) {
+                    KeyboardHost(
+                        state = viewModel,
+                        mode = KeyboardHostMode.Activity(
+                            isEditMode = viewModel.isEditMode,
+                            selectedButtonId = viewModel.selectedButtonId,
+                            tabContextMenuFor = viewModel.tabContextMenuFor,
+                            onOpenTabMenu = viewModel::openTabMenu,
+                            onCloseTabMenu = viewModel::closeTabMenu,
+                            onReorderTabs = viewModel::reorderTabs,
+                            onMenuEditButtons = viewModel::enterEditMode,
+                            onToggleEditMode = {
+                                if (isEditMode) viewModel.exitEditMode()
+                                else viewModel.enterEditMode(displayLayout.id)
+                            },
+                            onMenuConfigure = { id ->
+                                navController.navigate(MappoRoute.configureKeyboard(id))
+                            },
+                            onMenuDuplicate = viewModel::duplicateKeyboard,
+                            onMenuRemove = { id ->
+                                val layout = layouts.find { it.id == id }
+                                val profileName = activeProfile?.name ?: ""
+                                if (layout != null) {
+                                    tabActionDialog = TabActionDialog.RemoveConfirm(
+                                        layoutId = id,
+                                        name = layout.name,
+                                        profileName = profileName
+                                    )
+                                }
+                            },
+                            onMenuSaveTemplate = { id ->
+                                val layout = layouts.find { it.id == id }
+                                if (layout != null) {
+                                    tabActionDialog = TabActionDialog.SaveTemplateChooser(
+                                        layoutId = id,
+                                        keyboardName = layout.name
+                                    )
+                                }
+                            },
+                            onOpenDrawer = {
+                                // Drawer surfaces global navigation; opening it ends any per-tab
+                                // edit context. Add-keyboard cancellation, by contrast, leaves
+                                // edit mode intact (handled in the VM funnel).
+                                viewModel.exitEditMode()
+                                frameVisible = true
+                            },
+                            onAddKeyboard = { tabActionDialog = TabActionDialog.AddKeyboardChooser },
+                            onSelectButton = viewModel::selectButton,
+                            onMoveButton = viewModel::moveButton,
+                            onResizeButton = viewModel::resizeButton,
+                            onConfigureButton = { id ->
+                                val btn = displayLayout.buttons.find { it.id == id }
+                                if (btn != null) {
+                                    // The configure screen is instant-commit; setting selectedButtonId
+                                    // here makes viewModel.updateSelectedButton apply to the right one.
+                                    viewModel.selectButtonOnly(id)
+                                    navController.navigate(MappoRoute.configureButton(id))
+                                }
+                            },
+                            onDuplicateButton = viewModel::duplicateButton,
+                            onRemoveButton = { id ->
+                                val btn = displayLayout.buttons.find { it.id == id }
+                                if (btn != null) {
+                                    tabActionDialog = TabActionDialog.RemoveButtonConfirm(
+                                        buttonId = id,
+                                        buttonLabel = btn.label
+                                    )
+                                }
+                            },
+                            onAddAtCell = { col, row ->
+                                // Instant-commit add: create a default key-button at the cell first,
+                                // then navigate to its config screen for further editing. Backing out
+                                // leaves the button in place; the user removes it via long-press if
+                                // they didn't actually want it.
+                                viewModel.addButtonAt(col, row, GridButton(col = col, row = row, type = "key"))
+                                viewModel.selectedButtonId.value?.let { newId ->
+                                    navController.navigate(MappoRoute.configureButton(newId))
+                                }
+                            },
+                            onLongPressEmptyArea = { viewModel.enterEditMode(displayLayout.id) },
+                            onQuit = { (context as? Activity)?.finish() },
+                        ),
+                    )
+                    }
+                }
+            }
+            composable(MappoRoute.CHANGE_PROFILE) {
+                ChangeProfileScreen(
+                    profiles = profiles,
+                    activeProfile = activeProfile,
+                    onSelectProfile = { profile ->
+                        viewModel.selectProfile(profile)
+                        navController.popBackStack()
+                    },
+                    onAddProfile = { name -> viewModel.addProfile(name) },
+                    onDuplicateProfile = { profile -> viewModel.duplicateProfile(profile) },
+                    onDeleteProfile = { profile -> viewModel.deleteProfile(profile) },
+                    onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            composable(MappoRoute.REMAP_CONTROLS) { entry ->
+                // Phase 2: the inline command picker pops back here, delivering its result via this
+                // entry's savedStateHandle (same key the InputEditor route used).
+                val remapPickerResult by entry.savedStateHandle
+                    .getStateFlow<String?>(MappoRoute.PICKER_RESULT_KEY, null)
+                    .collectAsStateWithLifecycle()
+                RemapControlsScreen(
+                    config = activeControllerConfig,
+                    profileName = activeProfile?.name,
+                    viewingActionSetId = viewingActionSetId,
+                    onSelectActionSet = viewModel::setViewingActionSet,
+                    onAddActionSet = { title, inheritFromSetId ->
+                        viewModel.addControllerActionSet(
+                            name = com.mappo.ui.screen.deriveActionSetName(title),
+                            title = title,
+                            inheritFromSetId = inheritFromSetId,
+                        )
+                    },
+                    onRenameActionSet = { setId, newTitle ->
+                        viewModel.renameControllerActionSet(
+                            actionSetId = setId,
+                            name = com.mappo.ui.screen.deriveActionSetName(newTitle),
+                            title = newTitle,
+                        )
+                    },
+                    onDuplicateActionSet = { sourceSetId, newTitle ->
+                        viewModel.duplicateControllerActionSet(
+                            sourceSetId = sourceSetId,
+                            name = com.mappo.ui.screen.deriveActionSetName(newTitle),
+                            title = newTitle,
+                        )
+                    },
+                    onDeleteActionSet = viewModel::deleteControllerActionSet,
+                    viewingLayerId = viewingLayerId,
+                    onSelectLayer = viewModel::setViewingLayer,
+                    onAddLayer = { actionSetId, title ->
+                        viewModel.addControllerActionLayer(
+                            actionSetId = actionSetId,
+                            name = com.mappo.ui.screen.deriveActionLayerName(title),
+                            title = title,
+                        )
+                    },
+                    onRenameLayer = { layerId, newTitle ->
+                        viewModel.renameControllerActionLayer(
+                            layerId = layerId,
+                            name = com.mappo.ui.screen.deriveActionLayerName(newTitle),
+                            title = newTitle,
+                        )
+                    },
+                    onDuplicateLayer = { sourceLayerId, newTitle ->
+                        viewModel.duplicateControllerActionLayer(
+                            sourceLayerId = sourceLayerId,
+                            name = com.mappo.ui.screen.deriveActionLayerName(newTitle),
+                            title = newTitle,
+                        )
+                    },
+                    onDeleteLayer = viewModel::deleteControllerActionLayer,
+                    onClearLayerOverride = { layerId, inputSource, groupInputKey ->
+                        viewModel.clearLayerOverride(layerId, inputSource, groupInputKey)
+                    },
+                    onSetBindingGroupMode = { bindingGroupId, mode ->
+                        viewModel.setBindingGroupMode(bindingGroupId, mode)
+                    },
+                    onOpenModeSettings = { bindingGroupId, source ->
+                        navController.navigate(MappoRoute.modeSettings(bindingGroupId, source.name))
+                    },
+                    onAddModeShift = { setId, layerId, ownerSource ->
+                        if (layerId != null) viewModel.addModeShiftToLayer(layerId, ownerSource)
+                        else if (setId != null) viewModel.addModeShiftToSet(setId, ownerSource)
+                    },
+                    onRemoveModeShift = viewModel::removeModeShift,
+                    onSetModeShiftTrigger = { modeShiftId, source, subInput ->
+                        viewModel.setModeShiftTrigger(modeShiftId, source, subInput)
+                    },
+                    onOpenModeShiftInputEditor = { modeShiftId, ownerSource, groupInputKey, label ->
+                        // B.6 follow-up: mode-shift target groups are created
+                        // empty; sub-input rows materialize on first tap (same
+                        // pattern as layer overrides). Suspend → navigate so
+                        // the editor opens against the real GroupInput.
+                        scope.launch {
+                            viewModel.materializeModeShiftInput(modeShiftId, groupInputKey)
+                            navController.navigate(
+                                MappoRoute.inputEditor(
+                                    inputSource = ownerSource.name,
+                                    groupInputKey = groupInputKey,
+                                    label = label,
+                                    modeShiftId = modeShiftId,
+                                )
+                            )
+                        }
+                    },
+                    shizukuRequiredAcknowledged = shizukuRequiredAcked,
+                    shizukuReady = shizukuReady,
+                    shizukuState = shizukuState,
+                    onAcknowledgeShizukuRequired = viewModel::acknowledgeShizukuRequired,
+                    onOpenShizukuSetup = { navController.navigate(MappoRoute.SHIZUKU_SETUP) },
+                    onBack = { navController.popBackStack() },
+                    onOpenInputEditor = { inputSource, groupInputKey, label ->
+                        // Brick 5.5.c: in overlay mode, eagerly materialize the layer
+                        // override before navigating so the editor opens against a
+                        // real GroupInput on the layer (not the base set's row). The
+                        // VM call is suspend; scoped to keep the navigation atomic
+                        // with the persist. In base mode, navigate directly.
+                        val currentLayerId = viewingLayerId
+                        if (currentLayerId != null) {
+                            scope.launch {
+                                viewModel.materializeLayerOverride(
+                                    layerId = currentLayerId,
+                                    inputSource = inputSource,
+                                    groupInputKey = groupInputKey,
+                                )
+                                navController.navigate(
+                                    MappoRoute.inputEditor(inputSource.name, groupInputKey, label)
+                                )
+                            }
+                        } else {
+                            navController.navigate(
+                                MappoRoute.inputEditor(inputSource.name, groupInputKey, label)
+                            )
+                        }
+                    },
+                    // Phase 2: inline input-assignment editor callbacks (same VM methods the
+                    // standalone InputEditor route uses).
+                    pickerResult = remapPickerResult?.let { BindingOutput.decode(it) },
+                    onConsumePickerResult = {
+                        entry.savedStateHandle.remove<String>(MappoRoute.PICKER_RESULT_KEY)
+                    },
+                    onPickResult = { bindingId, output ->
+                        viewModel.setControllerCommand(bindingId, output)
+                    },
+                    onOpenPicker = { title, current ->
+                        navController.navigate(
+                            MappoRoute.remapTargetPicker(
+                                title = title,
+                                currentEncoded = current.encode(),
+                                showActionSets = true,
+                                showLayers = true,
+                            )
+                        )
+                    },
+                    onAddActivator = { groupInputId, type ->
+                        viewModel.addControllerActivator(groupInputId, type)
+                    },
+                    onRemoveActivator = { activatorId ->
+                        viewModel.removeControllerActivator(activatorId)
+                    },
+                    onSetActivatorType = { activatorId, type ->
+                        viewModel.setControllerActivatorType(activatorId, type)
+                    },
+                    onOpenActivatorSettings = { activatorId, label ->
+                        navController.navigate(MappoRoute.activatorEditor(activatorId, label))
+                    },
+                    onAddCommand = { activatorId ->
+                        viewModel.addControllerCommand(activatorId)
+                    },
+                    onRemoveCommand = { bindingId ->
+                        viewModel.removeControllerCommand(bindingId)
+                    },
+                    onAddInputRow = { groupInputId, type -> viewModel.addInputRow(groupInputId, type) },
+                    onSetInputRowPressType = { bindingId, type -> viewModel.setInputRowPressType(bindingId, type) },
+                    onSetInputRowLabel = { bindingId, label -> viewModel.setInputRowLabel(bindingId, label) },
+                    onDeleteInputRow = { bindingId -> viewModel.deleteInputRow(bindingId) },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            composable(
+                route = MappoRoute.INPUT_EDITOR,
+                arguments = listOf(
+                    navArgument(MappoRoute.ARG_INPUT_SOURCE) { type = NavType.StringType },
+                    navArgument(MappoRoute.ARG_GROUP_INPUT_KEY) { type = NavType.StringType },
+                    navArgument(MappoRoute.ARG_INPUT_LABEL) {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    },
+                    navArgument(MappoRoute.ARG_MODE_SHIFT_ID) {
+                        type = NavType.LongType
+                        defaultValue = 0L
+                    },
+                ),
+            ) { entry ->
+                val inputSourceName = entry.arguments?.getString(MappoRoute.ARG_INPUT_SOURCE) ?: return@composable
+                val groupInputKey = entry.arguments?.getString(MappoRoute.ARG_GROUP_INPUT_KEY) ?: return@composable
+                val label = entry.arguments?.getString(MappoRoute.ARG_INPUT_LABEL).orEmpty()
+                val modeShiftIdRaw = entry.arguments?.getLong(MappoRoute.ARG_MODE_SHIFT_ID) ?: 0L
+                val modeShiftId = if (modeShiftIdRaw > 0L) modeShiftIdRaw else null
+                val inputSource = runCatching {
+                    com.mappo.data.model.steam.InputSource.valueOf(inputSourceName)
+                }.getOrNull() ?: return@composable
+                val pickerResult by entry.savedStateHandle
+                    .getStateFlow<String?>(MappoRoute.PICKER_RESULT_KEY, null)
+                    .collectAsStateWithLifecycle()
+                InputEditorScreen(
+                    inputLabel = label.ifEmpty { groupInputKey },
+                    inputSource = inputSource,
+                    groupInputKey = groupInputKey,
+                    config = activeControllerConfig,
+                    viewingActionSetId = viewingActionSetId,
+                    viewingLayerId = viewingLayerId,
+                    modeShiftId = modeShiftId,
+                    pickerResult = pickerResult?.let { BindingOutput.decode(it) },
+                    onConsumePickerResult = {
+                        entry.savedStateHandle.remove<String>(MappoRoute.PICKER_RESULT_KEY)
+                    },
+                    onPickResult = { bindingId, output ->
+                        viewModel.setControllerCommand(bindingId, output)
+                    },
+                    onOpenPicker = { title, current ->
+                        navController.navigate(
+                            MappoRoute.remapTargetPicker(
+                                title = title,
+                                currentEncoded = current.encode(),
+                                showActionSets = true,
+                                showLayers = true,
+                            )
+                        )
+                    },
+                    onAddActivator = { groupInputId, type ->
+                        viewModel.addControllerActivator(groupInputId, type)
+                    },
+                    onRemoveActivator = { activatorId ->
+                        viewModel.removeControllerActivator(activatorId)
+                    },
+                    onSetActivatorType = { activatorId, type ->
+                        viewModel.setControllerActivatorType(activatorId, type)
+                    },
+                    onOpenActivatorSettings = { activatorId, label ->
+                        navController.navigate(MappoRoute.activatorEditor(activatorId, label))
+                    },
+                    onAddCommand = { activatorId ->
+                        viewModel.addControllerCommand(activatorId)
+                    },
+                    onRemoveCommand = { bindingId ->
+                        viewModel.removeControllerCommand(bindingId)
+                    },
+                    onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            composable(
+                route = MappoRoute.ACTIVATOR_EDITOR,
+                arguments = listOf(
+                    navArgument(MappoRoute.ARG_ACTIVATOR_ID) { type = NavType.LongType },
+                    navArgument(MappoRoute.ARG_ACTIVATOR_LABEL) {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    },
+                ),
+            ) { entry ->
+                val activatorId = entry.arguments?.getLong(MappoRoute.ARG_ACTIVATOR_ID) ?: return@composable
+                val label = entry.arguments?.getString(MappoRoute.ARG_ACTIVATOR_LABEL).orEmpty()
+                // Brick 3.3.e: chord-partner picker writes its result here and pops back.
+                // Apply via VM, then clear the savedStateHandle so recomposition doesn't re-apply.
+                val chordResult by entry.savedStateHandle
+                    .getStateFlow<String?>(MappoRoute.CHORD_PARTNER_RESULT_KEY, null)
+                    .collectAsStateWithLifecycle()
+                LaunchedEffect(chordResult, activeControllerConfig) {
+                    val encoded = chordResult ?: return@LaunchedEffect
+                    val parts = encoded.split("|", limit = 2)
+                    if (parts.size != 2) return@LaunchedEffect
+                    val source = runCatching {
+                        com.mappo.data.model.steam.InputSource.valueOf(parts[0])
+                    }.getOrNull() ?: return@LaunchedEffect
+                    // Resolve current settings off the viewed set so we don't clobber other knobs.
+                    val current = activeControllerConfig
+                        ?.resolveActionSet(viewingActionSetId)
+                        ?.preset
+                        ?.flatMap { p -> p.group.inputs.flatMap { it.activators } }
+                        ?.firstOrNull { it.activator.id == activatorId }
+                        ?.let { com.mappo.service.input.CompiledActivatorSettings.parse(it.activator.settingsJson) }
+                        ?: com.mappo.service.input.CompiledActivatorSettings.DEFAULTS
+                    viewModel.setControllerActivatorSettings(
+                        activatorId,
+                        current.copy(chordPartnerSource = source, chordPartnerKey = parts[1]),
+                    )
+                    entry.savedStateHandle.remove<String>(MappoRoute.CHORD_PARTNER_RESULT_KEY)
+                }
+                ActivatorEditorScreen(
+                    activatorId = activatorId,
+                    title = label.ifEmpty { "Activator" },
+                    config = activeControllerConfig,
+                    viewingActionSetId = viewingActionSetId,
+                    onSettingsChange = { id, settings ->
+                        viewModel.setControllerActivatorSettings(id, settings)
+                    },
+                    onPickChordPartner = { id ->
+                        navController.navigate(MappoRoute.chordPartnerPicker(id))
+                    },
+                    onBack = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            composable(
+                route = MappoRoute.MODE_SETTINGS,
+                arguments = listOf(
+                    navArgument(MappoRoute.ARG_BINDING_GROUP_ID) { type = NavType.LongType },
+                    navArgument(MappoRoute.ARG_INPUT_SOURCE) { type = NavType.StringType },
+                ),
+            ) { entry ->
+                val bindingGroupId = entry.arguments?.getLong(MappoRoute.ARG_BINDING_GROUP_ID)
+                    ?: return@composable
+                val sourceName = entry.arguments?.getString(MappoRoute.ARG_INPUT_SOURCE)
+                    ?: return@composable
+                val source = runCatching {
+                    com.mappo.data.model.steam.InputSource.valueOf(sourceName)
+                }.getOrNull() ?: return@composable
+                com.mappo.ui.screen.remap.settings.ModeSettingsScreen(
+                    bindingGroupId = bindingGroupId,
+                    source = source,
+                    config = activeControllerConfig,
+                    viewingActionSetId = viewingActionSetId,
+                    onSettingsChange = { id, settingsJson ->
+                        viewModel.setBindingGroupSettings(id, settingsJson)
+                    },
+                    onBack = { navController.popBackStack() },
+                    capturedInputs = viewModel.capturedInputs,
+                    setCaptureMode = { viewModel.setCaptureMode(it) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            composable(
+                route = MappoRoute.CHORD_PARTNER_PICKER,
+                arguments = listOf(
+                    navArgument(MappoRoute.ARG_ACTIVATOR_ID) { type = NavType.LongType },
+                ),
+            ) { _ ->
+                ChordPartnerPickerScreen(
+                    capturedInputs = viewModel.capturedInputs,
+                    setCaptureMode = { viewModel.setCaptureMode(it) },
+                    onPartnerCaptured = { address ->
+                        navController.previousBackStackEntry
+                            ?.savedStateHandle
+                            ?.set(MappoRoute.CHORD_PARTNER_RESULT_KEY, "${address.source.name}|${address.inputKey}")
+                        navController.popBackStack()
+                    },
+                    onCancel = { navController.popBackStack() },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            composable(MappoRoute.AUTO_SWITCH) {
+                AutoSwitchScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MappoRoute.BLOCKLIST) {
+                BlocklistScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MappoRoute.THEME_STUDIO) {
+                com.themestudio.ui.ThemeStudioScreen(
+                    onClose = { navController.popBackStack() },
+                    theme = { content -> com.mappo.ui.theme.MappoTheme { content() } },
+                    defaultDisplayFontName = com.mappo.ui.theme.DEFAULT_DISPLAY_FONT_NAME,
+                    defaultBodyFontName = com.mappo.ui.theme.DEFAULT_BODY_FONT_NAME,
+                )
+            }
+            composable(MappoRoute.SHIZUKU_SETUP) {
+                ShizukuSetupScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MappoRoute.COMPACT_GALLERY) {
+                com.mappo.ui.compact.CompactGalleryScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MappoRoute.COLOR_PICKER_DEMO) {
+                ColorPickerDemoScreen(onBack = { navController.popBackStack() })
+            }
+            composable(MappoRoute.STEAM_SETUP) {
+                SteamSetupScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenBrowse = { navController.navigate(MappoRoute.STEAM_BROWSE) },
+                )
+            }
+            composable(MappoRoute.STEAM_BROWSE) {
+                SteamBrowseScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenConfig = { id ->
+                        navController.navigate(MappoRoute.steamConfigDetail(id))
+                    },
+                )
+            }
+            composable(
+                route = MappoRoute.STEAM_CONFIG_DETAIL,
+                arguments = listOf(navArgument(MappoRoute.ARG_PUBLISHED_FILE_ID) { type = NavType.LongType }),
+            ) {
+                SteamConfigDetailScreen(onBack = { navController.popBackStack() })
+            }
+            composable(
+                route = MappoRoute.CONFIGURE_BUTTON,
+                arguments = listOf(navArgument(MappoRoute.ARG_BUTTON_ID) { type = NavType.StringType }),
+            ) { entry ->
+                val buttonId = entry.arguments?.getString(MappoRoute.ARG_BUTTON_ID) ?: return@composable
+                // Resolve the button live from the current display layout. If it's gone (e.g. user
+                // navigated back from a delete), pop ourselves.
+                val button = displayLayout.buttons.find { it.id == buttonId }
+                if (button == null) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                    return@composable
+                }
+                val pickerResult by entry.savedStateHandle
+                    .getStateFlow<String?>(MappoRoute.PICKER_RESULT_KEY, null)
+                    .collectAsStateWithLifecycle()
+                ConfigureButtonScreen(
+                    button = button,
+                    keyboardThemeColor = keyboardButtonParentColor(
+                        layout = displayLayout,
+                        themeFallback = MaterialTheme.colorScheme.surface,
+                    ),
+                    // Brick 4.5: picker emits BindingOutput-encoded results. Trackpad gestures
+                    // are still RemapTarget-shaped at the data layer, so convert at the boundary.
+                    // The picker doesn't surface Steam-Input categories here (showActionSets=false),
+                    // so the decoded BindingOutput will always be in the RemapTarget-compatible subset.
+                    pickerResult = pickerResult
+                        ?.let { BindingOutput.decode(it) }
+                        ?.toRemapTarget(),
+                    onConsumePickerResult = {
+                        entry.savedStateHandle.remove<String>(MappoRoute.PICKER_RESULT_KEY)
+                    },
+                    onUpdate = { updated ->
+                        // selectedButtonId was set at the navigation-entry point and persists
+                        // for the lifetime of this destination, so updateSelectedButton routes
+                        // to the right button without a defensive re-selection here.
+                        viewModel.updateSelectedButton(updated)
+                    },
+                    onOpenPicker = { title, current ->
+                        navController.navigate(
+                            MappoRoute.remapTargetPicker(
+                                title,
+                                BindingOutput.fromRemapTarget(current).encode(),
+                                showActionSets = false,
+                            )
+                        )
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(
+                route = MappoRoute.CONFIGURE_KEYBOARD,
+                arguments = listOf(navArgument(MappoRoute.ARG_LAYOUT_ID) { type = NavType.LongType }),
+            ) { entry ->
+                val layoutId = entry.arguments?.getLong(MappoRoute.ARG_LAYOUT_ID) ?: return@composable
+                val configuredLayout = layouts.find { it.id == layoutId }
+                if (configuredLayout == null) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                    return@composable
+                }
+                ConfigureKeyboardScreen(
+                    layout = configuredLayout,
+                    themeFallback = MaterialTheme.colorScheme.surface,
+                    onUpdate = { viewModel.updateLayoutInstant(it) },
+                    onTryResize = { cols, rows -> viewModel.tryResizeLayout(layoutId, cols, rows) },
+                    onApplyResizeWithAutoFit = { cols, rows ->
+                        viewModel.applyResizeWithAutoFit(layoutId, cols, rows)
+                    },
+                    onReset = { viewModel.resetKeyboard(layoutId) },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(
+                route = MappoRoute.REMAP_TARGET_PICKER,
+                arguments = listOf(
+                    navArgument(MappoRoute.ARG_TITLE) { type = NavType.StringType },
+                    navArgument(MappoRoute.ARG_CURRENT) { type = NavType.StringType },
+                    navArgument(MappoRoute.ARG_SHOW_ACTION_SETS) {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    },
+                    navArgument(MappoRoute.ARG_SHOW_LAYERS) {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    },
+                ),
+            ) { entry ->
+                val title = entry.arguments?.getString(MappoRoute.ARG_TITLE) ?: ""
+                val currentEncoded = entry.arguments?.getString(MappoRoute.ARG_CURRENT)
+                    ?: BindingOutput.Unbound.encode()
+                val showActionSets = entry.arguments?.getBoolean(MappoRoute.ARG_SHOW_ACTION_SETS) == true
+                val showLayers = entry.arguments?.getBoolean(MappoRoute.ARG_SHOW_LAYERS) == true
+                // Brick 4.5: source the action sets list from the active config for the
+                // Steam-Input call site. ConfigureButton sets showActionSets=false so this
+                // list isn't consulted there even though we'd compute the same value.
+                val availableActionSets: List<Pair<Long, String>> = if (showActionSets) {
+                    activeControllerConfig?.actionSets?.map { it.actionSet.id to it.actionSet.title }
+                        ?: emptyList()
+                } else emptyList()
+                // Brick 5.6: layers list is scoped to the viewing action set — layers in
+                // one set don't appear in another's namespace (Steam-faithful).
+                val availableLayers: List<Pair<Long, String>> = if (showLayers) {
+                    val viewingSet = activeControllerConfig?.let { cfg ->
+                        viewingActionSetId?.let { id ->
+                            cfg.actionSets.firstOrNull { it.actionSet.id == id }
+                        } ?: cfg.activeActionSet
+                    }
+                    viewingSet?.layers?.map { it.layer.id to it.layer.title } ?: emptyList()
+                } else emptyList()
+                RemapTargetPickerScreen(
+                    title = title,
+                    currentEncoded = currentEncoded,
+                    availableActionSets = availableActionSets,
+                    availableLayers = availableLayers,
+                    onSelect = { output ->
+                        // Write the result to the previous destination's saved state and pop. The
+                        // caller observes its own saved-state handle and applies the result to
+                        // whatever it's editing (InputEditor's editingBindingId, or
+                        // ConfigureButtonScreen's editingGesture).
+                        navController.previousBackStackEntry
+                            ?.savedStateHandle
+                            ?.set(MappoRoute.PICKER_RESULT_KEY, output.encode())
+                        navController.popBackStack()
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ── The handheld device frame: home chrome + the 1:1 screen canvas hosting every
+        // route. Slides up on launch; on MAIN a tap on the scrim (or Back / B) slides it down
+        // and backgrounds the task (see the frameVisible effect above). ──
+        HandheldFrame(
+            shown = frameVisible,
+            // Master power (the old toolbar's master switch, relocated to the frame chrome)
+            // drives remap AND the button overlay to the same value in lockstep — one control
+            // for both features. (Does NOT auto-show the overlay at app launch; the overlay
+            // follows the toggle when the user flips it.)
+            powerOn = remapEnabled,
+            onPowerChange = { target ->
+                if (remapEnabled != target) viewModel.toggleRemap()
+                if (overlayShowing != target) viewModel.toggleOverlay()
+            },
+            dismissEnabled = isMainRoute,
+            onDismissRequest = { frameVisible = false },
+            screenContent = screenContent,
+        )
+
+    TabActionDialogHost(
+        state = tabActionDialog,
+        profileName = activeProfile?.name ?: "",
+        userTemplates = userTemplates,
+        allTemplates = templates,
+        profiles = profiles,
+        activeProfileId = activeProfile?.id,
+        onStateChange = { tabActionDialog = it },
+        onConfirmRemove = { id -> viewModel.removeKeyboard(id) },
+        onSaveAsNewTemplate = { id, templateName ->
+            viewModel.saveAsNewTemplate(id, templateName)
+        },
+        onUpdateExistingTemplate = { id, target ->
+            viewModel.updateExistingTemplate(id, target)
+        },
+        onTemplateSaveCanceled = {
+            tabActionDialog = null
+            viewModel.emitToast("Keyboard template save cancelled")
+        },
+        onAddBlankKeyboard = { viewModel.addBlankKeyboard() },
+        onAddFromTemplate = { template -> viewModel.addKeyboardFromTemplate(template) },
+        onAddFromProfile = { sourceLayoutId -> viewModel.addKeyboardFromProfile(sourceLayoutId) },
+        fetchProfileLayouts = { profileId -> viewModel.layoutsForProfile(profileId) },
+        onConfirmDeleteButton = { id -> viewModel.deleteButton(id) }
+    )
+    } // end Box
+}
+
+/**
+ * Suppresses the system edge-back gesture across the full activity window while
+ * [active] is true (the keyboard view on the Main route, drawer closed). Prevents
+ * accidental back navigation when the user is swiping near the screen edge during
+ * virtual-keyboard / trackpad use. Cleared on every other destination + while the
+ * drawer is open so back-gesture navigation works normally there.
+ *
+ * **Why this used to be `ApplyMainScreenWindowBehavior`.** Pre–single-screen-refactor,
+ * this composable also toggled `FLAG_NOT_FOCUSABLE` on the activity window — the
+ * Thor "game on top screen, Mappo's activity keyboard on bottom" path used it so
+ * unmapped gamepad input would flow past Mappo to the game. After the refactor the
+ * keyboard lives in a system overlay (`KeyboardOverlayPresenter` / QS tile), so the
+ * activity is a configuration UI. The flag stopped earning its keep and started
+ * causing ANRs: with `FLAG_REQUEST_FILTER_KEY_EVENTS` on the accessibility service,
+ * any key event (F12, media keys, back, IME shortcuts) that didn't match the remap
+ * config had no focusable window to land on and 5-second-timeouts into an ANR. The
+ * flag is gone now; Thor users who want the old "game on the other screen" routing
+ * use Thor's Focus Lock OS feature instead. See the single-screen refactor plan for
+ * the full history.
+ */
+@Composable
+private fun SuppressEdgeBackGesture(active: Boolean) {
+    val view = LocalView.current
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // The exclusion rect needs to follow the view's current bounds (which can change with
+        // configuration / display swaps), so we both apply on state changes AND re-apply on
+        // every layout pass while suppression is active.
+        val activeState = rememberUpdatedState(active)
+        DisposableEffect(view) {
+            val listener = ViewTreeObserver.OnGlobalLayoutListener {
+                view.systemGestureExclusionRects = if (activeState.value) {
+                    listOf(Rect(0, 0, view.width, view.height))
+                } else {
+                    emptyList()
+                }
+            }
+            view.viewTreeObserver.addOnGlobalLayoutListener(listener)
+            onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+        }
+        LaunchedEffect(active) {
+            view.systemGestureExclusionRects = if (active) {
+                listOf(Rect(0, 0, view.width, view.height))
+            } else {
+                emptyList()
+            }
+        }
+    }
+}
+
+// Visibility widened to `internal` so `KeyboardHost` (single-screen refactor Brick 3)
+// can call this from a sibling file. The composable still belongs conceptually to
+// MainScreen — moving the implementation out would be a 1000+ line file shuffle
+// for no architectural gain. Same applies to `KeyboardSurface`, `KeyGrid`, and
+// `BottomBar` below.
+@Composable
+internal fun KeyboardTopBar(
+    layouts: ImmutableList<GridLayout>,
+    selectedIndex: Int,
+    isEditMode: Boolean,
+    tabContextMenuFor: Long?,
+    onSelectIndex: (Int) -> Unit,
+    onLongPressMenu: (Long) -> Unit,
+    onReorder: (Int, Int) -> Unit,
+    onCloseMenu: () -> Unit,
+    onMenuEditButtons: (Long) -> Unit,
+    onMenuConfigure: (Long) -> Unit,
+    onMenuDuplicate: (Long) -> Unit,
+    onMenuRemove: (Long) -> Unit,
+    onMenuSaveTemplate: (Long) -> Unit,
+    onOpenDrawer: () -> Unit,
+    onAddKeyboard: () -> Unit,
+    onToggleEditMode: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.height(40.dp)
+    ) {
+        IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
+            Icon(Icons.Default.Menu, contentDescription = "Open menu", modifier = Modifier.size(20.dp))
+        }
+        KeyboardTabBar(
+            layouts = layouts,
+            selectedIndex = selectedIndex,
+            tabContextMenuFor = tabContextMenuFor,
+            onSelectIndex = onSelectIndex,
+            onLongPressMenu = onLongPressMenu,
+            onReorder = onReorder,
+            onCloseMenu = onCloseMenu,
+            onMenuEditButtons = onMenuEditButtons,
+            onMenuConfigure = onMenuConfigure,
+            onMenuDuplicate = onMenuDuplicate,
+            onMenuRemove = onMenuRemove,
+            onMenuSaveTemplate = onMenuSaveTemplate,
+            modifier = Modifier.weight(1f)
+        )
+        IconButton(onClick = onAddKeyboard, modifier = Modifier.size(40.dp)) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = "Add keyboard",
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        // Edit / done toggle. Outside edit mode this is the only way besides the per-tab
+        // long-press menu to enter edit mode; inside it, this is the only top-level exit
+        // that doesn't navigate away (tab-switch and drawer-open also exit).
+        IconButton(onClick = onToggleEditMode, modifier = Modifier.size(40.dp)) {
+            Icon(
+                if (isEditMode) Icons.Default.Check else Icons.Default.Edit,
+                contentDescription = if (isEditMode) "Exit edit mode" else "Edit buttons",
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+internal fun KeyGrid(
+    layout: GridLayout,
+    isEditMode: Boolean,
+    selectedButtonId: String?,
+    onButtonTap: (GridButton) -> Unit,
+    onButtonDoubleTap: (GridButton) -> Unit,
+    onButtonHold: (GridButton) -> Unit,
+    onSelectButton: (String) -> Unit,
+    onMoveButton: (String, Int, Int) -> Unit,
+    onResizeButton: (String, Int, Int, Int, Int) -> Unit,
+    onDragStart: () -> Unit,
+    onMouseMove: (Float, Float) -> Unit,
+    onDragEnd: () -> Unit,
+    onTrackpadGesture: (GridButton, TrackpadGesture) -> Unit,
+    onConfigureButton: (String) -> Unit,
+    onDuplicateButton: (String) -> Unit,
+    onRemoveButton: (String) -> Unit,
+    onAddAtCell: (Int, Int) -> Unit,
+    onLongPressEmptyArea: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val gridScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val gap = 3.dp
+    val currentSelectedId by rememberUpdatedState(selectedButtonId)
+
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dropTargetCol by remember { mutableStateOf(0) }
+    var dropTargetRow by remember { mutableStateOf(0) }
+    var dropIsValid by remember { mutableStateOf(true) }
+    // Per-button long-press contextual menu — local UI state, mirrors the tab-bar pattern.
+    var buttonContextMenuFor by remember { mutableStateOf<String?>(null) }
+    // Hoisted out of the per-button loop so the empty-cell "+" affordances can hide
+    // while any button is being resized — otherwise the resize drag passes over them
+    // and a stray tap adds an unwanted button.
+    var isAnyResizing by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(
+        modifier = modifier
+            // Background long-press = shortcut into edit mode. Children (buttons, +icons)
+            // consume their own pointer events, so this only fires when the press lands
+            // on truly empty grid space. Skipped while already in edit mode — there's
+            // nothing to enter, and we don't want a re-haptic mid-edit.
+            .then(
+                if (!isEditMode) Modifier.pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = true)
+                        val touchSlop = viewConfiguration.touchSlop
+                        val longPressMs = viewConfiguration.longPressTimeoutMillis
+                        val downPos = down.position
+                        try {
+                            withTimeout(longPressMs) {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: continue
+                                    if (!change.pressed) return@withTimeout
+                                    if ((change.position - downPos).getDistance() > touchSlop) {
+                                        return@withTimeout
+                                    }
+                                }
+                            }
+                        } catch (_: PointerEventTimeoutCancellationException) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongPressEmptyArea()
+                        }
+                    }
+                } else Modifier
+            )
+    ) {
+        val cellW = maxWidth / layout.columns
+        val cellH = maxHeight / layout.rows
+        val cellWPx = with(density) { cellW.toPx() }
+        val cellHPx = with(density) { cellH.toPx() }
+        // Buttons are sized `cellW * span - gap` / `cellH * span - gap`, leaving a
+        // `gap`-wide shortfall at the end of each cell. Without compensation that
+        // shortfall accumulates only on the right/bottom edges of the grid (left/top
+        // columns start at 0). Shifting every position by gap/2 distributes the
+        // outer margin evenly: gap/2 on every side, full `gap` between buttons.
+        val halfGap = gap / 2
+
+        // ── Plus-icon underlay ────────────────────────────────────────────────
+        // A complete grid of "+" affordances rendered BEFORE the buttons in source
+        // order, so buttons (at the same zIndex 0) draw on top and occlude the plus
+        // sitting beneath them. When a button is being dragged its visual is
+        // translated away from its original cell — the underlay then becomes visible
+        // there, even though the OUTER hit-test box is still anchored to the source
+        // (so taps still belong to the button, not the plus). Pluses are non-
+        // interactable while any button is being dragged or resized.
+        if (isEditMode && cellW >= 24.dp && cellH >= 24.dp) {
+            val isAnyDragging = draggingId != null
+            val interactionBlocked = isAnyDragging || isAnyResizing
+            val occupied = remember(layout.buttons) {
+                buildSet {
+                    for (btn in layout.buttons) {
+                        for (r in btn.row until btn.row + btn.rowSpan) {
+                            for (c in btn.col until btn.col + btn.colSpan) {
+                                add(c to r)
+                            }
+                        }
+                    }
+                }
+            }
+            for (r in 0 until layout.rows) {
+                for (c in 0 until layout.columns) {
+                    val cellOccupied = (c to r) in occupied
+                    val canInteract = !interactionBlocked && !cellOccupied
+                    val ix = cellW * c + halfGap
+                    val iy = cellH * r + halfGap
+                    Box(
+                        modifier = Modifier
+                            .absoluteOffset(x = ix, y = iy)
+                            .size(width = cellW - gap, height = cellH - gap)
+                            .then(
+                                if (canInteract) Modifier.pointerInput(c, r) {
+                                    detectTapGestures(
+                                        onLongPress = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onAddAtCell(c, r)
+                                        }
+                                    )
+                                } else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = if (canInteract) "Add button at $c, $r" else null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                alpha = if (interactionBlocked) 0.2f else 0.4f
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Drop indicator ────────────────────────────────────────────────────
+        val draggingButton = if (draggingId != null) layout.buttons.find { it.id == draggingId } else null
+        if (isEditMode && draggingButton != null) {
+            val extraColors = com.mappo.ui.theme.LocalMappoExtraColors.current
+            val validColor = extraColors.dropZoneValid
+            val invalidColor = extraColors.dropZoneInvalid
+            Box(
+                modifier = Modifier
+                    .absoluteOffset(
+                        x = cellW * dropTargetCol + halfGap,
+                        y = cellH * dropTargetRow + halfGap
+                    )
+                    .size(
+                        width = cellW * draggingButton.colSpan - gap,
+                        height = cellH * draggingButton.rowSpan - gap
+                    )
+                    .zIndex(5f)
+                    .background(
+                        (if (dropIsValid) validColor else invalidColor).copy(alpha = 0.38f),
+                        RoundedCornerShape(8.dp)
+                    )
+            )
+        }
+
+        layout.buttons.forEach { button ->
+            // Always-fresh references inside gesture handlers (fixes stale-capture bug)
+            val currentButton by rememberUpdatedState(button)
+            val currentLayout by rememberUpdatedState(layout)
+
+            var dragOffset by remember(button.id) { mutableStateOf(Offset.Zero) }
+            var isDragging by remember(button.id) { mutableStateOf(false) }
+            var resizeDragPx by remember(button.id) { mutableStateOf(Offset.Zero) }
+            var resizeCorner by remember(button.id) { mutableStateOf<ResizeCorner?>(null) }
+
+            // Three sets of bounds coexist during a resize:
+            //   1. COMMITTED  (bx/by/bw/bh, == orig*): button.col/row/spans. The button
+            //      itself renders here and stays put during the entire drag — it commits
+            //      only on release.
+            //   2. SNAPPED PREVIEW (previewBx/By/Bw/Bh): the gridded destination the
+            //      release would commit to. Shown as a green (valid) or red (overlapping)
+            //      landing zone so the user sees exactly which cells they're claiming.
+            //   3. SMOOTH (smoothBx/By/Bw/Bh): raw finger position in px. Drives the
+            //      selection outline and the active handle's visual offset so the resize
+            //      feels physical instead of stuttery.
+            // Each corner moves only its two adjacent edges; the opposite two edges stay
+            // pinned. When no resize is active, all three sets collapse to the committed
+            // bounds.
+            val dCols = (resizeDragPx.x / cellWPx).roundToInt()
+            val dRows = (resizeDragPx.y / cellHPx).roundToInt()
+            val origR = button.col + button.colSpan
+            val origB = button.row + button.rowSpan
+            val moveLeft = resizeCorner == ResizeCorner.TOP_LEFT || resizeCorner == ResizeCorner.BOTTOM_LEFT
+            val moveTop = resizeCorner == ResizeCorner.TOP_LEFT || resizeCorner == ResizeCorner.TOP_RIGHT
+            val moveRight = resizeCorner == ResizeCorner.TOP_RIGHT || resizeCorner == ResizeCorner.BOTTOM_RIGHT
+            val moveBottom = resizeCorner == ResizeCorner.BOTTOM_LEFT || resizeCorner == ResizeCorner.BOTTOM_RIGHT
+            val previewL = if (moveLeft) (button.col + dCols).coerceIn(0, origR - 1) else button.col
+            val previewT = if (moveTop) (button.row + dRows).coerceIn(0, origB - 1) else button.row
+            val previewR = if (moveRight) (origR + dCols).coerceIn(button.col + 1, layout.columns) else origR
+            val previewB = if (moveBottom) (origB + dRows).coerceIn(button.row + 1, layout.rows) else origB
+            val previewColSpan = previewR - previewL
+            val previewRowSpan = previewB - previewT
+            val previewBx = cellW * previewL + halfGap
+            val previewBy = cellH * previewT + halfGap
+            val previewBw = cellW * previewColSpan - gap
+            val previewBh = cellH * previewRowSpan - gap
+
+            // Committed bounds — button renders here, dropdown menus anchor here.
+            val origBx = cellW * button.col + halfGap
+            val origBy = cellH * button.row + halfGap
+            val origBw = cellW * button.colSpan - gap
+            val origBh = cellH * button.rowSpan - gap
+            val bx = origBx
+            val by = origBy
+            val bw = origBw
+            val bh = origBh
+            val dxDp = with(density) { resizeDragPx.x.toDp() }
+            val dyDp = with(density) { resizeDragPx.y.toDp() }
+            // Clamp so the outline can't be flipped inside-out: the moving edge can't
+            // pass the fixed opposite edge minus a one-cell minimum (matches the snapped
+            // preview's minimum span of 1).
+            val smoothBx = when {
+                moveLeft -> (origBx + dxDp).coerceIn(0.dp, origBx + origBw - cellW)
+                else -> origBx
+            }
+            val smoothBy = when {
+                moveTop -> (origBy + dyDp).coerceIn(0.dp, origBy + origBh - cellH)
+                else -> origBy
+            }
+            val smoothRight = when {
+                moveRight -> (origBx + origBw + dxDp).coerceIn(smoothBx + cellW, maxWidth)
+                else -> origBx + origBw
+            }
+            val smoothBottom = when {
+                moveBottom -> (origBy + origBh + dyDp).coerceIn(smoothBy + cellH, maxHeight)
+                else -> origBy + origBh
+            }
+            val smoothBw = smoothRight - smoothBx
+            val smoothBh = smoothBottom - smoothBy
+
+            val isSelected = button.id == selectedButtonId
+
+            if (!isEditMode && button.isTrackpad) {
+                // ── Trackpad (normal mode) ────────────────────────────────────
+                val keyboardTheme = keyboardButtonParentColor(
+                    layout = layout,
+                    themeFallback = MaterialTheme.colorScheme.surface,
+                )
+                Box(
+                    modifier = Modifier
+                        .absoluteOffset(x = bx, y = by)
+                        .size(width = bw, height = bh)
+                        .pointerInput(button.id + "_tp") {
+                            var lastTapTimeMs = 0L
+                            awaitPointerEventScope {
+                                while (true) {
+                                    // Wait for finger down
+                                    var down = awaitPointerEvent().changes
+                                        .firstOrNull { it.pressed && !it.previousPressed }
+                                    while (down == null) {
+                                        down = awaitPointerEvent().changes
+                                            .firstOrNull { it.pressed && !it.previousPressed }
+                                    }
+                                    down.consume()
+
+                                    val downPos = down.position
+                                    var prevPos = down.position
+                                    var hasMoved = false
+                                    var dragStarted = false
+                                    var longPressFired = false
+
+                                    val longPressJob: Job = gridScope.launch {
+                                        delay(LONG_PRESS_DURATION_MS)
+                                        longPressFired = true
+                                        Log.d(TAG, "trackpad: long press → ${currentButton.gestureTarget(TrackpadGesture.LONG_PRESS)}")
+                                        onTrackpadGesture(currentButton, TrackpadGesture.LONG_PRESS)
+                                        // Reset double-tap window so a tap immediately after long-press
+                                        // doesn't get incorrectly paired with a previous tap.
+                                        lastTapTimeMs = 0L
+                                    }
+
+                                    var active = true
+                                    while (active) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        if (!change.pressed) {
+                                            longPressJob.cancel()
+                                            if (dragStarted) onDragEnd()
+                                            if (!hasMoved && !longPressFired) {
+                                                val now = System.currentTimeMillis()
+                                                // Always fire single tap immediately. If this turns out
+                                                // to be the second of a double tap, also fire double tap.
+                                                Log.d(TAG, "trackpad: tap → ${currentButton.gestureTarget(TrackpadGesture.TAP)}")
+                                                onTrackpadGesture(currentButton, TrackpadGesture.TAP)
+                                                if (lastTapTimeMs > 0L && (now - lastTapTimeMs) <= DOUBLE_TAP_INTERVAL_MS) {
+                                                    Log.d(TAG, "trackpad: double tap → ${currentButton.gestureTarget(TrackpadGesture.DOUBLE_TAP)}")
+                                                    onTrackpadGesture(currentButton, TrackpadGesture.DOUBLE_TAP)
+                                                    lastTapTimeMs = 0L
+                                                } else {
+                                                    lastTapTimeMs = now
+                                                }
+                                            }
+                                            active = false
+                                        } else {
+                                            val totalDelta = change.position - downPos
+                                            val distSq = totalDelta.x * totalDelta.x + totalDelta.y * totalDelta.y
+                                            if (!hasMoved && distSq > TAP_MOVEMENT_THRESHOLD_PX * TAP_MOVEMENT_THRESHOLD_PX) {
+                                                Log.d(TAG, "trackpad: movement threshold crossed → drag start")
+                                                longPressJob.cancel()
+                                                hasMoved = true
+                                                dragStarted = true
+                                                prevPos = change.position
+                                                onDragStart()
+                                            }
+                                            if (hasMoved) {
+                                                val delta = change.position - prevPos
+                                                val sens = currentButton.sensitivity ?: TRACKPAD_SENSITIVITY
+                                                onMouseMove(delta.x * sens, delta.y * sens)
+                                                prevPos = change.position
+                                            }
+                                            change.consume()
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                ) {
+                    KeyButtonShape(
+                        button = button,
+                        keyboardThemeColor = keyboardTheme,
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        ButtonContent(button = button, modifier = Modifier.fillMaxSize())
+                    }
+                }
+            } else {
+                // ── Key button (all modes) / trackpad in edit mode ────────────
+                // OUTER Box: natural layout slot. Hosts pointerInput WITHOUT graphicsLayer,
+                // so pointer-event coordinates stay in a stable frame during drag. The
+                // INNER OutlinedButton applies the graphicsLayer drag translation — which
+                // affects drawing only, not the gesture-coord frame.
+                Box(
+                    modifier = Modifier
+                        .absoluteOffset(x = bx, y = by)
+                        .size(width = bw, height = bh)
+                        .zIndex(if (isDragging) 10f else 0f)
+                        .then(
+                            if (isEditMode) Modifier.pointerInput(button.id) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    val touchSlop = viewConfiguration.touchSlop
+                                    val reorderSlop = MappoGesture.reorderSlopPx(viewConfiguration)
+                                    val longPressMs = viewConfiguration.longPressTimeoutMillis
+                                    val downPos = down.position
+
+                                    // Phase 1: race long-press timer vs. up vs. drag-before-timer.
+                                    // Crucially we do NOT consume on tap — we let OutlinedButton's
+                                    // onClick handle the tap (preserves ripple + select behavior).
+                                    var releasedOrMoved = false
+                                    val longPressed: Boolean = try {
+                                        withTimeout(longPressMs) {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id }
+                                                    ?: continue
+                                                if (!change.pressed) {
+                                                    releasedOrMoved = true
+                                                    break
+                                                }
+                                                val moved = (change.position - downPos).getDistance()
+                                                if (moved > touchSlop) {
+                                                    releasedOrMoved = true
+                                                    break
+                                                }
+                                            }
+                                        }
+                                        !releasedOrMoved
+                                    } catch (_: PointerEventTimeoutCancellationException) {
+                                        true
+                                    }
+
+                                    if (!longPressed) return@awaitEachGesture
+
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    buttonContextMenuFor = currentButton.id
+                                    if (currentSelectedId != currentButton.id) {
+                                        onSelectButton(currentButton.id)
+                                    }
+
+                                    // Phase 2: lifted — drag becomes a move; release w/o drag keeps menu open.
+                                    var dragStarted = false
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                            ?: continue
+                                        change.consume()
+                                        if (!change.pressed) {
+                                            if (dragStarted) {
+                                                if (dropIsValid) {
+                                                    onMoveButton(currentButton.id, dropTargetCol, dropTargetRow)
+                                                }
+                                                isDragging = false
+                                                draggingId = null
+                                                dragOffset = Offset.Zero
+                                            }
+                                            break
+                                        }
+                                        val totalMoved = (change.position - downPos).getDistance()
+                                        if (!dragStarted && totalMoved > reorderSlop) {
+                                            dragStarted = true
+                                            buttonContextMenuFor = null  // close menu when drag begins
+                                            isDragging = true
+                                            draggingId = currentButton.id
+                                            dropTargetCol = currentButton.col
+                                            dropTargetRow = currentButton.row
+                                            dropIsValid = true
+                                        }
+                                        if (dragStarted) {
+                                            dragOffset = change.position - downPos
+                                            val rawCol = ((currentButton.col * cellWPx + dragOffset.x) / cellWPx).roundToInt()
+                                            val rawRow = ((currentButton.row * cellHPx + dragOffset.y) / cellHPx).roundToInt()
+                                            dropTargetCol = rawCol.coerceIn(0, currentLayout.columns - currentButton.colSpan)
+                                            dropTargetRow = rawRow.coerceIn(0, currentLayout.rows - currentButton.rowSpan)
+                                            dropIsValid = !currentLayout.wouldOverlap(
+                                                currentButton.id, dropTargetCol, dropTargetRow,
+                                                currentButton.colSpan, currentButton.rowSpan
+                                            )
+                                        }
+                                    }
+                                }
+                            } else Modifier
+                        )
+                ) {
+                    val keyboardTheme = keyboardButtonParentColor(
+                        layout = layout,
+                        themeFallback = MaterialTheme.colorScheme.surface,
+                    )
+                    // Only register double/long handlers when targets are configured —
+                    // an idle onDoubleClick handler would delay every single tap by the
+                    // double-tap window, even on buttons without a configured double-tap.
+                    val hasDouble = button.onDoubleTapTarget !is RemapTarget.Unbound
+                    val hasHold = button.onHoldTarget !is RemapTarget.Unbound
+                    // Surface this button's down-state so KeyButtonShape can paint the
+                    // press-animation overlay and (when motion is on) collapse the bevel.
+                    // The InteractionSource is shared with combinedClickable so we read
+                    // the same press lifecycle that drives ripples/onClick.
+                    val interactionSource = remember { MutableInteractionSource() }
+                    val isPressed by interactionSource.collectIsPressedAsState()
+                    KeyButtonShape(
+                        button = button,
+                        keyboardThemeColor = keyboardTheme,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                translationX = dragOffset.x
+                                translationY = dragOffset.y
+                            },
+                        surfaceModifier = Modifier.combinedClickable(
+                            interactionSource = interactionSource,
+                            indication = LocalIndication.current,
+                            onClick = {
+                                if (isEditMode) onSelectButton(button.id)
+                                else onButtonTap(button)
+                            },
+                            onDoubleClick = if (!isEditMode && hasDouble) {
+                                { onButtonDoubleTap(button) }
+                            } else null,
+                            onLongClick = if (!isEditMode && hasHold) {
+                                { onButtonHold(button) }
+                            } else null,
+                        ),
+                        isPressed = isPressed,
+                    ) {
+                        ButtonContent(button = button, modifier = Modifier.fillMaxSize())
+                    }
+                }
+            }
+
+            // ── Selection outline (smooth) + resize handles (selected, not dragging) ─
+            if (isEditMode && isSelected && !isDragging) {
+                val extraColors = com.mappo.ui.theme.LocalMappoExtraColors.current
+                val outlineShape = RoundedCornerShape(BUTTON_CORNER)
+
+                // Resize destination: the snapped cells that pressing release right now
+                // would commit to. Green = within bounds and no overlap; red = overlaps
+                // another button (commit will be rejected). Mirrors the drag-to-move
+                // drop indicator so the visual language stays consistent. Only renders
+                // while a resize is in progress.
+                if (resizeCorner != null) {
+                    val previewWouldOverlap = layout.wouldOverlap(
+                        button.id, previewL, previewT,
+                        previewColSpan, previewRowSpan,
+                    )
+                    val zoneColor = if (previewWouldOverlap) extraColors.dropZoneInvalid
+                                    else extraColors.dropZoneValid
+                    Box(
+                        modifier = Modifier
+                            .absoluteOffset(x = previewBx, y = previewBy)
+                            .size(width = previewBw, height = previewBh)
+                            .zIndex(15f)
+                            .background(zoneColor.copy(alpha = 0.38f), outlineShape)
+                    )
+                }
+
+                // Selection outline at smooth (finger-tracking) bounds. The drop shadow
+                // is drawn per-line inside selectionOutline rather than as a single
+                // rectangle behind the whole box — that way the bracket reads as four
+                // thin floating elements with shadows on either side of each line,
+                // instead of a hazy fill across the button's face.
+                Box(
+                    modifier = Modifier
+                        .absoluteOffset(x = smoothBx, y = smoothBy)
+                        .size(width = smoothBw, height = smoothBh)
+                        .zIndex(25f)
+                        .selectionOutline(extraColors.selectionOutline)
+                )
+
+                // One circular handle per corner.
+                //
+                // Hit area (HANDLE_HIT_SIZE) is anchored to the button's ORIGINAL committed
+                // corner (origBx/origBy/origBw/origBh) so the pointerInput's coordinate
+                // frame stays stable for the entire drag. If we anchored to the smooth
+                // bounds instead, the gesture-source modifier would move with the finger
+                // and `detectDragGestures` would report zero-deltas in that moving frame
+                // (the classic "follow the finger" feedback loop). The visible disc lives
+                // inside the hit box and uses `graphicsLayer.translation*` to follow the
+                // smooth corner — translation is a draw-time transform that doesn't shift
+                // the pointer frame, so we get smooth visuals AND correct deltas.
+                //
+                // Handles sit at zIndex 50 (> dragging button's 10) so a neighboring button
+                // can never swallow a touch meant for a handle. While one corner is grabbed
+                // the other three fade out and drop their pointerInput so a stray touch on
+                // a faded handle can't hand the drag to the wrong corner mid-gesture.
+                ResizeCorner.values().forEach { corner ->
+                    val anchorX = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.BOTTOM_LEFT -> origBx
+                        ResizeCorner.TOP_RIGHT, ResizeCorner.BOTTOM_RIGHT -> origBx + origBw
+                    }
+                    val anchorY = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.TOP_RIGHT -> origBy
+                        ResizeCorner.BOTTOM_LEFT, ResizeCorner.BOTTOM_RIGHT -> origBy + origBh
+                    }
+                    val smoothCornerX = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.BOTTOM_LEFT -> smoothBx
+                        ResizeCorner.TOP_RIGHT, ResizeCorner.BOTTOM_RIGHT -> smoothBx + smoothBw
+                    }
+                    val smoothCornerY = when (corner) {
+                        ResizeCorner.TOP_LEFT, ResizeCorner.TOP_RIGHT -> smoothBy
+                        ResizeCorner.BOTTOM_LEFT, ResizeCorner.BOTTOM_RIGHT -> smoothBy + smoothBh
+                    }
+                    val translationXDp = smoothCornerX - anchorX
+                    val translationYDp = smoothCornerY - anchorY
+                    val translationXPx = with(density) { translationXDp.toPx() }
+                    val translationYPx = with(density) { translationYDp.toPx() }
+
+                    val isThisActive = resizeCorner == corner
+                    val isAnyActive = resizeCorner != null
+                    val targetAlpha = if (!isAnyActive || isThisActive) 1f else 0f
+                    val alpha by animateFloatAsState(
+                        targetValue = targetAlpha,
+                        animationSpec = tween(durationMillis = 40),
+                        label = "resizeHandleAlpha",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .absoluteOffset(
+                                x = anchorX - HANDLE_HIT_SIZE / 2,
+                                y = anchorY - HANDLE_HIT_SIZE / 2,
+                            )
+                            .size(HANDLE_HIT_SIZE)
+                            .zIndex(50f)
+                            .then(
+                                if (!isAnyActive || isThisActive) Modifier.pointerInput(button.id, corner) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            resizeCorner = corner
+                                            isAnyResizing = true
+                                        },
+                                        onDragEnd = {
+                                            val finalDCols = (resizeDragPx.x / cellWPx).roundToInt()
+                                            val finalDRows = (resizeDragPx.y / cellHPx).roundToInt()
+                                            val ml = corner == ResizeCorner.TOP_LEFT || corner == ResizeCorner.BOTTOM_LEFT
+                                            val mt = corner == ResizeCorner.TOP_LEFT || corner == ResizeCorner.TOP_RIGHT
+                                            val mr = corner == ResizeCorner.TOP_RIGHT || corner == ResizeCorner.BOTTOM_RIGHT
+                                            val mb = corner == ResizeCorner.BOTTOM_LEFT || corner == ResizeCorner.BOTTOM_RIGHT
+                                            val origRight = currentButton.col + currentButton.colSpan
+                                            val origBottom = currentButton.row + currentButton.rowSpan
+                                            val newL = if (ml) currentButton.col + finalDCols else currentButton.col
+                                            val newT = if (mt) currentButton.row + finalDRows else currentButton.row
+                                            val newR = if (mr) origRight + finalDCols else origRight
+                                            val newB = if (mb) origBottom + finalDRows else origBottom
+                                            onResizeButton(
+                                                currentButton.id,
+                                                newL, newT,
+                                                newR - newL, newB - newT,
+                                            )
+                                            resizeDragPx = Offset.Zero
+                                            resizeCorner = null
+                                            isAnyResizing = false
+                                        },
+                                        onDragCancel = {
+                                            resizeDragPx = Offset.Zero
+                                            resizeCorner = null
+                                            isAnyResizing = false
+                                        },
+                                        onDrag = { change, delta ->
+                                            change.consume()
+                                            resizeDragPx += delta
+                                        }
+                                    )
+                                } else Modifier
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(HANDLE_VISUAL_SIZE)
+                                .graphicsLayer {
+                                    this.alpha = alpha
+                                    translationX = translationXPx
+                                    translationY = translationYPx
+                                }
+                                .circleDropShadow()
+                                .background(extraColors.selectionOutline, CircleShape)
+                        )
+                    }
+                }
+            }
+
+            // ── Long-press contextual menu (anchored at the button's slot) ────
+            if (isEditMode) {
+                Box(
+                    modifier = Modifier
+                        .absoluteOffset(x = bx, y = by)
+                        .size(width = bw.coerceAtLeast(1.dp), height = bh.coerceAtLeast(1.dp))
+                        .zIndex(30f)
+                ) {
+                    DropdownMenu(
+                        expanded = buttonContextMenuFor == button.id,
+                        onDismissRequest = { buttonContextMenuFor = null }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Configure button") },
+                            leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) },
+                            onClick = {
+                                buttonContextMenuFor = null
+                                onConfigureButton(currentButton.id)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Duplicate button") },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                            onClick = {
+                                buttonContextMenuFor = null
+                                onDuplicateButton(currentButton.id)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    "Delete button",
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            },
+                            onClick = {
+                                buttonContextMenuFor = null
+                                onRemoveButton(currentButton.id)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+    }
+}
+
+private const val TAG = "MappoInput"
+private const val TRACKPAD_SENSITIVITY = 1.5f
+private const val TAP_MOVEMENT_THRESHOLD_PX = 12f
+private const val DOUBLE_TAP_INTERVAL_MS = 250L
+private const val LONG_PRESS_DURATION_MS = 500L
+
+/** Which corner of a selected button is currently being dragged for resize. */
+private enum class ResizeCorner { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
+
+// Resize handle: the touch target is intentionally larger than the visible disc so the
+// handle is easy to grab without the disc itself dominating the corner of a small button.
+private val HANDLE_HIT_SIZE = 32.dp
+private val HANDLE_VISUAL_SIZE = 12.dp
+
+// Soft drop shadow rendered for the selection outline. Uniform direction (purely below)
+// and Gaussian falloff. Android's built-in Modifier.shadow uses the View elevation
+// system, whose simulated light source position varies with where the View sits on the
+// screen — so the same shape would render visibly different shadows depending on which
+// button the user selected. Stamping the shadow with a BlurMaskFilter gives us a
+// position-independent, predictable result.
+private val SELECTION_SHADOW_BLUR = 10.dp
+private val SELECTION_SHADOW_OFFSET_Y = 3.dp
+private val SELECTION_SHADOW_COLOR = Color.Black.copy(alpha = 0.32f)
+
+private val SELECTION_OUTLINE_STROKE = 2.dp
+
+/**
+ * Draws the selection outline as four straight line segments running corner-to-corner.
+ * Each line gets a soft Gaussian shadow (via [android.graphics.BlurMaskFilter]) drawn
+ * BEFORE the line itself, so the shadow falls on both sides of the line — the bracket
+ * reads as a thin element floating slightly above the button face with an even overhead
+ * light, instead of as a hard rectangle pasted on top.
+ *
+ * The corner discs are drawn separately by the handle composables and get their own
+ * matching per-circle shadow via [circleDropShadow].
+ */
+private fun Modifier.selectionOutline(
+    color: Color,
+    strokeWidth: Dp = SELECTION_OUTLINE_STROKE,
+): Modifier = this.drawBehind {
+    val strokePx = strokeWidth.toPx()
+    val w = size.width
+    val h = size.height
+    val blurPx = SELECTION_SHADOW_BLUR.toPx()
+    val offsetYPx = SELECTION_SHADOW_OFFSET_Y.toPx()
+
+    val shadowPaint = android.graphics.Paint().apply {
+        this.color = SELECTION_SHADOW_COLOR.toArgb()
+        // NORMAL blur fuzzes both sides of the stroke — the shadow is visible on both
+        // sides of each thin line, like a real overhead light striking a floating wire.
+        maskFilter = android.graphics.BlurMaskFilter(blurPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        isAntiAlias = true
+        style = android.graphics.Paint.Style.STROKE
+        this.strokeWidth = strokePx
+        strokeCap = android.graphics.Paint.Cap.BUTT
+    }
+
+    drawIntoCanvas { canvas ->
+        val nc = canvas.nativeCanvas
+        // top
+        nc.drawLine(0f, offsetYPx, w, offsetYPx, shadowPaint)
+        // bottom
+        nc.drawLine(0f, h + offsetYPx, w, h + offsetYPx, shadowPaint)
+        // left
+        nc.drawLine(0f, offsetYPx, 0f, h + offsetYPx, shadowPaint)
+        // right
+        nc.drawLine(w, offsetYPx, w, h + offsetYPx, shadowPaint)
+    }
+
+    // Foreground lines (Compose's anti-aliased drawLine).
+    drawLine(color, Offset(0f, 0f), Offset(w, 0f), strokePx)
+    drawLine(color, Offset(0f, h), Offset(w, h), strokePx)
+    drawLine(color, Offset(0f, 0f), Offset(0f, h), strokePx)
+    drawLine(color, Offset(w, 0f), Offset(w, h), strokePx)
+}
+
+/**
+ * Draws a soft circular drop shadow behind a disc, matching the visual style of
+ * [selectionOutline]'s per-line shadows. Use on the corner handle discs.
+ */
+private fun Modifier.circleDropShadow(
+    color: Color = SELECTION_SHADOW_COLOR,
+    blurRadius: Dp = SELECTION_SHADOW_BLUR,
+    offsetY: Dp = SELECTION_SHADOW_OFFSET_Y,
+): Modifier = this.drawBehind {
+    val blurPx = blurRadius.toPx()
+    val offsetYPx = offsetY.toPx()
+    val radiusPx = size.minDimension / 2f
+    val paint = android.graphics.Paint().apply {
+        this.color = color.toArgb()
+        maskFilter = android.graphics.BlurMaskFilter(blurPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        isAntiAlias = true
+    }
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawCircle(
+            size.width / 2f,
+            size.height / 2f + offsetYPx,
+            radiusPx,
+            paint,
+        )
+    }
+}
+
+/**
+ * Draws a soft, blurred drop shadow behind the content using [android.graphics.BlurMaskFilter].
+ * The shadow is a rounded rect of the same size as the content, offset by [offsetY] (positive
+ * = below, simulating an overhead light source) and blurred by [blurRadius].
+ *
+ * Necessary because [Modifier.shadow] uses Android elevation, whose light source position
+ * depends on the View's location on the screen — that produces inconsistent shadow
+ * direction across multiple identical elements at different positions.
+ */
+// internal: shared with the main menu's separated sections (ui/component/menu). Keep the
+// BlurMaskFilter shadow centralized here per the drop-shadow doctrine — don't re-roll it.
+internal fun Modifier.softDropShadow(
+    cornerRadius: Dp,
+    blurRadius: Dp = SELECTION_SHADOW_BLUR,
+    offsetY: Dp = SELECTION_SHADOW_OFFSET_Y,
+    color: Color = SELECTION_SHADOW_COLOR,
+): Modifier = this.drawBehind {
+    val blurPx = blurRadius.toPx()
+    val offsetYPx = offsetY.toPx()
+    val cornerPx = cornerRadius.toPx()
+    val paint = android.graphics.Paint().apply {
+        this.color = color.toArgb()
+        // OUTER blur draws ONLY outside the shape, with the interior fully transparent.
+        // NORMAL would blur both sides of the edge, leaving a haze across the rect's
+        // interior (and thus across the selected button's face).
+        maskFilter = android.graphics.BlurMaskFilter(blurPx, android.graphics.BlurMaskFilter.Blur.OUTER)
+        isAntiAlias = true
+    }
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawRoundRect(
+            0f, offsetYPx,
+            size.width, size.height + offsetYPx,
+            cornerPx, cornerPx,
+            paint,
+        )
+    }
+}
+
+/**
+ * Layered visual surface for one button. Layers, bottom-up:
+ *  1. Drop shadow (when shadow slot enabled).
+ *  2. Bevel — fills the full rounded shape with the bevel color.
+ *  3. Surface — clipped to a rounded-top / flat-bottom shape, inset above the bevel
+ *     so the bevel band peeks out at the bottom. Fills with the fill color when fill
+ *     is enabled. The outline (when enabled) and the selection ring stroke just this
+ *     surface, so the stroke encompasses only the surface, not surface+bevel.
+ *  4. Content — placed inside the surface, so labels/icons center on the surface and
+ *     end up shifted up by half the bevel height when bevel is enabled.
+ *
+ * [modifier] applies to the outer (shadow + clip) box; pass [graphicsLayer] / size /
+ * offset here. [surfaceModifier] applies to the inner clipped surface box; pass
+ * gesture modifiers (combinedClickable, pointerInput) here so ripples + hit-testing
+ * stay inside the visible surface.
+ */
+@Composable
+private fun KeyButtonShape(
+    button: GridButton,
+    keyboardThemeColor: Color,
+    modifier: Modifier = Modifier,
+    surfaceModifier: Modifier = Modifier,
+    isPressed: Boolean = false,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+) {
+    val resolved = resolveAutoColors(button, keyboardThemeColor)
+    // Surface uses the SAME fully-rounded shape as the outer button when bevel is enabled.
+    // The surface sits at the top of the outer-clipped box with bottom-padding equal to
+    // BEVEL_HEIGHT, so the bevel (painted by the outer Box's background) shows in two
+    // places: the bottom band (with rounded outer-bottom corners) AND the surface's
+    // rounded bottom-corner cutouts (with the same radius). Both pairs of bevel corners
+    // are cut-off arcs of identical radius — visually the bevel "wraps" the surface's
+    // bottom curve.
+    val outerShape: Shape = RoundedCornerShape(BUTTON_CORNER)
+
+    // When motion+bevel are both on AND the button is pressed, translate the surface
+    // (and its content) downward inside the outer clip. The surface keeps its idle
+    // height — only its position shifts — so the label/icon visibly descend with the
+    // surface, and the bottom bevel band shrinks because the surface bottom slides
+    // toward the outer bottom. A thin sliver of bevel reveals above the surface, which
+    // reads as the housing rim around a button pushed into its socket.
+    //
+    // Press depth = 80% of BEVEL_HEIGHT so the remaining bottom band is ~20% (matches
+    // the prior collapse magnitude). Short tween keeps the press feel snappy — a
+    // default spring overshoots the brief window between finger-down and finger-up on
+    // quick taps and reads as laggy.
+    val motionActive = resolved.animationEnabled && resolved.animationMotionEnabled && resolved.bevelEnabled
+    val pressDepth by animateDpAsState(
+        targetValue = if (motionActive && isPressed) BEVEL_HEIGHT * 0.8f else 0.dp,
+        animationSpec = tween(durationMillis = 60),
+        label = "pressDepth",
+    )
+
+    Box(modifier = modifier) {
+        // Mask Box: shadow + outer clip + click handling. NO background here — the
+        // bevel paint lives one level deeper so it can translate down with the rest
+        // of the render during a press while this clip stays fixed (the "area mask"
+        // the press animation slides the button inside of).
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (resolved.shadowEnabled) Modifier.softDropShadow(
+                        cornerRadius = BUTTON_CORNER,
+                        blurRadius = BUTTON_SHADOW_BLUR,
+                        offsetY = BUTTON_SHADOW_OFFSET_Y,
+                        color = resolved.shadow,
+                    ) else Modifier
+                )
+                .clip(outerShape)
+                .then(surfaceModifier),
+        ) {
+            // Moving stack: bevel band + surface + content as a single unit. Offset
+            // downward by pressDepth while pressed. Anything that slides past the
+            // fixed mask above gets clipped at the bottom (which is what makes the
+            // visible bevel band shrink), and the area uncovered at the top reveals
+            // whatever sits behind the button (the keyboard surface), reading as
+            // the button sinking into its socket. All layers below — fill, outline,
+            // press overlay, content — translate together, so the label/icon stay
+            // anchored to the surface they sit on.
+            //
+            // Self-clip to outerShape AFTER the offset so the stack carries its own
+            // rounded silhouette: without this the bevel would draw as a rectangle
+            // and only round by accident where it overlaps the outer mask. When the
+            // stack slides down, its rectangular top edge would appear below the
+            // mask's curved top corners and render as harsh right angles.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset(y = pressDepth)
+                    .clip(outerShape)
+                    .then(if (resolved.bevelEnabled) Modifier.background(resolved.bevel) else Modifier),
+            ) {
+                // Surface: fully rounded so the bottom corners expose bevel "wings"
+                // that wrap the surface. Padding bottom = constant BEVEL_HEIGHT.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (resolved.bevelEnabled) Modifier.padding(bottom = BEVEL_HEIGHT) else Modifier)
+                        .clip(outerShape)
+                        .then(if (resolved.fillEnabled) Modifier.background(resolved.fill) else Modifier)
+                        .then(
+                            if (resolved.outlineEnabled) Modifier.border(1.dp, resolved.outline, outerShape)
+                            else Modifier
+                        ),
+                ) {
+                    // Press-state overlay. Inside the surface clip so it covers
+                    // fill + outline but not the bevel band, per spec. Beneath the
+                    // content callback so labels/icons remain readable.
+                    if (resolved.animationEnabled && isPressed) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(resolved.animation),
+                        )
+                    }
+                    content()
+                }
+            }
+        }
+
+        // Selection ring lives outside this composable now (rendered separately in the
+        // per-button grid loop), so it can use SMOOTH (un-snapped) bounds during a resize
+        // while the button itself keeps its gridded preview.
+    }
+}
+
+// BEVEL_HEIGHT >= BUTTON_CORNER keeps the bevel band visually grounded — below that,
+// the band lives entirely inside the outer bottom-corner curve and pinches at the
+// midline. Surface and outer share the corner radius so the bevel's top "wings"
+// (revealed by the surface's rounded bottom corners) match the bevel's bottom-corner
+// arcs (clipped by the outer shape) — both radius BUTTON_CORNER, same direction.
+// BEVEL_HEIGHT is set at the floor (== BUTTON_CORNER) to keep the bevel subtle.
+private val BUTTON_CORNER = 8.dp
+private val BEVEL_HEIGHT = 8.dp
+// Button drop shadow: subtler than the selection-outline shadow because keyboards have
+// many buttons and a heavy shadow on each would read as noisy.
+private val BUTTON_SHADOW_BLUR = 6.dp
+private val BUTTON_SHADOW_OFFSET_Y = 2.dp
+
+// Keyboard-scale equivalents for [KeyboardSurface]. Larger than the button constants
+// because the surface is the full grid area; subtle button-scale shadows/bevels would
+// disappear at this size.
+private val KEYBOARD_CORNER = 16.dp
+private val KEYBOARD_BEVEL_HEIGHT = 16.dp
+private val KEYBOARD_SHADOW_BLUR = 18.dp
+private val KEYBOARD_SHADOW_OFFSET_Y = 6.dp
+
+/**
+ * Layered visual surface for the keyboard's outer container. Mirrors [KeyButtonShape]
+ * one level up: shadow → bevel → fill+outline → content. The content is the [KeyGrid].
+ * All four slots are independently toggleable; with defaults (fill on+auto, others off)
+ * the surface paints exactly the M3 theme surface — matching pre-refactor visuals.
+ *
+ * The themeFallback parameter is the color used when fill is in auto mode; pass
+ * `MaterialTheme.colorScheme.surface` to match the bottom-screen background.
+ */
+@Composable
+internal fun KeyboardSurface(
+    layout: GridLayout,
+    themeFallback: Color,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+) {
+    val resolved = resolveAutoLayoutColors(layout, themeFallback)
+    val outerShape: Shape = RoundedCornerShape(KEYBOARD_CORNER)
+
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (resolved.shadowEnabled) Modifier.softDropShadow(
+                        cornerRadius = KEYBOARD_CORNER,
+                        blurRadius = KEYBOARD_SHADOW_BLUR,
+                        offsetY = KEYBOARD_SHADOW_OFFSET_Y,
+                        color = resolved.shadow,
+                    ) else Modifier
+                )
+                .clip(outerShape)
+                .then(if (resolved.bevelEnabled) Modifier.background(resolved.bevel) else Modifier),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (resolved.bevelEnabled) Modifier.padding(bottom = KEYBOARD_BEVEL_HEIGHT) else Modifier)
+                    .clip(outerShape)
+                    .then(if (resolved.fillEnabled) Modifier.background(resolved.fill) else Modifier)
+                    .then(
+                        if (resolved.outlineEnabled) Modifier.border(1.dp, resolved.outline, outerShape)
+                        else Modifier
+                    ),
+                content = content,
+            )
+        }
+    }
+}
+
+/**
+ * Renders a button's nine drawable regions. CENTER falls back to [GridButton.label]
+ * when no explicit CENTER region is set, so a freshly-created button still shows its
+ * canonical name. Each region's label falls back to the onTap target string when the
+ * region exists but its label is null.
+ */
+@Composable
+private fun ButtonContent(button: GridButton, modifier: Modifier = Modifier) {
+    val onTapPreview = remember(button.onTap, button.label) {
+        when (val t = button.onTapTarget) {
+            is RemapTarget.Unbound  -> button.label
+            is RemapTarget.Gamepad  -> t.button
+            is RemapTarget.Keyboard -> t.code
+            is RemapTarget.Mouse    -> t.code
+        }
+    }
+    Box(modifier = modifier.padding(2.dp)) {
+        RegionPosition.values().forEach { pos ->
+            val region = button.regions[pos.name]
+                ?: if (pos == RegionPosition.CENTER && button.label.isNotEmpty()) {
+                    ButtonRegion(label = button.label, sizeSp = 11f)
+                } else null
+            if (region != null) {
+                RegionView(
+                    region = region,
+                    fallbackLabel = onTapPreview,
+                    modifier = Modifier.align(pos.alignment()),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RegionView(
+    region: ButtonRegion,
+    fallbackLabel: String,
+    modifier: Modifier = Modifier,
+) {
+    val text = region.label ?: fallbackLabel
+    val labelColor = region.labelColorArgb?.let { Color(it) } ?: Color.Unspecified
+    // Icon's `tint = Color.Unspecified` means "draw the source asset's intrinsic colors"
+    // (typically black for Material vector icons), unlike Text which falls back to
+    // LocalContentColor. Resolve the inheritance ourselves so an unset iconColorArgb
+    // tracks the label color instead of rendering as a flat black sprite.
+    val iconColor = region.iconColorArgb?.let { Color(it) } ?: LocalContentColor.current
+    val iconVec = MappoIcons.resolve(region.icon)
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        if (iconVec != null) {
+            Icon(
+                iconVec,
+                contentDescription = null,
+                tint = iconColor,
+                modifier = Modifier.size((region.sizeSp * 1.2f).dp),
+            )
+        }
+        if (text.isNotEmpty()) {
+            Text(
+                text = text,
+                fontSize = region.sizeSp.sp,
+                lineHeight = (region.sizeSp + 2f).sp,
+                color = labelColor,
+                maxLines = 2,
+                overflow = TextOverflow.Clip,
+            )
+        }
+    }
+}
+
+private fun RegionPosition.alignment(): Alignment = when (this) {
+    RegionPosition.CENTER        -> Alignment.Center
+    RegionPosition.TOP_LEFT      -> Alignment.TopStart
+    RegionPosition.TOP_CENTER    -> Alignment.TopCenter
+    RegionPosition.TOP_RIGHT     -> Alignment.TopEnd
+    RegionPosition.CENTER_LEFT   -> Alignment.CenterStart
+    RegionPosition.CENTER_RIGHT  -> Alignment.CenterEnd
+    RegionPosition.BOTTOM_LEFT   -> Alignment.BottomStart
+    RegionPosition.BOTTOM_CENTER -> Alignment.BottomCenter
+    RegionPosition.BOTTOM_RIGHT  -> Alignment.BottomEnd
+}
+
+@Composable
+internal fun BottomBar(
+    remapEnabled: Boolean,
+    onToggleRemap: () -> Unit,
+    onLeftAction: () -> Unit,
+    leftActionLabel: String = "Quit",
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(
+            onClick = onLeftAction,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+            modifier = Modifier.height(40.dp)
+        ) {
+            Text(leftActionLabel, style = MaterialTheme.typography.labelLarge)
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        Icon(
+            Icons.Default.SportsEsports,
+            contentDescription = if (remapEnabled) "Remapping enabled" else "Remapping disabled",
+            modifier = Modifier.size(20.dp),
+            tint = if (remapEnabled) MaterialTheme.colorScheme.primary
+                   else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Switch(
+            checked = remapEnabled,
+            onCheckedChange = { onToggleRemap() },
+            modifier = Modifier.padding(end = 4.dp)
+        )
+    }
+}
+

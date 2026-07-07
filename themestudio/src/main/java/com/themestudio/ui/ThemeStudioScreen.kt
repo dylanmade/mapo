@@ -93,7 +93,7 @@ private enum class FontFamilyKind(val title: String) {
  * ```
  * ThemeStudioScreen(
  *     onClose = { ... },
- *     theme = { content -> MapoTheme { content() } },
+ *     theme = { content -> MappoTheme { content() } },
  * )
  * ```
  */
@@ -127,7 +127,7 @@ fun ThemeStudioScreen(
     val controller = LocalThemeStudioController.current
     val overrides = controller.overrides
 
-    // Default to dark since that's the only mode Mapo currently uses; the
+    // Default to dark since that's the only mode Mappo currently uses; the
     // segmented button below still lets the user flip to light for previewing.
     var editingDark by remember { mutableStateOf(true) }
     var tabIndex by remember { mutableIntStateOf(0) }

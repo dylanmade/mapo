@@ -1,4 +1,4 @@
-# Mapo - Project Context
+# Mappo - Project Context
 
 ## Overview
 Android input utility app for Android-based gaming devices. **Primary target: any single-screen
@@ -6,7 +6,7 @@ Android device** — the design intent is virtual keyboards overlaid on the main
 game runs "underneath" (transparent overlay over the foregrounded game). The AYN Thor's dual-screen
 form factor is now a **secondary** use case: the bottom screen is bonus real estate for virtual
 keyboards, but the core architecture targets the single-screen overlay pattern first.
-Background remapping works even when Mapo is not visible on any screen.
+Background remapping works even when Mappo is not visible on any screen.
 
 ## Core Features
 
@@ -14,7 +14,7 @@ Background remapping works even when Mapo is not visible on any screen.
 - Maps physical button inputs to any gamepad/keyboard/mouse input at Android OS level
 - Example: gamepad A -> keyboard ENTER, or any cross-type mapping
 - Works in background (no UI required)
-- **Digital remap** (button → key/button) works on any Mapo install; no setup beyond
+- **Digital remap** (button → key/button) works on any Mappo install; no setup beyond
   accessibility + overlay permissions.
 - **Analog modes** (Trigger Soft Pull, Mouse Joystick, Joystick Camera, Dpad-on-stick)
   require Shizuku — they read raw `/dev/input/event*` via a UID-2000 (shell) UserService
@@ -34,7 +34,7 @@ Background remapping works even when Mapo is not visible on any screen.
 - **Run mode** renders inside a system overlay (`TYPE_APPLICATION_OVERLAY`),
   activated via a Quick Settings tile or the in-app drawer toggle. The overlay
   is `FLAG_NOT_FOCUSABLE` so gamepad input flows past it to the foreground game.
-- **Edit / configure mode** lives inside the Mapo activity (`MainActivity` →
+- **Edit / configure mode** lives inside the Mappo activity (`MainActivity` →
   `KeyboardHost(mode = Activity, ...)`). Same composable as the overlay, with
   edit affordances enabled.
 

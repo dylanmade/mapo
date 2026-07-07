@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">mapo</string>
-    <string name="accessibility_service_label">Mapo</string>
-    <string name="toolbar_tile_label">Mapo toolbar</string>
+    <string name="app_name">mappo</string>
+    <string name="accessibility_service_label">Mappo</string>
+    <string name="toolbar_tile_label">Mappo toolbar</string>
     <string name="accessibility_service_description">Injects keyboard and mouse input events for PC games running via FEX emulation on the secondary screen.</string>
 
     <string name="permissions_required_title">Permissions Required</string>
-    <string name="permissions_required_intro">Mapo needs the following permissions to function:</string>
+    <string name="permissions_required_intro">Mappo needs the following permissions to function:</string>
     <string name="permission_accessibility_label">Accessibility</string>
     <string name="permission_accessibility_description">Required to remap physical buttons and inject input events.</string>
     <string name="permission_overlay_label">Display over other apps</string>
-    <string name="permission_overlay_description">Required to show profile prompts on the active screen instead of Mapo\'s screen.</string>
+    <string name="permission_overlay_description">Required to show profile prompts on the active screen instead of Mappo\'s screen.</string>
     <string name="permission_grant_button">Open Settings</string>
     <string name="permission_granted_indicator">Granted</string>
 
@@ -141,14 +141,14 @@
 
     <!-- Shizuku Setup screen. -->
     <string name="shizuku_screen_title">Shizuku</string>
-    <string name="shizuku_intro">Shizuku is required for Mapo\'s analog input modes (stick → mouse, soft trigger pulls, etc.). Digital remap (gamepad button → keyboard) works without Shizuku.</string>
+    <string name="shizuku_intro">Shizuku is required for Mappo\'s analog input modes (stick → mouse, soft trigger pulls, etc.). Digital remap (gamepad button → keyboard) works without Shizuku.</string>
     <string name="shizuku_state_not_installed">Shizuku is not installed.</string>
     <string name="shizuku_state_installed_not_running">Shizuku is installed, but the service is not running.</string>
-    <string name="shizuku_state_running_not_granted">Shizuku is running. Mapo needs your permission.</string>
+    <string name="shizuku_state_running_not_granted">Shizuku is running. Mappo needs your permission.</string>
     <string name="shizuku_state_granted">Shizuku is ready.</string>
     <string name="shizuku_install_button">Install Shizuku</string>
     <string name="shizuku_open_app_button">Open Shizuku app</string>
-    <string name="shizuku_grant_button">Grant Mapo permission</string>
+    <string name="shizuku_grant_button">Grant Mappo permission</string>
     <string name="shizuku_back">Back</string>
 
     <!-- Setup screen — checklist + troubleshooting (Brick G). -->
@@ -157,23 +157,23 @@
     <string name="shizuku_setup_step_install_subtitle">Get the Shizuku Manager app from the Play Store or GitHub.</string>
     <string name="shizuku_setup_step_start">Start Shizuku</string>
     <string name="shizuku_setup_step_start_subtitle">Pair Shizuku once via wireless debugging. Re-launch after every reboot.</string>
-    <string name="shizuku_setup_step_grant">Grant Mapo permission</string>
-    <string name="shizuku_setup_step_grant_subtitle">Approve Mapo\'s request inside Shizuku.</string>
+    <string name="shizuku_setup_step_grant">Grant Mappo permission</string>
+    <string name="shizuku_setup_step_grant_subtitle">Approve Mappo\'s request inside Shizuku.</string>
     <string name="shizuku_setup_step_done">Done</string>
     <string name="shizuku_setup_step_pending">Pending</string>
     <string name="shizuku_setup_step_current">Do this next</string>
     <string name="shizuku_setup_troubleshooting_section">Troubleshooting</string>
     <string name="shizuku_setup_troubleshooting_state_changes">Shizuku state takes a moment to refresh after install / pair / grant — pull down to refresh or re-open this screen if it seems stuck.</string>
-    <string name="shizuku_setup_troubleshooting_reboot">Shizuku needs to be re-started after every device reboot (wireless-debugging install) — Mapo will pick it up automatically once running.</string>
-    <string name="shizuku_setup_troubleshooting_digital">If you only use digital remap (gamepad button → keyboard), Shizuku is optional. Mapo will work without it.</string>
+    <string name="shizuku_setup_troubleshooting_reboot">Shizuku needs to be re-started after every device reboot (wireless-debugging install) — Mappo will pick it up automatically once running.</string>
+    <string name="shizuku_setup_troubleshooting_digital">If you only use digital remap (gamepad button → keyboard), Shizuku is optional. Mappo will work without it.</string>
 
     <!-- Shizuku-required dialog (Brick G). Shown on first analog-mode pick while
          Shizuku isn\'t ready. State-aware body copy. -->
     <string name="shizuku_required_dialog_title">Analog modes need Shizuku</string>
-    <string name="shizuku_required_dialog_intro">Mapo uses Shizuku to read gamepad sticks and triggers directly. Without Shizuku, analog modes (Trigger Soft Pull, Joystick → mouse, etc.) can\'t fire.</string>
+    <string name="shizuku_required_dialog_intro">Mappo uses Shizuku to read gamepad sticks and triggers directly. Without Shizuku, analog modes (Trigger Soft Pull, Joystick → mouse, etc.) can\'t fire.</string>
     <string name="shizuku_required_dialog_state_not_installed">You don\'t have Shizuku installed yet. Setup walks you through it — Play Store or GitHub.</string>
     <string name="shizuku_required_dialog_state_installed_not_running">Shizuku is installed but not running. Setup will help you start it (one-time wireless-debugging pair, then re-launch after each boot).</string>
-    <string name="shizuku_required_dialog_state_running_not_granted">Shizuku is running. Mapo just needs your permission — Setup grants it in one tap.</string>
+    <string name="shizuku_required_dialog_state_running_not_granted">Shizuku is running. Mappo just needs your permission — Setup grants it in one tap.</string>
     <string name="shizuku_required_dialog_state_granted">Shizuku is ready — analog modes should just work.</string>
     <string name="shizuku_required_dialog_outro">Your binding will save now and activate automatically as soon as Shizuku is set up.</string>
     <string name="shizuku_required_dialog_cta_set_up">Set up Shizuku</string>
@@ -192,7 +192,7 @@
     <string name="remap_shizuku_unavailable_banner">Analog modes won\'t fire — Shizuku isn\'t connected.</string>
     <string name="remap_shizuku_unavailable_banner_cta">Set up</string>
     <string name="blocklist_screen_title">Blocklist</string>
-    <string name="blocklist_header">Apps Mapo will never prompt you about</string>
+    <string name="blocklist_header">Apps Mappo will never prompt you about</string>
     <string name="blocklist_empty">No apps blocked. When you tap “Never for this app” on a prompt, the app will appear here.</string>
     <string name="blocklist_remove">Remove from blocklist</string>
 

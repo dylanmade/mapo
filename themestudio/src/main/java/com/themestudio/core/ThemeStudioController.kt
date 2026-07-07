@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.Dp
  * [storage] on construction; writes through to [storage] on every mutation.
  *
  * Exposed via [LocalThemeStudioController]. Consumers that just want to
- * *read* the current overrides — like the consumer's `MapoTheme` — observe
+ * *read* the current overrides — like the consumer's `MappoTheme` — observe
  * [overrides] as Compose state. Consumers that want to *mutate* — like the
  * editor — call the setters.
  */

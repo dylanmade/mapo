@@ -2,15 +2,15 @@
 
 ## Context
 
-After the bottom-toolbar redesign, Mapo's "home" is the floating pill (master switch ·
+After the bottom-toolbar redesign, Mappo's "home" is the floating pill (master switch ·
 profile split-button · options) rendered **inside `MainActivity`** — a translucent,
 fullscreen, `singleTask` activity that floats over the foregrounded game. The activity
 also hosts a `NavHost` whose deeper routes (Edit Controls, Edit Overlay, Change Profile,
 Auto-switch, Shizuku Setup, Theme Studio, …) are full-screen destinations in the same
 task. Tapping the backdrop calls `moveTaskToBack`.
 
-This is still an **activity-shaped home**: while it's up, the Mapo window owns focus, so
-it's a modal "I opened Mapo" state, not an always-available control surface layered on the
+This is still an **activity-shaped home**: while it's up, the Mappo window owns focus, so
+it's a modal "I opened Mappo" state, not an always-available control surface layered on the
 game. The single-screen target (`project_target_single_screen_pivot`) wants the inverse —
 the chrome should be a **persistent passthrough overlay** the user can reach mid-game
 without backgrounding it, navigable by **physical gamepad** (no touchscreen assumption),
@@ -49,7 +49,7 @@ perfect for a **transient modal** prompt.
 
 It is **fatal for a persistent toolbar**: a focusable `TYPE_APPLICATION_OVERLAY` window
 takes key-event focus away from the game for the *entire* time it's mounted. The whole
-reason every Mapo overlay window carries `FLAG_NOT_FOCUSABLE` (and why the flag was removed
+reason every Mappo overlay window carries `FLAG_NOT_FOCUSABLE` (and why the flag was removed
 from the activity in `feedback_no_flag_not_focusable_on_activity`) is so unmapped gamepad
 input flows to the game. A persistent home chrome cannot own focus.
 
@@ -153,14 +153,14 @@ UI reacts. We're adding an index + a target list + an activation channel to the 
 
 ## Resolved product decisions (2026-06-17)
 
-1. **Launcher-icon behavior → shows the overlay toolbar.** Tapping the Mapo icon reveals the
+1. **Launcher-icon behavior → shows the overlay toolbar.** Tapping the Mappo icon reveals the
    passthrough toolbar over the current foreground app (and routes to permission setup if
    overlay/accessibility perms are missing). It no longer opens a modal activity home. This
    is the same reveal path as the QS tile (decision 3). *Implemented at Brick 6 (the cutover),
    not earlier — it's irreversible and must wait until the overlay is gamepad-navigable.*
 2. **Toolbar-nav entry trigger → long-press Select + A (chord), later configurable.** Default
    is the chord *hold Select, then A*. This is authored as a normal binding so it later flows
-   through Mapo's standard activator configuration (regular / long-press / etc., per
+   through Mappo's standard activator configuration (regular / long-press / etc., per
    `reference_steam_input_activators`) and becomes user-rebindable with no special-case code.
    For the MVP the chord is the seeded default; the config UI is a follow-up, but the binding
    shape is chosen now so we don't hardcode a one-off.
@@ -191,12 +191,12 @@ overlay's own copy). Coexists with the in-activity toolbar; nothing deleted. **V
 device:** touch works, out-of-bounds passthrough works, game keeps gamepad input while up.
 
 ### Brick 2 — Config-host deep-route launching (additive) — ✅ LANDED (awaiting device verify)
-`MainActivity` takes `EXTRA_ROUTE` (a `MapoRoute` string), consumed in `onCreate` +
+`MainActivity` takes `EXTRA_ROUTE` (a `MappoRoute` string), consumed in `onCreate` +
 `onNewIntent` (singleTask) into `pendingRoute`/`routeNonce` snapshot state; `MainScreen` gained
 `deepLinkRoute`/`deepLinkNonce` params and a `LaunchedEffect(deepLinkNonce)` that navigates
 there. Keyed on the **nonce, not the route**, so re-tapping the same destination after backing
 out re-navigates (a plain String wouldn't re-fire). `startDestination` stays MAIN, so Back from
-a deep screen returns to the Mapo home. `ToolbarOverlayManager.launchRoute(route)` puts the
+a deep screen returns to the Mappo home. `ToolbarOverlayManager.launchRoute(route)` puts the
 extra; every deep-screen callback fires its exact route. **Purely additive** — in-activity home,
 MAIN route, and launcher behavior untouched. Launcher repoint + MAIN-home removal remain the
 **Brick 6 cutover** (must wait until the overlay is gamepad-navigable). **Verify on device:**
@@ -228,7 +228,7 @@ publishes targets + collects nav state + bumps an activate tick; `MainBottomTool
   menu. Both resolved when Brick 4 makes menu nav service-driven.
 
 **Verify on device:** with the dev overlay up, hold **Select + A** → selection ring appears;
-**DPAD L/R** walks switch→split→options; **A on the switch** toggles Mapo on/off (toolbar stays
+**DPAD L/R** walks switch→split→options; **A on the switch** toggles Mappo on/off (toolbar stays
 up); **A on split/options** opens that menu; **B** exits (ring gone, game DPAD restored). Confirm
 the game keeps gamepad input when *not* in nav mode, and DPAD doesn't leak to the game *during* nav.
 
@@ -292,7 +292,7 @@ not just a static ring). Sentence-case all strings; M3 surface roles per
 ### Brick 6 — Retire the in-activity home
 Remove the home route, backdrop tap-to-background, and dead drawer/menu code; the launcher
 icon now shows the overlay (decision 1). Pre-release, so destructive removal is fine
-(`project_mapo_pre_release`); flag back-compat reinstatement as release approaches.
+(`project_mappo_pre_release`); flag back-compat reinstatement as release approaches.
 
 ---
 

@@ -116,7 +116,7 @@ esac
 
 
 
-# Mapo customization: on macOS, fall back to Android Studio's bundled JBR if no
+# Mappo customization: on macOS, fall back to Android Studio's bundled JBR if no
 # JAVA_HOME is set and no working `java` is on PATH. Lets `./gradlew` work
 # standalone without a separate JDK install. Note that /usr/bin/java is a stub
 # on macOS that prints an install prompt instead of running, so we test by

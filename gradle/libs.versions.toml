@@ -78,11 +78,11 @@ kotlinx-collections-immutable = { group = "org.jetbrains.kotlinx", name = "kotli
 # (required for the AYN Thor's bottom screen).
 hidden-api-bypass = { group = "org.lsposed.hiddenapibypass", name = "hiddenapibypass", version.ref = "hiddenApiBypass" }
 
-# Shizuku (rikka.app). Optional dependency that powers Mapo's analog input modes:
+# Shizuku (rikka.app). Optional dependency that powers Mappo's analog input modes:
 # the UserService runs in Shizuku's shell-uid context, reads `/dev/input/event*`
 # directly (no focused-overlay required for motion capture), and injects key events
 # via `IInputManager.injectInputEvent` from shell-context (bypasses focus routing).
-# Without Shizuku, Mapo's digital remap continues to work via the existing reflection
+# Without Shizuku, Mappo's digital remap continues to work via the existing reflection
 # inject path — analog modes are simply gated.
 shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
 shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }

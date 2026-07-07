@@ -39,7 +39,7 @@ val LocalThemeStudioVariantOverride = compositionLocalOf<Boolean?> { null }
  * ```
  * setContent {
  *     ThemeStudioProvider(storage = SharedPrefsThemeOverridesStorage(this)) {
- *         MapoTheme { /* app content */ }
+ *         MappoTheme { /* app content */ }
  *     }
  * }
  * ```

@@ -3,10 +3,10 @@
     <!-- Dark-mode activity theme. Mirrors values/themes.xml but with a dark system parent so
          the activity windowBackground is dark; prevents white from bleeding through during
          Compose transitions or partial-transparency moments while in dark mode. -->
-    <style name="Theme.Mapo" parent="android:Theme.Material.NoActionBar" />
+    <style name="Theme.Mappo" parent="android:Theme.Material.NoActionBar" />
 
     <!-- Translucent variant for MainActivity (dark). See values/themes.xml for rationale. -->
-    <style name="Theme.Mapo.Translucent" parent="Theme.Mapo">
+    <style name="Theme.Mappo.Translucent" parent="Theme.Mappo">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowContentOverlay">@null</item>

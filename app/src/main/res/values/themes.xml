@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Light-mode activity theme. The Compose layer (MapoTheme) paints over this with the
+    <!-- Light-mode activity theme. The Compose layer (MappoTheme) paints over this with the
          M3 surfaceContainerLowest, so this only shows during transitions / partial-transparency
          moments. Dark variant lives in values-night/themes.xml. -->
-    <style name="Theme.Mapo" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Mappo" parent="android:Theme.Material.Light.NoActionBar" />
 
     <!-- Translucent variant for MainActivity: the home is the drawer floating over whatever
          app is underneath, so the window must let it show through. Secondary routes paint
          opaque Scaffolds over this, so only the transparent MAIN route reveals the app behind. -->
-    <style name="Theme.Mapo.Translucent" parent="Theme.Mapo">
+    <style name="Theme.Mappo.Translucent" parent="Theme.Mappo">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowContentOverlay">@null</item>
@@ -19,7 +19,7 @@
          WindowManager window). Conventional dropdown motion: scale-from-top-start + fade.
          Set via WindowManager.LayoutParams.windowAnimations; the exit plays only when the
          window is removed with removeView (not removeViewImmediate). -->
-    <style name="Animation.Mapo.Dropdown" parent="">
+    <style name="Animation.Mappo.Dropdown" parent="">
         <item name="android:windowEnterAnimation">@anim/dropdown_enter</item>
         <item name="android:windowExitAnimation">@anim/dropdown_exit</item>
     </style>

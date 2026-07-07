@@ -1,13 +1,13 @@
-// JNI ops on /dev/input/event* devices Mapo's UserService reads. The
+// JNI ops on /dev/input/event* devices Mappo's UserService reads. The
 // reader / event-parsing path itself is all Kotlin via Os.read / Os.open;
 // this file is the home for ioctl operations the Kotlin layer can't do
 // directly (android.system.Os doesn't expose arbitrary ioctls).
 //
 // Currently: EVIOCGRAB. Linux's "take exclusive access of an evdev device"
-// ioctl. While Mapo holds the grab, no other process — including Android's
-// system InputReader — receives events from the device. This is how Mapo
+// ioctl. While Mappo holds the grab, no other process — including Android's
+// system InputReader — receives events from the device. This is how Mappo
 // stops the game from seeing the physical controller's events directly,
-// so Mapo's virtual gamepad becomes the only path that reaches the game
+// so Mappo's virtual gamepad becomes the only path that reaches the game
 // (avoiding the dual-controller race the user reported on AYN Thor
 // 2026-06-01).
 
@@ -19,7 +19,7 @@
 
 #include <android/log.h>
 
-#define TAG "MapoEvdev"
+#define TAG "MappoEvdev"
 
 /**
  * Acquire (grab=1) or release (grab=0) exclusive access to the evdev
@@ -35,7 +35,7 @@
  * fd is a no-op; calling grab(0) on an ungrabbed fd is fine.
  */
 JNIEXPORT jint JNICALL
-Java_com_mapo_shizuku_service_EvdevGrab_nativeGrab(JNIEnv *env, jclass clazz, jint fd, jint grab) {
+Java_com_mappo_shizuku_service_EvdevGrab_nativeGrab(JNIEnv *env, jclass clazz, jint fd, jint grab) {
     (void) env;
     (void) clazz;
     if (ioctl(fd, EVIOCGRAB, (unsigned long) grab) < 0) {

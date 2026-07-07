@@ -16,7 +16,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "mapo"
+rootProject.name = "mappo"
 include(":app")
 include(":themestudio")
 include(":input-shared")

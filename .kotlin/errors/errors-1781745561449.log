@@ -59,7 +59,7 @@ Caused by: java.lang.Exception: IR lowering failed at: RemapControlsScreen.kt
 	at androidx.compose.compiler.plugins.kotlin.ComposeIrGenerationExtension.generate(ComposeIrGenerationExtension.kt:160)
 	at org.jetbrains.kotlin.fir.pipeline.Fir2IrPipeline.applyIrGenerationExtensions(convertToIr.kt:578)
 	... 44 more
-Caused by: java.io.FileNotFoundException: /Users/dylanbperry/projects/mapo/app/build/intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes/com/mapo/data/model/steam/ControllerProfile.class (No such file or directory)
+Caused by: java.io.FileNotFoundException: /Users/dylanbperry/projects/mappo/app/build/intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes/com/mappo/data/model/steam/ControllerProfile.class (No such file or directory)
 	at java.base/java.io.IoOverNioFileSystem.convertNioToIoExceptionInStreams(Unknown Source)
 	at java.base/java.io.IoOverNioFileSystem.initializeStreamsUsingNio0(Unknown Source)
 	at java.base/java.io.IoOverNioFileSystem.initializeStreamUsingNio(Unknown Source)
@@ -300,7 +300,7 @@ Caused by: java.io.FileNotFoundException: /Users/dylanbperry/projects/mapo/app/b
 	at org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid.visitFile(IrElementTransformerVoid.kt:160)
 	at androidx.compose.compiler.plugins.kotlin.lower.ComposerLambdaMemoization.visitFile(ComposerLambdaMemoization.kt:375)
 	... 55 more
-Caused by: java.nio.file.NoSuchFileException: /Users/dylanbperry/projects/mapo/app/build/intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes/com/mapo/data/model/steam/ControllerProfile.class
+Caused by: java.nio.file.NoSuchFileException: /Users/dylanbperry/projects/mappo/app/build/intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes/com/mappo/data/model/steam/ControllerProfile.class
 	at java.base/sun.nio.fs.UnixException.translateToIOException(Unknown Source)
 	at java.base/sun.nio.fs.UnixException.rethrowAsIOException(Unknown Source)
 	at java.base/sun.nio.fs.UnixException.rethrowAsIOException(Unknown Source)

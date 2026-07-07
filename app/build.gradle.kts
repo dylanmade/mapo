@@ -6,16 +6,16 @@ plugins {
 }
 
 android {
-    namespace = "com.mapo"
+    namespace = "com.mappo"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.mapo"
+        applicationId = "com.mappo"
         minSdk = 26
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
-        testInstrumentationRunner = "com.mapo.HiltTestRunner"
+        testInstrumentationRunner = "com.mappo.HiltTestRunner"
     }
 
     buildTypes {
@@ -75,7 +75,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    // MaterialKolor — seed-based M3 expressive color generation (SPEC_2025). Feeds MapoTheme's
+    // MaterialKolor — seed-based M3 expressive color generation (SPEC_2025). Feeds MappoTheme's
     // base color scheme from a seed instead of a hand-authored palette.
     implementation(libs.materialkolor)
     implementation(libs.androidx.compose.material.icons.extended)
@@ -99,11 +99,11 @@ dependencies {
 
     // Hidden API bypass — required so InputAccessibilityService can route injected
     // KeyEvents to a non-default display (Thor's bottom screen). See onCreate in
-    // MapoApplication for the exemption call.
+    // MappoApplication for the exemption call.
     implementation(libs.hidden.api.bypass)
 
     // Shizuku (Phase 6 analog modes). The `provider` artifact ships a ContentProvider
-    // that publishes Mapo's binder to the Shizuku Manager app for permission routing;
+    // that publishes Mappo's binder to the Shizuku Manager app for permission routing;
     // declared in AndroidManifest.xml. The `api` artifact is the public surface
     // (state listeners, permission requests, UserService binding helpers). All
     // Shizuku.* references go through `service/shizuku/ShizukuFacade.kt` so missing

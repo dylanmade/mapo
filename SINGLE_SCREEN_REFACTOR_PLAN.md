@@ -2,9 +2,9 @@
 
 ## Context
 
-Mapo today is architected around the AYN Thor's dual-screen form factor. The virtual-keyboard view lives **inside `MainActivity`'s window** (not as a system overlay), sized to fill the bottom screen; `FLAG_NOT_FOCUSABLE` is toggled per-destination so unmapped gamepad inputs flow to the game running on the top screen. This works on Thor; it does not translate to a single-screen Android device, where a full-window keyboard activity would simply obscure the game.
+Mappo today is architected around the AYN Thor's dual-screen form factor. The virtual-keyboard view lives **inside `MainActivity`'s window** (not as a system overlay), sized to fill the bottom screen; `FLAG_NOT_FOCUSABLE` is toggled per-destination so unmapped gamepad inputs flow to the game running on the top screen. This works on Thor; it does not translate to a single-screen Android device, where a full-window keyboard activity would simply obscure the game.
 
-On 2026-05-15 the user redirected Mapo's primary target to **any single-screen Android device**. Thor remains a secondary supported form factor. New model: virtual keyboards render as overlays on top of a foregrounded game, the way production no-root Android remap apps work.
+On 2026-05-15 the user redirected Mappo's primary target to **any single-screen Android device**. Thor remains a secondary supported form factor. New model: virtual keyboards render as overlays on top of a foregrounded game, the way production no-root Android remap apps work.
 
 Prereq for:
 - Phase 6 analog modes (motion capture's focus-routing issues are tied to the same architecture decisions resolved here).
@@ -21,7 +21,7 @@ Mount the virtual keyboard inside a `TYPE_APPLICATION_OVERLAY` window. Activity 
 
 Rejected alternatives:
 - `TYPE_ACCESSIBILITY_OVERLAY` focusable → Phase 6 already proved it breaks system focus globally (IME, back gesture, cursor, app-switcher all malfunction).
-- IME (`InputMethodService`) → Mapo's keyboard isn't a text-input keyboard; can't dispatch mouse / gestures; couples visibility to text-field focus.
+- IME (`InputMethodService`) → Mappo's keyboard isn't a text-input keyboard; can't dispatch mouse / gestures; couples visibility to text-field focus.
 - Game in PiP → can't force PiP on apps we don't own; many games opt out.
 - Multi-window / split-screen → game-dependent; mangles fullscreen render surfaces.
 - Sub-activity / `Presentation` → second activity steals focus from the game.
@@ -30,7 +30,7 @@ The overlay uses `FLAG_NOT_TOUCH_MODAL` + `FLAG_NOT_FOCUSABLE`. In-bounds taps r
 
 (Original plan text claimed `FLAG_NOT_FOCUSABLE` should be omitted "so taps reach Compose." That conflated touch routing with key-event focus — Brick 1 device verification proved the overlay absorbed every gamepad press without `FLAG_NOT_FOCUSABLE`, navigating the overlay instead of the game. Adding the flag fixed the regression; taps continue to work because they were never gated on focus.)
 
-**Activation: Quick Settings tile.** User pulls down the notification shade and taps the Mapo tile to toggle the overlay. Modern Android-native pattern, no physical-button commitment, system-wide reachable. Other activation mechanisms deferred.
+**Activation: Quick Settings tile.** User pulls down the notification shade and taps the Mappo tile to toggle the overlay. Modern Android-native pattern, no physical-button commitment, system-wide reachable. Other activation mechanisms deferred.
 
 ---
 
@@ -46,7 +46,7 @@ These contracts every later brick honors.
 ### Overlay contract
 
 - Overlay mode is **run-only**. No edit affordances, no NavHost, no drawer, no Scaffold.
-- Renders: slim `KeyboardTopBar` (tab selector + "Open Mapo" button to launch the activity) + `KeyboardSurface` + `KeyGrid` + run-mode `BottomBar` (remap toggle + hide-overlay).
+- Renders: slim `KeyboardTopBar` (tab selector + "Open Mappo" button to launch the activity) + `KeyboardSurface` + `KeyGrid` + run-mode `BottomBar` (remap toggle + hide-overlay).
 
 ### Activation
 
@@ -85,8 +85,8 @@ Goal: answer R1 (touch routing on a large `FLAG_NOT_TOUCH_MODAL` overlay) + R2 (
 - Debug-only "Mount POC keyboard overlay" entry temporarily in settings.
 
 **Files (new unless noted):**
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayManager.kt`
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayService.kt`
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayManager.kt`
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayService.kt`
 - `app/src/main/AndroidManifest.xml` (FGS declaration, `FOREGROUND_SERVICE` + typed permission)
 - Temporary debug entry in an existing settings screen
 
@@ -104,35 +104,35 @@ Goal: answer R1 (touch routing on a large `FLAG_NOT_TOUCH_MODAL` overlay) + R2 (
 - **`POST_NOTIFICATIONS` permission added** alongside the two FGS permissions. Android 13+ requires it for the FGS's persistent notification to render — without it the service still runs but the notification is silently dropped, which means no visible indicator that the keyboard overlay's process priority is being held.
 - **Manager mounts the FGS via started-service pattern** (`Context.startForegroundService` + `stopService`), not bound-service. Simpler for Brick 1; Brick 4's QS-tile flow may want bind semantics so the service can also drive the overlay (TileService → service → manager), but that decision is deferred until the tile lands.
 - **`KeyboardOverlayPocContent.kt` is its own file**, not a `private fun` inside the manager. The ViewModel needs to reference it for the debug toggle, and keeping it separate also makes its "Brick 1 placeholder, replaced in Brick 4" status clearer in the file tree.
-- **Drawable added.** Mapo had zero `res/drawable/` files before this brick; the FGS notification requires a small icon, so `ic_keyboard_overlay.xml` was created (vector, 24dp, white fill). The system tints it automatically on the status bar.
+- **Drawable added.** Mappo had zero `res/drawable/` files before this brick; the FGS notification requires a small icon, so `ic_keyboard_overlay.xml` was created (vector, 24dp, white fill). The system tints it automatically on the status bar.
 - **Overlay flag matrix corrected mid-brick to add `FLAG_NOT_FOCUSABLE`.** The original plan text claimed the keyboard surface should omit `FLAG_NOT_FOCUSABLE` "so Compose taps work." Device verification proved this conflated touch routing with key-event focus — without `FLAG_NOT_FOCUSABLE` the overlay absorbed every gamepad button press and the user's controller navigated the overlay's Compose focus tree instead of driving the foreground game. Adding the flag: gamepad input reaches the game, taps inside the overlay still reach Compose (touch is gated by `FLAG_NOT_TOUCHABLE`, which we don't set), back gesture passes through. Final flag set: `FLAG_LAYOUT_IN_SCREEN | FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL`. Plan's "Decision" section corrected with the lesson inline.
-- **`consumeSystemBack` made lifecycle-scoped (originally a Brick 5 cleanup item, pulled in here).** Device verification surfaced that Mapo's accessibility service was swallowing KEYCODE_BACK system-wide — once `consumeSystemBack` was set true (any time the user landed on the Main route with drawer closed), the global accessibility service consumed back everywhere, including in other apps. Pre-existing Thor-first behavior: the original logic assumed Mapo's activity is always foregrounded on Thor's bottom screen. The fix wraps the `setConsumeSystemBack(keyboardViewActive)` call in `repeatOnLifecycle(Lifecycle.State.STARTED)` so the flag clears automatically when Mapo's activity drops below STARTED (backgrounded) and re-evaluates when it returns. Pulled forward from Brick 5 because it actively breaks back-button behavior in other apps as soon as the user opens Mapo even once.
+- **`consumeSystemBack` made lifecycle-scoped (originally a Brick 5 cleanup item, pulled in here).** Device verification surfaced that Mappo's accessibility service was swallowing KEYCODE_BACK system-wide — once `consumeSystemBack` was set true (any time the user landed on the Main route with drawer closed), the global accessibility service consumed back everywhere, including in other apps. Pre-existing Thor-first behavior: the original logic assumed Mappo's activity is always foregrounded on Thor's bottom screen. The fix wraps the `setConsumeSystemBack(keyboardViewActive)` call in `repeatOnLifecycle(Lifecycle.State.STARTED)` so the flag clears automatically when Mappo's activity drops below STARTED (backgrounded) and re-evaluates when it returns. Pulled forward from Brick 5 because it actively breaks back-button behavior in other apps as soon as the user opens Mappo even once.
 
 #### Files actually landed
 
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayManager.kt` (new)
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayService.kt` (new)
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPocContent.kt` (new — Brick 1 only)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayManager.kt` (new)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayService.kt` (new)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayPocContent.kt` (new — Brick 1 only)
 - `app/src/main/res/drawable/ic_keyboard_overlay.xml` (new)
 - `app/src/main/AndroidManifest.xml` (FGS perms + service declaration + property)
-- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` (injection + `togglePocKeyboardOverlay()`)
-- `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` (debug drawer item — Brick 1 only)
-- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (wire callback — Brick 1 only)
-- `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (mock + constructor updates)
+- `app/src/main/java/com/mappo/ui/viewmodel/MainViewModel.kt` (injection + `togglePocKeyboardOverlay()`)
+- `app/src/main/java/com/mappo/ui/screen/ProfileDrawerContent.kt` (debug drawer item — Brick 1 only)
+- `app/src/main/java/com/mappo/ui/screen/MainScreen.kt` (wire callback — Brick 1 only)
+- `app/src/test/java/com/mappo/ui/viewmodel/MainViewModelTest.kt` (mock + constructor updates)
 
 #### Hand-off to device verification
 
 Round 1 (2026-05-17) confirmed:
 - ✅ Taps inside the placeholder grid reach Compose (logcat shows `KeyboardOverlayPoc: tap on slot N`).
 - ✅ Taps outside the grid reach the underlying app.
-- ✅ Overlay survives Mapo's dismissal from recents (R2 satisfied — FGS is doing its job).
+- ✅ Overlay survives Mappo's dismissal from recents (R2 satisfied — FGS is doing its job).
 - ❌ **Regression found:** gamepad input was absorbed by the overlay window, navigating the overlay's focus tree instead of reaching the foreground game. Root cause: missing `FLAG_NOT_FOCUSABLE`. Fixed by adding the flag (see deviations above).
 
 Round 2 (post-fix) — confirmed:
 - ✅ Taps inside the grid still log.
 - ✅ Gamepad input drives the foreground game (not the overlay).
 - ✅ Back-button reaches the foreground app (lifecycle-scoped `consumeSystemBack` fix).
-- ✅ Overlay survives Mapo's dismissal from recents (FGS doing its job).
+- ✅ Overlay survives Mappo's dismissal from recents (FGS doing its job).
 
 Thor multi-display routing (overlay auto-attaching to whichever screen has the foreground app) was deferred to Brick 5. R1, R2, and the back-button regression are resolved.
 
@@ -146,10 +146,10 @@ Goal: answer R3 (ViewModel instancing across activity + overlay) without touchin
 - Tabs exposed as opaque `List<KeyboardTab>` (FC1 seam), not `List<Layout>`.
 
 **Files:**
-- `app/src/main/java/com/mapo/service/keyboard/KeyboardController.kt` (new)
-- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` (delegation, no behavior change)
-- `app/src/test/java/com/mapo/service/keyboard/KeyboardControllerTest.kt` (new, Robolectric)
-- `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (updated)
+- `app/src/main/java/com/mappo/service/keyboard/KeyboardController.kt` (new)
+- `app/src/main/java/com/mappo/ui/viewmodel/MainViewModel.kt` (delegation, no behavior change)
+- `app/src/test/java/com/mappo/service/keyboard/KeyboardControllerTest.kt` (new, Robolectric)
+- `app/src/test/java/com/mappo/ui/viewmodel/MainViewModelTest.kt` (updated)
 
 **Verify:** all existing tests pass; manual smoke (key tap injects, remap toggle works).
 
@@ -166,11 +166,11 @@ Goal: answer R3 (ViewModel instancing across activity + overlay) without touchin
 
 #### Files actually landed
 
-- `app/src/main/java/com/mapo/service/keyboard/KeyboardController.kt` (new)
-- `app/src/main/java/com/mapo/service/keyboard/KeyboardTab.kt` (new — FC1 seam type)
-- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` (delegation, ~30 sites updated)
-- `app/src/test/java/com/mapo/service/keyboard/KeyboardControllerTest.kt` (new, 20 tests)
-- `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (real-controller wiring in setUp + `rebuildSubject`)
+- `app/src/main/java/com/mappo/service/keyboard/KeyboardController.kt` (new)
+- `app/src/main/java/com/mappo/service/keyboard/KeyboardTab.kt` (new — FC1 seam type)
+- `app/src/main/java/com/mappo/ui/viewmodel/MainViewModel.kt` (delegation, ~30 sites updated)
+- `app/src/test/java/com/mappo/service/keyboard/KeyboardControllerTest.kt` (new, 20 tests)
+- `app/src/test/java/com/mappo/ui/viewmodel/MainViewModelTest.kt` (real-controller wiring in setUp + `rebuildSubject`)
 
 ### Brick 3 — Host-agnostic `KeyboardHost` composable — ✅ COMPLETED
 
@@ -178,14 +178,14 @@ Goal: make the keyboard UI mountable from anywhere.
 
 - Extract the keyboard subtree (`KeyboardTopBar` parameterized + `KeyboardSurface` + `KeyGrid` + run-mode `BottomBar`) into a new `KeyboardHost.kt`. Takes a `KeyboardHostState` (thin wrapper around `KeyboardController` exposing StateFlows + handler functions) and a `KeyboardHostMode` (`Activity` or `Overlay`).
 - `Activity` mode: full features, edit affordances visible, edit callbacks navigate via `navController`.
-- `Overlay` mode: run-only, no edit affordances, "Open Mapo" button fires an Intent.
+- `Overlay` mode: run-only, no edit affordances, "Open Mappo" button fires an Intent.
 - `MainScreen` reduced to: `NavHost` + drawer + per-route Scaffolds. Main route mounts `KeyboardHost(mode = Activity, ...)`.
 
 **Files:**
-- `app/src/main/java/com/mapo/ui/screen/keyboard/KeyboardHost.kt` (new)
-- `app/src/main/java/com/mapo/ui/screen/keyboard/KeyboardHostState.kt` (new)
-- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (move sub-composables out)
-- `app/src/test/java/com/mapo/ui/screen/keyboard/KeyboardHostTest.kt` (new, Robolectric Compose)
+- `app/src/main/java/com/mappo/ui/screen/keyboard/KeyboardHost.kt` (new)
+- `app/src/main/java/com/mappo/ui/screen/keyboard/KeyboardHostState.kt` (new)
+- `app/src/main/java/com/mappo/ui/screen/MainScreen.kt` (move sub-composables out)
+- `app/src/test/java/com/mappo/ui/screen/keyboard/KeyboardHostTest.kt` (new, Robolectric Compose)
 
 **Verify:** activity-side behavior identical; existing tests pass (especially `ComposeSmokeTest`); tab / edit / config paths all still work.
 
@@ -196,22 +196,22 @@ Goal: make the keyboard UI mountable from anywhere.
 - **Sub-composables stay in `MainScreen.kt` with relaxed visibility (`private` → `internal`).** Original plan envisioned physically moving `KeyboardTopBar`, `KeyGrid`, `KeyboardSurface`, `BottomBar` (plus their ~600 lines of private helpers — `selectionOutline`, `circleDropShadow`, `softDropShadow`, `KeyButtonShape`, `ButtonContent`, `RegionView`, `RegionPosition.alignment`, the dozen shared `dp`/`Color` constants) into a new file. That's a 1000+ line shuffle with no architectural payoff — the seam this brick establishes is the **contract surface** (`KeyboardHost` + `KeyboardHostState` + `KeyboardHostMode`), not a file boundary. Visibility flips let `KeyboardHost.kt` call into the existing composables without moving them. Future cleanup can do the physical move once the dust settles.
 - **`MainViewModel` implements `KeyboardHostState` directly.** Saves writing an adapter — all the interface methods/properties were already on the VM with matching names + signatures. The overlay-side `KeyboardHostState` impl (Brick 4) will be a tiny wrapper over `KeyboardController` instead.
 - **`BottomBar` parameterized.** Old signature was `(remapEnabled, onToggleRemap, onQuit)`. New is `(remapEnabled, onToggleRemap, onLeftAction, leftActionLabel)` so the same composable serves Activity ("Quit") and Overlay ("Hide"). Single-source UI; mode-specific copy lives in the `KeyboardHostMode` branch.
-- **Overlay top-bar visual polish deferred to Brick 4.** Brick 3's Overlay-mode `KeyboardTopBar` reuses the Activity-mode `KeyboardTopBar` with all edit-related callbacks stubbed out (`onLongPressMenu = {}`, etc.) and `isEditMode = false`. That gets us a compilable, functionally-correct Overlay-mode render path now; the "slim top bar — tab selector + 'Open Mapo' button only" variant in the original plan is a Brick 4 polish pass.
+- **Overlay top-bar visual polish deferred to Brick 4.** Brick 3's Overlay-mode `KeyboardTopBar` reuses the Activity-mode `KeyboardTopBar` with all edit-related callbacks stubbed out (`onLongPressMenu = {}`, etc.) and `isEditMode = false`. That gets us a compilable, functionally-correct Overlay-mode render path now; the "slim top bar — tab selector + 'Open Mappo' button only" variant in the original plan is a Brick 4 polish pass.
 - **`KeyboardHostTest`** is a Robolectric smoke check, not exhaustive interaction verification. The underlying composables already have dedicated tests (`ActivatorEditorScreenTest`, `InputEditorScreenTest`, etc.); the host's job is plumbing, so the test checks plumbing — does each mode render without crash, does the bottom-bar label flip between modes.
 
 #### Files actually landed
 
-- `app/src/main/java/com/mapo/ui/screen/keyboard/KeyboardHost.kt` (new)
-- `app/src/main/java/com/mapo/ui/screen/keyboard/KeyboardHostState.kt` (new)
-- `app/src/main/java/com/mapo/ui/screen/keyboard/KeyboardHostMode.kt` (new — sealed Activity/Overlay variants)
-- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (visibility flips on 4 composables + main-route rewrite to call `KeyboardHost`)
-- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` (`: KeyboardHostState` + `override` keywords)
-- `app/src/test/java/com/mapo/ui/screen/keyboard/KeyboardHostTest.kt` (new — Robolectric smoke checks for both modes)
+- `app/src/main/java/com/mappo/ui/screen/keyboard/KeyboardHost.kt` (new)
+- `app/src/main/java/com/mappo/ui/screen/keyboard/KeyboardHostState.kt` (new)
+- `app/src/main/java/com/mappo/ui/screen/keyboard/KeyboardHostMode.kt` (new — sealed Activity/Overlay variants)
+- `app/src/main/java/com/mappo/ui/screen/MainScreen.kt` (visibility flips on 4 composables + main-route rewrite to call `KeyboardHost`)
+- `app/src/main/java/com/mappo/ui/viewmodel/MainViewModel.kt` (`: KeyboardHostState` + `override` keywords)
+- `app/src/test/java/com/mappo/ui/screen/keyboard/KeyboardHostTest.kt` (new — Robolectric smoke checks for both modes)
 
 #### Hand-off to device verification
 
 Compile + tests green. Activity-mode rendering is the higher-risk path (this is what users see daily). Quick sanity checks worth running on device:
-1. Open Mapo → keyboard view renders. Tab bar at top, key grid in the middle, bottom bar with Quit + remap switch at the bottom — same as before this brick.
+1. Open Mappo → keyboard view renders. Tab bar at top, key grid in the middle, bottom bar with Quit + remap switch at the bottom — same as before this brick.
 2. Tap a key → it injects (same as before).
 3. Long-press a tab → context menu appears, edit/configure/remove/duplicate/save-template options all work.
 4. Enter edit mode → grid shows drag handles + "+" affordances, buttons can be moved/resized.
@@ -233,13 +233,13 @@ Goal: end-to-end overlay keyboard with QS tile activation.
 - `InputDispatcher.setOverlayFocused` boolean → typed `OverlayFocusKind { NONE, PROMPT, KEYBOARD }`.
 
 **Files:**
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayManager.kt` (real content)
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardTileService.kt` (new)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayManager.kt` (real content)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardTileService.kt` (new)
 - `app/src/main/AndroidManifest.xml` (tile service)
 - Settings entry (existing screen or new)
-- `app/src/main/java/com/mapo/service/overlay/OverlayCoordinator.kt` (prompt-routing tweak)
-- `app/src/main/java/com/mapo/service/input/InputDispatcher.kt` (typed enum)
-- `app/src/test/java/com/mapo/service/overlay/keyboard/KeyboardOverlayManagerTest.kt` (new, Robolectric)
+- `app/src/main/java/com/mappo/service/overlay/OverlayCoordinator.kt` (prompt-routing tweak)
+- `app/src/main/java/com/mappo/service/input/InputDispatcher.kt` (typed enum)
+- `app/src/test/java/com/mappo/service/overlay/keyboard/KeyboardOverlayManagerTest.kt` (new, Robolectric)
 
 **Verify (single-screen phone):**
 - Launch a game → QS tile activates overlay → tap keys → keys inject into game.
@@ -256,51 +256,51 @@ Goal: end-to-end overlay keyboard with QS tile activation.
 
 #### Brick 4 deviations + decisions
 
-- **New `KeyboardOverlayPresenter` introduced as the single coordination point.** Not in the original brick file list, but the design that emerged: the QS tile, the drawer item, and (future) the FGS notification action all need the same composable wired with the same callbacks (Open Mapo, Hide overlay). Centralizing in a `@Singleton` presenter keeps the callers as one-liners and prevents copy-paste drift. `KeyboardOverlayManager` stays a pure window-attach mechanic underneath.
+- **New `KeyboardOverlayPresenter` introduced as the single coordination point.** Not in the original brick file list, but the design that emerged: the QS tile, the drawer item, and (future) the FGS notification action all need the same composable wired with the same callbacks (Open Mappo, Hide overlay). Centralizing in a `@Singleton` presenter keeps the callers as one-liners and prevents copy-paste drift. `KeyboardOverlayManager` stays a pure window-attach mechanic underneath.
 - **Adapter `KeyboardController.asKeyboardHostState()` extension.** The overlay can't reach `MainViewModel` (different `ViewModelStoreOwner`), so the controller goes through a thin `KeyboardHostState` adapter to mount `KeyboardHost(mode = Overlay)`. Adapter's `displayLayout` fallback to `DefaultLayouts.all[0]` mirrors what MainViewModel does at the same boundary — keeps activity- and overlay-side behaviorally identical. Controller's `StateFlow<GridLayout?>` (FC1 seam) stays the source of truth; both adapters apply the non-null bridge at the same point.
 - **`OverlayFocusKind` is a 3-value enum, not the originally-planned 4-value (`NONE`, `PROMPT`, `KEYBOARD`, `INPUT_LAYER_RESERVED`).** Input-layer overlays (FC2-as-originally-scoped) was cancelled mid-plan-refinement, so `INPUT_LAYER_RESERVED` is gone. `KEYBOARD` stays in the enum as a value but is **never set today** — the keyboard overlay's `FLAG_NOT_FOCUSABLE` window means the service has nothing to disambiguate. Kept the value so a future "service routes gamepad differently while the keyboard is up" need lands without an enum-shape change.
 - **Auto-switch profile-create prompt embedding inside the keyboard overlay was DEFERRED.** Original plan: "when keyboard overlay is mounted, embed the prompt inside the keyboard overlay's surface as a snackbar layer." That requires adding a snackbar slot to `KeyboardHost` and routing `OverlayCoordinator` decisions through the presenter. Today the prompt continues to render via `OverlayManager` (focusable, stacked above the keyboard overlay). Visual overlap is suboptimal but functionally fine — gamepad navigation still works on the prompt (`OverlayFocusKind.PROMPT` routing). Polish item for a follow-up.
-- **FGS notification "Show / Hide keyboard" action button DEFERRED.** QS tile is the primary trigger; the drawer entry is the secondary; a notification action would be a third path. Skipped to keep Brick 4 focused. The FGS notification currently shows "Tap the Mapo Quick Settings tile to hide" — directs users to the tile.
+- **FGS notification "Show / Hide keyboard" action button DEFERRED.** QS tile is the primary trigger; the drawer entry is the secondary; a notification action would be a third path. Skipped to keep Brick 4 focused. The FGS notification currently shows "Tap the Mappo Quick Settings tile to hide" — directs users to the tile.
 - **`KeyboardOverlayPocContent.kt` deleted.** The Brick 1 placeholder is dead code now that the manager mounts the real `KeyboardHost(Overlay)`.
 - **Settings entry not added.** The drawer entry already serves as the alternative-to-tile activation path. Adding a dedicated "Show keyboard overlay" toggle in a separate settings screen is a UX call the user can make later if drawer-discoverability proves insufficient.
 - **Tests target `KeyboardOverlayPresenter`, not `KeyboardOverlayManager`.** The manager's behavior is window-system mechanics (`WindowManager.addView`, FGS start/stop, display-context creation) verified on-device. The presenter's orchestration logic (show / hide / toggle / isShowing semantics, canonical overlay id) is what the test suite usefully pins.
 
 #### Files actually landed
 
-- `app/src/main/java/com/mapo/service/input/OverlayFocusKind.kt` (new — 3-value enum)
-- `app/src/main/java/com/mapo/service/input/InputDispatcher.kt` (Boolean → enum)
-- `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` (reads `overlayFocus == PROMPT`)
-- `app/src/main/java/com/mapo/service/overlay/OverlayManager.kt` (passes `OverlayFocusKind.PROMPT` / `NONE`)
-- `app/src/main/java/com/mapo/service/overlay/OverlayContent.kt` (doc reflow)
-- `app/src/main/java/com/mapo/service/keyboard/KeyboardControllerHostState.kt` (new — adapter)
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPresenter.kt` (new — orchestrator)
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardTileService.kt` (new — QS tile)
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayManager.kt` (POC_OVERLAY_ID const removed)
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPocContent.kt` (deleted)
+- `app/src/main/java/com/mappo/service/input/OverlayFocusKind.kt` (new — 3-value enum)
+- `app/src/main/java/com/mappo/service/input/InputDispatcher.kt` (Boolean → enum)
+- `app/src/main/java/com/mappo/service/InputAccessibilityService.kt` (reads `overlayFocus == PROMPT`)
+- `app/src/main/java/com/mappo/service/overlay/OverlayManager.kt` (passes `OverlayFocusKind.PROMPT` / `NONE`)
+- `app/src/main/java/com/mappo/service/overlay/OverlayContent.kt` (doc reflow)
+- `app/src/main/java/com/mappo/service/keyboard/KeyboardControllerHostState.kt` (new — adapter)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayPresenter.kt` (new — orchestrator)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardTileService.kt` (new — QS tile)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayManager.kt` (POC_OVERLAY_ID const removed)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayPocContent.kt` (deleted)
 - `app/src/main/AndroidManifest.xml` (tile service entry)
 - `app/src/main/res/values/strings.xml` (tile + drawer labels)
-- `app/src/main/java/com/mapo/ui/viewmodel/MainViewModel.kt` (presenter injection; `togglePocKeyboardOverlay` → `toggleKeyboardOverlay`)
-- `app/src/main/java/com/mapo/ui/screen/ProfileDrawerContent.kt` (label rename + callback param rename)
-- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (callback rename)
-- `app/src/test/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPresenterTest.kt` (new — 6 tests)
-- `app/src/test/java/com/mapo/ui/viewmodel/MainViewModelTest.kt` (constructor param rename)
+- `app/src/main/java/com/mappo/ui/viewmodel/MainViewModel.kt` (presenter injection; `togglePocKeyboardOverlay` → `toggleKeyboardOverlay`)
+- `app/src/main/java/com/mappo/ui/screen/ProfileDrawerContent.kt` (label rename + callback param rename)
+- `app/src/main/java/com/mappo/ui/screen/MainScreen.kt` (callback rename)
+- `app/src/test/java/com/mappo/service/overlay/keyboard/KeyboardOverlayPresenterTest.kt` (new — 6 tests)
+- `app/src/test/java/com/mappo/ui/viewmodel/MainViewModelTest.kt` (constructor param rename)
 
 #### Hand-off to device verification
 
 Compile + tests green. Brick 4 is the first time the actual run-mode keyboard renders inside a system overlay — device verification is essential:
 
 **QS tile path:**
-1. Open Mapo at least once so the accessibility service is connected and a profile + layouts are loaded.
-2. Pull down the notification shade → tap "Edit" (or however your device exposes tile customization) → drag the "Mapo keyboard" tile into the active row.
+1. Open Mappo at least once so the accessibility service is connected and a profile + layouts are loaded.
+2. Pull down the notification shade → tap "Edit" (or however your device exposes tile customization) → drag the "Mappo keyboard" tile into the active row.
 3. Launch a game / other app.
-4. Pull down the shade → tap the Mapo tile. The real keyboard (your actual layout, not a placeholder grid) should appear over the foreground app.
+4. Pull down the shade → tap the Mappo tile. The real keyboard (your actual layout, not a placeholder grid) should appear over the foreground app.
 5. Tap a key → it should inject to the foreground app, same as activity-mode keyboard.
 6. Tap a key whose mapping is a mouse/scroll → that dispatch path should also fire.
 7. Tap the "Hide" button in the overlay's bottom bar → overlay detaches.
 8. Tap the tile again → overlay re-appears.
 
 **Drawer path (alternative trigger):**
-9. Inside Mapo, open the drawer → tap "Toggle keyboard overlay" → overlay appears (with the activity behind it).
+9. Inside Mappo, open the drawer → tap "Toggle keyboard overlay" → overlay appears (with the activity behind it).
 10. Tap again → hides.
 
 **Cross-checks:**
@@ -332,13 +332,13 @@ Cleanup (now-dead Thor-first code paths):
 - `CLAUDE.md` already updated; reverify after refactor.
 
 **Files:**
-- `app/src/main/java/com/mapo/MainActivity.kt`
-- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (`ApplyMainScreenWindowBehavior`)
-- `app/src/main/java/com/mapo/service/input/InputDispatcher.kt` (doc only)
-- `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` (stale comment fix)
-- `app/src/main/java/com/mapo/service/foreground/ForegroundAppMonitor.kt` (doc only)
-- `app/src/main/java/com/mapo/ui/theme/ColorContrast.kt` (doc only)
-- new `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardDisplayRouter.kt`
+- `app/src/main/java/com/mappo/MainActivity.kt`
+- `app/src/main/java/com/mappo/ui/screen/MainScreen.kt` (`ApplyMainScreenWindowBehavior`)
+- `app/src/main/java/com/mappo/service/input/InputDispatcher.kt` (doc only)
+- `app/src/main/java/com/mappo/service/InputAccessibilityService.kt` (stale comment fix)
+- `app/src/main/java/com/mappo/service/foreground/ForegroundAppMonitor.kt` (doc only)
+- `app/src/main/java/com/mappo/ui/theme/ColorContrast.kt` (doc only)
+- new `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardDisplayRouter.kt`
 
 **Verify:**
 - Thor: keyboard works on bottom screen, remap works during top-screen game, no back-button ANR, no profile-switch glitches.
@@ -359,15 +359,15 @@ Cleanup (now-dead Thor-first code paths):
 
 #### Files actually landed
 
-- `app/src/main/java/com/mapo/MainActivity.kt` (removed unconditional `FLAG_NOT_FOCUSABLE` bootstrap + TODO; doc reframe)
-- `app/src/main/java/com/mapo/ui/screen/MainScreen.kt` (`ApplyMainScreenWindowBehavior` doc reframe)
-- `app/src/main/java/com/mapo/service/input/InputDispatcher.kt` (`consumeSystemBack` doc reframe)
-- `app/src/main/java/com/mapo/service/InputAccessibilityService.kt` (motion-capture stale comment fixed)
-- `app/src/main/java/com/mapo/service/foreground/ForegroundAppMonitor.kt` (doc reframe)
-- `app/src/main/java/com/mapo/ui/util/ColorContrast.kt` (doc reframe)
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardDisplayRouter.kt` (new — FC2 seam, single-display passthrough)
-- `app/src/main/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPresenter.kt` (router injected; documented FC2 fan-out as next change point)
-- `app/src/test/java/com/mapo/service/overlay/keyboard/KeyboardOverlayPresenterTest.kt` (router injected + stubbed)
+- `app/src/main/java/com/mappo/MainActivity.kt` (removed unconditional `FLAG_NOT_FOCUSABLE` bootstrap + TODO; doc reframe)
+- `app/src/main/java/com/mappo/ui/screen/MainScreen.kt` (`ApplyMainScreenWindowBehavior` doc reframe)
+- `app/src/main/java/com/mappo/service/input/InputDispatcher.kt` (`consumeSystemBack` doc reframe)
+- `app/src/main/java/com/mappo/service/InputAccessibilityService.kt` (motion-capture stale comment fixed)
+- `app/src/main/java/com/mappo/service/foreground/ForegroundAppMonitor.kt` (doc reframe)
+- `app/src/main/java/com/mappo/ui/util/ColorContrast.kt` (doc reframe)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardDisplayRouter.kt` (new — FC2 seam, single-display passthrough)
+- `app/src/main/java/com/mappo/service/overlay/keyboard/KeyboardOverlayPresenter.kt` (router injected; documented FC2 fan-out as next change point)
+- `app/src/test/java/com/mappo/service/overlay/keyboard/KeyboardOverlayPresenterTest.kt` (router injected + stubbed)
 - `CLAUDE.md` (Virtual Keyboard Layouts section gained run/edit-mode entry)
 
 #### Hand-off to device verification
@@ -375,14 +375,14 @@ Cleanup (now-dead Thor-first code paths):
 Single-screen phone (new primary target) should be unaffected by this brick — nothing structural changed for it. Worth a quick sanity check that the overlay still works from the QS tile.
 
 **Thor** is where this brick's claims need confirming:
-1. Open Mapo on Thor's bottom screen. Drawer → "Toggle keyboard overlay." Overlay should appear on the **top** screen (default display) by default.
+1. Open Mappo on Thor's bottom screen. Drawer → "Toggle keyboard overlay." Overlay should appear on the **top** screen (default display) by default.
 2. Verify gamepad input still drives a game running on top while the overlay is up.
-3. Verify back-button behavior in another app while Mapo is backgrounded (lifecycle-scoped `consumeSystemBack` from Brick 1 still works).
-4. Activity-mode keyboard (Mapo's bottom-screen activity view) should still render and respond to taps — that's the secondary-device path `ApplyMainScreenWindowBehavior` is now documented to serve.
+3. Verify back-button behavior in another app while Mappo is backgrounded (lifecycle-scoped `consumeSystemBack` from Brick 1 still works).
+4. Activity-mode keyboard (Mappo's bottom-screen activity view) should still render and respond to taps — that's the secondary-device path `ApplyMainScreenWindowBehavior` is now documented to serve.
 
 If those work, the refactor is closed. The follow-up "overlay follows the foreground app's screen on Thor" item is filed as a future brick separate from this plan.
 
-Device verification (2026-05-18): Thor — overlay defaults to top screen, gamepad input drives top-screen game while overlay up, back-button reaches foreground app while Mapo backgrounded, bottom-screen activity-mode keyboard still renders + taps inject. All clean. Brick 5 closed.
+Device verification (2026-05-18): Thor — overlay defaults to top screen, gamepad input drives top-screen game while overlay up, back-button reaches foreground app while Mappo backgrounded, bottom-screen activity-mode keyboard still renders + taps inject. All clean. Brick 5 closed.
 
 **Refactor complete (2026-05-18).** All 5 bricks closed. Single-screen Android is now the primary target; Thor remains a supported secondary device. Deferred follow-ups (none blocking): foreground-display-aware Thor routing in `KeyboardDisplayRouter`; embedding auto-switch prompt inside keyboard overlay; FGS notification action button. Phase 6 motion-capture refactor is the next workstream (still blocked behind its own motion-capture work, but unblocked at the architecture layer).
 
@@ -390,10 +390,10 @@ Device verification (2026-05-18): Thor — overlay defaults to top screen, gamep
 
 ## Features that need redesigning (not just relocating)
 
-1. **Profile drawer** — activity-only concept. Overlay's bottom bar gets a compact "Open Mapo" button.
+1. **Profile drawer** — activity-only concept. Overlay's bottom bar gets a compact "Open Mappo" button.
 2. **Profile auto-switch "Create profile for $appLabel?" prompt** — embed inside keyboard overlay (snackbar layer) when overlay is mounted; standalone otherwise.
-3. **`PermissionsRequiredDialog`** — reword from "auto-switcher to work" to "Mapo to work over a game."
-4. **`BottomBar` quit-app button** — split: "Hide keyboard" closes overlay; separate "Exit Mapo" in activity drawer for full shutdown.
+3. **`PermissionsRequiredDialog`** — reword from "auto-switcher to work" to "Mappo to work over a game."
+4. **`BottomBar` quit-app button** — split: "Hide keyboard" closes overlay; separate "Exit Mappo" in activity drawer for full shutdown.
 5. **`InputDispatcher.setOverlayFocused`** — boolean → typed `OverlayFocusKind { NONE, PROMPT, KEYBOARD }`.
 6. **Background-only operation** — preserved. Single FGS runs whenever remap is enabled OR keyboard is shown. Notification text adapts.
 
@@ -415,14 +415,14 @@ Device verification (2026-05-18): Thor — overlay defaults to top screen, gamep
 ## Verification (end-to-end, on completion of Brick 5)
 
 Single-screen device (phone or Odin 2 Mini):
-1. Install Mapo, grant accessibility + overlay permissions, set up a profile with at least one keyboard layout and one physical remap.
+1. Install Mappo, grant accessibility + overlay permissions, set up a profile with at least one keyboard layout and one physical remap.
 2. Launch a game.
 3. QS tile → keyboard appears over the game; taps inject into game; gamepad still drives game directly.
 4. Dismiss overlay → game unaffected.
 5. Overlay hidden, press remapped physical button → mapped output fires.
 6. Activate overlay again → still works after background time.
 7. Switch foregrounded game → auto-switcher fires; if profile-create prompt is needed, embeds correctly (inside overlay when mounted; standalone when not).
-8. Open Mapo from launcher → drawer / settings / edit-mode all function; activity-mode keyboard injects.
+8. Open Mappo from launcher → drawer / settings / edit-mode all function; activity-mode keyboard injects.
 
 Thor (bottom screen on, Focus Lock = Auto-Lock):
 - Repeat 1–8 with overlay attaching to the bottom screen by default.

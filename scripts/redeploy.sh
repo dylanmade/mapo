@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Redeploys Mapo to the connected device and re-grants its special permissions
+# Redeploys Mappo to the connected device and re-grants its special permissions
 # (accessibility service binding + overlay) without user interaction.
 #
-# Why this exists: Android Studio's "Run" cannot terminate Mapo when the
+# Why this exists: Android Studio's "Run" cannot terminate Mappo when the
 # InputAccessibilityService is bound to system_server -- the OS auto-restarts
 # protected accessibility services immediately after force-stop, racing the APK
 # swap, and `pm install -r` then refuses to replace a live APK. We work around
@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-PKG=com.mapo
+PKG=com.mappo
 SERVICE="${PKG}/${PKG}.service.InputAccessibilityService"
 ACTIVITY="${PKG}/.MainActivity"
 

@@ -57,7 +57,7 @@ Snapping + overlay settings                              ── Brick D
 - `RemapTarget` + `InputDispatcher.injectKey` / `dispatchTargetAsClick` — what a button
   emits. `KeyboardController.dispatchButtonTarget` is the reference; we extract a shared
   `RemapTarget`-dispatch helper rather than depend on the keyboard controller.
-- `OverlayLifecycleOwner`, the `KeyboardOverlayService` FGS, `MapoTheme` wrapping,
+- `OverlayLifecycleOwner`, the `KeyboardOverlayService` FGS, `MappoTheme` wrapping,
   `Settings.canDrawOverlays` gating, and the flag-matrix lesson (`FLAG_NOT_FOCUSABLE`
   is load-bearing so gamepad/key events reach the game).
 - Button visual styling (`ButtonContent`, drop-shadow helpers in `MainScreen.kt`) —
@@ -123,7 +123,7 @@ not from this work). **Next: on-device verification (see hand-off below).**
     FLAG_LAYOUT_NO_LIMITS`, gravity `TOP|START`, x/y/w/h from the element's normalized
     rect × display metrics. Window == button bounds ⇒ whole window touchable, everything
     outside passthrough. **No `OverlayTouchable*` reflection.**
-  - Content: one themed Compose button per window (`MapoTheme` + `OverlayLifecycleOwner`).
+  - Content: one themed Compose button per window (`MappoTheme` + `OverlayLifecycleOwner`).
     Reuse the FGS (`KeyboardOverlayService`) for process priority.
 - `OverlayPresenter` (`@Singleton`): `show()/hide()/toggle()/isShowing()`; collects
   `OverlayRepository` and drives the manager. Tap → `OverlayTargetDispatcher` →
@@ -131,7 +131,7 @@ not from this work). **Next: on-device verification (see hand-off below).**
   *new* Shizuku dependency).
 - New drawer entry **"Show overlay"** (toggle), separate from the legacy keyboard entry.
 - **Verify (device):** buttons render at position over a game; taps inject; empty space
-  passthrough; gamepad still drives game; survives Mapo backgrounding.
+  passthrough; gamepad still drives game; survives Mappo backgrounding.
 
 ### Brick C — Editor spike: BOTH candidates over the shared foundation — ✅ DONE
 **Decision (2026-06-04): the live on-overlay editor (C2) wins.** C1 (in-app canvas) was
@@ -197,7 +197,7 @@ sibling centers). Build + unit tests green (only the 5 pre-existing unrelated fa
 Device (single-screen phone primary; Thor secondary sanity):
 1. Grant accessibility + overlay permissions; pick a profile.
 2. Brick B: show overlay over a game → buttons at position; taps inject; empty space
-   passthrough; gamepad drives game; survives Mapo backgrounding.
+   passthrough; gamepad drives game; survives Mappo backgrounding.
 3. Brick C: each editor — add/drag/resize/bind → renders + injects. C2: scrim protects
    game; toolbar doesn't eat gamepad.
 4. Brick D: snapping on → edges/centers align; off → free.

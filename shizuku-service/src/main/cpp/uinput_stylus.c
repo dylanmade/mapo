@@ -1,9 +1,9 @@
-// Mapo virtual stylus InputDevice via /dev/uinput.
+// Mappo virtual stylus InputDevice via /dev/uinput.
 //
 // Why this device class (vs. SOURCE_MOUSE / touchscreen): for Mouse Region
 // we want *absolute* cursor positioning that Wine in GameNative honors. Real
 // mouse REL events go through Wine's per-event acceleration curve which
-// distorted Mapo's pin-then-move attempts (verified on AYN Thor 2026-05-30).
+// distorted Mappo's pin-then-move attempts (verified on AYN Thor 2026-05-30).
 // Synthetic finger touch (dispatchGesture) goes through Android's touch
 // pipeline, which Wine treats as a *relative* touchpad — also wrong. A
 // stylus (BTN_TOOL_PEN + ABS_X/Y) is the third tool-type Android exposes;
@@ -56,7 +56,7 @@ static int set_bit_stylus(int fd, unsigned long req, int bit, const char *desc) 
 // pixel width / height so the device's coord space matches the screen 1:1.
 // Returns the uinput fd on success (>= 0), or -1 on any failure.
 JNIEXPORT jint JNICALL
-Java_com_mapo_shizuku_service_UinputStylus_nativeOpen(JNIEnv *env, jclass clazz, jint maxX, jint maxY) {
+Java_com_mappo_shizuku_service_UinputStylus_nativeOpen(JNIEnv *env, jclass clazz, jint maxX, jint maxY) {
     (void)env; (void)clazz;
 
     int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
@@ -78,7 +78,7 @@ Java_com_mapo_shizuku_service_UinputStylus_nativeOpen(JNIEnv *env, jclass clazz,
 
     struct uinput_user_dev uidev;
     memset(&uidev, 0, sizeof(uidev));
-    snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "Mapo Virtual Stylus");
+    snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "Mappo Virtual Stylus");
     uidev.id.bustype = BUS_VIRTUAL;
     uidev.id.vendor = 0x4D41;   // 'MA'
     uidev.id.product = 0x5354;  // 'ST'
@@ -127,7 +127,7 @@ fail:
 // Move the stylus to absolute position (x, y) within the device's ABS range.
 // Caller must clamp to [0, maxX-1] / [0, maxY-1]. Emits EV_ABS + EV_SYN.
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputStylus_nativeMoveAbsolute(JNIEnv *env, jclass clazz, jint fd, jint x, jint y) {
+Java_com_mappo_shizuku_service_UinputStylus_nativeMoveAbsolute(JNIEnv *env, jclass clazz, jint fd, jint x, jint y) {
     (void)env; (void)clazz;
     if (fd < 0) return;
 
@@ -158,7 +158,7 @@ Java_com_mapo_shizuku_service_UinputStylus_nativeMoveAbsolute(JNIEnv *env, jclas
 // stick-driven taps. Hovering-only (BTN_TOOL_PEN=1, BTN_TOUCH=0) gives us
 // cursor tracking without click events.
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputStylus_nativeSetContact(JNIEnv *env, jclass clazz, jint fd, jint pressed) {
+Java_com_mappo_shizuku_service_UinputStylus_nativeSetContact(JNIEnv *env, jclass clazz, jint fd, jint pressed) {
     (void)env; (void)clazz;
     if (fd < 0) return;
 
@@ -180,7 +180,7 @@ Java_com_mapo_shizuku_service_UinputStylus_nativeSetContact(JNIEnv *env, jclass 
 
 // Destroy the virtual device and close the fd. Idempotent on -1.
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputStylus_nativeClose(JNIEnv *env, jclass clazz, jint fd) {
+Java_com_mappo_shizuku_service_UinputStylus_nativeClose(JNIEnv *env, jclass clazz, jint fd) {
     (void)env; (void)clazz;
     if (fd < 0) return;
     if (ioctl(fd, UI_DEV_DESTROY) < 0) {

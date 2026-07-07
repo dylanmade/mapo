@@ -11,7 +11,7 @@ plugins {
 // so it can read Build.MODEL for the device label, and so Hilt wiring in
 // :app can @Binds the interfaces without a separate JVM-vs-Android split.
 android {
-    namespace = "com.mapo.steam"
+    namespace = "com.mappo.steam"
     compileSdk = 37
 
     defaultConfig {

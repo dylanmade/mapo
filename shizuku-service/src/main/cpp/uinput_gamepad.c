@@ -1,4 +1,4 @@
-// Mapo virtual XInput-style gamepad InputDevice via /dev/uinput.
+// Mappo virtual XInput-style gamepad InputDevice via /dev/uinput.
 //
 // Companion to uinput.c (virtual mouse). Same pattern: open /dev/uinput from the
 // shell-UID UserService, declare the device's button + axis capabilities, register
@@ -34,7 +34,7 @@
 //
 // Device identity is Microsoft + Xbox 360 wired (0x045E / 0x028E) so games that
 // gate "is this really a controller" on the vendor/product ID accept it. The
-// device *name* stays "Mapo Virtual Gamepad" so it's identifiable in
+// device *name* stays "Mappo Virtual Gamepad" so it's identifiable in
 // /proc/bus/input/devices and `getevent -l` for debugging.
 
 #include <errno.h>
@@ -65,7 +65,7 @@ static int set_bit_g(int fd, unsigned long req, int bit, const char *desc) {
 // Open /dev/uinput, declare gamepad capabilities, create the virtual device.
 // Returns the fd on success (>=0), or -1 on any failure.
 JNIEXPORT jint JNICALL
-Java_com_mapo_shizuku_service_UinputGamepad_nativeOpen(JNIEnv *env, jclass clazz) {
+Java_com_mappo_shizuku_service_UinputGamepad_nativeOpen(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
 
     int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
@@ -108,7 +108,7 @@ Java_com_mapo_shizuku_service_UinputGamepad_nativeOpen(JNIEnv *env, jclass clazz
     // IDs maximize game compat (some games gate on a vendor/product allowlist).
     struct uinput_user_dev uidev;
     memset(&uidev, 0, sizeof(uidev));
-    snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "Mapo Virtual Gamepad");
+    snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "Mappo Virtual Gamepad");
     uidev.id.bustype = BUS_VIRTUAL;
     uidev.id.vendor = 0x045E;    // Microsoft
     uidev.id.product = 0x028E;   // Xbox 360 wired controller
@@ -160,7 +160,7 @@ fail:
 // calling (no clamping done here — invalid values would just be passed to
 // the kernel, which clamps on its own).
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputGamepad_nativeWriteAxes(
+Java_com_mappo_shizuku_service_UinputGamepad_nativeWriteAxes(
     JNIEnv *env, jclass clazz, jint fd,
     jint lx, jint ly, jint rx, jint ry,
     jint lt, jint rt, jint hatX, jint hatY) {
@@ -191,7 +191,7 @@ Java_com_mapo_shizuku_service_UinputGamepad_nativeWriteAxes(
 // EV_KEY event followed by SYN_REPORT. Caller passes the standard
 // linux/input.h BTN_* constant as `btnCode`.
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputGamepad_nativeWriteButton(
+Java_com_mappo_shizuku_service_UinputGamepad_nativeWriteButton(
     JNIEnv *env, jclass clazz, jint fd, jint btnCode, jint pressed) {
     (void)env; (void)clazz;
     if (fd < 0) return;
@@ -213,7 +213,7 @@ Java_com_mapo_shizuku_service_UinputGamepad_nativeWriteButton(
 
 // Tear down the virtual device + close the fd. Idempotent on -1.
 JNIEXPORT void JNICALL
-Java_com_mapo_shizuku_service_UinputGamepad_nativeClose(JNIEnv *env, jclass clazz, jint fd) {
+Java_com_mappo_shizuku_service_UinputGamepad_nativeClose(JNIEnv *env, jclass clazz, jint fd) {
     (void)env; (void)clazz;
     if (fd < 0) return;
     if (ioctl(fd, UI_DEV_DESTROY) < 0) {

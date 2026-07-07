@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22.1)
-project("mapo_uinput")
+project("mappo_uinput")
 
-# Shared native library backing two virtual InputDevices that Mapo's shell-UID
+# Shared native library backing two virtual InputDevices that Mappo's shell-UID
 # Shizuku UserService drives via /dev/uinput. Both devices live in the same .so
 # because they share build infra + the shell-UID context that grants
 # /dev/uinput access without root.
@@ -22,11 +22,11 @@ project("mapo_uinput")
 #                         not uinput WRITE side). Currently just EVIOCGRAB
 #                         for taking exclusive access to physical
 #                         controllers so the OS InputReader stops
-#                         dispatching their events to games while Mapo
+#                         dispatching their events to games while Mappo
 #                         routes them through its virtual gamepad
 #                         (resolves the dual-controller race when gyro
 #                         stick modes are active).
-add_library(mapo_uinput SHARED uinput.c uinput_gamepad.c uinput_stylus.c evdev.c)
+add_library(mappo_uinput SHARED uinput.c uinput_gamepad.c uinput_stylus.c evdev.c)
 
 find_library(log-lib log)
-target_link_libraries(mapo_uinput ${log-lib})
+target_link_libraries(mappo_uinput ${log-lib})

@@ -15,21 +15,29 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,8 +65,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -69,6 +75,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import com.mappo.ui.compact.scaledLayout
 import com.mappo.ui.screen.softDropShadow
 import kotlinx.coroutines.delay
 
@@ -103,7 +110,8 @@ data class HomeMenuEntry(
  */
 @Composable
 fun HomeFlower(
-    profileName: String?,
+    powerOn: Boolean,
+    onPowerChange: (Boolean) -> Unit,
     onOpenProfile: () -> Unit,
     onEditOverlay: () -> Unit,
     onEditControls: () -> Unit,
@@ -176,20 +184,30 @@ fun HomeFlower(
     ) {
         Box(Modifier.size(1.dp).focusRequester(focusAnchor).focusable())
 
+        // Master power, relocated onto the screen while the device chrome is in flux.
+        PowerControl(
+            powerOn = powerOn,
+            onPowerChange = onPowerChange,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp),
+        )
+
         val side = minOf(maxWidth, maxHeight)
         val gap = side * 0.035f
+        // All four petals are equal 1:1 squares.
+        val petal = side * 0.28f
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(gap),
         ) {
             PetalCard(
                 label = "Profile",
-                supporting = profileName ?: "None",
                 icon = Icons.Filled.Person,
                 accent = ProfileAccent,
                 selected = selected == FlowerDirection.Up,
                 onTap = { activate(FlowerDirection.Up) },
-                modifier = Modifier.size(width = side * 0.5f, height = side * 0.24f),
+                modifier = Modifier.size(petal),
             )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -197,33 +215,30 @@ fun HomeFlower(
             ) {
                 PetalCard(
                     label = "Overlay",
-                    supporting = "On-screen buttons",
                     icon = Icons.Filled.Layers,
                     accent = OverlayAccent,
                     selected = selected == FlowerDirection.Left,
                     onTap = { activate(FlowerDirection.Left) },
-                    modifier = Modifier.size(side * 0.3f),
+                    modifier = Modifier.size(petal),
                 )
                 DpadGlyph(selected = selected, size = side * 0.2f)
                 PetalCard(
                     label = "Remapping",
-                    supporting = "Physical controls",
                     icon = Icons.Filled.SportsEsports,
                     accent = RemapAccent,
                     selected = selected == FlowerDirection.Right,
                     onTap = { activate(FlowerDirection.Right) },
-                    modifier = Modifier.size(side * 0.3f),
+                    modifier = Modifier.size(petal),
                 )
             }
             Box {
                 PetalCard(
                     label = "Settings",
-                    supporting = "Everything else",
                     icon = Icons.Filled.Settings,
                     accent = SettingsAccent,
                     selected = selected == FlowerDirection.Down,
                     onTap = { activate(FlowerDirection.Down) },
-                    modifier = Modifier.size(width = side * 0.5f, height = side * 0.24f),
+                    modifier = Modifier.size(petal),
                 )
                 FlowerSettingsMenu(
                     expanded = settingsMenuOpen,
@@ -235,11 +250,59 @@ fun HomeFlower(
     }
 }
 
-/** One option petal: accent-tinted rounded card with icon, label, one-line helper subtext. */
+/**
+ * The master enable (the old toolbar's switch): "Power" toggle + LED driving remap and the
+ * button overlay in lockstep (wired by the caller).
+ */
+@Composable
+private fun PowerControl(
+    powerOn: Boolean,
+    onPowerChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Deliberate fixed LED green — a power LED is green regardless of theme.
+            val led by animateColorAsState(
+                targetValue = if (powerOn) Color(0xFF52E07C)
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                label = "powerLed",
+            )
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(led),
+            )
+            Spacer(Modifier.width(6.dp))
+            // Strip the 48dp interactive halo + scale down so the switch reads as hardware trim.
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                Switch(
+                    checked = powerOn,
+                    onCheckedChange = onPowerChange,
+                    modifier = Modifier.scaledLayout(0.8f),
+                    thumbContent = {
+                        Icon(
+                            imageVector = if (powerOn) Icons.Filled.Check else Icons.Filled.Close,
+                            contentDescription = if (powerOn) "Mappo features on" else "Mappo features off",
+                            modifier = Modifier.size(SwitchDefaults.IconSize),
+                        )
+                    },
+                )
+            }
+        }
+        Text(
+            text = "Power",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** One option petal: an accent-tinted 1:1 rounded card with icon + label. */
 @Composable
 private fun PetalCard(
     label: String,
-    supporting: String?,
     icon: ImageVector,
     accent: Color,
     selected: Boolean,
@@ -268,26 +331,15 @@ private fun PetalCard(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(26.dp))
+            Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(28.dp))
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
             )
-            if (supporting != null) {
-                // Profile's subtext is a user-typed name: bounded card + single line + ellipsis.
-                Text(
-                    text = supporting,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                )
-            }
         }
     }
 }

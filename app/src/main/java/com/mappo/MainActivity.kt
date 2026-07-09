@@ -20,11 +20,19 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.themestudio.core.ThemeStudioProvider
 import com.themestudio.persistence.SharedPrefsThemeOverridesStorage
 import dagger.hilt.android.AndroidEntryPoint
+import com.mappo.service.input.InputDispatcher
 import com.mappo.ui.screen.MainScreen
+import com.mappo.ui.screen.home.HomeBackdrop
 import com.mappo.ui.theme.MappoTheme
+import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var inputDispatcher: InputDispatcher
 
     // Deep-route request from the toolbar overlay (OVERLAY_TOOLBAR_PLAN.md, Brick 2). The
     // overlay launches us with EXTRA_ROUTE naming a NavHost destination; MainScreen navigates
@@ -35,6 +43,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        captureBackdropIfStale()
         consumeRouteExtra(intent)
         // Fully immersive, GameNative-style: the system bars are HIDDEN by default and Mappo
         // uses the entire screen (incl. the display cutout). A swipe from the edge reveals the
@@ -88,7 +97,29 @@ class MainActivity : ComponentActivity() {
         // singleTask: a re-launch (e.g. the overlay firing a new deep-route intent while we're
         // already alive) arrives here, not onCreate. Re-point getIntent() and consume the route.
         setIntent(intent)
+        captureBackdropIfStale()
         consumeRouteExtra(intent)
+    }
+
+    /**
+     * Launcher-icon / deep-link path for the home's blurred backdrop: fire a screenshot right
+     * away, before our first frame lands (the window fades in from transparent, so an early
+     * capture is near-clean). Skipped when the Select+A chord just captured — that shot was
+     * taken BEFORE launch and must not be replaced by one that may include our own window.
+     */
+    private fun captureBackdropIfStale() {
+        if (HomeBackdrop.isFresh()) return
+        inputDispatcher.captureScreenshot { HomeBackdrop.setFrom(it) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        inForeground = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        inForeground = false
     }
 
     private fun consumeRouteExtra(intent: Intent?) {
@@ -112,5 +143,23 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** Intent extra (a [com.mappo.ui.nav.MappoRoute] string) launching us straight to a deep screen. */
         const val EXTRA_ROUTE = "com.mappo.extra.ROUTE"
+
+        /**
+         * True while this activity is resumed. The accessibility service's Select+A home chord
+         * reads it to decide between revealing the home (launching the activity) and toggling
+         * the frame in place (emitting on [homeToggleRequests]).
+         */
+        @Volatile
+        var inForeground: Boolean = false
+            private set
+
+        private val homeToggleFlow = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+        /** Chord-driven requests to toggle the home frame while foreground; MainScreen collects. */
+        val homeToggleRequests: SharedFlow<Unit> = homeToggleFlow.asSharedFlow()
+
+        fun requestHomeToggle() {
+            homeToggleFlow.tryEmit(Unit)
+        }
     }
 }

@@ -107,6 +107,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import com.mappo.MainActivity
 import com.mappo.R
 import com.mappo.data.model.GridButton
 import com.mappo.data.model.GridLayout
@@ -300,6 +301,22 @@ fun MainScreen(
     LaunchedEffect(isMainRoute) {
         if (isMainRoute) frameVisible = true
     }
+    // Select+A chord while Mappo is foreground (see InputAccessibilityService): toggle the
+    // frame in place. Dismissing slides it down and backgrounds the task — directly here for
+    // sub-routes; the frameVisible effect above covers MAIN.
+    LaunchedEffect(Unit) {
+        MainActivity.homeToggleRequests.collect {
+            if (frameVisible) {
+                frameVisible = false
+                if (!currentIsMainRoute) {
+                    delay(HandheldFrameSlideMillis + 60L)
+                    activity?.moveTaskToBack(true)
+                }
+            } else {
+                frameVisible = true
+            }
+        }
+    }
 
     var accessibilityGranted by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var overlayGranted by remember { mutableStateOf(isOverlayPermissionGranted(context)) }
@@ -317,8 +334,8 @@ fun MainScreen(
                 // Reopened from the launcher after a dismiss backgrounded us: the composition is
                 // retained (menu hidden, route unchanged), so neither route effect re-fires.
                 // Restore the home frame here so reopening Mappo never lands on the empty
-                // transparent trap.
-                if (currentIsMainRoute) frameVisible = true
+                // transparent trap. Unconditional: the frame hosts every route now.
+                frameVisible = true
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -424,7 +441,15 @@ fun MainScreen(
                 ) { _ ->
                     // The d-pad flower home, rendered on the handheld's screen canvas.
                     HomeFlower(
-                        profileName = activeProfile?.name,
+                        // Master power (the old toolbar's master switch) drives remap AND the
+                        // button overlay to the same value in lockstep — one control for both
+                        // features. (Does NOT auto-show the overlay at app launch; the overlay
+                        // follows the toggle when the user flips it.)
+                        powerOn = remapEnabled,
+                        onPowerChange = { target ->
+                            if (remapEnabled != target) viewModel.toggleRemap()
+                            if (overlayShowing != target) viewModel.toggleOverlay()
+                        },
                         onOpenProfile = { navController.navigate(MappoRoute.CHANGE_PROFILE) },
                         onEditOverlay = {
                             // Live overlay editing happens over the game — slide the handheld
@@ -1088,15 +1113,6 @@ fun MainScreen(
         // and backgrounds the task (see the frameVisible effect above). ──
         HandheldFrame(
             shown = frameVisible,
-            // Master power (the old toolbar's master switch, relocated to the frame chrome)
-            // drives remap AND the button overlay to the same value in lockstep — one control
-            // for both features. (Does NOT auto-show the overlay at app launch; the overlay
-            // follows the toggle when the user flips it.)
-            powerOn = remapEnabled,
-            onPowerChange = { target ->
-                if (remapEnabled != target) viewModel.toggleRemap()
-                if (overlayShowing != target) viewModel.toggleOverlay()
-            },
             dismissEnabled = isMainRoute,
             onDismissRequest = { frameVisible = false },
             screenContent = screenContent,

@@ -6,6 +6,7 @@ import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.os.Build
@@ -15,7 +16,9 @@ import android.view.Display
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
+import com.mappo.MainActivity
 import com.mappo.data.model.DeviceButton
+import com.mappo.ui.screen.home.HomeBackdrop
 import com.mappo.data.model.RemapTarget
 import com.mappo.data.model.steam.InputSource
 import com.mappo.service.foreground.ForegroundAppMonitor
@@ -42,7 +45,6 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
     @Inject lateinit var shizukuKeyInjector: ShizukuKeyInjector
     @Inject lateinit var shizukuMouseInjector: ShizukuMouseInjector
     @Inject lateinit var shizukuStylusInjector: ShizukuStylusInjector
-    @Inject lateinit var toolbarOverlayManager: com.mappo.service.overlay.element.ToolbarOverlayManager
 
     companion object {
         // Physical gamepad keycodes → DeviceButton enum
@@ -538,21 +540,27 @@ class InputAccessibilityService : AccessibilityService(), InputSink {
             }
         }
 
-        // ── Toolbar nav ENTER trigger (OVERLAY_TOOLBAR_PLAN.md) ──
-        // Select held + A summons the toolbar (if needed) and enters gamepad-nav mode, which flips
-        // the overlay focusable + sets overlayFocus = TOOLBAR (handled above on subsequent keys).
-        // Placed BEFORE the remap-enabled gate so the toolbar is reachable even with remap off.
-        // Brick-5 MVP chord detected inline; migrates to the configurable activator flow later.
-        if (selectHeld && event.keyCode == KeyEvent.KEYCODE_BUTTON_A && downEdge && event.repeatCount == 0 &&
-            !dispatcher.toolbarNavActive.value
-        ) {
-            // Reveal the toolbar if it isn't up (showForNav returns false when overlay perm is
-            // missing → let A reach the game). Already-shown (dev/QS) toolbars enter nav in place.
-            if (toolbarOverlayManager.isShowing() || toolbarOverlayManager.showForNav()) {
-                Log.i(TAG, "onKeyEvent: Select+A → reveal/enter toolbar nav")
-                dispatcher.requestEnterToolbarNavWhenReady()
-                return true
+        // ── Home chord (Select + A): reveal or dismiss the handheld home frame ──
+        // Placed BEFORE the remap-enabled gate so the home is reachable even with remap off.
+        // Foreground → MainScreen toggles the frame in place (dismiss slides it down and
+        // backgrounds the task); background → launch the activity (frame slides up on resume).
+        // Chord detected inline (Brick-5 MVP); migrates to the configurable activator flow later.
+        if (selectHeld && event.keyCode == KeyEvent.KEYCODE_BUTTON_A && downEdge && event.repeatCount == 0) {
+            if (MainActivity.inForeground) {
+                Log.i(TAG, "onKeyEvent: Select+A → toggle home frame in place")
+                MainActivity.requestHomeToggle()
+            } else {
+                // Capture the display BEFORE our window exists — the one moment the home
+                // backdrop can't contain Mappo itself. Launch from the callback either way.
+                Log.i(TAG, "onKeyEvent: Select+A → capture backdrop, then launch home frame")
+                captureScreenshot { screenshot ->
+                    HomeBackdrop.setFrom(screenshot)
+                    startActivity(
+                        Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
             }
+            return true
         }
 
         if (!dispatcher.remapEnabled.value) return false

@@ -276,58 +276,27 @@ fun RemapControlsScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            Column {
-                // surfaceContainer app bar — one step up from the surface detail content (so the
-                // bar never matches it), same plane as the rail chrome. Title names the current
-                // profile; back nav; Import/Export + Reset actions (UI-only for now).
-                TopAppBar(
-                    title = {
-                        // Static prefix + width-capped name so a long profile name ellipsizes
-                        // instead of wrapping the app bar (see NameableText). Sized between
-                        // titleMedium (16sp) and the default titleLarge (22sp) for a header that's a
-                        // touch lighter than default without feeling small.
-                        ProvideTextStyle(
-                            MaterialTheme.typography.titleMedium.copy(fontSize = 19.sp, lineHeight = 24.sp),
-                        ) {
-                            if (profileName != null) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Editing ")
-                                    NameableText(profileName)
-                                }
-                            } else {
-                                Text("Edit controls")
-                            }
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        TextButton(onClick = { /* UI-only for now */ }) {
-                            Icon(Icons.Filled.ImportExport, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Import/Export")
-                        }
-                        TextButton(onClick = { /* UI-only for now */ }) {
-                            Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Reset")
-                        }
-                        // Pad the trailing action off the right edge (the default actions inset
-                        // reads too tight against the text-button label).
-                        Spacer(Modifier.width(10.dp))
-                    },
-                    // Shorter than the 64dp default so the bar claims less vertical space.
-                    expandedHeight = 50.dp,
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    ),
-                )
-                // Bottom border of the app bar.
-                HorizontalDivider()
-            }
+            // The action-set manager: back + one tab per set (layers as subordinate tabs) +
+            // add-set, on the shared ReorderableTabBar. Replaces the old profile-title app bar
+            // AND the rail's scope fly-out as the set/layer selection surface.
+            com.mappo.ui.screen.remap.RemapTopBar(
+                config = config,
+                viewingSetId = viewingSet?.actionSet?.id,
+                viewingLayerId = viewingLayerId,
+                onSelectActionSet = onSelectActionSet,
+                onSelectLayer = onSelectLayer,
+                onBack = onBack,
+                actions = com.mappo.ui.screen.remap.RemapScopeTabActions(
+                    onRenameSet = { dialog = ActionSetDialogState.Rename(it) },
+                    onDuplicateSet = { dialog = ActionSetDialogState.Duplicate(it) },
+                    onDeleteSet = { dialog = ActionSetDialogState.Delete(it) },
+                    onAddLayer = { layerDialog = LayerDialogState.Add(it) },
+                    onRenameLayer = { layerDialog = LayerDialogState.Rename(it) },
+                    onDuplicateLayer = { layerDialog = LayerDialogState.Duplicate(it) },
+                    onDeleteLayer = { layerDialog = LayerDialogState.Delete(it) },
+                    onAddSet = { dialog = ActionSetDialogState.Add },
+                ),
+            )
         },
     ) { innerPadding ->
         Column(
@@ -342,16 +311,6 @@ fun RemapControlsScreen(
                 sections = RemapSections.rail,
                 selectedSectionId = selectedSectionId,
                 onSectionSelected = { selectedSectionId = it },
-                scopeLabel = viewingLayer?.layer?.title
-                    ?: viewingSet?.actionSet?.title
-                    ?: "—",
-                config = config,
-                viewingSetId = viewingSet?.actionSet?.id,
-                viewingLayerId = viewingLayerId,
-                onSelectActionSet = onSelectActionSet,
-                onSelectLayer = onSelectLayer,
-                onAddSet = { dialog = ActionSetDialogState.Add },
-                onAddLayer = { setId -> layerDialog = LayerDialogState.Add(setId) },
                 modifier = Modifier.fillMaxSize(),
             ) { sectionId, firstRowFocusRequester ->
                 RemapDetailPane(

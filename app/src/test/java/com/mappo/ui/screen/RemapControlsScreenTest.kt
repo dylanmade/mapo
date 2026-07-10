@@ -203,7 +203,7 @@ class RemapControlsScreenTest {
     // ── Scope fly-out: action sets ──────────────
 
     @Test
-    fun scopeFlyout_listsEverySet_andSelectingInvokesCallback() {
+    fun tabs_listEverySet_andSelectingInvokesCallback() {
         var selectedSetId: Long? = null
         composeRule.setContent {
             MaterialTheme {
@@ -223,12 +223,10 @@ class RemapControlsScreenTest {
             }
         }
 
-        // Open the scope fly-out from the rail entry; every set is listed.
-        composeRule.onNodeWithTag("rail-scope").performClick()
-        composeRule.waitForIdle()
+        // Every set renders as a top-bar tab; tapping one selects it.
         composeRule.onNodeWithText("Menu", useUnmergedTree = true).assertExists()
-
         composeRule.onNodeWithText("Menu", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
 
         assert(selectedSetId == 2L) {
             "Expected onSelectActionSet(2L), got $selectedSetId"
@@ -285,10 +283,10 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
     }
 
-    // ── Scope fly-out: set management (kebab + add) ──────────────────────
+    // ── Top-bar tabs: set management ─────────────────────────────────────
 
     @Test
-    fun scopeFlyout_addSet_opensAddSetDialog() {
+    fun addSetButton_opensAddSetDialog() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -307,32 +305,9 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
+        composeRule.onNodeWithContentDescription("Add action set").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Add set", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Add Action Set", useUnmergedTree = true).assertIsDisplayed()
-    }
-
-    @Test
-    fun scopeFlyout_addLayer_opensAddLayerDialog() {
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = sampleConfig(),
-                        viewingActionSetId = 1L,
-                        onOpenInputEditor = { _, _, _ -> },
-                        onBack = {},
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        composeRule.onNodeWithTag("rail-scope").performClick()
-        composeRule.waitForIdle()
-        composeRule.onNodeWithText("Add layer", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithText("Add Layer", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
@@ -360,10 +335,10 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("Switch to: Menu").assertIsDisplayed()
     }
 
-    // ── Scope fly-out: layers ────────────────────────────────────────────
+    // ── Top-bar tabs: layers ─────────────────────────────────────────────
 
     @Test
-    fun scopeFlyout_listsLayers_underTheirSet() {
+    fun tabs_listLayers_asSubordinateTabs() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -372,7 +347,7 @@ class RemapControlsScreenTest {
                             layers = listOf(10L to "Scope", 11L to "Vehicle"),
                         ),
                         viewingActionSetId = 1L,
-                        viewingLayerId = null,  // base view → field shows the set name, not a layer
+                        viewingLayerId = null,  // base view → the set tab is selected, not a layer
                         onOpenInputEditor = { _, _, _ -> },
                         onBack = {},
                         modifier = androidx.compose.ui.Modifier.fillMaxSize(),
@@ -381,14 +356,12 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
-        composeRule.waitForIdle()
         composeRule.onNodeWithText("Scope", useUnmergedTree = true).assertExists()
         composeRule.onNodeWithText("Vehicle", useUnmergedTree = true).assertExists()
     }
 
     @Test
-    fun scopeFlyout_selectingLayer_invokesOnSelectLayer_withId() {
+    fun tabs_selectingLayer_invokesOnSelectLayer_withId() {
         var selectedLayerId: Long? = -1L  // sentinel; null is a meaningful value
         composeRule.setContent {
             MaterialTheme {
@@ -408,9 +381,8 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
-        composeRule.waitForIdle()
         composeRule.onNodeWithText("Vehicle", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
 
         assert(selectedLayerId == 11L) {
             "Expected onSelectLayer(11L), got $selectedLayerId"
@@ -418,7 +390,7 @@ class RemapControlsScreenTest {
     }
 
     @Test
-    fun scopeFlyout_selectingSetRow_dropsToBase_withNull() {
+    fun tabs_selectingSetTab_dropsToBase_withNull() {
         var lastSelected: Long? = -1L
         composeRule.setContent {
             MaterialTheme {
@@ -438,10 +410,9 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("rail-scope").performClick()
-        composeRule.waitForIdle()
-        // Tapping the set row itself selects the base set (no layer overlay).
+        // Tapping the set tab itself selects the base set (no layer overlay).
         composeRule.onNodeWithText("Default", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
 
         assert(lastSelected == null) {
             "Expected selecting the set row to fire onSelectLayer(null), got $lastSelected"
@@ -449,7 +420,7 @@ class RemapControlsScreenTest {
     }
 
     @Test
-    fun scopeFlyout_listsAllSetsLayers_notJustViewing() {
+    fun tabs_listAllSetsLayers_notJustViewing() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -467,10 +438,8 @@ class RemapControlsScreenTest {
             }
         }
 
-        // The fly-out is a global switcher: every set's layers are listed, not just the
+        // The tab bar is a global switcher: every set's layers are listed, not just the
         // viewing set's (unlike the old per-set pill row).
-        composeRule.onNodeWithTag("rail-scope").performClick()
-        composeRule.waitForIdle()
         composeRule.onNodeWithText("ScopeA", useUnmergedTree = true).assertExists()
         composeRule.onNodeWithText("ScopeB", useUnmergedTree = true).assertExists()
     }

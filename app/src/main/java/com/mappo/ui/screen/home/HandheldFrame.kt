@@ -65,10 +65,10 @@ private val BodyOverhang = 60.dp
 private const val ExpandMillis = 320
 
 // Deliberate fixed hardware colors (skeuomorphic exception — these must NOT re-tint with the
-// theme seed): the shell is an off-white plastic, the glass a near-black darker than the LCD's
-// surfaceContainerLowest so bezel and screen stay differentiated in dark theme.
+// theme seed): the shell is an off-white plastic; the glass is temporarily a light gray so it
+// reads clearly against the dark theme while the frame design is tuned (final = darker glass).
 private val BodyShellColor = Color(0xFFEFECE6)
-private val GlassColor = Color(0xFF060809)
+private val GlassColor = Color(0xFF5F656C) // placeholder light gray while the frame is tuned
 private val GlassPrintColor = Color(0xFF9AA3AD)
 
 /**
@@ -140,19 +140,20 @@ fun HandheldFrame(
             )
         }
 
-        // LCD bounds. Contracted: a 1:1 square as large as both axes allow inside the shell +
-        // glass borders. Expanded: fill everything the display offers. Both animate through the
-        // same pair so the glass + shell resize with the screen.
+        // LCD bounds. Contracted: the GLASS (LCD + bezel insets + wordmark band) is the 1:1
+        // square, so the LCD itself comes out slightly wide. Expanded: fill everything the
+        // display offers. Both animate through the same pair so the glass + shell resize with
+        // the screen.
         val maxLcdW = availW - ShellBorder * 2 - GlassInset * 2
         val maxLcdH = availH - TopMargin - ShellBorder - GlassInset - GlassBottomBand
-        val squareLcd = minOf(maxLcdW, maxLcdH)
+        val glassSquare = minOf(availW - ShellBorder * 2, availH - TopMargin - ShellBorder)
         val lcdW by animateDpAsState(
-            targetValue = if (expanded) maxLcdW else squareLcd,
+            targetValue = if (expanded) maxLcdW else glassSquare - GlassInset * 2,
             animationSpec = tween(ExpandMillis, easing = FastOutSlowInEasing),
             label = "lcdWidth",
         )
         val lcdH by animateDpAsState(
-            targetValue = if (expanded) maxLcdH else squareLcd,
+            targetValue = if (expanded) maxLcdH else glassSquare - GlassInset - GlassBottomBand,
             animationSpec = tween(ExpandMillis, easing = FastOutSlowInEasing),
             label = "lcdHeight",
         )

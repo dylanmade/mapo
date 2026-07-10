@@ -37,6 +37,7 @@ import com.mappo.data.model.steam.ActionSetGraph
 import com.mappo.data.model.steam.ActivatorType
 import com.mappo.data.model.steam.BindingGroupGraph
 import com.mappo.data.model.steam.BindingMode
+import com.mappo.data.model.steam.BindingOutput
 import com.mappo.data.model.steam.ControllerConfig
 import com.mappo.data.model.steam.InputSource
 import com.mappo.data.model.steam.displayLabel
@@ -64,12 +65,16 @@ internal fun RemapSimpleView(
 ) {
     Row(
         modifier = modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        // Wide gutter keeps the side group boxes off the controller image.
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        // Left column, counterclockwise start: shoulder → d-pad → stick.
+        // Left column, counterclockwise start: shoulder → d-pad → stick. Boxes anchor toward
+        // the screen center (the controller), i.e. this column's END edge.
         Column(
             modifier = Modifier.weight(1f).fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween,
+            // Boxes cluster toward the vertical center rather than spreading edge-to-edge.
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.End,
         ) {
             GroupBox(RemapSimpleGroup.LEFT_SHOULDER, viewingSet, viewingLayer, config, onOpenGroup)
             GroupBox(RemapSimpleGroup.DPAD, viewingSet, viewingLayer, config, onOpenGroup)
@@ -98,10 +103,12 @@ internal fun RemapSimpleView(
             Spacer(Modifier.weight(1f))
             GroupBox(RemapSimpleGroup.UTILITY, viewingSet, viewingLayer, config, onOpenGroup)
         }
-        // Right column: shoulder → face buttons → stick.
+        // Right column: shoulder → face buttons → stick. Boxes anchor toward the screen
+        // center (this column's START edge).
         Column(
             modifier = Modifier.weight(1f).fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.Start,
         ) {
             GroupBox(RemapSimpleGroup.RIGHT_SHOULDER, viewingSet, viewingLayer, config, onOpenGroup)
             GroupBox(RemapSimpleGroup.FACE, viewingSet, viewingLayer, config, onOpenGroup)
@@ -204,8 +211,12 @@ internal fun simpleRowLabel(
     val primary = groupInput?.activators?.firstOrNull { it.activator.type == ActivatorType.FULL_PRESS }
         ?: groupInput?.activators?.firstOrNull()
     val output = primary?.primaryOutput
-    return output?.displayLabel(config)
-        ?: effective.group.mode.displayNameFor(spec.source)
+    return when {
+        // Unbound displays as "(Device default)" in the editor; the summary reads "Default".
+        output != null && output != BindingOutput.Unbound -> output.displayLabel(config)
+        groupInput != null -> "Default"
+        else -> effective.group.mode.displayNameFor(spec.source)
+    }
 }
 
 /**
@@ -222,7 +233,7 @@ private fun GroupBox(
     onOpenGroup: (RemapSimpleGroup) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(8.dp)
     val accent = MaterialTheme.colorScheme.primary
     // Accent tint composited over surfaceContainerLow — same identity treatment as the home
     // flower's petal cards.

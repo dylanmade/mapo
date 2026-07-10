@@ -84,7 +84,7 @@ class RemapControlsScreenTest {
     }
 
     @Test
-    fun simpleView_rendersFaceGlyphs_andDefaultLabels() {
+    fun simpleView_rendersDefaultLabels_forUnconfiguredGroups() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -98,9 +98,8 @@ class RemapControlsScreenTest {
             }
         }
 
-        // The face box renders its A/B/X/Y badges; unconfigured groups read "Default".
-        composeRule.onAllNodesWithText("A", useUnmergedTree = true).assertCountEquals(1)
-        composeRule.onAllNodesWithText("B", useUnmergedTree = true).assertCountEquals(1)
+        // Face glyphs are graphical button prompts now (no letter text); unconfigured groups
+        // read "Default".
         assert(
             composeRule.onAllNodesWithText("Default", useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty(),

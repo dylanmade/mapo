@@ -1,10 +1,7 @@
 package com.mappo.ui.glyph
 
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -15,9 +12,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ControlCamera
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.DonutLarge
-import androidx.compose.material.icons.filled.FilterNone
 import androidx.compose.material.icons.filled.Gamepad
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mouse
@@ -32,26 +27,24 @@ import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.mappo.R
 import com.mappo.data.model.steam.BindingMode
 import com.mappo.data.model.steam.InputSource
 
 /**
- * Central glyph mapping for the remap UI, shared everywhere a mode / source / sub-input is shown so
- * the same thing reads identically across the screen.
+ * Central glyph mapping for the remap UI, shared everywhere a mode / source / sub-input is shown
+ * so the same thing reads identically across the screen.
  *
- * Glyphs are **built in code** (Material icons + letter badges) rather than bundled
- * controller-prompt assets — no external dependency, fully themeable, and a clean seam for an
- * Xbox↔PlayStation family toggle later (PlayStation cross/circle/square/triangle shapes are simple
- * geometric vectors to add when that toggle lands). Default family is Xbox/generic (A/B/X/Y letters).
+ * Physical-button prompts come from the **Kenney Input Prompts 1.5** Xbox Series vector set
+ * (CC0), imported as tintable vector drawables (`res/drawable/xbox_*.xml`) — outline variants
+ * for buttons, per-side stick direction/press marks. Concept icons (behavioral modes, source
+ * sections) stay Material glyphs: they describe ideas, not hardware. A PlayStation-family
+ * toggle later = a parallel `ps_*` drawable set behind [buttonPromptRes].
  */
 object InputGlyphs {
     /** Leading icon for a behavioral [BindingMode] in the Input Mode dropdown. */
@@ -88,26 +81,54 @@ object InputGlyphs {
         else -> Icons.Filled.RadioButtonChecked // bumpers / switches / "Other buttons"
     }
 
-    /** Letter shown in a circled badge (Xbox family): face buttons + bumper shorthand, or null. */
-    private fun faceButtonLetter(source: InputSource, subInputKey: String): String? = when (source) {
+    /**
+     * Kenney Xbox button-prompt drawable for a physical (source, sub-input) pair, or null when
+     * the pair has no hardware prompt (falls back to a Material icon / spacer).
+     */
+    private fun buttonPromptRes(source: InputSource, subInputKey: String): Int? = when (source) {
         InputSource.BUTTON_DIAMOND -> when (subInputKey) {
-            "button_a" -> "A"; "button_b" -> "B"; "button_x" -> "X"; "button_y" -> "Y"; else -> null
+            "button_a" -> R.drawable.xbox_button_a_outline
+            "button_b" -> R.drawable.xbox_button_b_outline
+            "button_x" -> R.drawable.xbox_button_x_outline
+            "button_y" -> R.drawable.xbox_button_y_outline
+            else -> null
         }
-        InputSource.LEFT_BUMPER -> if (subInputKey == "click") "L1" else null
-        InputSource.RIGHT_BUMPER -> if (subInputKey == "click") "R1" else null
+        InputSource.DPAD -> when (subInputKey) {
+            "dpad_up" -> R.drawable.xbox_dpad_up_outline
+            "dpad_down" -> R.drawable.xbox_dpad_down_outline
+            "dpad_left" -> R.drawable.xbox_dpad_left_outline
+            "dpad_right" -> R.drawable.xbox_dpad_right_outline
+            else -> null
+        }
+        InputSource.LEFT_JOYSTICK -> when (subInputKey) {
+            "dpad_up" -> R.drawable.xbox_stick_l_up
+            "dpad_down" -> R.drawable.xbox_stick_l_down
+            "dpad_left" -> R.drawable.xbox_stick_l_left
+            "dpad_right" -> R.drawable.xbox_stick_l_right
+            "click" -> R.drawable.xbox_stick_l_press
+            else -> null
+        }
+        InputSource.RIGHT_JOYSTICK -> when (subInputKey) {
+            "dpad_up" -> R.drawable.xbox_stick_r_up
+            "dpad_down" -> R.drawable.xbox_stick_r_down
+            "dpad_left" -> R.drawable.xbox_stick_r_left
+            "dpad_right" -> R.drawable.xbox_stick_r_right
+            "click" -> R.drawable.xbox_stick_r_press
+            else -> null
+        }
+        // Triggers: one prompt for every pull depth — the row label carries full vs soft.
+        InputSource.LEFT_TRIGGER -> R.drawable.xbox_lt_outline
+        InputSource.RIGHT_TRIGGER -> R.drawable.xbox_rt_outline
+        InputSource.LEFT_BUMPER -> R.drawable.xbox_lb_outline
+        InputSource.RIGHT_BUMPER -> R.drawable.xbox_rb_outline
+        // Xbox Series naming: Start = Menu (☰), Select = View (⧉).
+        InputSource.SWITCH_START -> R.drawable.xbox_button_menu_outline
+        InputSource.SWITCH_SELECT -> R.drawable.xbox_button_view_outline
         else -> null
     }
 
-    /** Source-specific icon overrides for sub-inputs whose generic icon reads wrong. */
-    private fun sourceSubInputIcon(source: InputSource, subInputKey: String): ImageVector? =
-        when (source) {
-            // Xbox-family glyph approximations: Start = hamburger, Select/View = stacked panes.
-            InputSource.SWITCH_START -> if (subInputKey == "click") Icons.Filled.Menu else null
-            InputSource.SWITCH_SELECT -> if (subInputKey == "click") Icons.Filled.FilterNone else null
-            else -> null
-        }
-
-    /** Material icon for a non-face-button sub-input, or null when none fits (falls back to a spacer). */
+    /** Material fallback for sub-inputs with no hardware prompt (e.g. face buttons remapped
+     *  into Directional Pad mode surface dpad_* keys on BUTTON_DIAMOND). */
     private fun subInputIcon(subInputKey: String): ImageVector? = when (subInputKey) {
         "dpad_up" -> Icons.Filled.ArrowUpward
         "dpad_down" -> Icons.Filled.ArrowDownward
@@ -123,10 +144,10 @@ object InputGlyphs {
     val GlyphSize = 22.dp
 
     /**
-     * Leading glyph for a bindable sub-input row. Face buttons render as a circled letter badge
-     * (Xbox family); d-pad / trigger / click etc. render a Material icon; anything else a sized
-     * spacer so labels stay aligned. [size] lets callers scale it down for inline contexts (e.g.
-     * a menu-item label).
+     * Leading glyph for a bindable sub-input row: the Kenney Xbox button prompt when the pair
+     * maps to physical hardware, a Material icon fallback otherwise, and a sized spacer when
+     * neither fits so labels stay aligned. Prompts tint with [LocalContentColor]. [size] lets
+     * callers scale it down for inline contexts (e.g. a menu-item label).
      */
     @Composable
     fun SubInputGlyph(
@@ -136,22 +157,16 @@ object InputGlyphs {
         size: androidx.compose.ui.unit.Dp = GlyphSize,
     ) {
         val tint = LocalContentColor.current
-        val letter = faceButtonLetter(source, subInputKey)
+        val promptRes = buttonPromptRes(source, subInputKey)
         when {
-            letter != null -> Box(
-                modifier = modifier.size(size).border((size.value / 14.667f).dp, tint, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                // Two-character badges (L1/R1) drop a size step so they stay inside the circle.
-                Text(
-                    letter,
-                    fontSize = (size.value * if (letter.length > 1) 0.38f else 0.5f).sp,
-                    lineHeight = (size.value * if (letter.length > 1) 0.38f else 0.5f).sp,
-                    color = tint,
-                )
-            }
+            promptRes != null -> Icon(
+                painter = painterResource(promptRes),
+                contentDescription = null,
+                modifier = modifier.size(size),
+                tint = tint,
+            )
             else -> {
-                val icon = sourceSubInputIcon(source, subInputKey) ?: subInputIcon(subInputKey)
+                val icon = subInputIcon(subInputKey)
                 if (icon != null) Icon(icon, contentDescription = null, modifier = modifier.size(size), tint = tint)
                 else Spacer(modifier.size(size))
             }

@@ -53,6 +53,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -177,6 +178,7 @@ fun ReorderableTabBar(
                 Box(
                     modifier = Modifier
                         .height(tabHeight)
+                        .testTag("tab:" + tab.key)
                         .zIndex(if (isDragging) 1f else 0f)
                         .onGloballyPositioned { coords ->
                             tabBounds[tab.key] = coords.boundsInParent()

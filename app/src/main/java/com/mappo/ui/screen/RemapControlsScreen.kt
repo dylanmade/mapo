@@ -2,6 +2,8 @@ package com.mappo.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -179,6 +181,10 @@ fun RemapControlsScreen(
 
     var selectedSectionId by rememberSaveable { mutableStateOf(RemapSections.SECTION_BUTTONS) }
 
+    // Whether the advanced editor dialog (rail + detail pane) is open. rememberSaveable so the
+    // dialog survives the full-screen command-picker round-trip and restores on pop-back.
+    var advancedOpen by rememberSaveable { mutableStateOf(false) }
+
     // Brick 4.4: which management dialog is currently open. Plain `remember` —
     // dialogs are short-lived; rotation-survival isn't worth a custom Saver.
     var dialog by remember { mutableStateOf<ActionSetDialogState>(ActionSetDialogState.None) }
@@ -307,12 +313,76 @@ fun RemapControlsScreen(
             if (hasAnalogModeInConfig && !shizukuReady) {
                 ShizukuUnavailableBanner(onOpenSetup = onOpenShizukuSetup)
             }
-            RemapRail(
-                sections = RemapSections.rail,
-                selectedSectionId = selectedSectionId,
-                onSectionSelected = { selectedSectionId = it },
-                modifier = Modifier.fillMaxSize(),
-            ) { sectionId, firstRowFocusRequester ->
+            // The simplified ("basic") view: group boxes around the controller diagram. Tapping
+            // a box opens the advanced editor dialog below on that group's section.
+            com.mappo.ui.screen.remap.RemapSimpleView(
+                viewingSet = viewingSet,
+                viewingLayer = viewingLayer,
+                config = config,
+                onMap = { /* input-mapping wizard — UI-only CTA for now */ },
+                onOpenGroup = { group ->
+                    selectedSectionId = group.sectionId
+                    advancedOpen = true
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+            com.mappo.ui.screen.remap.RemapBottomRow(
+                viewingSet = viewingSet,
+                viewingLayerSelected = viewingLayer != null,
+                onSetGyroMode = gatedSetBindingGroupMode,
+                onOpenModeSettings = onOpenModeSettings,
+            )
+        }
+    }
+
+    // Advanced editor: the pre-existing rail + detail-pane assignment UI, hosted in a
+    // near-fullscreen dialog opened from a group box (the "advanced" half of the basic/advanced
+    // split; the wizard becomes the primary flow later).
+    if (advancedOpen) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { advancedOpen = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            // The dialog window hands initial focus to the first focusable — the rail's first
+            // item — whose select-on-focus would clobber the section this dialog was opened on.
+            // An invisible focus anchor takes that initial focus instead (same idiom as
+            // HomeFlower's focus holder); the first real D-pad move then enters the rail.
+            val dialogFocusAnchor = remember { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(Unit) { runCatching { dialogFocusAnchor.requestFocus() } }
+            // surfaceContainerHigh — dialog plane hosting the advanced editor.
+            Surface(
+                modifier = Modifier.fillMaxSize().padding(10.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .focusRequester(dialogFocusAnchor)
+                        .focusable(),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Advanced controls",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { advancedOpen = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close")
+                        }
+                    }
+                    HorizontalDivider()
+                    RemapRail(
+                        sections = RemapSections.rail,
+                        selectedSectionId = selectedSectionId,
+                        onSectionSelected = { selectedSectionId = it },
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    ) { sectionId, firstRowFocusRequester ->
                 RemapDetailPane(
                     sectionId = sectionId,
                     viewingSet = viewingSet,
@@ -357,6 +427,8 @@ fun RemapControlsScreen(
                     onSetInputRowLabel = onSetInputRowLabel,
                     onDeleteInputRow = onDeleteInputRow,
                 )
+                    }
+                }
             }
         }
     }

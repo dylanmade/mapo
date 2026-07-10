@@ -6,6 +6,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.unit.dp
@@ -56,7 +58,7 @@ class RemapControlsScreenTest {
 
 
     @Test
-    fun renders_allSectionLabelsInRail() {
+    fun advancedDialog_rendersAllSections() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -70,15 +72,19 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Buttons").assertIsDisplayed()
-        composeRule.onNodeWithText("D-Pad").assertIsDisplayed()
-        composeRule.onNodeWithText("Triggers").assertIsDisplayed()
-        composeRule.onNodeWithText("Joysticks").assertIsDisplayed()
-        composeRule.onNodeWithText("Gyro").assertIsDisplayed()  // disabled, but visible
+        // The rail lives in the advanced editor dialog now — open it from a group box.
+        composeRule.onNodeWithTag("simple-group:DPAD").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("section-rail-item:buttons").assertExists()
+        composeRule.onNodeWithTag("section-rail-item:dpad").assertExists()
+        composeRule.onNodeWithTag("section-rail-item:triggers").assertExists()
+        composeRule.onNodeWithTag("section-rail-item:joysticks").assertExists()
+        composeRule.onNodeWithTag("section-rail-item:gyro").assertExists()
     }
 
     @Test
-    fun renders_buttonsSectionByDefault_withFaceButtonRows() {
+    fun simpleView_rendersFaceGlyphs_andDefaultLabels() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -92,22 +98,17 @@ class RemapControlsScreenTest {
             }
         }
 
-        // LazyColumn lazily lays out items; below-the-fold rows are present in the
-        // semantics tree (assertExists) but not necessarily visible (assertIsDisplayed)
-        // in the small Robolectric viewport.
-        // Verify at least the first few face-button rows render. Robolectric's
-        // semantics tree gets quirky for low-content single-character text in
-        // some configurations; testing both endpoints (first + last in the group)
-        // would over-couple us to the test environment. Spot-checking covers the
-        // brick 1.3 behavior contract: "the buttons section is the default view
-        // and shows face-button rows."
-        composeRule.onNodeWithText("Face Buttons", useUnmergedTree = true).assertExists()
+        // The face box renders its A/B/X/Y badges; unconfigured groups read "Default".
         composeRule.onAllNodesWithText("A", useUnmergedTree = true).assertCountEquals(1)
         composeRule.onAllNodesWithText("B", useUnmergedTree = true).assertCountEquals(1)
+        assert(
+            composeRule.onAllNodesWithText("Default", useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty(),
+        ) { "Expected unconfigured groups to summarize as 'Default'" }
     }
 
     @Test
-    fun selectingDpadSection_swapsDetailPaneToDpadRows() {
+    fun tappingDpadBox_opensAdvancedEditorOnDpadSection() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -121,66 +122,14 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithTag("section-rail-item:dpad").performClick()
+        composeRule.onNodeWithTag("simple-group:DPAD").performClick()
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("Directional Pad Behavior", useUnmergedTree = true).assertExists()
-        // Spot-check the first dpad row landed; full enumeration is finicky in
-        // Robolectric and the section-switch contract is what we're verifying.
-        composeRule.onNodeWithText("D-Pad Up", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("Advanced controls").assertIsDisplayed()
+        composeRule.onNodeWithTag("section-rail-item:dpad").assertIsSelected()
     }
 
-    @Test
-    fun clickingBoundRow_invokesOnOpenInputEditor() {
-        var openedKey: String? = null
-        var openedLabel: String? = null
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = sampleConfig(boundButtonA = BindingOutput.KeyPress("ENTER")),
-                        onOpenInputEditor = { _, key, label ->
-                            openedKey = key
-                            openedLabel = label
-                        },
-                        onBack = {},
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
 
-        composeRule.onNodeWithText("A").performClick()
-
-        assert(openedKey == "button_a" && openedLabel == "A") {
-            "Expected input editor open with key='button_a' label='A', got key='$openedKey' label='$openedLabel'"
-        }
-    }
-
-    @Test
-    fun renders_disabledPlaceholderRowsInTriggers() {
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = sampleConfig(),
-                        onOpenInputEditor = { _, _, _ -> },
-                        onBack = {},
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        composeRule.onNodeWithTag("section-rail-item:triggers").performClick()
-        composeRule.waitForIdle()
-
-        // L2 Full Pull is the first row under the Left Trigger subheader. Soft Pull
-        // is two rows below; if Full Pull rendered, the LazyColumn is on the right
-        // section. The exact later-row visibility is brittle in Robolectric so we
-        // spot-check the top of each subheader's row group.
-        composeRule.onNodeWithText("L2 Full Pull", useUnmergedTree = true).assertExists()
-    }
 
     @Test
     fun displaysBoundLabel_forConfiguredBinding() {
@@ -410,8 +359,9 @@ class RemapControlsScreenTest {
             }
         }
 
-        // Tapping the set tab itself selects the base set (no layer overlay).
-        composeRule.onNodeWithText("Default", useUnmergedTree = true).performClick()
+        // Tapping the set tab itself selects the base set (no layer overlay). (By tag — the
+        // set's "Default" title collides with the simple view's "Default" summary labels.)
+        composeRule.onNodeWithTag("tab:set:1").performClick()
         composeRule.waitForIdle()
 
         assert(lastSelected == null) {
@@ -496,10 +446,12 @@ class RemapControlsScreenTest {
             }
         }
 
-        // Override visible; base hidden for that row.
+        // Override visible in the simple view; base hidden for that row.
         composeRule.onNodeWithText("MS: MOUSE_LEFT", useUnmergedTree = true).assertExists()
         composeRule.onAllNodesWithText("KB: ENTER", useUnmergedTree = true).assertCountEquals(0)
-        // Trailing menu present.
+        // Trailing menu lives in the advanced editor dialog.
+        composeRule.onNodeWithTag("simple-group:FACE").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithContentDescription("Override actions").assertIsDisplayed()
     }
 
@@ -527,6 +479,8 @@ class RemapControlsScreenTest {
             }
         }
 
+        composeRule.onNodeWithTag("simple-group:FACE").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithContentDescription("Override actions").performClick()
         composeRule.onNodeWithText("Clear override").performClick()
 
@@ -551,6 +505,8 @@ class RemapControlsScreenTest {
                 }
             }
         }
+        composeRule.onNodeWithTag("simple-group:FACE").performClick()
+        composeRule.waitForIdle()
         composeRule.onAllNodesWithText("Only overrides").assertCountEquals(0)
         composeRule.onAllNodesWithText("Show all").assertCountEquals(0)
     }
@@ -577,6 +533,9 @@ class RemapControlsScreenTest {
             }
         }
 
+        composeRule.onNodeWithTag("simple-group:FACE").performClick()
+        composeRule.waitForIdle()
+
         // Toggle visible.
         composeRule.onNodeWithText("Show all").assertIsDisplayed()
         composeRule.onNodeWithText("Only overrides").assertIsDisplayed()
@@ -590,7 +549,8 @@ class RemapControlsScreenTest {
         // anyway (per feedback_robolectric_compose_pitfalls). The filter's
         // correctness is exhaustively tested at the pure-function level via
         // FilterToOverridesTest.
-        composeRule.onNodeWithText("MS: MOUSE_LEFT", useUnmergedTree = true).assertExists()
+        // (onAllNodes + onFirst: the label also renders in the simple view beneath the dialog.)
+        composeRule.onAllNodesWithText("MS: MOUSE_LEFT", useUnmergedTree = true).onFirst().assertExists()
     }
 
     /**

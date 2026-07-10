@@ -15,7 +15,9 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ControlCamera
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.DonutLarge
+import androidx.compose.material.icons.filled.FilterNone
 import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mouse
@@ -86,11 +88,24 @@ object InputGlyphs {
         else -> Icons.Filled.RadioButtonChecked // bumpers / switches / "Other buttons"
     }
 
-    /** Letter shown in a face-button badge (Xbox family), or null if [subInputKey] isn't a face button. */
-    private fun faceButtonLetter(source: InputSource, subInputKey: String): String? =
-        if (source == InputSource.BUTTON_DIAMOND) when (subInputKey) {
+    /** Letter shown in a circled badge (Xbox family): face buttons + bumper shorthand, or null. */
+    private fun faceButtonLetter(source: InputSource, subInputKey: String): String? = when (source) {
+        InputSource.BUTTON_DIAMOND -> when (subInputKey) {
             "button_a" -> "A"; "button_b" -> "B"; "button_x" -> "X"; "button_y" -> "Y"; else -> null
-        } else null
+        }
+        InputSource.LEFT_BUMPER -> if (subInputKey == "click") "L1" else null
+        InputSource.RIGHT_BUMPER -> if (subInputKey == "click") "R1" else null
+        else -> null
+    }
+
+    /** Source-specific icon overrides for sub-inputs whose generic icon reads wrong. */
+    private fun sourceSubInputIcon(source: InputSource, subInputKey: String): ImageVector? =
+        when (source) {
+            // Xbox-family glyph approximations: Start = hamburger, Select/View = stacked panes.
+            InputSource.SWITCH_START -> if (subInputKey == "click") Icons.Filled.Menu else null
+            InputSource.SWITCH_SELECT -> if (subInputKey == "click") Icons.Filled.FilterNone else null
+            else -> null
+        }
 
     /** Material icon for a non-face-button sub-input, or null when none fits (falls back to a spacer). */
     private fun subInputIcon(subInputKey: String): ImageVector? = when (subInputKey) {
@@ -127,15 +142,16 @@ object InputGlyphs {
                 modifier = modifier.size(size).border((size.value / 14.667f).dp, tint, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
+                // Two-character badges (L1/R1) drop a size step so they stay inside the circle.
                 Text(
                     letter,
-                    fontSize = (size.value * 0.5f).sp,
-                    lineHeight = (size.value * 0.5f).sp,
+                    fontSize = (size.value * if (letter.length > 1) 0.38f else 0.5f).sp,
+                    lineHeight = (size.value * if (letter.length > 1) 0.38f else 0.5f).sp,
                     color = tint,
                 )
             }
             else -> {
-                val icon = subInputIcon(subInputKey)
+                val icon = sourceSubInputIcon(source, subInputKey) ?: subInputIcon(subInputKey)
                 if (icon != null) Icon(icon, contentDescription = null, modifier = modifier.size(size), tint = tint)
                 else Spacer(modifier.size(size))
             }

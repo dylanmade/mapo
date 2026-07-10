@@ -41,10 +41,12 @@ import com.mappo.data.model.steam.InputSource
  * so the same thing reads identically across the screen.
  *
  * Physical-button prompts come from the **Kenney Input Prompts 1.5** Xbox Series vector set
- * (CC0), imported as tintable vector drawables (`res/drawable/xbox_*.xml`) — outline variants
- * for buttons, per-side stick direction/press marks. Concept icons (behavioral modes, source
- * sections) stay Material glyphs: they describe ideas, not hardware. A PlayStation-family
- * toggle later = a parallel `ps_*` drawable set behind [buttonPromptRes].
+ * (CC0), imported as vector drawables (`res/drawable/xbox_*.xml`) — filled variants, color face
+ * buttons, per-side stick marks. Prompts render UNTINTED (fixed hardware colors — the face
+ * button hues and the dpad's highlighted-arm accent must not re-tint with the theme). Concept
+ * icons (behavioral modes, source sections) stay Material glyphs: they describe ideas, not
+ * hardware. A PlayStation-family toggle later = a parallel `ps_*` drawable set behind
+ * [buttonPromptRes].
  */
 object InputGlyphs {
     /** Leading icon for a behavioral [BindingMode] in the Input Mode dropdown. */
@@ -87,17 +89,17 @@ object InputGlyphs {
      */
     private fun buttonPromptRes(source: InputSource, subInputKey: String): Int? = when (source) {
         InputSource.BUTTON_DIAMOND -> when (subInputKey) {
-            "button_a" -> R.drawable.xbox_button_a_outline
-            "button_b" -> R.drawable.xbox_button_b_outline
-            "button_x" -> R.drawable.xbox_button_x_outline
-            "button_y" -> R.drawable.xbox_button_y_outline
+            "button_a" -> R.drawable.xbox_button_color_a
+            "button_b" -> R.drawable.xbox_button_color_b
+            "button_x" -> R.drawable.xbox_button_color_x
+            "button_y" -> R.drawable.xbox_button_color_y
             else -> null
         }
         InputSource.DPAD -> when (subInputKey) {
-            "dpad_up" -> R.drawable.xbox_dpad_up_outline
-            "dpad_down" -> R.drawable.xbox_dpad_down_outline
-            "dpad_left" -> R.drawable.xbox_dpad_left_outline
-            "dpad_right" -> R.drawable.xbox_dpad_right_outline
+            "dpad_up" -> R.drawable.xbox_dpad_up
+            "dpad_down" -> R.drawable.xbox_dpad_down
+            "dpad_left" -> R.drawable.xbox_dpad_left
+            "dpad_right" -> R.drawable.xbox_dpad_right
             else -> null
         }
         InputSource.LEFT_JOYSTICK -> when (subInputKey) {
@@ -105,7 +107,7 @@ object InputGlyphs {
             "dpad_down" -> R.drawable.xbox_stick_l_down
             "dpad_left" -> R.drawable.xbox_stick_l_left
             "dpad_right" -> R.drawable.xbox_stick_l_right
-            "click" -> R.drawable.xbox_stick_l_press
+            "click" -> R.drawable.xbox_stick_side_l
             else -> null
         }
         InputSource.RIGHT_JOYSTICK -> when (subInputKey) {
@@ -113,17 +115,17 @@ object InputGlyphs {
             "dpad_down" -> R.drawable.xbox_stick_r_down
             "dpad_left" -> R.drawable.xbox_stick_r_left
             "dpad_right" -> R.drawable.xbox_stick_r_right
-            "click" -> R.drawable.xbox_stick_r_press
+            "click" -> R.drawable.xbox_stick_side_r
             else -> null
         }
         // Triggers: one prompt for every pull depth — the row label carries full vs soft.
-        InputSource.LEFT_TRIGGER -> R.drawable.xbox_lt_outline
-        InputSource.RIGHT_TRIGGER -> R.drawable.xbox_rt_outline
-        InputSource.LEFT_BUMPER -> R.drawable.xbox_lb_outline
-        InputSource.RIGHT_BUMPER -> R.drawable.xbox_rb_outline
+        InputSource.LEFT_TRIGGER -> R.drawable.xbox_lt
+        InputSource.RIGHT_TRIGGER -> R.drawable.xbox_rt
+        InputSource.LEFT_BUMPER -> R.drawable.xbox_lb
+        InputSource.RIGHT_BUMPER -> R.drawable.xbox_rb
         // Xbox Series naming: Start = Menu (☰), Select = View (⧉).
-        InputSource.SWITCH_START -> R.drawable.xbox_button_menu_outline
-        InputSource.SWITCH_SELECT -> R.drawable.xbox_button_view_outline
+        InputSource.SWITCH_START -> R.drawable.xbox_button_menu
+        InputSource.SWITCH_SELECT -> R.drawable.xbox_button_view
         else -> null
     }
 
@@ -146,8 +148,10 @@ object InputGlyphs {
     /**
      * Leading glyph for a bindable sub-input row: the Kenney Xbox button prompt when the pair
      * maps to physical hardware, a Material icon fallback otherwise, and a sized spacer when
-     * neither fits so labels stay aligned. Prompts tint with [LocalContentColor]. [size] lets
-     * callers scale it down for inline contexts (e.g. a menu-item label).
+     * neither fits so labels stay aligned. Prompts render UNTINTED — the drawables carry fixed
+     * hardware colors (face hues, dpad accent) that deliberately ignore the theme; only the
+     * Material fallbacks tint with [LocalContentColor]. [size] lets callers scale it down for
+     * inline contexts (e.g. a menu-item label).
      */
     @Composable
     fun SubInputGlyph(
@@ -163,7 +167,7 @@ object InputGlyphs {
                 painter = painterResource(promptRes),
                 contentDescription = null,
                 modifier = modifier.size(size),
-                tint = tint,
+                tint = androidx.compose.ui.graphics.Color.Unspecified,
             )
             else -> {
                 val icon = subInputIcon(subInputKey)

@@ -1,9 +1,9 @@
 package com.mappo.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -279,88 +279,88 @@ fun RemapControlsScreen(
             }
     } == true
 
-    Scaffold(
-        modifier = modifier,
-        topBar = {
-            // The action-set manager: back + one tab per set (layers as subordinate tabs) +
-            // add-set, on the shared ReorderableTabBar. Replaces the old profile-title app bar
-            // AND the rail's scope fly-out as the set/layer selection surface.
-            com.mappo.ui.screen.remap.RemapTopBar(
-                config = config,
-                viewingSetId = viewingSet?.actionSet?.id,
-                viewingLayerId = viewingLayerId,
-                onSelectActionSet = onSelectActionSet,
-                onSelectLayer = onSelectLayer,
-                onBack = onBack,
-                actions = com.mappo.ui.screen.remap.RemapScopeTabActions(
-                    onRenameSet = { dialog = ActionSetDialogState.Rename(it) },
-                    onDuplicateSet = { dialog = ActionSetDialogState.Duplicate(it) },
-                    onDeleteSet = { dialog = ActionSetDialogState.Delete(it) },
-                    onAddLayer = { layerDialog = LayerDialogState.Add(it) },
-                    onRenameLayer = { layerDialog = LayerDialogState.Rename(it) },
-                    onDuplicateLayer = { layerDialog = LayerDialogState.Duplicate(it) },
-                    onDeleteLayer = { layerDialog = LayerDialogState.Delete(it) },
-                    onAddSet = { dialog = ActionSetDialogState.Add },
-                ),
-            )
-        },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-        ) {
-            if (hasAnalogModeInConfig && !shizukuReady) {
-                ShizukuUnavailableBanner(onOpenSetup = onOpenShizukuSetup)
+    Box(modifier = modifier) {
+        Scaffold(
+            topBar = {
+                // The action-set manager: back + one tab per set (layers as subordinate tabs) +
+                // add-set, on the shared ReorderableTabBar. Replaces the old profile-title app bar
+                // AND the rail's scope fly-out as the set/layer selection surface.
+                com.mappo.ui.screen.remap.RemapTopBar(
+                    config = config,
+                    viewingSetId = viewingSet?.actionSet?.id,
+                    viewingLayerId = viewingLayerId,
+                    onSelectActionSet = onSelectActionSet,
+                    onSelectLayer = onSelectLayer,
+                    onBack = onBack,
+                    actions = com.mappo.ui.screen.remap.RemapScopeTabActions(
+                        onRenameSet = { dialog = ActionSetDialogState.Rename(it) },
+                        onDuplicateSet = { dialog = ActionSetDialogState.Duplicate(it) },
+                        onDeleteSet = { dialog = ActionSetDialogState.Delete(it) },
+                        onAddLayer = { layerDialog = LayerDialogState.Add(it) },
+                        onRenameLayer = { layerDialog = LayerDialogState.Rename(it) },
+                        onDuplicateLayer = { layerDialog = LayerDialogState.Duplicate(it) },
+                        onDeleteLayer = { layerDialog = LayerDialogState.Delete(it) },
+                        onAddSet = { dialog = ActionSetDialogState.Add },
+                    ),
+                )
+            },
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            ) {
+                if (hasAnalogModeInConfig && !shizukuReady) {
+                    ShizukuUnavailableBanner(onOpenSetup = onOpenShizukuSetup)
+                }
+                // The simplified ("basic") view: group boxes around the controller diagram. Tapping
+                // a box opens the advanced editor dialog below on that group's section.
+                com.mappo.ui.screen.remap.RemapSimpleView(
+                    viewingSet = viewingSet,
+                    viewingLayer = viewingLayer,
+                    config = config,
+                    onMap = { /* input-mapping wizard — UI-only CTA for now */ },
+                    onOpenGroup = { group ->
+                        selectedSectionId = group.sectionId
+                        advancedOpen = true
+                    },
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                )
+                com.mappo.ui.screen.remap.RemapBottomRow(
+                    viewingSet = viewingSet,
+                    viewingLayerSelected = viewingLayer != null,
+                    onSetGyroMode = gatedSetBindingGroupMode,
+                    onOpenModeSettings = onOpenModeSettings,
+                )
             }
-            // The simplified ("basic") view: group boxes around the controller diagram. Tapping
-            // a box opens the advanced editor dialog below on that group's section.
-            com.mappo.ui.screen.remap.RemapSimpleView(
-                viewingSet = viewingSet,
-                viewingLayer = viewingLayer,
-                config = config,
-                onMap = { /* input-mapping wizard — UI-only CTA for now */ },
-                onOpenGroup = { group ->
-                    selectedSectionId = group.sectionId
-                    advancedOpen = true
-                },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
-            com.mappo.ui.screen.remap.RemapBottomRow(
-                viewingSet = viewingSet,
-                viewingLayerSelected = viewingLayer != null,
-                onSetGyroMode = gatedSetBindingGroupMode,
-                onOpenModeSettings = onOpenModeSettings,
-            )
         }
-    }
 
-    // Advanced editor: the pre-existing rail + detail-pane assignment UI, hosted in a
-    // near-fullscreen dialog opened from a group box (the "advanced" half of the basic/advanced
-    // split; the wizard becomes the primary flow later).
-    if (advancedOpen) {
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { advancedOpen = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            // The dialog window hands initial focus to the first focusable — the rail's first
-            // item — whose select-on-focus would clobber the section this dialog was opened on.
-            // An invisible focus anchor takes that initial focus instead (same idiom as
-            // HomeFlower's focus holder); the first real D-pad move then enters the rail.
-            val dialogFocusAnchor = remember { androidx.compose.ui.focus.FocusRequester() }
-            LaunchedEffect(Unit) { runCatching { dialogFocusAnchor.requestFocus() } }
+        // Advanced editor: the pre-existing rail + detail-pane assignment UI, opened from a
+        // group box (the "advanced" half of the basic/advanced split; the wizard becomes the
+        // primary flow later). Deliberately an IN-BOUNDS overlay, not a platform Dialog window —
+        // a window would escape the handheld frame's LCD and cover the whole physical display.
+        if (advancedOpen) {
+            BackHandler { advancedOpen = false }
+            // Scrim (raw black is sanctioned for scrims); tapping outside dismisses.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { advancedOpen = false },
+            )
             // surfaceContainerHigh — dialog plane hosting the advanced editor.
             Surface(
-                modifier = Modifier.fillMaxSize().padding(10.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp)
+                    .softDropShadow(cornerRadius = 16.dp),
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
             ) {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .focusRequester(dialogFocusAnchor)
-                        .focusable(),
-                ) {
+                Column(Modifier.fillMaxSize()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -383,50 +383,50 @@ fun RemapControlsScreen(
                         onSectionSelected = { selectedSectionId = it },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     ) { sectionId, firstRowFocusRequester ->
-                RemapDetailPane(
-                    sectionId = sectionId,
-                    viewingSet = viewingSet,
-                    viewingLayer = viewingLayer,
-                    onlyOverrides = onlyOverrides,
-                    onSetOnlyOverrides = { onlyOverrides = it },
-                    config = config,
-                    firstRowFocusRequester = firstRowFocusRequester,
-                    onOpenInputEditor = onOpenInputEditor,
-                    onClearOverride = { inputSource, groupInputKey ->
-                        val layerId = viewingLayer?.layer?.id ?: return@RemapDetailPane
-                        onClearLayerOverride(layerId, inputSource, groupInputKey)
-                    },
-                    onSetBindingGroupMode = gatedSetBindingGroupMode,
-                    onOpenModeSettings = onOpenModeSettings,
-                    onAddModeShift = { ownerSource ->
-                        val layerId = viewingLayer?.layer?.id
-                        val setId = viewingSet?.actionSet?.id
-                        if (layerId != null) {
-                            onAddModeShift(null, layerId, ownerSource)
-                        } else if (setId != null) {
-                            onAddModeShift(setId, null, ownerSource)
-                        }
-                    },
-                    onRemoveModeShift = onRemoveModeShift,
-                    onSetModeShiftTrigger = onSetModeShiftTrigger,
-                    onOpenModeShiftInputEditor = onOpenModeShiftInputEditor,
-                    collapsedRows = collapsedRows,
-                    onToggleRowCollapsed = { key ->
-                        if (collapsedRows.contains(key)) collapsedRows.remove(key)
-                        else collapsedRows.add(key)
-                    },
-                    onEditCommand = onEditCommand,
-                    onAddActivator = onAddActivator,
-                    onRemoveActivator = onRemoveActivator,
-                    onSetActivatorType = onSetActivatorType,
-                    onOpenActivatorSettings = onOpenActivatorSettings,
-                    onAddCommand = onAddCommand,
-                    onRemoveCommand = onRemoveCommand,
-                    onAddInputRow = onAddInputRow,
-                    onSetInputRowPressType = onSetInputRowPressType,
-                    onSetInputRowLabel = onSetInputRowLabel,
-                    onDeleteInputRow = onDeleteInputRow,
-                )
+                        RemapDetailPane(
+                            sectionId = sectionId,
+                            viewingSet = viewingSet,
+                            viewingLayer = viewingLayer,
+                            onlyOverrides = onlyOverrides,
+                            onSetOnlyOverrides = { onlyOverrides = it },
+                            config = config,
+                            firstRowFocusRequester = firstRowFocusRequester,
+                            onOpenInputEditor = onOpenInputEditor,
+                            onClearOverride = { inputSource, groupInputKey ->
+                                val layerId = viewingLayer?.layer?.id ?: return@RemapDetailPane
+                                onClearLayerOverride(layerId, inputSource, groupInputKey)
+                            },
+                            onSetBindingGroupMode = gatedSetBindingGroupMode,
+                            onOpenModeSettings = onOpenModeSettings,
+                            onAddModeShift = { ownerSource ->
+                                val layerId = viewingLayer?.layer?.id
+                                val setId = viewingSet?.actionSet?.id
+                                if (layerId != null) {
+                                    onAddModeShift(null, layerId, ownerSource)
+                                } else if (setId != null) {
+                                    onAddModeShift(setId, null, ownerSource)
+                                }
+                            },
+                            onRemoveModeShift = onRemoveModeShift,
+                            onSetModeShiftTrigger = onSetModeShiftTrigger,
+                            onOpenModeShiftInputEditor = onOpenModeShiftInputEditor,
+                            collapsedRows = collapsedRows,
+                            onToggleRowCollapsed = { key ->
+                                if (collapsedRows.contains(key)) collapsedRows.remove(key)
+                                else collapsedRows.add(key)
+                            },
+                            onEditCommand = onEditCommand,
+                            onAddActivator = onAddActivator,
+                            onRemoveActivator = onRemoveActivator,
+                            onSetActivatorType = onSetActivatorType,
+                            onOpenActivatorSettings = onOpenActivatorSettings,
+                            onAddCommand = onAddCommand,
+                            onRemoveCommand = onRemoveCommand,
+                            onAddInputRow = onAddInputRow,
+                            onSetInputRowPressType = onSetInputRowPressType,
+                            onSetInputRowLabel = onSetInputRowLabel,
+                            onDeleteInputRow = onDeleteInputRow,
+                        )
                     }
                 }
             }

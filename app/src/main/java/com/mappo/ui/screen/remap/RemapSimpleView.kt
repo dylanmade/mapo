@@ -1,14 +1,15 @@
 package com.mappo.ui.screen.remap
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.paint
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
@@ -63,56 +65,71 @@ internal fun RemapSimpleView(
     onOpenGroup: (RemapSimpleGroup) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-        // Wide gutter keeps the side group boxes off the controller image.
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        // Left column, counterclockwise start: shoulder → d-pad → stick. Boxes anchor toward
-        // the screen center (the controller), i.e. this column's END edge.
-        Column(
-            modifier = Modifier.weight(1f).fillMaxSize(),
-            // Boxes cluster toward the vertical center rather than spreading edge-to-edge.
-            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-            horizontalAlignment = Alignment.End,
+    // The whole three-column band centers vertically as one unit. The Row's height is the
+    // tallest SIDE column's content (IntrinsicSize.Min; the controller image reports no
+    // intrinsic size — see the paint modifier below), which lets the middle column pin the Map
+    // button's top edge and the utility box's bottom edge to the flanking columns' extents.
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            // Wide gutter keeps the side group boxes off the controller image.
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            GroupBox(RemapSimpleGroup.LEFT_SHOULDER, viewingSet, viewingLayer, config, onOpenGroup)
-            GroupBox(RemapSimpleGroup.DPAD, viewingSet, viewingLayer, config, onOpenGroup)
-            GroupBox(RemapSimpleGroup.LEFT_STICK, viewingSet, viewingLayer, config, onOpenGroup)
-        }
-        // Middle column: Map CTA above the controller, utility buttons beneath it.
-        Column(
-            modifier = Modifier.weight(1.25f).fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Button(
-                onClick = onMap,
-                modifier = Modifier.testTag("map-button"),
+            // Left column, counterclockwise start: shoulder → d-pad → stick. Boxes anchor
+            // toward the screen center (the controller), i.e. this column's END edge.
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                // Boxes cluster toward the vertical center rather than spreading edge-to-edge.
+                verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                horizontalAlignment = Alignment.End,
             ) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Map")
+                GroupBox(RemapSimpleGroup.LEFT_SHOULDER, viewingSet, viewingLayer, config, onOpenGroup)
+                GroupBox(RemapSimpleGroup.DPAD, viewingSet, viewingLayer, config, onOpenGroup)
+                GroupBox(RemapSimpleGroup.LEFT_STICK, viewingSet, viewingLayer, config, onOpenGroup)
             }
-            Spacer(Modifier.weight(1f))
-            Image(
-                painter = painterResource(R.drawable.controller_placeholder),
-                contentDescription = "Controller",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.weight(1f))
-            GroupBox(RemapSimpleGroup.UTILITY, viewingSet, viewingLayer, config, onOpenGroup)
-        }
-        // Right column: shoulder → face buttons → stick. Boxes anchor toward the screen
-        // center (this column's START edge).
-        Column(
-            modifier = Modifier.weight(1f).fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-            horizontalAlignment = Alignment.Start,
-        ) {
-            GroupBox(RemapSimpleGroup.RIGHT_SHOULDER, viewingSet, viewingLayer, config, onOpenGroup)
-            GroupBox(RemapSimpleGroup.FACE, viewingSet, viewingLayer, config, onOpenGroup)
-            GroupBox(RemapSimpleGroup.RIGHT_STICK, viewingSet, viewingLayer, config, onOpenGroup)
+            // Middle column: Map CTA top-aligned with the flanking columns' topmost boxes, the
+            // utility box bottom-aligned with their bottommost, controller between.
+            Column(
+                modifier = Modifier.weight(1.25f).fillMaxHeight(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Button(
+                    onClick = onMap,
+                    modifier = Modifier.testTag("map-button"),
+                ) {
+                    Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Map")
+                }
+                // sizeToIntrinsics=false is load-bearing: with it, the image contributes no
+                // intrinsic height, so the Row's IntrinsicSize.Min is set by the side columns.
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .paint(
+                            painter = painterResource(R.drawable.controller_placeholder),
+                            sizeToIntrinsics = false,
+                            contentScale = ContentScale.Fit,
+                        ),
+                )
+                GroupBox(RemapSimpleGroup.UTILITY, viewingSet, viewingLayer, config, onOpenGroup)
+            }
+            // Right column: shoulder → face buttons → stick. Boxes anchor toward the screen
+            // center (this column's START edge).
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                horizontalAlignment = Alignment.Start,
+            ) {
+                GroupBox(RemapSimpleGroup.RIGHT_SHOULDER, viewingSet, viewingLayer, config, onOpenGroup)
+                GroupBox(RemapSimpleGroup.FACE, viewingSet, viewingLayer, config, onOpenGroup)
+                GroupBox(RemapSimpleGroup.RIGHT_STICK, viewingSet, viewingLayer, config, onOpenGroup)
+            }
         }
     }
 }

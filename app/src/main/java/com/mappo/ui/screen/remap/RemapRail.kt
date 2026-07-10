@@ -1,5 +1,6 @@
 package com.mappo.ui.screen.remap
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -8,25 +9,28 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Circle
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material3.WideNavigationRailItem
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -34,6 +38,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 
 /**
@@ -48,23 +53,14 @@ data class SectionedPaneItem(
 )
 
 /**
- * The Remap screen's left rail: a narrow `surfaceContainer` [Surface] holding a centered [Column]
- * of [WideNavigationRailItem]s (collapsed icon-over-label look) — the section items (Buttons /
- * D-Pad / Triggers / Joysticks / Gyro). Right pane = [detailPane].
+ * The advanced editor's left rail: a slim icon-only `surfaceContainer` strip of section items
+ * (Buttons / D-Pad / Triggers / Joysticks / Gyro). Hand-rolled compact items (2026-07-10 —
+ * `WideNavigationRailItem` + labels burned ~90dp of width; inside the advanced-editor overlay
+ * that's wasted space, so items are 40dp icon tiles with `selectable` Tab semantics and the
+ * label as the content description). Right pane = [detailPane].
  *
- * (The rail's former first item — the action set / layer scope button + fly-out — was replaced
- * 2026-07-10 by the top tab bar (`RemapTopBar`), which is now the set/layer selection surface.
- * The rail is pure section navigation.)
- *
- * We hand-roll the rail rather than use [androidx.compose.material3.WideNavigationRail] because
- * that component forces a fixed 96dp collapsed container and places its items at x=0 — forcing it
- * narrower knocked the items off-center. Instead a [Column] with centered alignment **wraps its
- * content**, so the rail comes out a touch narrower than 96dp with reliably centered items.
- * Tunables: [RailHorizontalPadding], [RailItemSpacing], [RailItemMinHeight]. Rail is one step up
- * from the `surface` detail pane, with a [VerticalDivider] right border. Gamepad: focusing a
- * section selects it; D-pad right → enters the detail pane.
+ * Gamepad: focusing a section selects it; D-pad right → enters the detail pane.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun RemapRail(
     sections: List<SectionedPaneItem>,
@@ -76,9 +72,7 @@ fun RemapRail(
     val detailRequester = remember(selectedSectionId) { FocusRequester() }
 
     Row(modifier = modifier.fillMaxSize()) {
-        // M3 role: surfaceContainer — one step up from the surface detail pane. No forced width:
-        // the rail wraps its (centered) item column, which comes out a touch narrower than the M3
-        // default 96dp container. Forcing a width here is what knocked the items off-center.
+        // M3 role: surfaceContainer — one step up from the surface detail pane.
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
             // D-pad → from anywhere in the rail jumps into the detail pane's first row.
@@ -93,14 +87,11 @@ fun RemapRail(
             Column(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .padding(top = 4.dp, bottom = 4.dp, start = RailHorizontalPadding, end = RailHorizontalPadding)
+                    .padding(RailPadding)
                     .selectableGroup(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(RailItemSpacing),
             ) {
-                // Items are bare [WideNavigationRailItem]s sized to their content and centered by
-                // the column. Each sits in a fixed-min-height [Box] (RailItemMinHeight) to restore
-                // the per-item height the real rail enforced.
                 sections.forEach { section ->
                     val interaction = remember(section.id) { MutableInteractionSource() }
                     val focused by interaction.collectIsFocusedAsState()
@@ -108,19 +99,33 @@ fun RemapRail(
                     LaunchedEffect(focused) {
                         if (focused && section.enabled) onSectionSelected(section.id)
                     }
+                    val selected = section.id == selectedSectionId
                     Box(
-                        modifier = Modifier.heightIn(min = RailItemMinHeight),
+                        modifier = Modifier
+                            .size(RailItemSize)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.secondaryContainer
+                                else Color.Transparent,
+                            )
+                            .selectable(
+                                selected = selected,
+                                enabled = section.enabled,
+                                role = Role.Tab,
+                                interactionSource = interaction,
+                                indication = ripple(),
+                            ) { onSectionSelected(section.id) }
+                            .testTag("section-rail-item:${section.id}")
+                            .alpha(if (section.enabled) 1f else 0.38f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        WideNavigationRailItem(
-                            selected = section.id == selectedSectionId,
-                            onClick = { onSectionSelected(section.id) },
-                            icon = { Icon(section.icon ?: Icons.Filled.Circle, contentDescription = null) },
-                            label = { Text(section.label) },
-                            railExpanded = false,
-                            enabled = section.enabled,
-                            interactionSource = interaction,
-                            modifier = Modifier.testTag("section-rail-item:${section.id}"),
+                        Icon(
+                            section.icon ?: Icons.Filled.Circle,
+                            // The label survives as the accessibility name — no visual label.
+                            contentDescription = section.label,
+                            tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
@@ -140,14 +145,14 @@ fun RemapRail(
     }
 }
 
-/** Horizontal padding on each side of the rail item column (lever) — sets how snug the rail is. */
-private val RailHorizontalPadding = 4.dp
+/** Edge padding around the rail's item column. */
+private val RailPadding = 4.dp
 
-/** Vertical spacing between rail items (lever). Matches the M3 collapsed rail's 4dp item spacing. */
+/** Vertical spacing between rail items. */
 private val RailItemSpacing = 4.dp
 
-/** Per-item min height (lever) — restores the height the real rail enforced (M3 token = 64dp). */
-private val RailItemMinHeight = 64.dp
+/** Icon-tile edge — the rail's whole width is this + 2×[RailPadding]. */
+private val RailItemSize = 40.dp
 
 /** Try-best focus request — swallows the "not laid out yet" race. */
 private fun FocusRequester.tryRequestFocus() {

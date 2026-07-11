@@ -18,6 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * One-row list item with a label on the left and two number-input fields on the right,
@@ -70,10 +72,10 @@ fun TwoNumberInputRow(
             },
             label = { Text("W") },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            keyboardOptions = mappoKeyboardOptions(KeyboardOptions(keyboardType = KeyboardType.Number)),
             modifier = Modifier
                 .width(72.dp)
-                .onFocusChanged { widthFocused = it.isFocused },
+                .onFocusChanged { widthFocused = it.isFocused }.imeActivation(),
         )
         Text(
             "×",
@@ -91,10 +93,10 @@ fun TwoNumberInputRow(
             },
             label = { Text("H") },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            keyboardOptions = mappoKeyboardOptions(KeyboardOptions(keyboardType = KeyboardType.Number)),
             modifier = Modifier
                 .width(72.dp)
-                .onFocusChanged { heightFocused = it.isFocused },
+                .onFocusChanged { heightFocused = it.isFocused }.imeActivation(),
         )
     }
 }

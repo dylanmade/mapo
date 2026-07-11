@@ -17,9 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
@@ -35,6 +32,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -42,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,11 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mappo.data.model.steam.ActionLayerGraph
@@ -69,9 +64,8 @@ import com.mappo.data.model.steam.displayLabel
 import com.mappo.data.model.steam.displayNameFor
 import com.mappo.data.model.steam.InputSource
 import com.mappo.service.input.modes.SourceModeCatalog
+import com.mappo.ui.compact.CompactTextField
 import com.mappo.ui.glyph.InputGlyphs
-import com.mappo.ui.imeActivation
-import com.mappo.ui.mappoKeyboardOptions
 import com.mappo.ui.screen.activatorRenderOrder
 import com.mappo.ui.screen.displayLabel as activatorDisplayLabel
 import com.mappo.ui.screen.remap.settings.SourceModeSettingsSchema
@@ -386,8 +380,11 @@ private fun PressPillDropdown(
 }
 
 /**
- * Inline label editor styled to the pill grid (same height as the dropdowns). Commits on IME
- * Done or focus loss — never per keystroke, and never auto-focused (IME doctrine).
+ * Tap-to-edit label pill. Inline IME editing here proved unusable — the keyboard overlays the
+ * bottom-half editor rows (per the app-wide "IME never moves layout" policy), hiding the field
+ * being typed into. Instead the pill shows the label and opens a small edit dialog (the
+ * rename-action-set pattern, the user's preferred tap-to-edit treatment); the dialog floats
+ * clear of the keyboard.
  */
 @Composable
 private fun LabelPillField(
@@ -396,45 +393,54 @@ private fun LabelPillField(
     onCommit: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var text by remember(value) { mutableStateOf(value) }
-    val focusManager = LocalFocusManager.current
+    var editing by remember { mutableStateOf(false) }
     // surfaceContainerHigh — pill plane matching the dropdowns.
     Surface(
         shape = RoundedCornerShape(50),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = modifier.height(RemapPillHeight),
+        modifier = modifier
+            .height(RemapPillHeight)
+            .then(if (enabled) Modifier.clickable { editing = true } else Modifier.alpha(0.6f)),
     ) {
         Box(
             modifier = Modifier.padding(horizontal = 8.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
-            BasicTextField(
-                value = text,
-                onValueChange = { text = it },
-                enabled = enabled,
-                singleLine = true,
-                textStyle = remapMiniTextStyle().copy(color = MaterialTheme.colorScheme.onSurface),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                keyboardOptions = mappoKeyboardOptions(KeyboardOptions(imeAction = ImeAction.Done)),
-                keyboardActions = KeyboardActions(onDone = {
-                    if (text != value) onCommit(text)
-                    focusManager.clearFocus()
-                }),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .imeActivation()
-                    .onFocusChanged { state ->
-                        if (!state.isFocused && text != value) onCommit(text)
-                    },
+            Text(
+                text = value.ifEmpty { "Label" },
+                style = remapMiniTextStyle(),
+                color = if (value.isEmpty()) {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            if (text.isEmpty()) {
-                Text(
-                    text = "Label",
-                    style = remapMiniTextStyle(),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                )
-            }
         }
+    }
+
+    if (editing) {
+        var text by remember { mutableStateOf(value) }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Input label") },
+            text = {
+                // CompactTextField carries the app-wide IME policy; no auto-focus (IME doctrine).
+                CompactTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = "Label",
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onCommit(text); editing = false }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editing = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 

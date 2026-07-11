@@ -31,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Modal dialog that lets the user pick an icon by name from [MappoIcons.catalog],
@@ -57,7 +59,8 @@ fun IconPickerDialog(
                     onValueChange = { filter = it },
                     label = { Text("Search") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().imeActivation(),
+                    keyboardOptions = mappoKeyboardOptions(),
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(

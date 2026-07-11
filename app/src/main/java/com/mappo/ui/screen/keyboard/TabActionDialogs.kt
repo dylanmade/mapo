@@ -43,6 +43,8 @@ import com.mappo.data.model.Profile
 import com.mappo.data.model.TemplateRef
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.collections.immutable.ImmutableList
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Top-level dispatcher for the keyboard tab action dialog tree. MainScreen passes the current
@@ -159,7 +161,9 @@ fun TabActionDialogHost(
                                 }
                             }
                         }
-                    )
+                    ,
+                        keyboardOptions = mappoKeyboardOptions(),
+                        modifier = Modifier.imeActivation(),)
                 },
                 confirmButton = {
                     TextButton(
@@ -202,8 +206,8 @@ fun TabActionDialogHost(
                                     }
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                            modifier = Modifier.fillMaxWidth().imeActivation(),
+                            keyboardOptions = mappoKeyboardOptions(),)
                         Spacer(Modifier.height(8.dp))
                         if (matches.isEmpty()) {
                             Text(
@@ -397,8 +401,8 @@ fun TabActionDialogHost(
                                     }
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                            modifier = Modifier.fillMaxWidth().imeActivation(),
+                            keyboardOptions = mappoKeyboardOptions(),)
                         Spacer(Modifier.height(8.dp))
                         if (matches.isEmpty()) {
                             Text(

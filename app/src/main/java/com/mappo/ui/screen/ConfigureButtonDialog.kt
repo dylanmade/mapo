@@ -76,6 +76,8 @@ import com.mappo.ui.component.MappoIcons
 import com.mappo.ui.component.SizeDropdown
 import com.mappo.ui.util.ResolvedButtonColors
 import com.mappo.ui.util.resolveAutoColors
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Two-tab full-screen configuration screen for one [GridButton]. Behavior tab covers type,
@@ -666,7 +668,8 @@ internal fun RegionEditDialog(
                     label = { Text("Label") },
                     placeholder = { Text("default: $labelPlaceholder") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().imeActivation(),
+                    keyboardOptions = mappoKeyboardOptions(),
                 )
 
                 Row(

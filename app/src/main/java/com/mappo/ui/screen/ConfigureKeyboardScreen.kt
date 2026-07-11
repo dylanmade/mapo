@@ -51,6 +51,8 @@ import com.mappo.ui.components.TwoNumberInputRow
 import com.mappo.ui.util.ResolvedLayoutColors
 import com.mappo.ui.util.resolveAutoColors
 import com.mappo.ui.util.resolveAutoLayoutColors
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Two-tab full-screen editor for a [GridLayout]. The Keyboard tab covers name, size,
@@ -331,7 +333,8 @@ private fun KeyboardTab(
         },
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 16.dp).imeActivation(),
+        keyboardOptions = mappoKeyboardOptions(),
     )
 
     Text(

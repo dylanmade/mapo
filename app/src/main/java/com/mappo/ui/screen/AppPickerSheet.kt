@@ -44,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import com.mappo.R
 import com.mappo.data.model.Profile
 import com.mappo.data.repository.InstalledAppsRepository.InstalledApp
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Modal bottom sheet listing every launchable app on the device, filtered by a
@@ -125,7 +127,8 @@ fun AppPickerSheet(
                 placeholder = { Text(stringResource(R.string.auto_switch_picker_search_hint)) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp).imeActivation(),
+                keyboardOptions = mappoKeyboardOptions(),
             )
 
             Box(

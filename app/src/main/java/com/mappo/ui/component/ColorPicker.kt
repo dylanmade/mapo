@@ -42,6 +42,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 private enum class PickerMode { HSL, RGB }
 
@@ -127,8 +129,8 @@ fun ColorPicker(
                 },
                 label = { Text("Hex", style = MaterialTheme.typography.labelSmall) },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                modifier = Modifier.weight(1f),
+                keyboardOptions = mappoKeyboardOptions(KeyboardOptions(keyboardType = KeyboardType.Ascii)),
+                modifier = Modifier.weight(1f).imeActivation(),
             )
         }
         Spacer(Modifier.height(12.dp))

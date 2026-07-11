@@ -33,6 +33,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.mappo.data.model.Profile
 import kotlinx.collections.immutable.ImmutableList
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -59,6 +61,8 @@ fun ChangeProfileScreen(
                     onValueChange = { newProfileName = it },
                     label = { Text("Profile Name") },
                     singleLine = true,
+                    keyboardOptions = mappoKeyboardOptions(),
+                    modifier = Modifier.imeActivation(),
                 )
             },
             confirmButton = {

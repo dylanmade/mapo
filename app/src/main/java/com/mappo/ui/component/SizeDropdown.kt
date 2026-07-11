@@ -18,6 +18,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Numeric size picker. Presents a dropdown of preset values but the field is editable,
@@ -53,12 +55,12 @@ fun SizeDropdown(
             },
             singleLine = true,
             label = { Text(label) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            keyboardOptions = mappoKeyboardOptions(KeyboardOptions(keyboardType = KeyboardType.Number)),
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
                 .onFocusChanged { focused = it.isFocused }
-                .fillMaxWidth(),
+                .fillMaxWidth().imeActivation(),
         )
         ExposedDropdownMenu(
             expanded = expanded,

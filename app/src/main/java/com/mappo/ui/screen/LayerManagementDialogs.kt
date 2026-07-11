@@ -16,6 +16,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mappo.data.model.steam.ActionLayer
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Action-layer management dialogs for the `RemapControlsScreen` layer row (Brick 5.4).
@@ -56,7 +58,8 @@ fun AddLayerDialog(
                     onValueChange = { title = it },
                     label = { Text("Name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().imeActivation(),
+                    keyboardOptions = mappoKeyboardOptions(),
                 )
                 Text(
                     text = "Starts empty — bindings on the parent set show through until you override them.",
@@ -94,7 +97,8 @@ fun RenameLayerDialog(
                 onValueChange = { title = it },
                 label = { Text("Name") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().imeActivation(),
+                keyboardOptions = mappoKeyboardOptions(),
             )
         },
         confirmButton = {
@@ -126,7 +130,8 @@ fun DuplicateLayerDialog(
                     onValueChange = { title = it },
                     label = { Text("Name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().imeActivation(),
+                    keyboardOptions = mappoKeyboardOptions(),
                 )
                 Text(
                     text = "Copies every override from the source layer.",

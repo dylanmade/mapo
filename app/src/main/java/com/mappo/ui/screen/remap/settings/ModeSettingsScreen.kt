@@ -59,6 +59,8 @@ import com.mappo.data.model.steam.resolveActionSet
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
 import org.json.JSONObject
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Full-screen, schema-driven settings editor for one (source x mode) menu. Reached
@@ -522,7 +524,7 @@ private fun NumericEntryField(
         supportingText = if (invalid) {
             { Text("Allowed: ${formatNumber(min, decimals)}–${formatNumber(max, decimals)}$unitSuffix") }
         } else null,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+        keyboardOptions = mappoKeyboardOptions(KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)),
         // Done hides the keyboard by clearing focus, which runs the commit path below.
         onKeyboardAction = { focusManager.clearFocus() },
         modifier = Modifier
@@ -536,7 +538,7 @@ private fun NumericEntryField(
                 if (wasFocused && !fs.isFocused) {
                     onCommit((state.text.toString().toFloatOrNull() ?: value).coerceIn(min, max))
                 }
-            },
+            }.imeActivation(),
     )
 }
 

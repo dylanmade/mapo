@@ -30,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mappo.data.model.steam.ActionSet
 import com.mappo.data.model.steam.ActionSetGraph
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Action-set management dialogs for the `RemapControlsScreen` tab bar (Brick 4.4).
@@ -73,7 +75,8 @@ fun AddSetDialog(
                     onValueChange = { title = it },
                     label = { Text("Name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().imeActivation(),
+                    keyboardOptions = mappoKeyboardOptions(),
                 )
                 Text(
                     text = "Shown on the Remap Controls tab.",
@@ -127,7 +130,8 @@ fun RenameSetDialog(
                 onValueChange = { title = it },
                 label = { Text("Name") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().imeActivation(),
+                keyboardOptions = mappoKeyboardOptions(),
             )
         },
         confirmButton = {
@@ -159,7 +163,8 @@ fun DuplicateSetDialog(
                     onValueChange = { title = it },
                     label = { Text("Name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().imeActivation(),
+                    keyboardOptions = mappoKeyboardOptions(),
                 )
                 Text(
                     text = "Copies every binding from the source set.",

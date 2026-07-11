@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 @Composable
 fun SteppedSliderWithNumberInput(
@@ -62,10 +64,9 @@ fun SteppedSliderWithNumberInput(
                 }
             },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            keyboardOptions = mappoKeyboardOptions(KeyboardOptions(keyboardType = KeyboardType.Number)),
             modifier = Modifier
                 .width(64.dp)
-                .onFocusChanged { focused = it.isFocused }
-        )
+                .onFocusChanged { focused = it.isFocused }.imeActivation(),)
     }
 }

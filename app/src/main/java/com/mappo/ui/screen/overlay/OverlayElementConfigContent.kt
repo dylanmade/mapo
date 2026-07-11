@@ -39,6 +39,8 @@ import com.mappo.data.model.targetFor
 import com.mappo.data.model.withTarget
 import com.mappo.ui.component.ColorPicker
 import kotlin.math.roundToInt
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Full per-button editor for the live overlay's config side-drawer (Brick D, "+ light
@@ -75,8 +77,8 @@ fun OverlayElementConfigContent(
             onValueChange = { commit(draft.copy(label = it)) },
             label = { Text("Label (optional)") },
             singleLine = true,
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Done),
-            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = mappoKeyboardOptions(androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Done)),
+            modifier = Modifier.fillMaxWidth().imeActivation(),
         )
 
         // ── Commands ──

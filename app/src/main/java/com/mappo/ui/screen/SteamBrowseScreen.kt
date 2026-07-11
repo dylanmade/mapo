@@ -37,6 +37,8 @@ import com.mappo.steam.library.OwnedGame
 import com.mappo.steam.workshop.WorkshopConfig
 import com.mappo.ui.viewmodel.SteamBrowseState
 import com.mappo.ui.viewmodel.SteamBrowseViewModel
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -137,7 +139,8 @@ private fun GamesList(
             placeholder = { Text(stringResource(R.string.steam_browse_filter_hint)) },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp).imeActivation(),
+            keyboardOptions = mappoKeyboardOptions(),
         )
         val visible = state.visible
         if (state.games.isEmpty()) {

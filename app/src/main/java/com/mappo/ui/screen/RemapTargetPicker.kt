@@ -45,6 +45,8 @@ import com.mappo.data.model.RemapTarget
 import com.mappo.data.model.steam.BindingOutput
 import com.mappo.ui.component.gamepad.GamepadDiagram
 import kotlinx.collections.immutable.ImmutableList
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 
 /**
  * Full-screen picker for choosing a [BindingOutput]. Reached as a Navigation destination
@@ -295,7 +297,8 @@ private fun InputFilterField(filter: String, onFilterChange: (String) -> Unit) {
         singleLine = true,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp).imeActivation(),
+        keyboardOptions = mappoKeyboardOptions(),
     )
 }
 

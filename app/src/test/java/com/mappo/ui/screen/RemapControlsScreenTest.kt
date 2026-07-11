@@ -6,12 +6,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -57,31 +57,6 @@ class RemapControlsScreenTest {
     @get:Rule val composeRule = createComposeRule()
 
 
-    @Test
-    fun advancedDialog_rendersAllSections() {
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = sampleConfig(),
-                        onOpenInputEditor = { _, _, _ -> },
-                        onBack = {},
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        // The rail lives in the advanced editor dialog now — open it from a group box.
-        composeRule.onNodeWithTag("simple-group:DPAD").performClick()
-        composeRule.waitForIdle()
-
-        composeRule.onNodeWithTag("section-rail-item:buttons").assertExists()
-        composeRule.onNodeWithTag("section-rail-item:dpad").assertExists()
-        composeRule.onNodeWithTag("section-rail-item:triggers").assertExists()
-        composeRule.onNodeWithTag("section-rail-item:joysticks").assertExists()
-        composeRule.onNodeWithTag("section-rail-item:gyro").assertExists()
-    }
 
     @Test
     fun simpleView_rendersDefaultLabels_forUnconfiguredGroups() {
@@ -107,7 +82,7 @@ class RemapControlsScreenTest {
     }
 
     @Test
-    fun tappingDpadBox_opensAdvancedEditorOnDpadSection() {
+    fun tappingDpadBox_morphsIntoGroupEditor() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -124,8 +99,9 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithTag("simple-group:DPAD").performClick()
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("Advanced controls").assertIsDisplayed()
-        composeRule.onNodeWithTag("section-rail-item:dpad").assertIsSelected()
+        // The box morphs into the in-place group editor; its home spot becomes a placeholder.
+        composeRule.onNodeWithTag("group-editor").assertExists()
+        composeRule.onNodeWithContentDescription("Close").assertExists()
     }
 
 
@@ -448,9 +424,12 @@ class RemapControlsScreenTest {
         // Override visible in the simple view; base hidden for that row.
         composeRule.onNodeWithText("MS: MOUSE_LEFT", useUnmergedTree = true).assertExists()
         composeRule.onAllNodesWithText("KB: ENTER", useUnmergedTree = true).assertCountEquals(0)
-        // Trailing menu lives in the advanced editor dialog.
+        // Trailing menu lives in the expanded group editor; the button_a row is last in the
+        // Y/X/B/A order, so scroll the editor's rows to it first.
         composeRule.onNodeWithTag("simple-group:FACE").performClick()
         composeRule.waitForIdle()
+        composeRule.onNodeWithTag("group-editor-rows")
+            .performScrollToNode(hasContentDescription("Override actions"))
         composeRule.onNodeWithContentDescription("Override actions").assertIsDisplayed()
     }
 
@@ -480,6 +459,8 @@ class RemapControlsScreenTest {
 
         composeRule.onNodeWithTag("simple-group:FACE").performClick()
         composeRule.waitForIdle()
+        composeRule.onNodeWithTag("group-editor-rows")
+            .performScrollToNode(hasContentDescription("Override actions"))
         composeRule.onNodeWithContentDescription("Override actions").performClick()
         composeRule.onNodeWithText("Clear override").performClick()
 
@@ -489,7 +470,7 @@ class RemapControlsScreenTest {
     }
 
     @Test
-    fun overridesFilterToggle_hiddenInBaseMode() {
+    fun groupEditor_hasNoOverridesFilter() {
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -510,47 +491,6 @@ class RemapControlsScreenTest {
         composeRule.onAllNodesWithText("Show all").assertCountEquals(0)
     }
 
-    @Test
-    fun overridesFilterToggle_visibleInOverlayMode_andOverriddenRowSurvivesFilter() {
-        composeRule.setContent {
-            MaterialTheme {
-                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
-                    RemapControlsScreen(
-                        config = configWithLayerOverride(
-                            baseButtonA = BindingOutput.KeyPress("ENTER"),
-                            layerId = 10L,
-                            layerTitle = "Scope",
-                            layerOverrideButtonA = BindingOutput.MouseButton("MOUSE_LEFT"),
-                        ),
-                        viewingActionSetId = 1L,
-                        viewingLayerId = 10L,
-                        onOpenInputEditor = { _, _, _ -> },
-                        onBack = {},
-                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        composeRule.onNodeWithTag("simple-group:FACE").performClick()
-        composeRule.waitForIdle()
-
-        // Toggle visible.
-        composeRule.onNodeWithText("Show all").assertIsDisplayed()
-        composeRule.onNodeWithText("Only overrides").assertIsDisplayed()
-
-        composeRule.onNodeWithText("Only overrides").performClick()
-        composeRule.waitForIdle()
-
-        // The overridden row is still in the tree — the filter let it through.
-        // We don't assert that the non-overridden rows are *gone* here because
-        // Robolectric's LazyColumn doesn't always materialize below-the-fold rows
-        // anyway (per feedback_robolectric_compose_pitfalls). The filter's
-        // correctness is exhaustively tested at the pure-function level via
-        // FilterToOverridesTest.
-        // (onAllNodes + onFirst: the label also renders in the simple view beneath the dialog.)
-        composeRule.onAllNodesWithText("MS: MOUSE_LEFT", useUnmergedTree = true).onFirst().assertExists()
-    }
 
     /**
      * Helper for overlay-mode tests. Builds a single-set config with one layer that

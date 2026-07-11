@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
@@ -357,13 +356,11 @@ fun MainScreen(
         NavHost(
             navController = navController,
             startDestination = MappoRoute.MAIN,
-            // Size routes to the area above the (docked) soft keyboard so a focused field can
-            // scroll into view instead of hiding behind it. The window uses FLAG_LAYOUT_NO_LIMITS
-            // and won't resize for the IME, so we consume the IME inset here — inset modifiers
-            // are position-aware, so only the IME's overlap with the screen canvas is consumed.
-            modifier = Modifier
-                .fillMaxSize()
-                .imePadding(),
+            // The soft keyboard OVERLAYS the UI — it must never move or squeeze it (imePadding
+            // here used to shrink the routes inside the handheld frame's LCD whenever the IME
+            // opened, shifting everything; removed 2026-07-11). Fields low on the screen may
+            // sit under the keyboard; screens that care can scroll themselves.
+            modifier = Modifier.fillMaxSize(),
             // Crossfade at 250 ms with default FastOutSlowInEasing.
             enterTransition = { fadeIn(tween(250)) },
             exitTransition = { fadeOut(tween(250)) },

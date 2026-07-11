@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -50,11 +51,58 @@ import com.mappo.ui.glyph.InputGlyphs
 internal fun remapMiniTextStyle(): TextStyle =
     MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp)
 
+/** Overline treatment (uppercase callers + tracked-out small caps look) for editor headers. */
+@Composable
+internal fun remapOverlineTextStyle(): TextStyle =
+    MaterialTheme.typography.labelSmall.copy(
+        fontSize = 9.sp,
+        lineHeight = 11.sp,
+        letterSpacing = 0.8.sp,
+    )
+
 /** Height of the pill dropdowns (mode / overlay pickers). */
 internal val RemapPillHeight = 20.dp
 
 /** Icon edge inside the pills. */
 internal val RemapPillIconSize = 11.dp
+
+/**
+ * A hand-rolled miniature pill button. [filled] renders the primary (command/output) look;
+ * unfilled is the tonal chip look shared with the dropdown pills. Disabled = dimmed + inert.
+ */
+@Composable
+internal fun RemapMiniPillButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    filled: Boolean = false,
+) {
+    val container = if (filled) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.surfaceContainerHigh
+    val content = if (filled) MaterialTheme.colorScheme.onPrimary
+    else MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = container,
+        modifier = modifier
+            .height(RemapPillHeight)
+            .then(
+                if (enabled) Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick)
+                else Modifier.alpha(0.55f),
+            ),
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+            Text(
+                text = text,
+                style = remapMiniTextStyle(),
+                color = content,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
 
 /** A hand-rolled miniature icon button (cogs etc.) — ripple-clipped circle, no 48dp halo. */
 @Composable
@@ -81,7 +129,9 @@ internal fun RemapMiniIconButton(
     }
 }
 
-/** The mode-selection pill: current mode glyph + name + dropdown arrow → menu of valid modes. */
+/** The mode-selection pill: current mode glyph + name + dropdown arrow → menu of valid modes.
+ *  [overline] renders the text in the overline treatment (uppercase, tracked out) for the
+ *  group editor's header. */
 @Composable
 internal fun ModePillDropdown(
     source: InputSource,
@@ -89,6 +139,7 @@ internal fun ModePillDropdown(
     validModes: List<BindingMode>,
     enabled: Boolean,
     onPick: (BindingMode) -> Unit,
+    overline: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -112,11 +163,12 @@ internal fun ModePillDropdown(
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = currentMode.displayNameFor(source),
-                    style = remapMiniTextStyle(),
+                    text = currentMode.displayNameFor(source)
+                        .let { if (overline) it.uppercase() else it },
+                    style = if (overline) remapOverlineTextStyle() else remapMiniTextStyle(),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 110.dp),
+                    modifier = Modifier.widthIn(max = 130.dp),
                 )
                 Icon(
                     Icons.Filled.ArrowDropDown,

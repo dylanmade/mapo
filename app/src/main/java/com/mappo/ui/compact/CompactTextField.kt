@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import com.mappo.ui.imeActivation
+import com.mappo.ui.mappoKeyboardOptions
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -157,11 +159,13 @@ fun CompactTextField(
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
+            // App-wide IME policy: no keyboard on gamepad focus; activator key opens it.
+            modifier = Modifier.imeActivation(),
             enabled = enabled,
             readOnly = readOnly,
             textStyle = textStyle,
             cursorBrush = SolidColor(if (isError) colors.error else colors.primary),
-            keyboardOptions = keyboardOptions,
+            keyboardOptions = mappoKeyboardOptions(keyboardOptions),
             keyboardActions = keyboardActions,
             visualTransformation = visualTransformation,
             singleLine = singleLine,

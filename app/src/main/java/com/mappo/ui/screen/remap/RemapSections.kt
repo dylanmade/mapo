@@ -1,215 +1,24 @@
 package com.mappo.ui.screen.remap
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ControlCamera
-import androidx.compose.material.icons.filled.Gamepad
-import androidx.compose.material.icons.filled.ScreenRotation
-import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material.icons.filled.Straighten
-import com.mappo.data.model.steam.ActivatorType
 import com.mappo.data.model.steam.InputSource
 import com.mappo.service.input.modes.StubMode
 import com.mappo.service.input.modes.handler
 
 /**
- * One item rendered into the detail pane of `RemapControlsScreen`.
- * Determined statically by the registry rather than derived from the live
- * `ControllerConfig`, because:
- *  - Section grouping is a UI concept, not a data-layer one.
- *  - We want disabled placeholders (Soft Pull, Analog Output Trigger) visible
- *    *before* the data layer can express them. The registry "promises" rows
- *    that later phases will make live.
- *  - The user's preferred grouping (Buttons → Face/Bumpers/Menu/etc.) doesn't
- *    map 1:1 to Steam's input-source taxonomy, so the registry is the bridge.
+ * Shared registries for the Remap Controls editor: which sub-input rows a (source × mode)
+ * pair surfaces, source-aware sub-input labels, which sources can own added modes (mode
+ * shifts), and the physical digital sub-inputs offered as mode-shift triggers.
+ *
+ * (The rail/section-pane registry that used to live here died with the retired detail-pane
+ * editor — the simple view's groups are in RemapSimpleView.kt.)
  */
-sealed class RemapPaneItem {
-    abstract val key: String
-
-    /**
-     * Section subheader with an optional mode-dropdown affordance.
-     *
-     * When [inputSource] is non-null the subheader renders a mode picker bound to the
-     * source's [com.mappo.data.model.steam.BindingGroup.mode]; when null (e.g. the
-     * Bumpers / Menu Buttons sections, which span multiple sources that all use
-     * `SINGLE_BUTTON`), no picker is rendered.
-     */
-    data class Subheader(
-        override val key: String,
-        val title: String,
-        val inputSource: InputSource? = null,
-    ) : RemapPaneItem()
-
-    /** A live, bindable row. Resolves to one activator in the active config. */
-    data class BindingRow(
-        override val key: String,
-        val label: String,
-        val inputSource: InputSource,
-        val groupInputKey: String,
-        val activatorType: ActivatorType = ActivatorType.FULL_PRESS,
-    ) : RemapPaneItem()
-
-    /** A disabled placeholder — visible but not bindable; tap is a no-op. */
-    data class DisabledRow(
-        override val key: String,
-        val label: String,
-    ) : RemapPaneItem()
-
-    /**
-     * Phase 7 Brick B.6: header row for a per-source mode shift section. Renders
-     * "{sourceLabel} (Mode Shift)" with the shift's mode picker, settings cog,
-     * and remove button. Resolved at render time from [InputSource]'s display
-     * name.
-     */
-    data class ModeShiftHeader(
-        override val key: String,
-        val modeShiftId: Long,
-        val ownerSource: InputSource,
-    ) : RemapPaneItem()
-
-    /**
-     * Phase 7 Brick B.6: bindable row within a mode shift's target group.
-     * Routes to InputEditorScreen with the [modeShiftId] nav arg so the
-     * editor resolves bindings through the shift's group, not the source's
-     * preset.
-     */
-    data class ModeShiftBindingRow(
-        override val key: String,
-        val modeShiftId: Long,
-        val label: String,
-        val ownerSource: InputSource,
-        val groupInputKey: String,
-    ) : RemapPaneItem()
-}
-
 object RemapSections {
 
-    const val SECTION_BUTTONS = "buttons"
-    const val SECTION_DPAD = "dpad"
-    const val SECTION_TRIGGERS = "triggers"
-    const val SECTION_JOYSTICKS = "joysticks"
-    const val SECTION_GYRO = "gyro"
-
     /**
-     * Rail entries in display order. Icons are best-fit Material glyphs (Triggers has no
-     * dedicated symbol — `Straighten` stands in for the analog pull); easy to swap.
-     */
-    val rail: List<SectionedPaneItem> = listOf(
-        SectionedPaneItem(SECTION_BUTTONS, "Buttons", icon = Icons.Filled.SportsEsports),
-        SectionedPaneItem(SECTION_DPAD, "D-Pad", icon = Icons.Filled.Gamepad),
-        SectionedPaneItem(SECTION_TRIGGERS, "Triggers", icon = Icons.Filled.Straighten),
-        SectionedPaneItem(SECTION_JOYSTICKS, "Joysticks", icon = Icons.Filled.ControlCamera),
-        SectionedPaneItem(SECTION_GYRO, "Gyro", icon = Icons.Filled.ScreenRotation),
-    )
-
-    /**
-     * Phase 7 follow-up: sources whose visible sub-input rows depend on the
-     * currently-selected [com.mappo.data.model.steam.BindingMode]. The static
-     * [contentBySection] registry omits binding rows for these sources; the
-     * detail pane resolves the effective mode at render time and generates
-     * rows dynamically via [bindableSubInputsFor].
-     *
-     * Sources NOT in this set always render their static rows (bumpers,
-     * switch buttons — all permanently `SINGLE_BUTTON`).
-     */
-    val MODE_AWARE_SOURCES: Set<InputSource> = setOf(
-        InputSource.BUTTON_DIAMOND,
-        InputSource.DPAD,
-        InputSource.LEFT_TRIGGER,
-        InputSource.RIGHT_TRIGGER,
-        InputSource.LEFT_JOYSTICK,
-        InputSource.RIGHT_JOYSTICK,
-        InputSource.GYRO,
-        // NB: bumpers + switches are NOT mode-aware. As of the detail-pane refactor they live in
-        // the "Other buttons" section as single-button rows (no mode dropdown) — see
-        // [OTHER_BUTTON_SOURCES] / OtherButtonRow.
-    )
-
-    /**
-     * Single-button "switch" sources (bumpers + Start/Select). They have no behavioral modes; the
-     * detail pane renders them via OtherButtonRow under the "Other buttons" header — a passthrough
-     * toggle ((Device default) ↔ Single button) plus inline command assignment when intercepted.
-     */
-    val OTHER_BUTTON_SOURCES: Set<InputSource> = setOf(
-        InputSource.LEFT_BUMPER,
-        InputSource.RIGHT_BUMPER,
-        InputSource.SWITCH_START,
-        InputSource.SWITCH_SELECT,
-    )
-
-    /**
-     * Phase 6: the input sources a section renders, in display order. The detail pane builds one
-     * Card per mode-aware source (plus its added modes) and groups [OTHER_BUTTON_SOURCES] into a
-     * single trailing card. Left precedes right so stacked cards read in a predictable order.
-     */
-    fun sectionSources(sectionId: String): List<InputSource> = when (sectionId) {
-        SECTION_BUTTONS -> listOf(InputSource.BUTTON_DIAMOND) + OTHER_BUTTON_SOURCES
-        SECTION_DPAD -> listOf(InputSource.DPAD)
-        SECTION_TRIGGERS -> listOf(InputSource.LEFT_TRIGGER, InputSource.RIGHT_TRIGGER)
-        SECTION_JOYSTICKS -> listOf(InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK)
-        SECTION_GYRO -> listOf(InputSource.GYRO)
-        else -> emptyList()
-    }
-
-    val contentBySection: Map<String, List<RemapPaneItem>> = mapOf(
-        SECTION_BUTTONS to listOf(
-            // Face buttons: rows generated dynamically per current mode (BUTTON_PAD →
-            // A/B/X/Y; DPAD → A/B/X/Y mapped to directions; etc.).
-            RemapPaneItem.Subheader("buttons.face.header", "Face Buttons", InputSource.BUTTON_DIAMOND),
-            // Other buttons: bumpers + Start/Select. These are single-button "switch" sources with
-            // no behavioral modes, so they get NO mode dropdown (header has no inputSource). Each is
-            // a static bindable row rendered by OtherButtonRow — a passthrough toggle ((Device
-            // default) ↔ intercept) plus direct command assignment when intercepted.
-            RemapPaneItem.Subheader("buttons.other.header", "Other buttons", inputSource = null),
-            RemapPaneItem.BindingRow("buttons.other.l1", "L1", InputSource.LEFT_BUMPER, "click"),
-            RemapPaneItem.BindingRow("buttons.other.r1", "R1", InputSource.RIGHT_BUMPER, "click"),
-            RemapPaneItem.BindingRow("buttons.other.start", "Start", InputSource.SWITCH_START, "click"),
-            RemapPaneItem.BindingRow("buttons.other.select", "Select", InputSource.SWITCH_SELECT, "click"),
-        ),
-        SECTION_DPAD to listOf(
-            // Dpad source rows: dynamic per mode. DPAD/BUTTON_PAD modes surface the
-            // four directions; JOYSTICK_MOUSE / etc. surface their respective
-            // sub-input vocabularies.
-            RemapPaneItem.Subheader("dpad.header", "Directional Pad", InputSource.DPAD),
-        ),
-        SECTION_TRIGGERS to listOf(
-            RemapPaneItem.Subheader("triggers.left.header", "Left Trigger", InputSource.LEFT_TRIGGER),
-            // Dynamic rows for LEFT_TRIGGER inject here. The Analog Output
-            // Trigger DisabledRow stays as a fixed-position placeholder after
-            // the dynamic rows — it documents a sub-input we don't yet expose.
-            RemapPaneItem.DisabledRow("triggers.left.analog", "Analog Output Trigger"),
-            RemapPaneItem.Subheader("triggers.right.header", "Right Trigger", InputSource.RIGHT_TRIGGER),
-            RemapPaneItem.DisabledRow("triggers.right.analog", "Analog Output Trigger"),
-        ),
-        SECTION_JOYSTICKS to listOf(
-            RemapPaneItem.Subheader("joysticks.left.header", "Left Joystick", InputSource.LEFT_JOYSTICK),
-            RemapPaneItem.Subheader("joysticks.right.header", "Right Joystick", InputSource.RIGHT_JOYSTICK),
-        ),
-        SECTION_GYRO to listOf(
-            // Gyro source has no static sub-input rows — gyro modes (Gyro to Mouse,
-            // Gyro to Joystick Camera, etc.) emit continuous output, not bindable
-            // sub-inputs. The subheader carries the mode picker; everything else
-            // (sensitivity / deadzone / invert) lives in the Cog menu.
-            RemapPaneItem.Subheader("gyro.header", "Gyro", InputSource.GYRO),
-        ),
-    )
-
-    /**
-     * Fallback shown when the detail pane is asked for an unknown sectionId — a
-     * defensive default. Today every rail entry has a populated content map, but
-     * future un-implemented sections route here rather than crashing.
-     */
-    const val UNIMPLEMENTED_SECTION_PLACEHOLDER = "This section isn't available yet."
-
-    /**
-     * Phase 7 Brick B.6: which sources can have a mode shift added in the
-     * editor UI. Maps to a source's Subheader; only subheaders whose
-     * [RemapPaneItem.Subheader.inputSource] is in this set show a
-     * "+ Add Mode Shift" button. Subheaders without a source (Bumpers,
-     * Menu Buttons) cover multiple sources at once and don't get the
-     * button — mode shifts are per-source. Triggers + switches are
-     * excluded per Steam parity (their physical role makes them awkward
-     * shift targets; users shift TO them by binding the trigger as the
-     * trigger of someone else's mode shift).
+     * Which sources can have a mode shift ("added input mode") created from the editor UI.
+     * Triggers + switches are excluded per Steam parity (their physical role makes them
+     * awkward shift targets; users shift TO them by binding them as the trigger of someone
+     * else's mode shift).
      */
     val MODE_SHIFT_OWNERS: Set<InputSource> = setOf(
         InputSource.BUTTON_DIAMOND,
@@ -257,12 +66,8 @@ object RemapSections {
     )
 
     /**
-     * Phase 7 Brick B.6 / mode-driven base rows: derived bindable sub-input list
-     * for a given source + mode. Used by:
-     *  - The base source rows (post follow-up) — dynamically rendered after each
-     *    [RemapPaneItem.Subheader] whose source is in [MODE_AWARE_SOURCES].
-     *  - Mode shift sections — same shape but rendered under a "(Mode Shift)"
-     *    heading instead of the source's primary subheader.
+     * Derived bindable sub-input list for a given source + mode — drives the group editor's
+     * rows (and any future mode-shift sections).
      *
      * Reads through `validInputsFor(source, mode)` so the result stays in sync
      * with the runtime catalog. Labels are source-aware via [labelFor] —

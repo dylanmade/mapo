@@ -1,15 +1,21 @@
 package com.mappo.ui.screen.remap
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,15 +29,38 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.paint
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.lerp
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.mappo.R
 import com.mappo.data.model.steam.ActionLayerGraph
@@ -45,13 +74,16 @@ import com.mappo.data.model.steam.InputSource
 import com.mappo.data.model.steam.displayLabel
 import com.mappo.data.model.steam.displayNameFor
 import com.mappo.ui.glyph.InputGlyphs
+import com.mappo.ui.screen.softDropShadow
+import kotlin.math.roundToInt
 
 /**
- * The simplified ("basic") remap view: a controller diagram in the middle flanked by one
- * tappable box per input group, each row showing just the input glyph + what its **standard
- * press** currently does. No inline editing — tapping a box opens the advanced editor dialog
- * (the rail + detail pane) on that group's section. The top-center **Map** button is the future
- * home of the input-mapping wizard (UI-only for now).
+ * The simplified remap view: a controller diagram in the middle flanked by one tappable box per
+ * input group, each row showing just the input glyph + what its **standard press** currently
+ * does. Tapping a box animates it into the center of the screen (over the controller), morphing
+ * into the in-place advanced editor ([RemapGroupEditor]); a dashed outline holds the group's
+ * home position and the box animates back on close (or when another group is picked). The
+ * top-center **Map** button is the future home of the input-mapping wizard (UI-only for now).
  *
  * Box styling mirrors the home d-pad flower's petal cards (accent-tinted rounded box + border)
  * so the two "launcher" surfaces read as one family.
@@ -62,14 +94,57 @@ internal fun RemapSimpleView(
     viewingLayer: ActionLayerGraph?,
     config: ControllerConfig?,
     onMap: () -> Unit,
-    onOpenGroup: (RemapSimpleGroup) -> Unit,
+    editorCallbacks: RemapGroupEditorCallbacks,
     modifier: Modifier = Modifier,
 ) {
-    // The whole three-column band centers vertically as one unit. The Row's height is the
-    // tallest SIDE column's content (IntrinsicSize.Min; the controller image reports no
-    // intrinsic size — see the paint modifier below), which lets the middle column pin the Map
-    // button's top edge and the utility box's bottom edge to the flanking columns' extents.
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+    // The group whose editor should be open (user intent — survives the command-picker
+    // round-trip) vs. the group currently on screen mid-animation.
+    var expandedGroup by rememberSaveable { mutableStateOf<RemapSimpleGroup?>(null) }
+    var visibleGroup by remember { mutableStateOf(expandedGroup) }
+    val progress = remember { Animatable(if (expandedGroup != null) 1f else 0f) }
+    val boxBounds = remember { mutableStateMapOf<RemapSimpleGroup, Rect>() }
+    var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var rootSize by remember { mutableStateOf(IntSize.Zero) }
+    // Focus target for the expanded editor — without it, the tapped box's disappearance sends
+    // focus hunting to the first focusable on screen (the top-left back button).
+    val editorFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+
+    // Drives expand / collapse / switch-to-another-group. Switching collapses the current
+    // editor back to its home box before expanding the next one.
+    LaunchedEffect(expandedGroup) {
+        val target = expandedGroup
+        if (target == visibleGroup) {
+            if (target != null && progress.value < 1f) {
+                progress.animateTo(1f, tween(ExpandMillis, easing = FastOutSlowInEasing))
+            }
+            return@LaunchedEffect
+        }
+        if (visibleGroup != null) {
+            progress.animateTo(0f, tween(CollapseMillis, easing = FastOutSlowInEasing))
+            visibleGroup = null
+        }
+        if (target != null) {
+            visibleGroup = target
+            progress.animateTo(1f, tween(ExpandMillis, easing = FastOutSlowInEasing))
+        }
+    }
+
+    BackHandler(enabled = expandedGroup != null) { expandedGroup = null }
+
+    // Move focus into the editor as it opens (see editorFocus above).
+    LaunchedEffect(visibleGroup) {
+        if (visibleGroup != null) runCatching { editorFocus.requestFocus() }
+    }
+
+    Box(
+        modifier = modifier.onGloballyPositioned { rootCoords = it; rootSize = it.size },
+        contentAlignment = Alignment.Center,
+    ) {
+        // The whole three-column band centers vertically as one unit. The Row's height is the
+        // tallest SIDE column's content (IntrinsicSize.Min; the controller image reports no
+        // intrinsic size — see the paint modifier below), which lets the middle column pin the
+        // Map button's top edge and the utility box's bottom edge to the flanking columns'
+        // extents.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -78,17 +153,31 @@ internal fun RemapSimpleView(
             // Wide gutter keeps the side group boxes off the controller image.
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
+            val box: @Composable (RemapSimpleGroup) -> Unit = { group ->
+                GroupBox(
+                    group = group,
+                    viewingSet = viewingSet,
+                    viewingLayer = viewingLayer,
+                    config = config,
+                    placeholder = group == visibleGroup,
+                    placeholderSize = boxBounds[group]?.size,
+                    onPositioned = { coords ->
+                        rootCoords?.let { root -> boxBounds[group] = root.localBoundingBoxOf(coords) }
+                    },
+                    onOpenGroup = { expandedGroup = it },
+                )
+            }
             // Left column, counterclockwise start: shoulder → d-pad → stick. Boxes anchor
-            // toward the screen center (the controller), i.e. this column's END edge.
+            // toward the screen center (the controller), i.e. this column's END edge, and
+            // cluster toward the vertical center.
             Column(
                 modifier = Modifier.weight(1f).fillMaxHeight(),
-                // Boxes cluster toward the vertical center rather than spreading edge-to-edge.
                 verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
                 horizontalAlignment = Alignment.End,
             ) {
-                GroupBox(RemapSimpleGroup.LEFT_SHOULDER, viewingSet, viewingLayer, config, onOpenGroup)
-                GroupBox(RemapSimpleGroup.DPAD, viewingSet, viewingLayer, config, onOpenGroup)
-                GroupBox(RemapSimpleGroup.LEFT_STICK, viewingSet, viewingLayer, config, onOpenGroup)
+                box(RemapSimpleGroup.LEFT_SHOULDER)
+                box(RemapSimpleGroup.DPAD)
+                box(RemapSimpleGroup.LEFT_STICK)
             }
             // Middle column: Map CTA top-aligned with the flanking columns' topmost boxes, the
             // utility box bottom-aligned with their bottommost, controller between.
@@ -117,7 +206,7 @@ internal fun RemapSimpleView(
                             contentScale = ContentScale.Fit,
                         ),
                 )
-                GroupBox(RemapSimpleGroup.UTILITY, viewingSet, viewingLayer, config, onOpenGroup)
+                box(RemapSimpleGroup.UTILITY)
             }
             // Right column: shoulder → face buttons → stick. Boxes anchor toward the screen
             // center (this column's START edge).
@@ -126,9 +215,80 @@ internal fun RemapSimpleView(
                 verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
                 horizontalAlignment = Alignment.Start,
             ) {
-                GroupBox(RemapSimpleGroup.RIGHT_SHOULDER, viewingSet, viewingLayer, config, onOpenGroup)
-                GroupBox(RemapSimpleGroup.FACE, viewingSet, viewingLayer, config, onOpenGroup)
-                GroupBox(RemapSimpleGroup.RIGHT_STICK, viewingSet, viewingLayer, config, onOpenGroup)
+                box(RemapSimpleGroup.RIGHT_SHOULDER)
+                box(RemapSimpleGroup.FACE)
+                box(RemapSimpleGroup.RIGHT_STICK)
+            }
+        }
+
+        // ── The morphing editor overlay ───────────────────────────────────
+        val vg = visibleGroup
+        val origin = vg?.let { boxBounds[it] }
+        if (vg != null && origin != null && rootSize != IntSize.Zero) {
+            // Target = nearly the whole view (a slim margin keeps the edges peeking through) —
+            // controller-image-sized proved too cramped a viewing experience.
+            val marginPx = with(LocalDensity.current) { EditorMargin.toPx() }
+            val target = Rect(
+                offset = Offset(marginPx, marginPx),
+                size = Size(rootSize.width - marginPx * 2, rootSize.height - marginPx * 2),
+            )
+            val shape = RoundedCornerShape(GroupCorner)
+            val accent = MaterialTheme.colorScheme.primary
+            val container = accent.copy(alpha = 0.08f)
+                .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
+            // Recompose only when the animation starts/ends; the per-frame rect is read in the
+            // LAYOUT phase (the layout modifier below) and the fades in the DRAW phase
+            // (graphicsLayer) — recomposing every frame is what made the morph jitter.
+            val midFlight by remember { derivedStateOf { progress.value < 1f } }
+            // TopStart-anchored overlay layer: the panel is placed at absolute root coords.
+            // (Placing it straight in the center-aligned root Box offset the rect from the
+            // CENTER slot — every morph appeared to launch from the bottom-right.)
+            Box(Modifier.matchParentSize()) {
+                Box(
+                    modifier = Modifier
+                        .layout { measurable, constraints ->
+                            val rect = lerp(origin, target, progress.value)
+                            val placeable = measurable.measure(
+                                androidx.compose.ui.unit.Constraints.fixed(
+                                    rect.width.roundToInt().coerceAtLeast(1),
+                                    rect.height.roundToInt().coerceAtLeast(1),
+                                ),
+                            )
+                            layout(constraints.maxWidth, constraints.maxHeight) {
+                                placeable.place(rect.left.roundToInt(), rect.top.roundToInt())
+                            }
+                        }
+                        .softDropShadow(cornerRadius = GroupCorner)
+                        .clip(shape)
+                        .background(container)
+                        .border(1.dp, accent.copy(alpha = 0.35f), shape)
+                        .focusRequester(editorFocus)
+                        .focusable()
+                        .testTag("group-editor"),
+                ) {
+                    // Crossfade: the box's summary rows dissolve into the editor as it grows.
+                    if (midFlight) {
+                        Column(
+                            modifier = Modifier
+                                .graphicsLayer { alpha = 1f - progress.value }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            GroupSummaryRows(vg, viewingSet, viewingLayer, config)
+                        }
+                    }
+                    RemapGroupEditor(
+                        group = vg,
+                        viewingSet = viewingSet,
+                        viewingLayer = viewingLayer,
+                        config = config,
+                        callbacks = editorCallbacks,
+                        onClose = { expandedGroup = null },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { alpha = progress.value },
+                    )
+                }
             }
         }
     }
@@ -138,19 +298,17 @@ internal fun RemapSimpleView(
 internal data class SimpleRowSpec(val source: InputSource, val subInputKey: String)
 
 /**
- * The simple view's input groups. Each opens the advanced editor on [sectionId]; rows summarize
- * the standard-press assignment only (hold/double/etc. live in the advanced editor).
+ * The simple view's input groups. Rows summarize the standard-press assignment only
+ * (hold/double/etc. live in the expanded editor); the same specs drive the editor's rows.
  */
-internal enum class RemapSimpleGroup(val sectionId: String, val rows: List<SimpleRowSpec>) {
+internal enum class RemapSimpleGroup(val rows: List<SimpleRowSpec>) {
     LEFT_SHOULDER(
-        RemapSections.SECTION_TRIGGERS,
         listOf(
             SimpleRowSpec(InputSource.LEFT_TRIGGER, "full_pull"),
             SimpleRowSpec(InputSource.LEFT_BUMPER, "click"),
         ),
     ),
     DPAD(
-        RemapSections.SECTION_DPAD,
         listOf(
             SimpleRowSpec(InputSource.DPAD, "dpad_up"),
             SimpleRowSpec(InputSource.DPAD, "dpad_left"),
@@ -159,7 +317,6 @@ internal enum class RemapSimpleGroup(val sectionId: String, val rows: List<Simpl
         ),
     ),
     LEFT_STICK(
-        RemapSections.SECTION_JOYSTICKS,
         listOf(
             SimpleRowSpec(InputSource.LEFT_JOYSTICK, "dpad_up"),
             SimpleRowSpec(InputSource.LEFT_JOYSTICK, "dpad_left"),
@@ -169,14 +326,12 @@ internal enum class RemapSimpleGroup(val sectionId: String, val rows: List<Simpl
         ),
     ),
     UTILITY(
-        RemapSections.SECTION_BUTTONS,
         listOf(
             SimpleRowSpec(InputSource.SWITCH_START, "click"),
             SimpleRowSpec(InputSource.SWITCH_SELECT, "click"),
         ),
     ),
     RIGHT_STICK(
-        RemapSections.SECTION_JOYSTICKS,
         listOf(
             SimpleRowSpec(InputSource.RIGHT_JOYSTICK, "dpad_up"),
             SimpleRowSpec(InputSource.RIGHT_JOYSTICK, "dpad_left"),
@@ -186,7 +341,6 @@ internal enum class RemapSimpleGroup(val sectionId: String, val rows: List<Simpl
         ),
     ),
     FACE(
-        RemapSections.SECTION_BUTTONS,
         listOf(
             SimpleRowSpec(InputSource.BUTTON_DIAMOND, "button_y"),
             SimpleRowSpec(InputSource.BUTTON_DIAMOND, "button_x"),
@@ -195,7 +349,6 @@ internal enum class RemapSimpleGroup(val sectionId: String, val rows: List<Simpl
         ),
     ),
     RIGHT_SHOULDER(
-        RemapSections.SECTION_TRIGGERS,
         listOf(
             SimpleRowSpec(InputSource.RIGHT_TRIGGER, "full_pull"),
             SimpleRowSpec(InputSource.RIGHT_BUMPER, "click"),
@@ -206,8 +359,9 @@ internal enum class RemapSimpleGroup(val sectionId: String, val rows: List<Simpl
 /**
  * Resolve what a row's standard press currently does, as a short label:
  * `(Device default)` mode → "Default"; `None` → "None"; a bound FULL_PRESS command → its
- * display label; an active mode with no per-input row (analog modes) → the mode's name.
- * Layer view resolves the override first and falls through to the base set (ghost semantics).
+ * display label; a present-but-unbound input → "Default"; an active mode with no per-input row
+ * (analog modes) → the mode's name. Layer view resolves the override first and falls through
+ * to the base set (ghost semantics).
  */
 internal fun simpleRowLabel(
     viewingSet: ActionSetGraph?,
@@ -236,10 +390,36 @@ internal fun simpleRowLabel(
     }
 }
 
+/** The glyph + standard-press summary rows of one group (shared by the box and the morph). */
+@Composable
+private fun GroupSummaryRows(
+    group: RemapSimpleGroup,
+    viewingSet: ActionSetGraph?,
+    viewingLayer: ActionLayerGraph?,
+    config: ControllerConfig?,
+) {
+    group.rows.forEach { spec ->
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier.height(14.dp),
+        ) {
+            InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 12.dp)
+            Text(
+                text = simpleRowLabel(viewingSet, viewingLayer, config, spec),
+                style = remapMiniTextStyle(),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 /**
- * One tappable group box: glyph + standard-press label per row. Petal-card styling (see
- * HomeFlower.PetalCard) with the primary accent; the whole box is the tap target that opens
- * the advanced editor for the group's section.
+ * One tappable group box (petal-card styling, see HomeFlower.PetalCard). While the group is
+ * expanded into the editor, [placeholder] renders a same-size dashed outline instead — the
+ * spot the editor animates back to.
  */
 @Composable
 private fun GroupBox(
@@ -247,17 +427,46 @@ private fun GroupBox(
     viewingSet: ActionSetGraph?,
     viewingLayer: ActionLayerGraph?,
     config: ControllerConfig?,
+    placeholder: Boolean,
+    placeholderSize: Size?,
+    onPositioned: (LayoutCoordinates) -> Unit,
     onOpenGroup: (RemapSimpleGroup) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(GroupCorner)
     val accent = MaterialTheme.colorScheme.primary
+    if (placeholder && placeholderSize != null) {
+        // Dashed home-position outline, sized to the box's last measured bounds so the
+        // surrounding layout doesn't shift while the group lives in the editor.
+        val density = LocalDensity.current
+        val dash = accent.copy(alpha = 0.45f)
+        Box(
+            modifier = modifier
+                .onGloballyPositioned(onPositioned)
+                .size(
+                    width = with(density) { placeholderSize.width.toDp() },
+                    height = with(density) { placeholderSize.height.toDp() },
+                )
+                .drawBehind {
+                    drawRoundRect(
+                        color = dash,
+                        cornerRadius = CornerRadius(GroupCorner.toPx()),
+                        style = Stroke(
+                            width = 1.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 7f)),
+                        ),
+                    )
+                },
+        )
+        return
+    }
     // Accent tint composited over surfaceContainerLow — same identity treatment as the home
     // flower's petal cards.
     val container = accent.copy(alpha = 0.08f)
         .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
     Column(
         modifier = modifier
+            .onGloballyPositioned(onPositioned)
             .clip(shape)
             .background(container)
             .border(1.dp, accent.copy(alpha = 0.35f), shape)
@@ -266,21 +475,12 @@ private fun GroupBox(
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        group.rows.forEach { spec ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                modifier = Modifier.height(14.dp),
-            ) {
-                InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 12.dp)
-                Text(
-                    text = simpleRowLabel(viewingSet, viewingLayer, config, spec),
-                    style = remapMiniTextStyle(),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+        GroupSummaryRows(group, viewingSet, viewingLayer, config)
     }
 }
+
+private val GroupCorner = 8.dp
+private const val ExpandMillis = 300
+private const val CollapseMillis = 240
+/** Inset between the expanded editor and the simple view's edges. */
+private val EditorMargin = 10.dp

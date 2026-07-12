@@ -49,7 +49,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.lerp
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
@@ -240,9 +239,7 @@ internal fun RemapSimpleView(
                 size = Size(rootSize.width - marginPx * 2, rootSize.height - marginPx * 2),
             )
             val shape = RoundedCornerShape(GroupCorner)
-            val accent = MaterialTheme.colorScheme.primary
-            val container = accent.copy(alpha = 0.08f)
-                .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
+            val container = remapBoxContainer()
             // Recompose only when the animation starts/ends; the per-frame rect is read in the
             // LAYOUT phase (the layout modifier below) and the fades in the DRAW phase
             // (graphicsLayer) — recomposing every frame is what made the morph jitter.
@@ -268,7 +265,7 @@ internal fun RemapSimpleView(
                         .softDropShadow(cornerRadius = GroupCorner)
                         .clip(shape)
                         .background(container)
-                        .border(1.dp, accent.copy(alpha = 0.35f), shape)
+                        .border(remapBevelBorder(container, GroupCorner), shape)
                         .focusRequester(editorFocus)
                         .focusable()
                         .testTag("group-editor"),
@@ -502,7 +499,7 @@ private fun GroupBox(
                         color = dash,
                         cornerRadius = CornerRadius(GroupCorner.toPx()),
                         style = Stroke(
-                            width = 1.dp.toPx(),
+                            width = RemapBoxStroke.toPx(),
                             pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 7f)),
                         ),
                     )
@@ -510,10 +507,9 @@ private fun GroupBox(
         )
         return
     }
-    // Accent tint composited over surfaceContainerLow — same identity treatment as the home
-    // flower's petal cards.
-    val container = accent.copy(alpha = 0.08f)
-        .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
+    // Shared box treatment (same identity as the home flower's petal cards) — also the basis
+    // the pill controls now copy, via the remapBoxContainer/remapBoxOutline helpers.
+    val container = remapBoxContainer()
     val rowExtras = rowExtraInputCounts(group, viewingSet, viewingLayer)
     // Each +N hangs OUTSIDE the box as a ZERO-FOOTPRINT overlay, aligned with ITS OWN summary
     // row (per-row extras, not one group total). Zero-footprint: it reports no layout size, so
@@ -525,7 +521,7 @@ private fun GroupBox(
                 .onGloballyPositioned(onPositioned)
                 .clip(shape)
                 .background(container)
-                .border(1.dp, accent.copy(alpha = 0.35f), shape)
+                .border(remapBevelBorder(container, GroupCorner), shape)
                 .clickable { onOpenGroup(group) }
                 .testTag("simple-group:${group.name}")
                 .padding(horizontal = 8.dp, vertical = 6.dp),

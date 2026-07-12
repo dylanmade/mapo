@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Layers
@@ -31,6 +30,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.mappo.data.model.steam.ActionSetGraph
 import com.mappo.data.model.steam.BindingMode
@@ -122,15 +122,20 @@ private fun OverlayPillDropdown() {
     var open by remember { mutableStateOf(false) }
     var selected by rememberSaveable { mutableStateOf("(None)") }
     Box {
-        // surfaceContainerHigh — pill-style dropdown button, matching the mode pills.
+        // Shared box treatment — pill-style dropdown button, no trailing arrow.
+        val container = remapBoxContainer()
         Surface(
             shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.heightIn(min = RemapPillHeight).clickable { open = true },
+            color = container,
+            border = remapBevelBorder(container, RemapPillHeight / 2),
+            modifier = Modifier
+                .heightIn(min = RemapPillHeight)
+                .clip(RoundedCornerShape(50))
+                .clickable(onClickLabel = "Choose overlay") { open = true },
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 8.dp, end = 3.dp),
+                modifier = Modifier.padding(horizontal = 8.dp),
             ) {
                 Icon(
                     Icons.Filled.Layers,
@@ -140,12 +145,6 @@ private fun OverlayPillDropdown() {
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(text = selected, style = remapMiniTextStyle())
-                Icon(
-                    Icons.Filled.ArrowDropDown,
-                    contentDescription = "Choose overlay",
-                    modifier = Modifier.size(RemapPillArrowSize),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

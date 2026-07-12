@@ -1,5 +1,6 @@
 package com.mappo.ui.screen.remap
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -13,7 +14,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -30,9 +30,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.LinearGradientShader
+import androidx.compose.ui.graphics.Shader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mappo.data.model.steam.BindingMode
@@ -62,14 +72,93 @@ internal fun remapOverlineTextStyle(): TextStyle =
         letterSpacing = 0.9.sp,
     )
 
+/**
+ * Container fill shared by the group input boxes and every pill control (dropdowns, label
+ * field, output button): the accent tint composited over the low container plane. One family,
+ * one treatment — the pills deliberately match the boxes' attributes (2026-07-12 experiment).
+ */
+@Composable
+internal fun remapBoxContainer(): Color =
+    MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+        .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
+
+/**
+ * The topmost button plane: buttons sitting ON an elevated box/card background (the expanded
+ * group editor's dropdowns and output button) use this fill instead of [remapBoxContainer],
+ * which would vanish against its own plane.
+ */
+internal val RemapElevatedContainer = Color(0xFF434A5B)
+
+/**
+ * Fill for text-input fields sitting on a box/card plane (e.g. the label field on the
+ * expanded editor): a slightly darker "well" than the card it sits on. Deliberately FLAT —
+ * no bevel border — because an input is not a button.
+ */
+@Composable
+internal fun remapInputFieldContainer(): Color =
+    lerp(remapBoxContainer(), Color.Black, 0.22f)
+
+/** Bevel stroke width for the boxes + pill controls (slightly under the original 1dp). */
+internal val RemapBoxStroke = 0.75.dp
+
+/** How far the bevel's highlight/shadow deviate from the base fill — "ever so slightly".
+ *  Highlights read hotter than shadows on the dark theme, so they get the lighter touch. */
+private const val BevelHighlightStrength = 0.15f
+private const val BevelShadowStrength = 0.25f
+
+/** Where along the corner arc the bevel finishes fading: 1−cos(45°) of the radius — the
+ *  point where the outline's tangent passes 45° and "top" geometrically becomes "side". */
+private const val BevelFadeOfRadius = 0.6f
+
+/**
+ * The bevel border on buttons + cards (replaced the old solid accent outline): a very faint
+ * thin top highlight and bottom shadow, each the base fill nudged toward white/black, fading
+ * to transparent (same hue, zero alpha — not transparent-black, which muddies the fade).
+ * The fade completes WITHIN the corner rounding — by the arc's 45° point — so the highlight
+ * ends just before the top border becomes the side border; that needs the real component
+ * size, hence a [ShaderBrush] with per-size stops rather than fraction-based gradient stops
+ * (which overshot the corners on anything taller than a pill).
+ */
+@Composable
+internal fun remapBevelBorder(base: Color, cornerRadius: Dp): BorderStroke {
+    val fadePx = with(LocalDensity.current) { (cornerRadius * BevelFadeOfRadius).toPx() }
+    return BorderStroke(
+        RemapBoxStroke,
+        BevelBrush(
+            highlight = lerp(base, Color.White, BevelHighlightStrength),
+            shadow = lerp(base, Color.Black, BevelShadowStrength),
+            fadePx = fadePx,
+        ),
+    )
+}
+
+private class BevelBrush(
+    private val highlight: Color,
+    private val shadow: Color,
+    private val fadePx: Float,
+) : ShaderBrush() {
+    override fun createShader(size: Size): Shader {
+        val fade = (fadePx / size.height).coerceIn(0.01f, 0.49f)
+        return LinearGradientShader(
+            from = Offset.Zero,
+            to = Offset(0f, size.height),
+            colors = listOf(highlight, highlight.copy(alpha = 0f), shadow.copy(alpha = 0f), shadow),
+            colorStops = listOf(0f, fade, 1f - fade, 1f),
+        )
+    }
+
+    override fun equals(other: Any?): Boolean = other is BevelBrush &&
+        other.highlight == highlight && other.shadow == shadow && other.fadePx == fadePx
+
+    override fun hashCode(): Int =
+        31 * (31 * highlight.hashCode() + shadow.hashCode()) + fadePx.hashCode()
+}
+
 /** Height of the pill dropdowns (mode / overlay pickers). */
 internal val RemapPillHeight = 24.dp
 
 /** Icon edge inside the pills. */
 internal val RemapPillIconSize = 13.dp
-
-/** Dropdown-arrow edge inside the pills. */
-internal val RemapPillArrowSize = 16.dp
 
 /** Outer tap-target edge of [RemapMiniIconButton] (also its footprint spacer in editor rows). */
 internal val RemapIconButtonSize = 24.dp
@@ -78,8 +167,10 @@ internal val RemapIconButtonSize = 24.dp
 internal val RemapIconButtonIconSize = 16.dp
 
 /**
- * A hand-rolled miniature pill button. [filled] renders the primary (command/output) look;
- * unfilled is the tonal chip look shared with the dropdown pills. Disabled = dimmed + inert.
+ * A hand-rolled miniature pill button, in the shared box treatment. [filled] (the
+ * command/output button) keeps its emphasis through the stronger text color only. [elevated]
+ * uses the topmost button plane for buttons sitting on a box/card background. Disabled =
+ * dimmed + inert.
  */
 @Composable
 internal fun RemapMiniPillButton(
@@ -88,14 +179,15 @@ internal fun RemapMiniPillButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     filled: Boolean = false,
+    elevated: Boolean = false,
 ) {
-    val container = if (filled) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surfaceContainerHigh
-    val content = if (filled) MaterialTheme.colorScheme.onPrimary
+    val content = if (filled) MaterialTheme.colorScheme.onSurface
     else MaterialTheme.colorScheme.onSurfaceVariant
+    val container = if (elevated) RemapElevatedContainer else remapBoxContainer()
     Surface(
         shape = RoundedCornerShape(50),
         color = container,
+        border = remapBevelBorder(container, RemapPillHeight / 2),
         modifier = modifier
             .height(RemapPillHeight)
             .then(
@@ -151,20 +243,28 @@ internal fun ModePillDropdown(
     enabled: Boolean,
     onPick: (BindingMode) -> Unit,
     overline: Boolean = false,
+    elevated: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
+    val container = if (elevated) RemapElevatedContainer else remapBoxContainer()
     Box {
-        // surfaceContainerHigh — pill-style dropdown button, per the picker-pill convention.
+        // Shared box treatment — pill-style dropdown button, no trailing arrow.
         Surface(
             shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = container,
+            border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = Modifier
                 .heightIn(min = RemapPillHeight)
-                .then(if (enabled) Modifier.clickable { open = true } else Modifier.alpha(0.6f)),
+                .then(
+                    if (enabled) {
+                        Modifier.clip(RoundedCornerShape(50))
+                            .clickable(onClickLabel = "Change input mode") { open = true }
+                    } else Modifier.alpha(0.6f),
+                ),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 8.dp, end = 3.dp),
+                modifier = Modifier.padding(horizontal = 8.dp),
             ) {
                 Icon(
                     InputGlyphs.modeIcon(currentMode),
@@ -180,13 +280,6 @@ internal fun ModePillDropdown(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = 156.dp),
-                )
-                Icon(
-                    Icons.Filled.ArrowDropDown,
-                    contentDescription = "Change input mode",
-                    modifier = Modifier.size(RemapPillArrowSize),
-                    tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
-                    else MaterialTheme.colorScheme.outline,
                 )
             }
         }

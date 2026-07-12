@@ -21,7 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Adjust
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -49,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -129,6 +129,7 @@ internal fun RemapGroupEditor(
                     enabled = viewingLayer == null && validModes.size > 1,
                     onPick = { mode -> callbacks.onSetBindingGroupMode(primaryGroup.id, mode) },
                     overline = true,
+                    elevated = true,
                 )
             } else {
                 Text(
@@ -286,6 +287,7 @@ private fun EditorCommandRow(
             text = outputLabel,
             onClick = onTapOutput,
             filled = true,
+            elevated = true,
             modifier = Modifier.widthIn(max = EditorOutputMaxWidth),
         )
         when (kebab) {
@@ -339,29 +341,28 @@ private fun PressPillDropdown(
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
-        // surfaceContainerHigh — pill-style dropdown button, matching the mode pills.
+        // Elevated button plane — this pill always sits on the expanded editor's card.
         Surface(
             shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = RemapElevatedContainer,
+            border = remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2),
             modifier = Modifier
                 .heightIn(min = RemapPillHeight)
-                .then(if (enabled) Modifier.clickable { open = true } else Modifier.alpha(0.6f)),
+                .then(
+                    if (enabled) {
+                        Modifier.clip(RoundedCornerShape(50))
+                            .clickable(onClickLabel = "Change press type") { open = true }
+                    } else Modifier.alpha(0.6f),
+                ),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 8.dp, end = 3.dp),
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.padding(horizontal = 8.dp),
             ) {
                 Text(
                     text = current.shortLabel(),
                     style = remapMiniTextStyle(),
                     maxLines = 1,
-                )
-                Icon(
-                    Icons.Filled.ArrowDropDown,
-                    contentDescription = "Change press type",
-                    modifier = Modifier.size(RemapPillArrowSize),
-                    tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
-                    else MaterialTheme.colorScheme.outline,
                 )
             }
         }
@@ -394,13 +395,19 @@ private fun LabelPillField(
     modifier: Modifier = Modifier,
 ) {
     var editing by remember { mutableStateOf(false) }
-    // surfaceContainerHigh — pill plane matching the dropdowns.
+    // Input-field well: darker than the editor card it sits on, and FLAT (no bevel) — it's a
+    // field, not a button.
     Surface(
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = remapInputFieldContainer(),
         modifier = modifier
             .height(RemapPillHeight)
-            .then(if (enabled) Modifier.clickable { editing = true } else Modifier.alpha(0.6f)),
+            .then(
+                if (enabled) {
+                    Modifier.clip(RoundedCornerShape(50))
+                        .clickable(onClickLabel = "Edit label") { editing = true }
+                } else Modifier.alpha(0.6f),
+            ),
     ) {
         Box(
             modifier = Modifier.padding(horizontal = 8.dp),

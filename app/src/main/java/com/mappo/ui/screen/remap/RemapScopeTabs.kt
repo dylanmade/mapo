@@ -75,11 +75,11 @@ internal fun RemapTopBar(
                 modifier = Modifier.fillMaxWidth().height(TopBarHeight),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onBack, modifier = Modifier.size(30.dp)) {
+                IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(20.dp),
                     )
                 }
                 // Tabs hug the bar's bottom edge so the selection underline meets the divider.
@@ -96,11 +96,11 @@ internal fun RemapTopBar(
                         actions = actions,
                     )
                 }
-                IconButton(onClick = actions.onAddSet, modifier = Modifier.size(30.dp)) {
+                IconButton(onClick = actions.onAddSet, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.Filled.Add,
                         contentDescription = "Add action set",
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             }
@@ -220,5 +220,5 @@ private fun ScopeTabs(
     }
 }
 
-private val TopBarHeight = 34.dp
-private val ScopeTabHeight = 26.dp
+private val TopBarHeight = 40.dp
+private val ScopeTabHeight = 32.dp

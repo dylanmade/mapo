@@ -44,27 +44,38 @@ import com.mappo.ui.glyph.InputGlyphs
  * Compact hand-rolled chrome shared across the simplified Remap Controls screen (group boxes,
  * Gyro/Overlay strip). All metrics live here — never re-derive a private size constant per call
  * site. DELIBERATE M3 DEVIATION: sub-touch-target scale, accepted to fit the 1:1 viewport.
+ * (Scaled back up ~20% from the density-experiment sizes once the layout settled — readability
+ * pass, 2026-07-12; still deliberately below the 48dp M3 floor.)
  */
 
 /** Compressed body text for the simple view's rows and pills. */
 @Composable
 internal fun remapMiniTextStyle(): TextStyle =
-    MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp)
+    MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, lineHeight = 14.sp)
 
 /** Overline treatment (uppercase callers + tracked-out small caps look) for editor headers. */
 @Composable
 internal fun remapOverlineTextStyle(): TextStyle =
     MaterialTheme.typography.labelSmall.copy(
-        fontSize = 9.sp,
-        lineHeight = 11.sp,
-        letterSpacing = 0.8.sp,
+        fontSize = 10.sp,
+        lineHeight = 12.sp,
+        letterSpacing = 0.9.sp,
     )
 
 /** Height of the pill dropdowns (mode / overlay pickers). */
-internal val RemapPillHeight = 20.dp
+internal val RemapPillHeight = 24.dp
 
 /** Icon edge inside the pills. */
-internal val RemapPillIconSize = 11.dp
+internal val RemapPillIconSize = 13.dp
+
+/** Dropdown-arrow edge inside the pills. */
+internal val RemapPillArrowSize = 16.dp
+
+/** Outer tap-target edge of [RemapMiniIconButton] (also its footprint spacer in editor rows). */
+internal val RemapIconButtonSize = 24.dp
+
+/** Icon edge inside [RemapMiniIconButton]. */
+internal val RemapIconButtonIconSize = 16.dp
 
 /**
  * A hand-rolled miniature pill button. [filled] renders the primary (command/output) look;
@@ -115,7 +126,7 @@ internal fun RemapMiniIconButton(
 ) {
     Box(
         modifier = modifier
-            .size(20.dp)
+            .size(RemapIconButtonSize)
             .clip(CircleShape)
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier.alpha(0.45f)),
         contentAlignment = Alignment.Center,
@@ -123,7 +134,7 @@ internal fun RemapMiniIconButton(
         Icon(
             icon,
             contentDescription = contentDescription,
-            modifier = Modifier.size(14.dp),
+            modifier = Modifier.size(RemapIconButtonIconSize),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -168,12 +179,12 @@ internal fun ModePillDropdown(
                     style = if (overline) remapOverlineTextStyle() else remapMiniTextStyle(),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 130.dp),
+                    modifier = Modifier.widthIn(max = 156.dp),
                 )
                 Icon(
                     Icons.Filled.ArrowDropDown,
                     contentDescription = "Change input mode",
-                    modifier = Modifier.size(13.dp),
+                    modifier = Modifier.size(RemapPillArrowSize),
                     tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.outline,
                 )

@@ -135,12 +135,12 @@ fun ReorderableTabBar(
         IconButton(
             onClick = { coroutineScope.launch { listState.animateScrollBy(-CHEVRON_SCROLL_PX) } },
             enabled = listState.canScrollBackward,
-            modifier = Modifier.size(if (dense) 22.dp else 32.dp),
+            modifier = Modifier.size(if (dense) 26.dp else 32.dp),
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                 contentDescription = "Scroll tabs left",
-                modifier = Modifier.size(if (dense) 14.dp else 18.dp),
+                modifier = Modifier.size(if (dense) 16.dp else 18.dp),
             )
         }
         LazyRow(
@@ -309,12 +309,12 @@ fun ReorderableTabBar(
         IconButton(
             onClick = { coroutineScope.launch { listState.animateScrollBy(CHEVRON_SCROLL_PX) } },
             enabled = listState.canScrollForward,
-            modifier = Modifier.size(if (dense) 22.dp else 32.dp),
+            modifier = Modifier.size(if (dense) 26.dp else 32.dp),
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "Scroll tabs right",
-                modifier = Modifier.size(if (dense) 14.dp else 18.dp),
+                modifier = Modifier.size(if (dense) 16.dp else 18.dp),
             )
         }
     }
@@ -351,20 +351,20 @@ private fun TabSurface(
                     )
                 }
             }
-            .padding(horizontal = if (dense) 8.dp else 14.dp),
+            .padding(horizontal = if (dense) 10.dp else 14.dp),
     ) {
         if (leadingIcon != null) {
             Icon(
                 leadingIcon,
                 contentDescription = null,
                 tint = labelColor,
-                modifier = Modifier.size(if (dense) 10.dp else 14.dp),
+                modifier = Modifier.size(if (dense) 12.dp else 14.dp),
             )
-            Spacer(Modifier.width(if (dense) 4.dp else 6.dp))
+            Spacer(Modifier.width(if (dense) 5.dp else 6.dp))
         }
         // Tab labels are user-typed names (keyboards, action sets, layers) — cap + ellipsize.
         val base = if (dense) {
-            MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 12.sp)
+            MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, lineHeight = 14.sp)
         } else {
             MaterialTheme.typography.labelMedium
         }

@@ -274,7 +274,7 @@ private fun EditorCommandRow(
             enabled = editable && onSetPressType != null,
             onPick = { onSetPressType?.invoke(it) },
         )
-        InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 14.dp)
+        InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 17.dp)
         LabelPillField(
             value = label,
             enabled = editable && onCommitLabel != null,
@@ -289,7 +289,7 @@ private fun EditorCommandRow(
             modifier = Modifier.widthIn(max = EditorOutputMaxWidth),
         )
         when (kebab) {
-            null -> Spacer(Modifier.size(20.dp)) // kebab footprint, keeps rows aligned
+            null -> Spacer(Modifier.size(RemapIconButtonSize)) // kebab footprint, keeps rows aligned
             is EditorKebab.ClearOverride -> Box {
                 var open by remember { mutableStateOf(false) }
                 RowKebab(onClick = { open = true }, contentDescription = "Override actions")
@@ -359,7 +359,7 @@ private fun PressPillDropdown(
                 Icon(
                     Icons.Filled.ArrowDropDown,
                     contentDescription = "Change press type",
-                    modifier = Modifier.size(13.dp),
+                    modifier = Modifier.size(RemapPillArrowSize),
                     tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.outline,
                 )
@@ -532,7 +532,7 @@ internal fun RichMenuItem(
     )
 }
 
-private val EditorHeaderHeight = 30.dp
-private val EditorRowHeight = 26.dp
-private val EditorLabelWidth = 64.dp
-private val EditorOutputMaxWidth = 52.dp
+private val EditorHeaderHeight = 36.dp
+private val EditorRowHeight = 32.dp
+private val EditorLabelWidth = 76.dp
+private val EditorOutputMaxWidth = 62.dp

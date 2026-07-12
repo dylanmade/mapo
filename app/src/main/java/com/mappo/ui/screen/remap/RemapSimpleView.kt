@@ -454,7 +454,7 @@ private fun GroupSummaryRows(
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             modifier = Modifier.height(SummaryRowHeight),
         ) {
-            InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 12.dp)
+            InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 14.dp)
             Text(
                 text = simpleRowLabel(viewingSet, viewingLayer, config, spec),
                 style = remapMiniTextStyle(),
@@ -572,17 +572,17 @@ private val RemapSimpleGroup.badgeOnLeft: Boolean
         this == RemapSimpleGroup.LEFT_STICK
 
 /** Height of one glyph + label summary row inside a group box. */
-private val SummaryRowHeight = 14.dp
+private val SummaryRowHeight = 17.dp
 
 /** Vertical gap between summary rows — with [SummaryRowHeight], sets the +N badges' row pitch. */
-private val SummaryRowSpacing = 3.dp
+private val SummaryRowSpacing = 4.dp
 
-/** Aligns a +N badge's text with its summary row (6dp box padding + a 14dp row against the
- *  badge's 12sp line height); each subsequent row adds one row pitch. */
-private val BadgeFirstRowAlignPadding = 7.dp
+/** Aligns a +N badge's text with its summary row (6dp box padding + the 17dp row against the
+ *  badge's 14sp line height → 6 + (17−14)/2); each subsequent row adds one row pitch. */
+private val BadgeFirstRowAlignPadding = 7.5.dp
 
 /** Column-edge reserve for the zero-footprint +N badges (badge width + its 4dp gap). */
-private val BadgeGutter = 20.dp
+private val BadgeGutter = 24.dp
 
 private val GroupCorner = 8.dp
 private const val ExpandMillis = 300

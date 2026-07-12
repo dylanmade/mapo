@@ -143,7 +143,7 @@ private fun OverlayPillDropdown() {
                 Icon(
                     Icons.Filled.ArrowDropDown,
                     contentDescription = "Choose overlay",
-                    modifier = Modifier.size(13.dp),
+                    modifier = Modifier.size(RemapPillArrowSize),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

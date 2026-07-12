@@ -124,6 +124,48 @@ class RemapControlsScreenTest {
         composeRule.onNodeWithText("KB: ENTER", useUnmergedTree = true).assertExists()
     }
 
+    @Test
+    fun simpleView_showsUserLabel_insteadOfAssignment() {
+        setScreenLocal(sampleConfig(boundButtonA = BindingOutput.KeyPress("ENTER"), buttonALabel = "Jump"))
+
+        composeRule.onNodeWithText("Jump", useUnmergedTree = true).assertExists()
+        composeRule.onAllNodesWithText("KB: ENTER", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test
+    fun simpleView_showsExtraInputBadge() {
+        setScreenLocal(sampleConfig(extraButtonAInput = true))
+
+        // One command row beyond the standard press on button_a → "+ 1" (thin space) beside
+        // the face box.
+        composeRule.onNodeWithText("+\u20091", useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun simpleView_extraInputBadges_arePerRow() {
+        setScreenLocal(sampleConfig(extraButtonAInput = true, extraButtonBInput = true))
+
+        // Extras on two different sub-inputs render one badge per row ("+\u20091" twice), not
+        // a single group-total "+\u20092".
+        composeRule.onAllNodesWithText("+\u20091", useUnmergedTree = true).assertCountEquals(2)
+        composeRule.onAllNodesWithText("+\u20092", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    private fun setScreenLocal(config: ControllerConfig) {
+        composeRule.setContent {
+            MaterialTheme {
+                Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
+                    RemapControlsScreen(
+                        config = config,
+                        onOpenInputEditor = { _, _, _ -> },
+                        onBack = {},
+                        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+    }
+
     // ── Scope fly-out: action sets ──────────────
 
     @Test
@@ -640,28 +682,51 @@ class RemapControlsScreenTest {
     /** Builds a minimal ControllerConfig matching the seed shape, with optional override for BUTTON_A. */
     private fun sampleConfig(
         boundButtonA: BindingOutput = BindingOutput.Unbound,
+        buttonALabel: String? = null,
+        extraButtonAInput: Boolean = false,
+        extraButtonBInput: Boolean = false,
     ): ControllerConfig {
         val activator = Activator(id = 100L, groupInputId = 10L, type = ActivatorType.FULL_PRESS, orderIndex = 0)
         val binding = boundButtonA.toEntity().let { (type, args) ->
-            Binding(id = 1000L, activatorId = activator.id, outputType = type, args = args, orderIndex = 0)
+            Binding(id = 1000L, activatorId = activator.id, outputType = type, args = args, orderIndex = 0, label = buttonALabel)
+        }
+        val activatorGraphs = buildList {
+            add(ActivatorGraph(activator, listOf(binding)))
+            if (extraButtonAInput) {
+                val extra = Activator(id = 101L, groupInputId = 10L, type = ActivatorType.LONG_PRESS, orderIndex = 1)
+                val extraBinding = BindingOutput.KeyPress("SPACE").toEntity().let { (type, args) ->
+                    Binding(id = 1001L, activatorId = extra.id, outputType = type, args = args, orderIndex = 0)
+                }
+                add(ActivatorGraph(extra, listOf(extraBinding)))
+            }
         }
         val buttonAInput = GroupInputGraph(
             input = GroupInput(id = 10L, bindingGroupId = 1L, inputKey = "button_a", orderIndex = 0),
-            activators = listOf(ActivatorGraph(activator, listOf(binding))),
+            activators = activatorGraphs,
         )
-        fun unboundInput(id: Long, key: String, order: Int): GroupInputGraph {
+        fun unboundInput(id: Long, key: String, order: Int, extraInput: Boolean = false): GroupInputGraph {
             val act = Activator(id = id + 100L, groupInputId = id, type = ActivatorType.FULL_PRESS)
             val b = Binding(id = id + 1000L, activatorId = act.id, outputType = BindingOutputType.UNBOUND, args = "")
+            val activators = buildList {
+                add(ActivatorGraph(act, listOf(b)))
+                if (extraInput) {
+                    val extra = Activator(id = id + 110L, groupInputId = id, type = ActivatorType.LONG_PRESS, orderIndex = 1)
+                    val extraBinding = BindingOutput.KeyPress("Q").toEntity().let { (type, args) ->
+                        Binding(id = id + 1010L, activatorId = extra.id, outputType = type, args = args, orderIndex = 0)
+                    }
+                    add(ActivatorGraph(extra, listOf(extraBinding)))
+                }
+            }
             return GroupInputGraph(
                 input = GroupInput(id = id, bindingGroupId = 1L, inputKey = key, orderIndex = order),
-                activators = listOf(ActivatorGraph(act, listOf(b))),
+                activators = activators,
             )
         }
         val faceGroup = BindingGroupGraph(
             group = BindingGroup(id = 1L, actionSetId = 1L, name = "face_buttons", mode = BindingMode.BUTTON_PAD),
             inputs = listOf(
                 buttonAInput,
-                unboundInput(11L, "button_b", 1),
+                unboundInput(11L, "button_b", 1, extraInput = extraButtonBInput),
                 unboundInput(12L, "button_x", 2),
                 unboundInput(13L, "button_y", 3),
             ),

@@ -153,7 +153,7 @@ internal fun RemapSimpleView(
             // Wide gutter keeps the side group boxes off the controller image.
             horizontalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            val box: @Composable (RemapSimpleGroup) -> Unit = { group ->
+            val box: @Composable (RemapSimpleGroup, Modifier) -> Unit = { group, boxModifier ->
                 GroupBox(
                     group = group,
                     viewingSet = viewingSet,
@@ -165,19 +165,22 @@ internal fun RemapSimpleView(
                         rootCoords?.let { root -> boxBounds[group] = root.localBoundingBoxOf(coords) }
                     },
                     onOpenGroup = { expandedGroup = it },
+                    modifier = boxModifier,
                 )
             }
             // Left column, counterclockwise start: shoulder → d-pad → stick. Boxes anchor
             // toward the screen center (the controller), i.e. this column's END edge, and
             // cluster toward the vertical center.
             Column(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+                // start gutter reserves room for the boxes' outside-left +N badges (they're
+                // zero-footprint overlays — without this they'd clip off the view edge).
+                modifier = Modifier.weight(1f).fillMaxHeight().padding(start = BadgeGutter),
                 verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
                 horizontalAlignment = Alignment.End,
             ) {
-                box(RemapSimpleGroup.LEFT_SHOULDER)
-                box(RemapSimpleGroup.DPAD)
-                box(RemapSimpleGroup.LEFT_STICK)
+                box(RemapSimpleGroup.LEFT_SHOULDER, Modifier)
+                box(RemapSimpleGroup.DPAD, Modifier)
+                box(RemapSimpleGroup.LEFT_STICK, Modifier)
             }
             // Middle column: Map CTA top-aligned with the flanking columns' topmost boxes, the
             // utility box bottom-aligned with their bottommost, controller between.
@@ -206,18 +209,22 @@ internal fun RemapSimpleView(
                             contentScale = ContentScale.Fit,
                         ),
                 )
-                box(RemapSimpleGroup.UTILITY)
+                // SYMMETRIC gutter on the box only (not the column): clamps the box's max width so
+                // its +N badge has room before the right column, without leaning the centering
+                // axis or narrowing the controller image.
+                box(RemapSimpleGroup.UTILITY, Modifier.padding(horizontal = BadgeGutter))
             }
             // Right column: shoulder → face buttons → stick. Boxes anchor toward the screen
             // center (this column's START edge).
             Column(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+                // end gutter reserves room for the outside-right +N badges (see left column).
+                modifier = Modifier.weight(1f).fillMaxHeight().padding(end = BadgeGutter),
                 verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
                 horizontalAlignment = Alignment.Start,
             ) {
-                box(RemapSimpleGroup.RIGHT_SHOULDER)
-                box(RemapSimpleGroup.FACE)
-                box(RemapSimpleGroup.RIGHT_STICK)
+                box(RemapSimpleGroup.RIGHT_SHOULDER, Modifier)
+                box(RemapSimpleGroup.FACE, Modifier)
+                box(RemapSimpleGroup.RIGHT_STICK, Modifier)
             }
         }
 
@@ -272,7 +279,7 @@ internal fun RemapSimpleView(
                             modifier = Modifier
                                 .graphicsLayer { alpha = 1f - progress.value }
                                 .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                            verticalArrangement = Arrangement.spacedBy(SummaryRowSpacing),
                         ) {
                             GroupSummaryRows(vg, viewingSet, viewingLayer, config)
                         }
@@ -381,6 +388,9 @@ internal fun simpleRowLabel(
         ?: baseGroup?.inputByKey(spec.subInputKey)
     val primary = groupInput?.activators?.firstOrNull { it.activator.type == ActivatorType.FULL_PRESS }
         ?: groupInput?.activators?.firstOrNull()
+    // A user-given label always wins over the raw assignment in the basic view.
+    val userLabel = primary?.bindings?.firstOrNull()?.label
+    if (!userLabel.isNullOrBlank()) return userLabel
     val output = primary?.primaryOutput
     return when {
         // Unbound displays as "(Device default)" in the editor; the summary reads "Default".
@@ -388,6 +398,46 @@ internal fun simpleRowLabel(
         groupInput != null -> "Default"
         else -> effective.group.mode.displayNameFor(spec.source)
     }
+}
+
+/**
+ * Per-row +N counts: how many command rows each displayed sub-input carries beyond its
+ * primary, plus BOUND rows on sub-inputs the box doesn't summarize (soft pulls, outer rings —
+ * their seeded-but-unbound rows don't count), attributed to that source's FIRST displayed row.
+ * Each nonzero entry surfaces as a +N badge beside its own summary row; the values sum to the
+ * group's total extras.
+ */
+internal fun rowExtraInputCounts(
+    group: RemapSimpleGroup,
+    viewingSet: ActionSetGraph?,
+    viewingLayer: ActionLayerGraph?,
+): Map<SimpleRowSpec, Int> {
+    val counts = mutableMapOf<SimpleRowSpec, Int>()
+    val displayedKeysBySource = group.rows.groupBy({ it.source }, { it.subInputKey })
+    for ((source, displayedKeys) in displayedKeysBySource) {
+        val layerGroup = viewingLayer?.presetFor(source)?.group
+        val baseGroup = viewingSet?.presetFor(source)?.group
+        val effective = layerGroup ?: baseGroup ?: continue
+        val mode = effective.group.mode
+        if (mode == BindingMode.DEVICE_DEFAULT || mode == BindingMode.NONE) continue
+        for ((subKey, _) in RemapSections.bindableSubInputsFor(source, mode)) {
+            val groupInput = layerGroup?.inputByKey(subKey) ?: baseGroup?.inputByKey(subKey) ?: continue
+            val rows = groupInput.activators.flatMap { ag -> ag.bindings }
+            val spec: SimpleRowSpec
+            val extra: Int
+            if (subKey in displayedKeys) {
+                spec = SimpleRowSpec(source, subKey)
+                extra = (rows.size - 1).coerceAtLeast(0)
+            } else {
+                // Hidden sub-inputs have no row of their own — they surface on their
+                // source's first displayed row (soft pull → the trigger's full-pull row).
+                spec = group.rows.first { it.source == source }
+                extra = rows.count { BindingOutput.fromEntity(it.outputType, it.args) != BindingOutput.Unbound }
+            }
+            if (extra > 0) counts[spec] = (counts[spec] ?: 0) + extra
+        }
+    }
+    return counts
 }
 
 /** The glyph + standard-press summary rows of one group (shared by the box and the morph). */
@@ -402,7 +452,7 @@ private fun GroupSummaryRows(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
-            modifier = Modifier.height(14.dp),
+            modifier = Modifier.height(SummaryRowHeight),
         ) {
             InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 12.dp)
             Text(
@@ -464,20 +514,75 @@ private fun GroupBox(
     // flower's petal cards.
     val container = accent.copy(alpha = 0.08f)
         .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
-    Column(
-        modifier = modifier
-            .onGloballyPositioned(onPositioned)
-            .clip(shape)
-            .background(container)
-            .border(1.dp, accent.copy(alpha = 0.35f), shape)
-            .clickable { onOpenGroup(group) }
-            .testTag("simple-group:${group.name}")
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        GroupSummaryRows(group, viewingSet, viewingLayer, config)
+    val rowExtras = rowExtraInputCounts(group, viewingSet, viewingLayer)
+    // Each +N hangs OUTSIDE the box as a ZERO-FOOTPRINT overlay, aligned with ITS OWN summary
+    // row (per-row extras, not one group total). Zero-footprint: it reports no layout size, so
+    // it can never shift the box (the centered utility box drifted left when the badge took
+    // real width) and never wraps (measured unconstrained). It draws into the column gutter.
+    Box(modifier = modifier) {
+        Column(
+            modifier = Modifier
+                .onGloballyPositioned(onPositioned)
+                .clip(shape)
+                .background(container)
+                .border(1.dp, accent.copy(alpha = 0.35f), shape)
+                .clickable { onOpenGroup(group) }
+                .testTag("simple-group:${group.name}")
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(SummaryRowSpacing),
+        ) {
+            GroupSummaryRows(group, viewingSet, viewingLayer, config)
+        }
+        if (rowExtras.isNotEmpty()) {
+            val onLeft = group.badgeOnLeft
+            val gapPx = with(LocalDensity.current) { 4.dp.toPx() }
+            val topPx = with(LocalDensity.current) { BadgeFirstRowAlignPadding.toPx() }
+            val pitchPx = with(LocalDensity.current) { (SummaryRowHeight + SummaryRowSpacing).toPx() }
+            group.rows.forEachIndexed { index, spec ->
+                val extra = rowExtras[spec] ?: return@forEachIndexed
+                Text(
+                    // Thin space between the plus and the count, per taste.
+                    text = "+\u2009$extra",
+                    style = remapMiniTextStyle(),
+                    color = accent,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier
+                        .align(if (onLeft) Alignment.TopStart else Alignment.TopEnd)
+                        .layout { measurable, _ ->
+                            // Measure at intrinsic size, report ZERO size to the parent, and
+                            // hang the text off the box's outer edge, at this row's height.
+                            val placeable = measurable.measure(androidx.compose.ui.unit.Constraints())
+                            layout(0, 0) {
+                                val x = if (onLeft) -(placeable.width + gapPx) else gapPx
+                                placeable.place(x.roundToInt(), (topPx + pitchPx * index).roundToInt())
+                            }
+                        },
+                )
+            }
+        }
     }
 }
+
+/** Left column boxes carry their +N badge on the left (outside edge toward the screen center
+ *  is already occupied by the box anchor); middle + right columns carry it on the right. */
+private val RemapSimpleGroup.badgeOnLeft: Boolean
+    get() = this == RemapSimpleGroup.LEFT_SHOULDER ||
+        this == RemapSimpleGroup.DPAD ||
+        this == RemapSimpleGroup.LEFT_STICK
+
+/** Height of one glyph + label summary row inside a group box. */
+private val SummaryRowHeight = 14.dp
+
+/** Vertical gap between summary rows — with [SummaryRowHeight], sets the +N badges' row pitch. */
+private val SummaryRowSpacing = 3.dp
+
+/** Aligns a +N badge's text with its summary row (6dp box padding + a 14dp row against the
+ *  badge's 12sp line height); each subsequent row adds one row pitch. */
+private val BadgeFirstRowAlignPadding = 7.dp
+
+/** Column-edge reserve for the zero-footprint +N badges (badge width + its 4dp gap). */
+private val BadgeGutter = 20.dp
 
 private val GroupCorner = 8.dp
 private const val ExpandMillis = 300

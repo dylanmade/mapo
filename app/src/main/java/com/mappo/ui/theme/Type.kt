@@ -11,16 +11,17 @@ import com.themestudio.core.rememberThemeFontResolver
 
 /**
  * Baked-in defaults for the Display and Body font families. Both currently
- * resolve to PP Mori (asset-bundled, personal-use-only). Exposed as constants
- * so Theme Studio can show the actual default font in its pickers instead of
- * the generic "(theme default)" placeholder.
+ * resolve to Gill Sans (asset-bundled, in-house license only; PP Mori remains
+ * in the library as an alternative). Exposed as constants so Theme Studio can
+ * show the actual default font in its pickers instead of the generic
+ * "(theme default)" placeholder.
  */
-const val DEFAULT_DISPLAY_FONT_NAME: String = "PP Mori"
-const val DEFAULT_BODY_FONT_NAME: String = "PP Mori"
+const val DEFAULT_DISPLAY_FONT_NAME: String = "Gill Sans"
+const val DEFAULT_BODY_FONT_NAME: String = "Gill Sans"
 
 /**
- * Composable typography builder. PP Mori is bundled as assets, so resolving
- * its [androidx.compose.ui.text.font.FontFamily] needs an [android.content.res.AssetManager]
+ * Composable typography builder. The default families are bundled as assets, so resolving
+ * a [androidx.compose.ui.text.font.FontFamily] needs an [android.content.res.AssetManager]
  * — which means we have to build the family inside Compose rather than as a
  * top-level val. The result is remembered against the resolver so it doesn't
  * rebuild on recompositions.
@@ -30,7 +31,7 @@ const val DEFAULT_BODY_FONT_NAME: String = "PP Mori"
  * (e.g. -0.25sp tracking on `displayLarge`, 0.5sp on `bodyLarge`, 64sp line
  * height on `displayLarge`) are calibrated for Roboto and don't translate
  * to other typefaces — leaving them in place would silently impose Roboto's
- * "look" on PP Mori (or any other font the user picks). Instead each role
+ * "look" on Gill Sans (or any other font the user picks). Instead each role
  * uses `letterSpacing = 0.sp` (no extra tracking, font-natural kerning
  * applies) and `lineHeight = Unspecified` (font-natural line height
  * computed from intrinsic ascent/descent metrics). Users can opt back into

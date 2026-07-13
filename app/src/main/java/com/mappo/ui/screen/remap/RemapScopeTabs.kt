@@ -2,14 +2,9 @@ package com.mappo.ui.screen.remap
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -17,7 +12,6 @@ import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -50,12 +44,13 @@ internal class RemapScopeTabActions(
 )
 
 /**
- * The rebuilt Remap Controls top bar: back button + one tab per action set, each set's layers
- * following it as subordinate tabs (outlined Layers glyph), + a trailing add-set button. Tab
- * behavior (tap / long-press menu / chevron scroll) comes from the shared [ReorderableTabBar]
- * extracted from the virtual-keyboard tab UI. Drag-to-reorder is wired off until a
- * set-reordering repository op exists (the tab order IS the boot-set order, so this is the
- * planned home for that affordance).
+ * The rebuilt Remap Controls top bar: one tab per action set, each set's layers following it
+ * as subordinate tabs (outlined Layers glyph). Tab behavior (tap / long-press menu / chevron
+ * scroll) comes from the shared [ReorderableTabBar] extracted from the virtual-keyboard tab
+ * UI. Drag-to-reorder is wired off until a set-reordering repository op exists (the tab order
+ * IS the boot-set order, so this is the planned home for that affordance). Back + add-set
+ * buttons were removed 2026-07-12 pending a new home for that functionality —
+ * [RemapScopeTabActions.onAddSet] is currently unreachable.
  */
 @Composable
 internal fun RemapTopBar(
@@ -64,45 +59,25 @@ internal fun RemapTopBar(
     viewingLayerId: Long?,
     onSelectActionSet: (Long) -> Unit,
     onSelectLayer: (Long?) -> Unit,
-    onBack: () -> Unit,
     actions: RemapScopeTabActions,
     modifier: Modifier = Modifier,
 ) {
     // surfaceContainer — app-bar plane, one step up from the screen surface.
     Column(modifier = modifier) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-            Row(
+            // Tabs hug the bar's bottom edge so the selection underline meets the divider.
+            Box(
                 modifier = Modifier.fillMaxWidth().height(TopBarHeight),
-                verticalAlignment = Alignment.CenterVertically,
+                contentAlignment = Alignment.BottomStart,
             ) {
-                IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                // Tabs hug the bar's bottom edge so the selection underline meets the divider.
-                Box(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    contentAlignment = Alignment.BottomStart,
-                ) {
-                    ScopeTabs(
-                        config = config,
-                        viewingSetId = viewingSetId,
-                        viewingLayerId = viewingLayerId,
-                        onSelectActionSet = onSelectActionSet,
-                        onSelectLayer = onSelectLayer,
-                        actions = actions,
-                    )
-                }
-                IconButton(onClick = actions.onAddSet, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        Icons.Filled.Add,
-                        contentDescription = "Add action set",
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
+                ScopeTabs(
+                    config = config,
+                    viewingSetId = viewingSetId,
+                    viewingLayerId = viewingLayerId,
+                    onSelectActionSet = onSelectActionSet,
+                    onSelectLayer = onSelectLayer,
+                    actions = actions,
+                )
             }
         }
         HorizontalDivider()
@@ -220,5 +195,7 @@ private fun ScopeTabs(
     }
 }
 
-private val TopBarHeight = 40.dp
+// Bar = tab height + a whisker of air above the tabs' rounded tops (the M3-size back/add
+// buttons that used to force extra headroom are gone).
+private val TopBarHeight = 36.dp
 private val ScopeTabHeight = 32.dp

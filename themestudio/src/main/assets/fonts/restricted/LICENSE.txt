@@ -19,5 +19,10 @@ ppmori/
     Personal-use only. No commercial use, no redistribution.
     See https://pangrampangram.com/products/mori for current terms.
 
+gillsans/
+    Gill Sans — © The Monotype Corporation
+    Commercial desktop typeface; bundled here for in-house exploration only.
+    No redistribution. App-embedding for release requires a Monotype license.
+
 If you add another restricted family here, add it to this inventory and to
 `LocalFontRegistry.all` with `redistributable = false`.

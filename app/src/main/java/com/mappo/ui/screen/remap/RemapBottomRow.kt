@@ -7,15 +7,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -31,17 +30,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.mappo.data.model.steam.ActionSetGraph
 import com.mappo.data.model.steam.BindingMode
 import com.mappo.data.model.steam.InputSource
+import com.mappo.R
 import com.mappo.service.input.modes.SourceModeCatalog
-import com.mappo.ui.screen.remap.settings.SourceModeSettingsSchema
 
 /**
- * The control strip under the simple remap view: the Gyro mode picker (+ settings cog) and the
- * Overlay association picker (+ edit button). Gyro lives here rather than in a group box — it
- * has no bindable sub-inputs; its whole configuration is the mode + the cog menu.
+ * The control strip beneath the simple remap view's band: the Gyro mode picker and the Overlay
+ * association picker, each with a leading glyph on its caption. Gyro lives here rather than in
+ * a group box — it has no bindable sub-inputs; its whole configuration is the mode (deeper
+ * tuning moves elsewhere once the wizard lands).
  *
  * The Overlay picker is UI-only scaffolding for now: overlays have no named grouping entity yet
  * (overlay elements scope directly to sets/layers), so there is nothing real to list or persist.
@@ -53,7 +55,6 @@ internal fun RemapBottomRow(
     viewingSet: ActionSetGraph?,
     viewingLayerSelected: Boolean,
     onSetGyroMode: (bindingGroupId: Long, mode: BindingMode) -> Unit,
-    onOpenModeSettings: (bindingGroupId: Long, source: InputSource) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val gyroGroup = viewingSet?.presetFor(InputSource.GYRO)?.group?.group
@@ -65,11 +66,8 @@ internal fun RemapBottomRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // ── Gyro ────────────────────────────────────────────────────────────
-        Text(
-            text = "Gyro",
-            style = remapMiniTextStyle(),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // Lucide rotate-3d — the Material ScreenRotation glyph read oversized and off-style.
+        StripCaption(icon = painterResource(R.drawable.lucide_rotate_3d), text = "Gyro")
         Spacer(Modifier.width(6.dp))
         if (gyroGroup != null && gyroModes.isNotEmpty()) {
             ModePillDropdown(
@@ -78,14 +76,6 @@ internal fun RemapBottomRow(
                 validModes = gyroModes,
                 enabled = !viewingLayerSelected && gyroModes.size > 1,
                 onPick = { mode -> onSetGyroMode(gyroGroup.id, mode) },
-            )
-            Spacer(Modifier.width(3.dp))
-            val cogEnabled = SourceModeSettingsSchema.hasSettings(InputSource.GYRO, gyroGroup.mode)
-            RemapMiniIconButton(
-                icon = Icons.Filled.Settings,
-                contentDescription = "Gyro mode settings",
-                enabled = cogEnabled,
-                onClick = { onOpenModeSettings(gyroGroup.id, InputSource.GYRO) },
             )
         } else {
             Text(
@@ -98,21 +88,27 @@ internal fun RemapBottomRow(
         Spacer(Modifier.width(24.dp))
 
         // ── Overlay ─────────────────────────────────────────────────────────
-        Text(
-            text = "Overlay",
-            style = remapMiniTextStyle(),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        StripCaption(icon = rememberVectorPainter(Icons.Outlined.Layers), text = "Overlay")
         Spacer(Modifier.width(6.dp))
         OverlayPillDropdown()
-        Spacer(Modifier.width(3.dp))
-        RemapMiniIconButton(
-            icon = Icons.Filled.Edit,
-            contentDescription = "Edit overlay",
-            enabled = false, // UI-only until named overlays exist
-            onClick = {},
-        )
     }
+}
+
+/** A strip caption: small leading glyph + label, in the muted caption treatment. */
+@Composable
+private fun StripCaption(icon: androidx.compose.ui.graphics.painter.Painter, text: String) {
+    Icon(
+        icon,
+        contentDescription = null,
+        modifier = Modifier.size(RemapPillIconSize),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.width(4.dp))
+    Text(
+        text = text,
+        style = remapMiniTextStyle(),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /** Placeholder overlay picker: "(None)" + a disabled empty-state entry. Selection is local UI
@@ -130,20 +126,14 @@ private fun OverlayPillDropdown() {
             border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = Modifier
                 .heightIn(min = RemapPillHeight)
+                .widthIn(min = RemapPillMinWidth)
                 .clip(RoundedCornerShape(50))
                 .clickable(onClickLabel = "Choose overlay") { open = true },
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) {
-                Icon(
-                    Icons.Filled.Layers,
-                    contentDescription = null,
-                    modifier = Modifier.size(RemapPillIconSize),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.width(4.dp))
                 Text(text = selected, style = remapMiniTextStyle())
             }
         }

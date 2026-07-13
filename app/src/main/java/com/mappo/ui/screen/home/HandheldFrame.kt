@@ -61,6 +61,10 @@ private val GlassBottomBand = 34.dp
 // How far past the display's bottom edge the device body continues (its "buttons" live
 // below the fold, off-screen).
 private val BodyOverhang = 60.dp
+// Off-white body deliberately left visible BELOW the glass before the device runs off the
+// display edge — shortens the glass and lifts the frame up by this much. Equal to ShellBorder
+// so the visible frame reads the same width on all four sides.
+private val BottomExposure = ShellBorder
 /** Duration of the expand ↔ contract resize between the 1:1 LCD and full width. */
 private const val ExpandMillis = 320
 
@@ -145,8 +149,11 @@ fun HandheldFrame(
         // display offers. Both animate through the same pair so the glass + shell resize with
         // the screen.
         val maxLcdW = availW - ShellBorder * 2 - GlassInset * 2
-        val maxLcdH = availH - TopMargin - ShellBorder - GlassInset - GlassBottomBand
-        val glassSquare = minOf(availW - ShellBorder * 2, availH - TopMargin - ShellBorder)
+        val maxLcdH = availH - TopMargin - ShellBorder - GlassInset - GlassBottomBand - BottomExposure
+        val glassSquare = minOf(
+            availW - ShellBorder * 2,
+            availH - TopMargin - ShellBorder - BottomExposure,
+        )
         val lcdW by animateDpAsState(
             targetValue = if (expanded) maxLcdW else glassSquare - GlassInset * 2,
             animationSpec = tween(ExpandMillis, easing = FastOutSlowInEasing),

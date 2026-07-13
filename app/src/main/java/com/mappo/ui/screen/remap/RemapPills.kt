@@ -2,6 +2,7 @@ package com.mappo.ui.screen.remap
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -103,12 +104,12 @@ internal val RemapBoxStroke = 0.75.dp
 
 /** How far the bevel's highlight/shadow deviate from the base fill — "ever so slightly".
  *  Highlights read hotter than shadows on the dark theme, so they get the lighter touch. */
-private const val BevelHighlightStrength = 0.15f
+private const val BevelHighlightStrength = 0.10f
 private const val BevelShadowStrength = 0.25f
 
 /** Where along the corner arc the bevel finishes fading: 1−cos(45°) of the radius — the
  *  point where the outline's tangent passes 45° and "top" geometrically becomes "side". */
-private const val BevelFadeOfRadius = 0.6f
+private const val BevelFadeOfRadius = 0.9f
 
 /**
  * The bevel border on buttons + cards (replaced the old solid accent outline): a very faint
@@ -156,6 +157,10 @@ private class BevelBrush(
 
 /** Height of the pill dropdowns (mode / overlay pickers). */
 internal val RemapPillHeight = 24.dp
+
+/** Width floor for pill dropdowns — matches the advanced view's output-button footprint so
+ *  short values ("None") don't collapse the pill into a tiny chip. */
+internal val RemapPillMinWidth = 62.dp
 
 /** Icon edge inside the pills. */
 internal val RemapPillIconSize = 13.dp
@@ -255,6 +260,7 @@ internal fun ModePillDropdown(
             border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = Modifier
                 .heightIn(min = RemapPillHeight)
+                .widthIn(min = RemapPillMinWidth)
                 .then(
                     if (enabled) {
                         Modifier.clip(RoundedCornerShape(50))
@@ -264,6 +270,7 @@ internal fun ModePillDropdown(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) {
                 Icon(

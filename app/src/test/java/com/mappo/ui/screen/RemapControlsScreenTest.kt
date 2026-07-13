@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -73,12 +74,12 @@ class RemapControlsScreenTest {
             }
         }
 
-        // Face glyphs are graphical button prompts now (no letter text); unconfigured groups
-        // read "Default".
-        assert(
-            composeRule.onAllNodesWithText("Default", useUnmergedTree = true)
-                .fetchSemanticsNodes().isNotEmpty(),
-        ) { "Expected unconfigured groups to summarize as 'Default'" }
+        // Face glyphs are graphical button prompts now (no letter text); unconfigured inputs
+        // summarize as their own resting names (individualized defaults, not "Default").
+        composeRule.onNodeWithText("A Button", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("D-Pad Up", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("Left Stick Click", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("Start Button", useUnmergedTree = true).assertExists()
     }
 
     @Test
@@ -136,19 +137,19 @@ class RemapControlsScreenTest {
     fun simpleView_showsExtraInputBadge() {
         setScreenLocal(sampleConfig(extraButtonAInput = true))
 
-        // One command row beyond the standard press on button_a → "+ 1" (thin space) beside
-        // the face box.
-        composeRule.onNodeWithText("+\u20091", useUnmergedTree = true).assertExists()
+        // One command row beyond the standard press on button_a → a hair-spaced "+ 1"
+        // (leading hair space pads it off the box border) beside the face box.
+        composeRule.onNodeWithText("\u200A+\u200A1", useUnmergedTree = true).assertExists()
     }
 
     @Test
     fun simpleView_extraInputBadges_arePerRow() {
         setScreenLocal(sampleConfig(extraButtonAInput = true, extraButtonBInput = true))
 
-        // Extras on two different sub-inputs render one badge per row ("+\u20091" twice), not
-        // a single group-total "+\u20092".
-        composeRule.onAllNodesWithText("+\u20091", useUnmergedTree = true).assertCountEquals(2)
-        composeRule.onAllNodesWithText("+\u20092", useUnmergedTree = true).assertCountEquals(0)
+        // Extras on two different sub-inputs render one badge per row ("+\u200A1" twice), not
+        // a single group-total "+\u200A2".
+        composeRule.onAllNodesWithText("\u200A+\u200A1", useUnmergedTree = true).assertCountEquals(2)
+        composeRule.onAllNodesWithText("\u200A+\u200A2", useUnmergedTree = true).assertCountEquals(0)
     }
 
     private fun setScreenLocal(config: ControllerConfig) {
@@ -252,7 +253,9 @@ class RemapControlsScreenTest {
     // ── Top-bar tabs: set management ─────────────────────────────────────
 
     @Test
-    fun addSetButton_opensAddSetDialog() {
+    fun topBar_hasNoBackOrAddButtons() {
+        // Back + add-set buttons were removed from the top bar (2026-07-12) pending a new
+        // home for that functionality; the bar is tabs-only for now.
         composeRule.setContent {
             MaterialTheme {
                 Surface(modifier = androidx.compose.ui.Modifier.size(1200.dp, 1600.dp)) {
@@ -271,9 +274,8 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Add action set").performClick()
-        composeRule.waitForIdle()
-        composeRule.onNodeWithText("Add Action Set", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onAllNodesWithContentDescription("Add action set").assertCountEquals(0)
+        composeRule.onAllNodesWithContentDescription("Back").assertCountEquals(0)
     }
 
     @Test

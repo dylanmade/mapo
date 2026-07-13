@@ -95,6 +95,9 @@ internal fun RemapSimpleView(
     onMap: () -> Unit,
     editorCallbacks: RemapGroupEditorCallbacks,
     modifier: Modifier = Modifier,
+    // Rendered directly beneath the three-column band (the Gyro/Overlay strip); band + strip
+    // center vertically on the view as one unit.
+    bottomContent: @Composable () -> Unit = {},
 ) {
     // The group whose editor should be open (user intent — survives the command-picker
     // round-trip) vs. the group currently on screen mid-animation.
@@ -137,93 +140,105 @@ internal fun RemapSimpleView(
 
     Box(
         modifier = modifier.onGloballyPositioned { rootCoords = it; rootSize = it.size },
-        contentAlignment = Alignment.Center,
     ) {
-        // The whole three-column band centers vertically as one unit. The Row's height is the
-        // tallest SIDE column's content (IntrinsicSize.Min; the controller image reports no
-        // intrinsic size — see the paint modifier below), which lets the middle column pin the
-        // Map button's top edge and the utility box's bottom edge to the flanking columns'
-        // extents.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(IntrinsicSize.Min)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            // Wide gutter keeps the side group boxes off the controller image.
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        // The band + the Gyro/Overlay strip center vertically as ONE unit (the strip sits
+        // directly beneath the band rather than floating in the leftover space).
+        Column(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
         ) {
-            val box: @Composable (RemapSimpleGroup, Modifier) -> Unit = { group, boxModifier ->
-                GroupBox(
-                    group = group,
-                    viewingSet = viewingSet,
-                    viewingLayer = viewingLayer,
-                    config = config,
-                    placeholder = group == visibleGroup,
-                    placeholderSize = boxBounds[group]?.size,
-                    onPositioned = { coords ->
-                        rootCoords?.let { root -> boxBounds[group] = root.localBoundingBoxOf(coords) }
-                    },
-                    onOpenGroup = { expandedGroup = it },
-                    modifier = boxModifier,
-                )
-            }
-            // Left column, counterclockwise start: shoulder → d-pad → stick. Boxes anchor
-            // toward the screen center (the controller), i.e. this column's END edge, and
-            // cluster toward the vertical center.
-            Column(
-                // start gutter reserves room for the boxes' outside-left +N badges (they're
-                // zero-footprint overlays — without this they'd clip off the view edge).
-                modifier = Modifier.weight(1f).fillMaxHeight().padding(start = BadgeGutter),
-                verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-                horizontalAlignment = Alignment.End,
+            // The three-column band. The Row's height is the tallest SIDE column's content
+            // (IntrinsicSize.Min; the controller image reports no intrinsic size — see the paint
+            // modifier below), which lets the middle column pin the Map button's top edge and the
+            // utility box's bottom edge to the flanking columns' extents.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                // Wide gutter keeps the side group boxes off the controller image.
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                box(RemapSimpleGroup.LEFT_SHOULDER, Modifier)
-                box(RemapSimpleGroup.DPAD, Modifier)
-                box(RemapSimpleGroup.LEFT_STICK, Modifier)
-            }
-            // Middle column: Map CTA top-aligned with the flanking columns' topmost boxes, the
-            // utility box bottom-aligned with their bottommost, controller between.
-            Column(
-                modifier = Modifier.weight(1.25f).fillMaxHeight(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Button(
-                    onClick = onMap,
-                    modifier = Modifier.testTag("map-button"),
-                ) {
-                    Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Map")
+                val box: @Composable (RemapSimpleGroup, Modifier) -> Unit = { group, boxModifier ->
+                    GroupBox(
+                        group = group,
+                        viewingSet = viewingSet,
+                        viewingLayer = viewingLayer,
+                        config = config,
+                        placeholder = group == visibleGroup,
+                        placeholderSize = boxBounds[group]?.size,
+                        onPositioned = { coords ->
+                            rootCoords?.let { root -> boxBounds[group] = root.localBoundingBoxOf(coords) }
+                        },
+                        onOpenGroup = { expandedGroup = it },
+                        modifier = boxModifier,
+                    )
                 }
-                // sizeToIntrinsics=false is load-bearing: with it, the image contributes no
-                // intrinsic height, so the Row's IntrinsicSize.Min is set by the side columns.
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp)
-                        .paint(
-                            painter = painterResource(R.drawable.controller_placeholder),
-                            sizeToIntrinsics = false,
-                            contentScale = ContentScale.Fit,
-                        ),
-                )
-                // SYMMETRIC gutter on the box only (not the column): clamps the box's max width so
-                // its +N badge has room before the right column, without leaning the centering
-                // axis or narrowing the controller image.
-                box(RemapSimpleGroup.UTILITY, Modifier.padding(horizontal = BadgeGutter))
+                // Left column, counterclockwise start: shoulder → d-pad → stick. Boxes anchor
+                // toward the screen center (the controller), i.e. this column's END edge, and
+                // cluster toward the vertical center.
+                Column(
+                    // start gutter reserves room for the boxes' outside-left +N badges (they're
+                    // zero-footprint overlays — without this they'd clip off the view edge).
+                    modifier = Modifier.weight(1f).fillMaxHeight().padding(start = BadgeGutter),
+                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    box(RemapSimpleGroup.LEFT_SHOULDER, Modifier)
+                    box(RemapSimpleGroup.DPAD, Modifier)
+                    box(RemapSimpleGroup.LEFT_STICK, Modifier)
+                }
+                // Middle column: Map CTA top-aligned with the flanking columns' topmost boxes, the
+                // utility box bottom-aligned with their bottommost, controller between.
+                Column(
+                    modifier = Modifier.weight(1.25f).fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Button(
+                        onClick = onMap,
+                        modifier = Modifier.testTag("map-button"),
+                    ) {
+                        Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Map")
+                    }
+                    // sizeToIntrinsics=false is load-bearing: with it, the image contributes no
+                    // intrinsic height, so the Row's IntrinsicSize.Min is set by the side columns.
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                            .paint(
+                                painter = painterResource(R.drawable.controller_placeholder),
+                                sizeToIntrinsics = false,
+                                contentScale = ContentScale.Fit,
+                            ),
+                    )
+                    // SYMMETRIC gutter on the box only (not the column): clamps the box's max width so
+                    // its +N badge has room before the right column, without leaning the centering
+                    // axis or narrowing the controller image.
+                    box(RemapSimpleGroup.UTILITY, Modifier.padding(horizontal = BadgeGutter))
+                }
+                // Right column: shoulder → face buttons → stick. Boxes anchor toward the screen
+                // center (this column's START edge).
+                Column(
+                    // end gutter reserves room for the outside-right +N badges (see left column).
+                    modifier = Modifier.weight(1f).fillMaxHeight().padding(end = BadgeGutter),
+                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                    horizontalAlignment = Alignment.Start,
+                ) {
+                    box(RemapSimpleGroup.RIGHT_SHOULDER, Modifier)
+                    box(RemapSimpleGroup.FACE, Modifier)
+                    box(RemapSimpleGroup.RIGHT_STICK, Modifier)
+                }
             }
-            // Right column: shoulder → face buttons → stick. Boxes anchor toward the screen
-            // center (this column's START edge).
-            Column(
-                // end gutter reserves room for the outside-right +N badges (see left column).
-                modifier = Modifier.weight(1f).fillMaxHeight().padding(end = BadgeGutter),
-                verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-                horizontalAlignment = Alignment.Start,
+            // The Gyro/Overlay strip, horizontally centered directly beneath the band.
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
             ) {
-                box(RemapSimpleGroup.RIGHT_SHOULDER, Modifier)
-                box(RemapSimpleGroup.FACE, Modifier)
-                box(RemapSimpleGroup.RIGHT_STICK, Modifier)
+                bottomContent()
             }
         }
 
@@ -362,10 +377,10 @@ internal enum class RemapSimpleGroup(val rows: List<SimpleRowSpec>) {
 
 /**
  * Resolve what a row's standard press currently does, as a short label:
- * `(Device default)` mode → "Default"; `None` → "None"; a bound FULL_PRESS command → its
- * display label; a present-but-unbound input → "Default"; an active mode with no per-input row
- * (analog modes) → the mode's name. Layer view resolves the override first and falls through
- * to the base set (ghost semantics).
+ * `(Device default)` mode or a present-but-unbound input → the input's own resting name
+ * ([defaultRowLabel]); `None` → "None"; a bound FULL_PRESS command → its display label; an
+ * active mode with no per-input row (analog modes) → the mode's name. Layer view resolves the
+ * override first and falls through to the base set (ghost semantics).
  */
 internal fun simpleRowLabel(
     viewingSet: ActionSetGraph?,
@@ -375,9 +390,9 @@ internal fun simpleRowLabel(
 ): String {
     val layerGroup: BindingGroupGraph? = viewingLayer?.presetFor(spec.source)?.group
     val baseGroup: BindingGroupGraph? = viewingSet?.presetFor(spec.source)?.group
-    val effective = layerGroup ?: baseGroup ?: return "Default"
+    val effective = layerGroup ?: baseGroup ?: return defaultRowLabel(spec)
     when (effective.group.mode) {
-        BindingMode.DEVICE_DEFAULT -> return "Default"
+        BindingMode.DEVICE_DEFAULT -> return defaultRowLabel(spec)
         BindingMode.NONE -> return "None"
         else -> Unit
     }
@@ -390,11 +405,52 @@ internal fun simpleRowLabel(
     if (!userLabel.isNullOrBlank()) return userLabel
     val output = primary?.primaryOutput
     return when {
-        // Unbound displays as "(Device default)" in the editor; the summary reads "Default".
+        // Unbound displays as "(Device default)" in the editor; the summary shows the
+        // input's resting name.
         output != null && output != BindingOutput.Unbound -> output.displayLabel(config)
-        groupInput != null -> "Default"
+        groupInput != null -> defaultRowLabel(spec)
         else -> effective.group.mode.displayNameFor(spec.source)
     }
+}
+
+/**
+ * The resting label for an unchanged/unlabeled input — its own physical name rather than a
+ * generic "Default". User-specified wording; Title Case button names are a deliberate
+ * exception to the sentence-case doctrine (they read as proper nouns).
+ */
+internal fun defaultRowLabel(spec: SimpleRowSpec): String = when (spec.source) {
+    InputSource.LEFT_TRIGGER -> "Left Trigger"
+    InputSource.RIGHT_TRIGGER -> "Right Trigger"
+    InputSource.LEFT_BUMPER -> "Left Bumper"
+    InputSource.RIGHT_BUMPER -> "Right Bumper"
+    InputSource.SWITCH_START -> "Start Button"
+    InputSource.SWITCH_SELECT -> "Select Button"
+    InputSource.DPAD -> when (spec.subInputKey) {
+        "dpad_up" -> "D-Pad Up"
+        "dpad_left" -> "D-Pad Left"
+        "dpad_right" -> "D-Pad Right"
+        "dpad_down" -> "D-Pad Down"
+        else -> "D-Pad"
+    }
+    InputSource.LEFT_JOYSTICK, InputSource.RIGHT_JOYSTICK -> {
+        val stick = if (spec.source == InputSource.LEFT_JOYSTICK) "L-Stick" else "R-Stick"
+        when (spec.subInputKey) {
+            "dpad_up" -> "$stick Up"
+            "dpad_left" -> "$stick Left"
+            "dpad_right" -> "$stick Right"
+            "dpad_down" -> "$stick Down"
+            "click" -> "$stick Click"
+            else -> stick
+        }
+    }
+    InputSource.BUTTON_DIAMOND -> when (spec.subInputKey) {
+        "button_y" -> "Y Button"
+        "button_x" -> "X Button"
+        "button_b" -> "B Button"
+        "button_a" -> "A Button"
+        else -> "Button"
+    }
+    else -> "Default"
 }
 
 /**
@@ -517,7 +573,10 @@ private fun GroupBox(
     // real width) and never wraps (measured unconstrained). It draws into the column gutter.
     Box(modifier = modifier) {
         Column(
+            // Full column width regardless of label content — every box in a column reads as
+            // the same fixed-width card.
             modifier = Modifier
+                .fillMaxWidth()
                 .onGloballyPositioned(onPositioned)
                 .clip(shape)
                 .background(container)
@@ -537,8 +596,9 @@ private fun GroupBox(
             group.rows.forEachIndexed { index, spec ->
                 val extra = rowExtras[spec] ?: return@forEachIndexed
                 Text(
-                    // Thin space between the plus and the count, per taste.
-                    text = "+\u2009$extra",
+                    // Hair spaces: between the plus and the count (thin space read a touch too
+                    // wide), and on the box-facing side to pad the badge off the box border.
+                    text = if (onLeft) "+\u200A$extra\u200A" else "\u200A+\u200A$extra",
                     style = remapMiniTextStyle(),
                     color = accent,
                     maxLines = 1,
@@ -577,8 +637,9 @@ private val SummaryRowSpacing = 4.dp
  *  badge's 14sp line height → 6 + (17−14)/2); each subsequent row adds one row pitch. */
 private val BadgeFirstRowAlignPadding = 7.5.dp
 
-/** Column-edge reserve for the zero-footprint +N badges (badge width + its 4dp gap). */
-private val BadgeGutter = 24.dp
+/** Column-edge reserve for the zero-footprint +N badges (badge width + its 4dp gap) — kept as
+ *  tight as the badge allows so the group boxes get the widest possible footprint. */
+private val BadgeGutter = 18.dp
 
 private val GroupCorner = 8.dp
 private const val ExpandMillis = 300

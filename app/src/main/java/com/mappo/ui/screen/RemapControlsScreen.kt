@@ -213,15 +213,14 @@ fun RemapControlsScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            // The action-set manager: back + one tab per set (layers as subordinate tabs) +
-            // add-set, on the shared ReorderableTabBar.
+            // The action-set manager: one tab per set (layers as subordinate tabs) on the
+            // shared ReorderableTabBar. Back/add-set buttons removed pending a new home.
             RemapTopBar(
                 config = config,
                 viewingSetId = viewingSet?.actionSet?.id,
                 viewingLayerId = viewingLayerId,
                 onSelectActionSet = onSelectActionSet,
                 onSelectLayer = onSelectLayer,
-                onBack = onBack,
                 actions = RemapScopeTabActions(
                     onRenameSet = { dialog = ActionSetDialogState.Rename(it) },
                     onDuplicateSet = { dialog = ActionSetDialogState.Duplicate(it) },
@@ -251,12 +250,13 @@ fun RemapControlsScreen(
                     onMap = { /* input-mapping wizard — UI-only CTA for now */ },
                     editorCallbacks = editorCallbacks,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
-                )
-                RemapBottomRow(
-                    viewingSet = viewingSet,
-                    viewingLayerSelected = viewingLayer != null,
-                    onSetGyroMode = gatedSetBindingGroupMode,
-                    onOpenModeSettings = onOpenModeSettings,
+                    bottomContent = {
+                        RemapBottomRow(
+                            viewingSet = viewingSet,
+                            viewingLayerSelected = viewingLayer != null,
+                            onSetGyroMode = gatedSetBindingGroupMode,
+                        )
+                    },
                 )
             }
         }

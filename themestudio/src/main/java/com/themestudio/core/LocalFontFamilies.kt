@@ -60,6 +60,24 @@ object LocalFontRegistry {
                 LocalFontVariant(FontWeight.Black, FontStyle.Italic, "fonts/restricted/ppmori/PPMori-BlackItalic.otf"),
             ),
         ),
+        LocalFontFamilySpec(
+            displayName = "Gill Sans",
+            licenseNote = "Commercial typeface (Monotype) — in-house use only, not redistributable",
+            redistributable = false,
+            // The Condensed cuts are a separate width family and are deliberately excluded.
+            variants = listOf(
+                LocalFontVariant(FontWeight.Light, FontStyle.Normal, "fonts/restricted/gillsans/GillSans-Light.otf"),
+                LocalFontVariant(FontWeight.Light, FontStyle.Italic, "fonts/restricted/gillsans/GillSans-LightItalic.otf"),
+                LocalFontVariant(FontWeight.Normal, FontStyle.Normal, "fonts/restricted/gillsans/GillSans-Regular.otf"),
+                LocalFontVariant(FontWeight.Normal, FontStyle.Italic, "fonts/restricted/gillsans/GillSans-Italic.otf"),
+                LocalFontVariant(FontWeight.Medium, FontStyle.Normal, "fonts/restricted/gillsans/GillSans-Medium.otf"),
+                LocalFontVariant(FontWeight.Medium, FontStyle.Italic, "fonts/restricted/gillsans/GillSans-MediumItalic.otf"),
+                LocalFontVariant(FontWeight.Bold, FontStyle.Normal, "fonts/restricted/gillsans/GillSans-Bold.otf"),
+                LocalFontVariant(FontWeight.Bold, FontStyle.Italic, "fonts/restricted/gillsans/GillSans-BoldItalic.otf"),
+                LocalFontVariant(FontWeight.ExtraBold, FontStyle.Normal, "fonts/restricted/gillsans/GillSans-Heavy.otf"),
+                LocalFontVariant(FontWeight.ExtraBold, FontStyle.Italic, "fonts/restricted/gillsans/GillSans-HeavyItalic.otf"),
+            ),
+        ),
     )
 
     fun findByDisplayName(name: String): LocalFontFamilySpec? {

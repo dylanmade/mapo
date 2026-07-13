@@ -335,6 +335,11 @@ private fun TabSurface(
     val labelColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
     else MaterialTheme.colorScheme.onSurfaceVariant
     val indicatorColor = MaterialTheme.colorScheme.primary
+    // The indicator strip gets RESERVED space below the content on every tab (selected or
+    // not), per tab convention: the label centers in (tab height − indicator), so selecting a
+    // tab never crowds its label — unselected tabs just show that whisker of extra gap above
+    // the divider.
+    val indicatorHeight = if (dense) 2.dp else 3.dp
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -343,7 +348,7 @@ private fun TabSurface(
             .background(container, RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
             .drawBehind {
                 if (selected) {
-                    val strokePx = (if (dense) 2.dp else 3.dp).toPx()
+                    val strokePx = indicatorHeight.toPx()
                     drawRect(
                         color = indicatorColor,
                         topLeft = Offset(0f, size.height - strokePx),
@@ -351,7 +356,11 @@ private fun TabSurface(
                     )
                 }
             }
-            .padding(horizontal = if (dense) 10.dp else 14.dp),
+            .padding(
+                start = if (dense) 10.dp else 14.dp,
+                end = if (dense) 10.dp else 14.dp,
+                bottom = indicatorHeight,
+            ),
     ) {
         if (leadingIcon != null) {
             Icon(

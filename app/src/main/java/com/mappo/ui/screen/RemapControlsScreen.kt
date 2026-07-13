@@ -125,6 +125,10 @@ fun RemapControlsScreen(
     onSetInputRowPressType: (bindingId: Long, type: ActivatorType) -> Unit = { _, _ -> },
     onSetInputRowLabel: (bindingId: Long, label: String) -> Unit = { _, _ -> },
     onDeleteInputRow: (bindingId: Long) -> Unit = {},
+    // Row duplication and whole-group reset need dedicated repo ops (duplicates must own their
+    // data); default no-ops until those land — the menu items render but do nothing.
+    onDuplicateInputRow: (bindingId: Long) -> Unit = {},
+    onResetBindingGroup: (bindingGroupId: Long) -> Unit = {},
 ) {
     // Physical/gesture back navigates home. The expanded group editor installs its own
     // (more-recent) BackHandler while open, so this only fires when nothing else is dismissable.
@@ -207,6 +211,16 @@ fun RemapControlsScreen(
         onSetPressType = onSetInputRowPressType,
         onSetLabel = onSetInputRowLabel,
         onDeleteRow = onDeleteInputRow,
+        onDuplicateRow = onDuplicateInputRow,
+        onResetRow = { bindingId ->
+            // "Reset input" composed from the existing row-level ops: back to a default
+            // Press with no label and no output. (Activator settings — turbo, delays —
+            // keep their values until a dedicated reset op exists.)
+            onSetInputRowPressType(bindingId, ActivatorType.FULL_PRESS)
+            onSetInputRowLabel(bindingId, "")
+            onPickResult(bindingId, BindingOutput.Unbound)
+        },
+        onResetGroup = onResetBindingGroup,
         onConfigure = onOpenActivatorSettings,
     )
 

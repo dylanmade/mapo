@@ -6,7 +6,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,16 +40,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.paint
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.lerp
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
@@ -80,8 +75,8 @@ import kotlin.math.roundToInt
  * The simplified remap view: a controller diagram in the middle flanked by one tappable box per
  * input group, each row showing just the input glyph + what its **standard press** currently
  * does. Tapping a box animates it into the center of the screen (over the controller), morphing
- * into the in-place advanced editor ([RemapGroupEditor]); a dashed outline holds the group's
- * home position and the box animates back on close (or when another group is picked). The
+ * into the in-place advanced editor ([RemapGroupEditor]); an invisible stand-in holds the
+ * group's home position and the box animates back on close (or when another group is picked). The
  * top-center **Map** button is the future home of the input-mapping wizard (UI-only for now).
  *
  * Box styling mirrors the home d-pad flower's petal cards (accent-tinted rounded box + border)
@@ -293,9 +288,10 @@ internal fun RemapSimpleView(
                             }
                         }
                         .softDropShadow(cornerRadius = GroupCorner)
+                        // Outer stroke — before the clip, or the overhang gets clipped off.
+                        .remapOuterBorder(remapBevelBorder(container, GroupCorner), GroupCorner)
                         .clip(shape)
                         .background(container)
-                        .border(remapBevelBorder(container, GroupCorner), shape)
                         .focusRequester(editorFocus)
                         .focusable()
                         .testTag("group-editor"),
@@ -536,7 +532,7 @@ private fun GroupSummaryRows(
 
 /**
  * One tappable group box (petal-card styling, see HomeFlower.PetalCard). While the group is
- * expanded into the editor, [placeholder] renders a same-size dashed outline instead — the
+ * expanded into the editor, [placeholder] renders a same-size invisible stand-in instead — the
  * spot the editor animates back to.
  */
 @Composable
@@ -554,27 +550,18 @@ private fun GroupBox(
     val shape = RoundedCornerShape(GroupCorner)
     val accent = MaterialTheme.colorScheme.primary
     if (placeholder && placeholderSize != null) {
-        // Dashed home-position outline, sized to the box's last measured bounds so the
-        // surrounding layout doesn't shift while the group lives in the editor.
+        // Invisible same-size stand-in, sized to the box's last measured bounds: holds the
+        // home position (and the animate-back rect) while the group lives in the editor. The
+        // old dashed outline moved to ui/component/DashedPlaceholderBox — the expanded editor
+        // covers the whole band now, so drawing the dashes bought nothing.
         val density = LocalDensity.current
-        val dash = accent.copy(alpha = 0.45f)
         Box(
             modifier = modifier
                 .onGloballyPositioned(onPositioned)
                 .size(
                     width = with(density) { placeholderSize.width.toDp() },
                     height = with(density) { placeholderSize.height.toDp() },
-                )
-                .drawBehind {
-                    drawRoundRect(
-                        color = dash,
-                        cornerRadius = CornerRadius(GroupCorner.toPx()),
-                        style = Stroke(
-                            width = RemapBoxStroke.toPx(),
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 7f)),
-                        ),
-                    )
-                },
+                ),
         )
         return
     }
@@ -593,9 +580,10 @@ private fun GroupBox(
             modifier = Modifier
                 .fillMaxWidth()
                 .onGloballyPositioned(onPositioned)
+                // Outer stroke — before the clip, or the overhang gets clipped off.
+                .remapOuterBorder(remapBevelBorder(container, GroupCorner), GroupCorner)
                 .clip(shape)
                 .background(container)
-                .border(remapBevelBorder(container, GroupCorner), shape)
                 .clickable { onOpenGroup(group) }
                 .testTag("simple-group:${group.name}")
                 .padding(horizontal = 8.dp, vertical = 6.dp),

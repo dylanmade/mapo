@@ -3,6 +3,7 @@ package com.mappo.ui.screen.remap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -24,10 +25,13 @@ import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TouchApp
@@ -42,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,8 +55,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mappo.R
 import com.mappo.data.model.steam.ActionLayerGraph
 import com.mappo.data.model.steam.ActionSetGraph
 import com.mappo.data.model.steam.ActivatorType
@@ -71,10 +78,11 @@ import com.mappo.ui.screen.displayLabel as activatorDisplayLabel
 import com.mappo.ui.screen.remap.settings.SourceModeSettingsSchema
 
 /**
- * The expanded ("advanced") in-place editor a group box grows into. Sticky header — mode pill
- * (overline text) · kebab · close — over an inset divider, then scrollable command rows:
- * press-type pill · input glyph · inline label field · output button · kebab. Multiple commands
- * on one input repeat the glyph per row (no connector links).
+ * The expanded ("advanced") in-place editor a group box grows into. Sticky header — group
+ * identity (overline glyph + label) · flow arrow · mode pill · configure/more/close — over an
+ * inset divider, then scrollable command rows: input button (press type + glyph) · flow arrow ·
+ * output button · label field · configure · more. A footer row offers "Add new input" /
+ * "Import an input".
  *
  * Base-set view edits inline; layer view resolves override→base, renders read-only, and routes
  * output taps to the full-screen editor (which materializes the override); override rows get a
@@ -87,9 +95,14 @@ internal class RemapGroupEditorCallbacks(
     val onOpenInputEditor: (inputSource: InputSource, groupInputKey: String, label: String) -> Unit,
     val onClearOverride: (inputSource: InputSource, groupInputKey: String) -> Unit,
     val onAddInputRow: (groupInputId: Long, type: ActivatorType) -> Unit,
+    // Press type has no direct control since the input button absorbed the press pill
+    // (2026-07-12); retained for the Map flow, which will own press-type selection.
     val onSetPressType: (bindingId: Long, type: ActivatorType) -> Unit,
     val onSetLabel: (bindingId: Long, label: String) -> Unit,
     val onDeleteRow: (bindingId: Long) -> Unit,
+    val onDuplicateRow: (bindingId: Long) -> Unit,
+    val onResetRow: (bindingId: Long) -> Unit,
+    val onResetGroup: (bindingGroupId: Long) -> Unit,
     val onConfigure: (activatorId: Long, title: String) -> Unit,
 )
 
@@ -110,7 +123,16 @@ internal fun RemapGroupEditor(
     val primaryGroup = viewingLayer?.presetFor(primarySource)?.group?.group
         ?: viewingSet?.presetFor(primarySource)?.group?.group
     val validModes = SourceModeCatalog.modesValidFor(primarySource)
-    var headerKebab by remember { mutableStateOf(false) }
+    val modeName = primaryGroup?.mode?.displayNameFor(primarySource) ?: "mode"
+    val editable = viewingLayer == null
+    var headerMore by remember { mutableStateOf(false) }
+
+    // Ephemeral blank rows appended by "Add new input": unassigned inputs (no glyph, default
+    // Press). UI-sorting scaffolding — the data model has no unassigned-input owner yet, so
+    // they live in local state until the Map flow can assign a button and persist them.
+    var blankRows by remember(group, viewingSet?.actionSet?.id, viewingLayer?.layer?.id) {
+        mutableIntStateOf(0)
+    }
 
     Column(modifier = modifier) {
         // ── Sticky header ─────────────────────────────────────────────────
@@ -121,12 +143,28 @@ internal fun RemapGroupEditor(
                 .padding(start = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Non-interactive group identity: concept glyph + overline label.
+            Icon(
+                InputGlyphs.sourceGlyph(primarySource),
+                contentDescription = null,
+                modifier = Modifier.size(RemapPillIconSize),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = group.headerLabel().uppercase(),
+                style = remapOverlineTextStyle(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(8.dp))
+            EditorFlowArrow()
+            Spacer(Modifier.width(8.dp))
             if (primaryGroup != null && validModes.isNotEmpty()) {
                 ModePillDropdown(
                     source = primarySource,
                     currentMode = primaryGroup.mode,
                     validModes = validModes,
-                    enabled = viewingLayer == null && validModes.size > 1,
+                    enabled = editable && validModes.size > 1,
                     onPick = { mode -> callbacks.onSetBindingGroupMode(primaryGroup.id, mode) },
                     overline = true,
                     elevated = true,
@@ -139,18 +177,38 @@ internal fun RemapGroupEditor(
                 )
             }
             Spacer(Modifier.weight(1f))
+            RemapMiniIconButton(
+                icon = Icons.Filled.Settings,
+                contentDescription = "Configure $modeName",
+                onClick = { primaryGroup?.let { callbacks.onOpenModeSettings(it.id, primarySource) } },
+                enabled = primaryGroup != null &&
+                    SourceModeSettingsSchema.hasSettings(primarySource, primaryGroup.mode),
+            )
             Box {
-                RowKebab(onClick = { headerKebab = true }, contentDescription = "Group options")
-                DropdownMenu(expanded = headerKebab, onDismissRequest = { headerKebab = false }) {
+                RowKebab(onClick = { headerMore = true }, contentDescription = "Group options")
+                DropdownMenu(expanded = headerMore, onDismissRequest = { headerMore = false }) {
                     RichMenuItem(
-                        title = "Configure ${primaryGroup?.mode?.displayNameFor(primarySource) ?: "mode"}",
-                        helper = "Deadzones, curves, and other tuning.",
-                        icon = Icons.Filled.Settings,
-                        enabled = primaryGroup != null &&
-                            SourceModeSettingsSchema.hasSettings(primarySource, primaryGroup.mode),
+                        title = "Add new input",
+                        helper = "Append a blank input row.",
+                        icon = Icons.Filled.Add,
+                        enabled = editable,
+                        onClick = { headerMore = false; blankRows++ },
+                    )
+                    RichMenuItem(
+                        title = "Import $modeName",
+                        helper = "Bring in a mode and inputs from another profile.",
+                        icon = Icons.Filled.Download,
+                        // Future: profile import. Inert while the acquisition flow lands.
+                        onClick = { headerMore = false },
+                    )
+                    RichMenuItem(
+                        title = "Reset $modeName",
+                        helper = "Return this group to its defaults.",
+                        icon = Icons.Filled.RestartAlt,
+                        enabled = editable && primaryGroup != null,
                         onClick = {
-                            headerKebab = false
-                            primaryGroup?.let { callbacks.onOpenModeSettings(it.id, primarySource) }
+                            headerMore = false
+                            primaryGroup?.let { callbacks.onResetGroup(it.id) }
                         },
                     )
                 }
@@ -165,7 +223,6 @@ internal fun RemapGroupEditor(
         HorizontalDivider(Modifier.padding(horizontal = 8.dp))
 
         // ── Command rows ──────────────────────────────────────────────────
-        val editable = viewingLayer == null
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag("group-editor-rows"),
             contentPadding = PaddingValues(vertical = 4.dp),
@@ -187,7 +244,8 @@ internal fun RemapGroupEditor(
                             onTapOutput = {
                                 callbacks.onOpenInputEditor(spec.source, spec.subInputKey, subLabel)
                             },
-                            kebab = null,
+                            onConfigure = null,
+                            menu = null,
                         )
                     }
                 } else {
@@ -205,19 +263,23 @@ internal fun RemapGroupEditor(
                                     if (editable) callbacks.onEditCommand(binding.id, output, title)
                                     else callbacks.onOpenInputEditor(spec.source, spec.subInputKey, subLabel)
                                 },
-                                onSetPressType = { t -> callbacks.onSetPressType(binding.id, t) },
                                 onCommitLabel = { callbacks.onSetLabel(binding.id, it) },
-                                kebab = when {
-                                    editable -> EditorKebab.Editable(
-                                        onConfigure = { callbacks.onConfigure(binding.activatorId, title) },
-                                        onAddAnother = {
+                                onConfigure = if (editable) {
+                                    { callbacks.onConfigure(binding.activatorId, title) }
+                                } else null,
+                                menu = when {
+                                    editable -> EditorRowMenu.Editable(
+                                        onAdd = {
                                             effective?.let { callbacks.onAddInputRow(it.input.id, ActivatorType.FULL_PRESS) }
                                         },
-                                        onDelete = if (rows.size > 1) {
-                                            { callbacks.onDeleteRow(binding.id) }
-                                        } else null,
+                                        onDuplicate = { callbacks.onDuplicateRow(binding.id) },
+                                        onReset = { callbacks.onResetRow(binding.id) },
+                                        // The last-input restriction is deliberately LIFTED:
+                                        // deleting even the default row is how users null out
+                                        // a button entirely.
+                                        onDelete = { callbacks.onDeleteRow(binding.id) },
                                     )
-                                    layerGroupInput != null && idx == 0 -> EditorKebab.ClearOverride(
+                                    layerGroupInput != null && idx == 0 -> EditorRowMenu.ClearOverride(
                                         onClear = { callbacks.onClearOverride(spec.source, spec.subInputKey) },
                                     )
                                     else -> null
@@ -227,8 +289,49 @@ internal fun RemapGroupEditor(
                     }
                 }
             }
+            // Ephemeral unassigned rows (see blankRows above).
+            items(blankRows, key = { "blank-$it" }) {
+                EditorCommandRow(
+                    spec = null,
+                    pressType = ActivatorType.FULL_PRESS,
+                    label = "",
+                    outputLabel = BindingOutput.Unbound.displayLabel(config),
+                    editable = true,
+                    onTapOutput = {}, // nothing to persist to until the Map flow assigns a button
+                    onConfigure = null,
+                    menu = EditorRowMenu.BlankRow(onDelete = { blankRows-- }),
+                    onCommitLabel = {},
+                )
+            }
+            if (editable) {
+                item(key = "editor-footer") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        EditorInlineTextButton("Add new input") { blankRows++ }
+                        // Future: import inputs (and their mode) from other profiles.
+                        EditorInlineTextButton("Import an input") {}
+                    }
+                }
+            }
         }
     }
+}
+
+/** Header identity label for a group. User-specified wording; Title Case is the deliberate
+ *  exception to the sentence-case doctrine (hardware names read as proper nouns). */
+internal fun RemapSimpleGroup.headerLabel(): String = when (this) {
+    RemapSimpleGroup.LEFT_SHOULDER -> "Left Trigger"
+    RemapSimpleGroup.LEFT_STICK -> "Left Joystick"
+    RemapSimpleGroup.DPAD -> "Directional Pad"
+    RemapSimpleGroup.FACE -> "Face Buttons"
+    RemapSimpleGroup.RIGHT_SHOULDER -> "Right Trigger"
+    RemapSimpleGroup.RIGHT_STICK -> "Right Joystick"
+    RemapSimpleGroup.UTILITY -> "Utility Buttons"
 }
 
 /** Resolve a group input into its display rows: one (binding, pressType) per command. */
@@ -238,92 +341,132 @@ private fun GroupInputGraph?.commandRows(): List<Pair<Binding, ActivatorType>> =
         ?.flatMap { ag -> ag.bindings.map { b -> b to ag.activator.type } }
         .orEmpty()
 
-/** What the row's kebab offers. Null hides the kebab (a spacer keeps the grid aligned). */
-private sealed interface EditorKebab {
+/** What the row's More menu offers. Null hides the kebab (a spacer keeps the grid aligned). */
+private sealed interface EditorRowMenu {
     class Editable(
-        val onConfigure: () -> Unit,
-        val onAddAnother: () -> Unit,
-        val onDelete: (() -> Unit)?,
-    ) : EditorKebab
+        val onAdd: () -> Unit,
+        val onDuplicate: () -> Unit,
+        val onReset: () -> Unit,
+        val onDelete: () -> Unit,
+    ) : EditorRowMenu
 
-    class ClearOverride(val onClear: () -> Unit) : EditorKebab
+    /** Ephemeral unassigned row — deletable only. */
+    class BlankRow(val onDelete: () -> Unit) : EditorRowMenu
+
+    class ClearOverride(val onClear: () -> Unit) : EditorRowMenu
 }
 
-/** One command row: press pill · glyph · label field · output button · kebab. */
+/**
+ * One command row: input button (press + glyph) · flow arrow · output button · label field ·
+ * configure · more. The input and output buttons flex to content between a shared floor
+ * ("Press" + a glyph — the glyph slot is reserved even for unassigned inputs) and a third of
+ * the row; the label field takes whatever remains.
+ */
 @Composable
 private fun EditorCommandRow(
-    spec: SimpleRowSpec,
+    spec: SimpleRowSpec?,
     pressType: ActivatorType,
     label: String,
     outputLabel: String,
     editable: Boolean,
     onTapOutput: () -> Unit,
-    kebab: EditorKebab?,
-    onSetPressType: ((ActivatorType) -> Unit)? = null,
+    onConfigure: (() -> Unit)?,
+    menu: EditorRowMenu?,
     onCommitLabel: ((String) -> Unit)? = null,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = EditorRowHeight)
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        PressPillDropdown(
-            current = pressType,
-            enabled = editable && onSetPressType != null,
-            onPick = { onSetPressType?.invoke(it) },
-        )
-        InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 17.dp)
-        LabelPillField(
-            value = label,
-            enabled = editable && onCommitLabel != null,
-            onCommit = { onCommitLabel?.invoke(it) },
-            modifier = Modifier.width(EditorLabelWidth),
-        )
-        Spacer(Modifier.weight(1f))
-        RemapMiniPillButton(
-            text = outputLabel,
-            onClick = onTapOutput,
-            filled = true,
-            elevated = true,
-            modifier = Modifier.widthIn(max = EditorOutputMaxWidth),
-        )
-        when (kebab) {
-            null -> Spacer(Modifier.size(RemapIconButtonSize)) // kebab footprint, keeps rows aligned
-            is EditorKebab.ClearOverride -> Box {
-                var open by remember { mutableStateOf(false) }
-                RowKebab(onClick = { open = true }, contentDescription = "Override actions")
-                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Clear override") },
-                        onClick = { open = false; kebab.onClear() },
-                    )
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val flexMax = maxWidth / 3
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = EditorRowHeight)
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            InputPillButton(
+                pressType = pressType,
+                spec = spec,
+                enabled = editable,
+                // Future home of the Map flow; inert while the UI settles.
+                onClick = {},
+                modifier = Modifier.widthIn(min = EditorFlexPillMinWidth, max = flexMax),
+            )
+            EditorFlowArrow()
+            RemapMiniPillButton(
+                text = outputLabel,
+                onClick = onTapOutput,
+                filled = true,
+                elevated = true,
+                modifier = Modifier.widthIn(min = EditorFlexPillMinWidth, max = flexMax),
+            )
+            LabelPillField(
+                value = label,
+                enabled = editable && onCommitLabel != null,
+                onCommit = { onCommitLabel?.invoke(it) },
+                modifier = Modifier.weight(1f),
+            )
+            RemapMiniIconButton(
+                icon = Icons.Filled.Settings,
+                contentDescription = "Configure input",
+                onClick = onConfigure ?: {},
+                enabled = onConfigure != null,
+            )
+            when (menu) {
+                null -> Spacer(Modifier.size(RemapIconButtonSize)) // kebab footprint, keeps rows aligned
+                is EditorRowMenu.ClearOverride -> Box {
+                    var open by remember { mutableStateOf(false) }
+                    RowKebab(onClick = { open = true }, contentDescription = "Override actions")
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Clear override") },
+                            onClick = { open = false; menu.onClear() },
+                        )
+                    }
                 }
-            }
-            is EditorKebab.Editable -> Box {
-                var open by remember { mutableStateOf(false) }
-                RowKebab(onClick = { open = true })
-                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                    RichMenuItem(
-                        title = "Configure input",
-                        helper = "Cycle, turbo, long-press time, delays, chord.",
-                        icon = Icons.Filled.Settings,
-                        onClick = { open = false; kebab.onConfigure() },
-                    )
-                    RichMenuItem(
-                        title = "Add another input",
-                        helper = "Bind another command to this input.",
-                        icon = Icons.Filled.Add,
-                        onClick = { open = false; kebab.onAddAnother() },
-                    )
-                    kebab.onDelete?.let { delete ->
+                is EditorRowMenu.BlankRow -> Box {
+                    var open by remember { mutableStateOf(false) }
+                    RowKebab(onClick = { open = true })
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                         RichMenuItem(
                             title = "Delete input",
                             helper = "Remove this input row.",
                             icon = Icons.Filled.Delete,
-                            onClick = { open = false; delete() },
+                            onClick = { open = false; menu.onDelete() },
+                        )
+                    }
+                }
+                is EditorRowMenu.Editable -> Box {
+                    var open by remember { mutableStateOf(false) }
+                    RowKebab(onClick = { open = true })
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        RichMenuItem(
+                            title = "Add new input",
+                            helper = "Bind another command to this input.",
+                            icon = Icons.Filled.Add,
+                            titleContent = { GlyphMenuTitle("Add new", spec) },
+                            onClick = { open = false; menu.onAdd() },
+                        )
+                        RichMenuItem(
+                            title = "Duplicate input",
+                            helper = "Copy this command and its settings.",
+                            icon = Icons.Filled.ContentCopy,
+                            titleContent = { GlyphMenuTitle("Duplicate", spec) },
+                            onClick = { open = false; menu.onDuplicate() },
+                        )
+                        RichMenuItem(
+                            title = "Reset input",
+                            helper = "Back to a default Press of this input.",
+                            icon = Icons.Filled.RestartAlt,
+                            titleContent = { GlyphMenuTitle("Reset", spec) },
+                            onClick = { open = false; menu.onReset() },
+                        )
+                        RichMenuItem(
+                            title = "Delete input",
+                            helper = "Remove this row — even the last one, to null the button.",
+                            icon = Icons.Filled.Delete,
+                            titleContent = { GlyphMenuTitle("Delete", spec) },
+                            onClick = { open = false; menu.onDelete() },
                         )
                     }
                 }
@@ -332,50 +475,93 @@ private fun EditorCommandRow(
     }
 }
 
-/** The press-type pill dropdown — same chrome as [ModePillDropdown], press-type vocabulary. */
+/**
+ * The row's input button: press-type word + button glyph in one elevated pill. Eventually
+ * routes into the Map flow; inert for now. The glyph slot is reserved even when [spec] is null
+ * (an unassigned input) so button widths read consistently.
+ */
 @Composable
-private fun PressPillDropdown(
-    current: ActivatorType,
+private fun InputPillButton(
+    pressType: ActivatorType,
+    spec: SimpleRowSpec?,
     enabled: Boolean,
-    onPick: (ActivatorType) -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        // Elevated button plane — this pill always sits on the expanded editor's card.
-        Surface(
-            shape = RoundedCornerShape(50),
-            color = RemapElevatedContainer,
-            border = remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2),
-            modifier = Modifier
-                .heightIn(min = RemapPillHeight)
-                .then(
-                    if (enabled) {
-                        Modifier.clip(RoundedCornerShape(50))
-                            .clickable(onClickLabel = "Change press type") { open = true }
-                    } else Modifier.alpha(0.6f),
-                ),
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = RemapElevatedContainer,
+        modifier = modifier
+            .heightIn(min = RemapPillHeight)
+            .remapOuterBorder(remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2), RemapPillHeight / 2)
+            .then(
+                if (enabled) {
+                    Modifier.clip(RoundedCornerShape(50))
+                        .clickable(onClickLabel = "Change input") { onClick() }
+                } else Modifier.alpha(0.6f),
+            ),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 8.dp),
         ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            ) {
-                Text(
-                    text = current.shortLabel(),
-                    style = remapMiniTextStyle(),
-                    maxLines = 1,
-                )
+            Text(
+                text = pressType.shortLabel(),
+                style = remapMiniTextStyle(),
+                maxLines = 1,
+            )
+            Spacer(Modifier.width(5.dp))
+            if (spec != null) {
+                InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = EditorGlyphSize)
+            } else {
+                Spacer(Modifier.size(EditorGlyphSize))
             }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            pressTypeOrder.forEach { t ->
-                RichMenuItem(
-                    title = t.shortLabel(),
-                    helper = t.helperText(),
-                    icon = t.pressIcon(),
-                    selected = t == current,
-                    onClick = { open = false; if (t != current) onPick(t) },
-                )
-            }
+    }
+}
+
+/** Non-interactive input→output flow marker: a filled Lucide play triangle. */
+@Composable
+private fun EditorFlowArrow() {
+    Icon(
+        painterResource(R.drawable.lucide_play_filled),
+        contentDescription = null,
+        modifier = Modifier.size(EditorFlowArrowSize),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** In-line text-variant action (the M3 text-button role at the editor's mini scale). */
+@Composable
+private fun EditorInlineTextButton(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .heightIn(min = RemapPillHeight)
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = remapMiniTextStyle(),
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+/** Menu-item title with the row's button glyph inline: "Add new Ⓐ input". Falls back to plain
+ *  text when the row has no assigned button. */
+@Composable
+private fun GlyphMenuTitle(prefix: String, spec: SimpleRowSpec?) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("$prefix ", style = MaterialTheme.typography.bodyLarge)
+        if (spec != null) {
+            InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 15.dp)
+            Text(" input", style = MaterialTheme.typography.bodyLarge)
+        } else {
+            Text("input", style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
@@ -453,7 +639,8 @@ private fun LabelPillField(
 
 // ── Shared press-type vocabulary (moved from the retired detail-pane editor) ─────────────────
 
-/** Press types offered in the press-type menu (SOFT_PRESS is a sub-input, not offered here). */
+/** Press types offered by the future Map flow (SOFT_PRESS is a sub-input, not offered here).
+ *  The old per-row press pill retired 2026-07-12 when the input button absorbed it. */
 internal val pressTypeOrder = listOf(
     ActivatorType.FULL_PRESS,
     ActivatorType.LONG_PRESS,
@@ -508,7 +695,9 @@ internal fun RowKebab(onClick: () -> Unit, contentDescription: String = "Options
     )
 }
 
-/** A `DropdownMenuItem` with a leading icon and two-line title + helper text. */
+/** A `DropdownMenuItem` with a leading icon and two-line title + helper text. [titleContent]
+ *  swaps in a custom title composable (e.g. an inline button glyph) — [title] still names the
+ *  item for readers of the code. */
 @Composable
 internal fun RichMenuItem(
     title: String,
@@ -516,6 +705,7 @@ internal fun RichMenuItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     enabled: Boolean = true,
     selected: Boolean = false,
+    titleContent: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -524,11 +714,15 @@ internal fun RichMenuItem(
         leadingIcon = { Icon(icon, contentDescription = null, tint = tint) },
         text = {
             Column {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                )
+                if (titleContent != null) {
+                    titleContent()
+                } else {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
                 Text(helper, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
@@ -541,5 +735,13 @@ internal fun RichMenuItem(
 
 private val EditorHeaderHeight = 36.dp
 private val EditorRowHeight = 32.dp
-private val EditorLabelWidth = 76.dp
-private val EditorOutputMaxWidth = 62.dp
+
+/** Shared width floor for the flexing input/output buttons — roughly "Press" plus a glyph, so
+ *  even a glyphless unassigned input keeps the full footprint. */
+private val EditorFlexPillMinWidth = 68.dp
+
+/** Button-glyph edge inside the input button. */
+private val EditorGlyphSize = 17.dp
+
+/** Edge of the filled-play flow arrows (header and rows). */
+private val EditorFlowArrowSize = 10.dp

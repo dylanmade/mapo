@@ -11,13 +11,13 @@ import com.themestudio.core.rememberThemeFontResolver
 
 /**
  * Baked-in defaults for the Display and Body font families. Both currently
- * resolve to Gill Sans (asset-bundled, in-house license only; PP Mori remains
- * in the library as an alternative). Exposed as constants so Theme Studio can
+ * resolve to PP Mori (Gill Sans remains in the library as an alternative,
+ * selectable via Theme Studio). Exposed as constants so Theme Studio can
  * show the actual default font in its pickers instead of the generic
  * "(theme default)" placeholder.
  */
-const val DEFAULT_DISPLAY_FONT_NAME: String = "Gill Sans"
-const val DEFAULT_BODY_FONT_NAME: String = "Gill Sans"
+const val DEFAULT_DISPLAY_FONT_NAME: String = "PP Mori"
+const val DEFAULT_BODY_FONT_NAME: String = "PP Mori"
 
 /**
  * Composable typography builder. The default families are bundled as assets, so resolving
@@ -31,7 +31,7 @@ const val DEFAULT_BODY_FONT_NAME: String = "Gill Sans"
  * (e.g. -0.25sp tracking on `displayLarge`, 0.5sp on `bodyLarge`, 64sp line
  * height on `displayLarge`) are calibrated for Roboto and don't translate
  * to other typefaces — leaving them in place would silently impose Roboto's
- * "look" on Gill Sans (or any other font the user picks). Instead each role
+ * "look" on PP Mori (or any other font the user picks). Instead each role
  * uses `letterSpacing = 0.sp` (no extra tracking, font-natural kerning
  * applies) and `lineHeight = Unspecified` (font-natural line height
  * computed from intrinsic ascent/descent metrics). Users can opt back into

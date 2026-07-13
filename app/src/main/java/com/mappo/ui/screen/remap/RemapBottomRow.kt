@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -76,6 +75,7 @@ internal fun RemapBottomRow(
                 validModes = gyroModes,
                 enabled = !viewingLayerSelected && gyroModes.size > 1,
                 onPick = { mode -> onSetGyroMode(gyroGroup.id, mode) },
+                fixedWidth = RemapStripPillWidth,
             )
         } else {
             Text(
@@ -111,22 +111,23 @@ private fun StripCaption(icon: androidx.compose.ui.graphics.painter.Painter, tex
     )
 }
 
-/** Placeholder overlay picker: "(None)" + a disabled empty-state entry. Selection is local UI
+/** Placeholder overlay picker: "None" + a disabled empty-state entry. Selection is local UI
  *  state only — no persistence target exists yet. */
 @Composable
 private fun OverlayPillDropdown() {
     var open by remember { mutableStateOf(false) }
-    var selected by rememberSaveable { mutableStateOf("(None)") }
+    var selected by rememberSaveable { mutableStateOf("None") }
     Box {
-        // Shared box treatment — pill-style dropdown button, no trailing arrow.
+        // Shared box treatment — pill-style dropdown button, no trailing arrow. Static width,
+        // unified with the Gyro pill.
         val container = remapBoxContainer()
         Surface(
             shape = RoundedCornerShape(50),
             color = container,
-            border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = Modifier
                 .heightIn(min = RemapPillHeight)
-                .widthIn(min = RemapPillMinWidth)
+                .width(RemapStripPillWidth)
+                .remapOuterBorder(remapBevelBorder(container, RemapPillHeight / 2), RemapPillHeight / 2)
                 .clip(RoundedCornerShape(50))
                 .clickable(onClickLabel = "Choose overlay") { open = true },
         ) {
@@ -139,11 +140,11 @@ private fun OverlayPillDropdown() {
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
-                text = { Text("(None)") },
-                trailingIcon = if (selected == "(None)") {
+                text = { Text("None") },
+                trailingIcon = if (selected == "None") {
                     { Icon(Icons.Filled.Check, contentDescription = null) }
                 } else null,
-                onClick = { selected = "(None)"; open = false },
+                onClick = { selected = "None"; open = false },
             )
             DropdownMenuItem(
                 enabled = false,

@@ -31,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -38,6 +40,7 @@ import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -133,6 +136,26 @@ internal fun remapBevelBorder(base: Color, cornerRadius: Dp): BorderStroke {
     )
 }
 
+/**
+ * Draws [border] as an OUTER stroke — sitting entirely outside the component's bounds (CSS
+ * `outline` semantics) instead of Compose's default inner stroke, which ate into the fill and
+ * read as an inset ring against the hover/press states. Draw-phase only, zero layout footprint;
+ * apply it BEFORE any `clip` in the chain or the overhang gets clipped off (Rows/Columns
+ * themselves don't clip children).
+ */
+internal fun Modifier.remapOuterBorder(border: BorderStroke, cornerRadius: Dp): Modifier =
+    drawBehind {
+        val strokePx = border.width.toPx()
+        val inflate = strokePx / 2f
+        drawRoundRect(
+            brush = border.brush,
+            topLeft = Offset(-inflate, -inflate),
+            size = Size(size.width + strokePx, size.height + strokePx),
+            cornerRadius = CornerRadius(cornerRadius.toPx() + inflate),
+            style = Stroke(width = strokePx),
+        )
+    }
+
 private class BevelBrush(
     private val highlight: Color,
     private val shadow: Color,
@@ -161,6 +184,10 @@ internal val RemapPillHeight = 24.dp
 /** Width floor for pill dropdowns — matches the advanced view's output-button footprint so
  *  short values ("None") don't collapse the pill into a tiny chip. */
 internal val RemapPillMinWidth = 62.dp
+
+/** FIXED width of the Gyro/Overlay strip pills — a static, unified footprint (both pickers
+ *  identical) instead of flexing to the selected value's label. */
+internal val RemapStripPillWidth = 116.dp
 
 /** Icon edge inside the pills. */
 internal val RemapPillIconSize = 13.dp
@@ -192,9 +219,9 @@ internal fun RemapMiniPillButton(
     Surface(
         shape = RoundedCornerShape(50),
         color = container,
-        border = remapBevelBorder(container, RemapPillHeight / 2),
         modifier = modifier
             .height(RemapPillHeight)
+            .remapOuterBorder(remapBevelBorder(container, RemapPillHeight / 2), RemapPillHeight / 2)
             .then(
                 if (enabled) Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick)
                 else Modifier.alpha(0.55f),
@@ -239,7 +266,8 @@ internal fun RemapMiniIconButton(
 
 /** The mode-selection pill: current mode glyph + name + dropdown arrow → menu of valid modes.
  *  [overline] renders the text in the overline treatment (uppercase, tracked out) for the
- *  group editor's header. */
+ *  group editor's header. [fixedWidth] pins the pill to a static footprint (the Gyro/Overlay
+ *  strip) instead of flexing to the label. */
 @Composable
 internal fun ModePillDropdown(
     source: InputSource,
@@ -249,6 +277,7 @@ internal fun ModePillDropdown(
     onPick: (BindingMode) -> Unit,
     overline: Boolean = false,
     elevated: Boolean = false,
+    fixedWidth: Dp? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     val container = if (elevated) RemapElevatedContainer else remapBoxContainer()
@@ -257,10 +286,13 @@ internal fun ModePillDropdown(
         Surface(
             shape = RoundedCornerShape(50),
             color = container,
-            border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = Modifier
                 .heightIn(min = RemapPillHeight)
-                .widthIn(min = RemapPillMinWidth)
+                .then(
+                    if (fixedWidth != null) Modifier.width(fixedWidth)
+                    else Modifier.widthIn(min = RemapPillMinWidth),
+                )
+                .remapOuterBorder(remapBevelBorder(container, RemapPillHeight / 2), RemapPillHeight / 2)
                 .then(
                     if (enabled) {
                         Modifier.clip(RoundedCornerShape(50))
@@ -293,7 +325,10 @@ internal fun ModePillDropdown(
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             validModes.forEach { mode ->
                 DropdownMenuItem(
-                    leadingIcon = { Icon(InputGlyphs.modeIcon(mode), contentDescription = null) },
+                    // "None" is an absence, not a behavior — it gets no concept glyph.
+                    leadingIcon = if (mode == BindingMode.NONE) null else {
+                        { Icon(InputGlyphs.modeIcon(mode), contentDescription = null) }
+                    },
                     text = { Text(mode.displayNameFor(source)) },
                     trailingIcon = if (mode == currentMode) {
                         { Icon(Icons.Filled.Check, contentDescription = null) }

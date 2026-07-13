@@ -242,11 +242,16 @@ internal fun RemapSimpleView(
                     }
                 }
                 }
-            // The Gyro/Overlay strip's flexed container: all remaining height, strip centered
-            // — so the block↔strip and strip↔bottom gaps stay balanced automatically.
+            // The Gyro/Overlay strip's flexed container: all remaining height, strip pinned
+            // to the bottom with the SAME fixed gap as the block's top nudge — the screen
+            // opens and closes on matching BlockTopGap margins; the flexible slack lives
+            // between the block and the strip.
             Box(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(bottom = BlockBottomGap),
+                contentAlignment = Alignment.BottomCenter,
             ) {
                 bottomContent()
             }
@@ -649,6 +654,7 @@ private val BadgeFirstRowAlignPadding = 7.5.dp
 
 /** Fixed downward nudge of the inputs block from the tab bar (its "margin-top"). */
 private val BlockTopGap = 16.dp
+private val BlockBottomGap = 12.dp
 
 /** Column-edge reserve for the zero-footprint +N badges (badge width + its 4dp gap) — kept as
  *  tight as the badge allows so the group boxes get the widest possible footprint. */

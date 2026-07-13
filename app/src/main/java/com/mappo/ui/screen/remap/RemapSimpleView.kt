@@ -5,8 +5,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.geometry.Offset
@@ -103,8 +105,13 @@ internal fun RemapSimpleView(
     var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var rootSize by remember { mutableStateOf(IntSize.Zero) }
     // Focus target for the expanded editor — without it, the tapped box's disappearance sends
-    // focus hunting to the first focusable on screen (the top-left back button).
-    val editorFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // focus hunting to the first focusable on screen (the top-left back button). Attached to
+    // the editor's Close button (NOT the overlay container: a focused container that spatially
+    // contains every child is a directional-search dead end — no child is "in a direction"
+    // from it, so controller focus could never step inside).
+    val editorFocus = remember { FocusRequester() }
+    // Which group box should reclaim controller focus once the editor collapses back into it.
+    var returnFocusGroup by remember { mutableStateOf<RemapSimpleGroup?>(null) }
 
     // Drives expand / collapse / switch-to-another-group. Switching collapses the current
     // editor back to its home box before expanding the next one.
@@ -117,8 +124,11 @@ internal fun RemapSimpleView(
             return@LaunchedEffect
         }
         if (visibleGroup != null) {
+            val closing = visibleGroup
             progress.animateTo(0f, tween(CollapseMillis, easing = FastOutSlowInEasing))
             visibleGroup = null
+            // Backing out (not switching groups): hand controller focus back to the home box.
+            if (target == null) returnFocusGroup = closing
         }
         if (target != null) {
             visibleGroup = target
@@ -128,7 +138,8 @@ internal fun RemapSimpleView(
 
     BackHandler(enabled = expandedGroup != null) { expandedGroup = null }
 
-    // Move focus into the editor as it opens (see editorFocus above).
+    // Move controller focus onto the editor's Close button as it opens (see editorFocus
+    // above) — from there the d-pad walks the header controls and rows directly.
     LaunchedEffect(visibleGroup) {
         if (visibleGroup != null) runCatching { editorFocus.requestFocus() }
     }
@@ -141,7 +152,19 @@ internal fun RemapSimpleView(
         // — never a weighted slot, which is a hard size that CLAMPS content taller than its
         // share (that clamp is what shaved the block's bottom) — nudged down by a fixed gap;
         // the strip centers in whatever truly remains.
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                // While the editor overlay is up, directional focus must not wander into
+                // the band/strip underneath it — cancel any attempt to enter this subtree.
+                .then(
+                    if (visibleGroup != null) {
+                        Modifier
+                            .focusProperties { onEnter = { cancelFocusChange() } }
+                            .focusGroup()
+                    } else Modifier,
+                ),
+        ) {
             Spacer(Modifier.height(BlockTopGap))
             Box(
                 modifier = Modifier.fillMaxWidth(),
@@ -171,6 +194,8 @@ internal fun RemapSimpleView(
                                 rootCoords?.let { root -> boxBounds[group] = root.localBoundingBoxOf(coords) }
                             },
                             onOpenGroup = { expandedGroup = it },
+                            requestFocus = group == returnFocusGroup,
+                            onFocusHandled = { returnFocusGroup = null },
                             modifier = boxModifier,
                         )
                     }
@@ -292,8 +317,6 @@ internal fun RemapSimpleView(
                         .remapOuterBorder(remapBevelBorder(container, GroupCorner), GroupCorner)
                         .clip(shape)
                         .background(container)
-                        .focusRequester(editorFocus)
-                        .focusable()
                         .testTag("group-editor"),
                 ) {
                     // Crossfade: the box's summary rows dissolve into the editor as it grows.
@@ -317,6 +340,7 @@ internal fun RemapSimpleView(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer { alpha = progress.value },
+                        focusRequester = editorFocus,
                     )
                 }
             }
@@ -545,6 +569,9 @@ private fun GroupBox(
     placeholderSize: Size?,
     onPositioned: (LayoutCoordinates) -> Unit,
     onOpenGroup: (RemapSimpleGroup) -> Unit,
+    // One-shot: reclaim controller focus (the editor just collapsed back into this box).
+    requestFocus: Boolean = false,
+    onFocusHandled: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(GroupCorner)
@@ -573,17 +600,30 @@ private fun GroupBox(
     // row (per-row extras, not one group total). Zero-footprint: it reports no layout size, so
     // it can never shift the box (the centered utility box drifted left when the badge took
     // real width) and never wraps (measured unconstrained). It draws into the column gutter.
+    val focusRequester = remember { FocusRequester() }
+    if (requestFocus) {
+        // LaunchedEffect (not an inline call): the box may be freshly recomposed from its
+        // placeholder branch, and the focus target only exists after this composition lands.
+        LaunchedEffect(Unit) {
+            runCatching { focusRequester.requestFocus() }
+            onFocusHandled()
+        }
+    }
     Box(modifier = modifier) {
         Column(
             // Full column width regardless of label content — every box in a column reads as
             // the same fixed-width card.
             modifier = Modifier
+                // Focus scale is draw-phase only, so the measured bounds (the morph's origin
+                // rect, reported below) stay put while the box grows on controller focus.
+                .remapFocusScale()
                 .fillMaxWidth()
                 .onGloballyPositioned(onPositioned)
                 // Outer stroke — before the clip, or the overhang gets clipped off.
                 .remapOuterBorder(remapBevelBorder(container, GroupCorner), GroupCorner)
                 .clip(shape)
                 .background(container)
+                .focusRequester(focusRequester)
                 .clickable { onOpenGroup(group) }
                 .testTag("simple-group:${group.name}")
                 .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -641,8 +681,8 @@ private val SummaryRowSpacing = 4.dp
 private val BadgeFirstRowAlignPadding = 7.5.dp
 
 /** Fixed downward nudge of the inputs block from the tab bar (its "margin-top"). */
-private val BlockTopGap = 16.dp
-private val BlockBottomGap = 12.dp
+private val BlockTopGap = 14.dp
+private val BlockBottomGap = 14.dp
 
 /** Column-edge reserve for the zero-footprint +N badges (badge width + its 4dp gap) — kept as
  *  tight as the badge allows so the group boxes get the widest possible footprint. */

@@ -1,5 +1,7 @@
 package com.mappo.ui.screen.remap
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -41,6 +44,7 @@ import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -108,7 +112,7 @@ internal val RemapBoxStroke = 0.75.dp
 /** How far the bevel's highlight/shadow deviate from the base fill — "ever so slightly".
  *  Highlights read hotter than shadows on the dark theme, so they get the lighter touch. */
 private const val BevelHighlightStrength = 0.10f
-private const val BevelShadowStrength = 0.25f
+private const val BevelShadowStrength = 0.05f
 
 /** Where along the corner arc the bevel finishes fading: 1−cos(45°) of the radius — the
  *  point where the outline's tangent passes 45° and "top" geometrically becomes "side". */
@@ -192,11 +196,40 @@ internal val RemapStripPillWidth = 116.dp
 /** Icon edge inside the pills. */
 internal val RemapPillIconSize = 13.dp
 
+/** Horizontal content inset shared by every pill control (buttons, dropdowns, label field) —
+ *  bumped from 8dp 2026-07-13; content read cramped against the pill ends. */
+internal val RemapPillContentPadding = 10.dp
+
+/** Gap between a leading glyph and its label (pills, headers, strip captions). */
+internal val RemapGlyphLabelGap = 5.dp
+
 /** Outer tap-target edge of [RemapMiniIconButton] (also its footprint spacer in editor rows). */
 internal val RemapIconButtonSize = 24.dp
 
 /** Icon edge inside [RemapMiniIconButton]. */
 internal val RemapIconButtonIconSize = 16.dp
+
+/**
+ * Subtle grow-on-focus for the remap screen's interactive elements — controller-navigation
+ * feedback, matching the home flower petals' selected scale (1.04 there). Draw-phase only
+ * ([graphicsLayer]), so layout bounds (and the morph-origin rects measured from them) never
+ * move. Chain it BEFORE the element's border/background so the whole control scales as one.
+ */
+@Composable
+internal fun Modifier.remapFocusScale(): Modifier {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (focused) 1.05f else 1f,
+        animationSpec = tween(150),
+        label = "remapFocusScale",
+    )
+    return this
+        .onFocusChanged { focused = it.isFocused }
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+}
 
 /**
  * A hand-rolled miniature pill button, in the shared box treatment. [filled] (the
@@ -220,6 +253,7 @@ internal fun RemapMiniPillButton(
         shape = RoundedCornerShape(50),
         color = container,
         modifier = modifier
+            .remapFocusScale()
             .height(RemapPillHeight)
             .remapOuterBorder(remapBevelBorder(container, RemapPillHeight / 2), RemapPillHeight / 2)
             .then(
@@ -227,7 +261,7 @@ internal fun RemapMiniPillButton(
                 else Modifier.alpha(0.55f),
             ),
     ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = RemapPillContentPadding)) {
             Text(
                 text = text,
                 style = remapMiniTextStyle(),
@@ -250,6 +284,7 @@ internal fun RemapMiniIconButton(
 ) {
     Box(
         modifier = modifier
+            .remapFocusScale()
             .size(RemapIconButtonSize)
             .clip(CircleShape)
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier.alpha(0.45f)),
@@ -287,6 +322,7 @@ internal fun ModePillDropdown(
             shape = RoundedCornerShape(50),
             color = container,
             modifier = Modifier
+                .remapFocusScale()
                 .heightIn(min = RemapPillHeight)
                 .then(
                     if (fixedWidth != null) Modifier.width(fixedWidth)
@@ -303,15 +339,20 @@ internal fun ModePillDropdown(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(horizontal = 8.dp),
+                modifier = Modifier.padding(horizontal = RemapPillContentPadding),
             ) {
-                Icon(
-                    InputGlyphs.modeIcon(currentMode),
-                    contentDescription = null,
-                    modifier = Modifier.size(RemapPillIconSize),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.width(4.dp))
+                // "None" shows bare on the pill — an absence carries no concept glyph there.
+                // (The menu ITEM keeps its glyph; in a list, the icon column reads as part of
+                // the option, not as a claim about current state.)
+                if (currentMode != BindingMode.NONE) {
+                    Icon(
+                        InputGlyphs.modePainter(currentMode),
+                        contentDescription = null,
+                        modifier = Modifier.size(RemapPillIconSize),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(RemapGlyphLabelGap))
+                }
                 Text(
                     text = currentMode.displayNameFor(source)
                         .let { if (overline) it.uppercase() else it },
@@ -325,10 +366,7 @@ internal fun ModePillDropdown(
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             validModes.forEach { mode ->
                 DropdownMenuItem(
-                    // "None" is an absence, not a behavior — it gets no concept glyph.
-                    leadingIcon = if (mode == BindingMode.NONE) null else {
-                        { Icon(InputGlyphs.modeIcon(mode), contentDescription = null) }
-                    },
+                    leadingIcon = { Icon(InputGlyphs.modePainter(mode), contentDescription = null) },
                     text = { Text(mode.displayNameFor(source)) },
                     trailingIcon = if (mode == currentMode) {
                         { Icon(Icons.Filled.Check, contentDescription = null) }

@@ -29,7 +29,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Settings
@@ -54,6 +54,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -115,6 +117,11 @@ internal fun RemapGroupEditor(
     callbacks: RemapGroupEditorCallbacks,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    // Landing spot for controller focus when the editor opens — attached to the Close button
+    // (the one control that always exists and is always enabled). Directional focus can't
+    // step INTO an overlay from a focused container that spatially contains everything, so
+    // the simple view requests focus here explicitly.
+    focusRequester: FocusRequester? = null,
 ) {
     // The header's mode pill edits the group's PRIMARY source (first row's source). Multi-source
     // groups (shoulder = trigger + bumper, utility = Start + Select) keep their secondary
@@ -143,14 +150,15 @@ internal fun RemapGroupEditor(
                 .padding(start = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Non-interactive group identity: concept glyph + overline label.
+            // Non-interactive group identity: hardware glyph + overline label. The Kenney
+            // prompt is single-color, so it tints down to the overline treatment safely.
             Icon(
-                InputGlyphs.sourceGlyph(primarySource),
+                InputGlyphs.sourcePainter(primarySource),
                 contentDescription = null,
                 modifier = Modifier.size(RemapPillIconSize),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(RemapGlyphLabelGap))
             Text(
                 text = group.headerLabel().uppercase(),
                 style = remapOverlineTextStyle(),
@@ -218,6 +226,7 @@ internal fun RemapGroupEditor(
                 icon = Icons.Filled.Close,
                 contentDescription = "Close",
                 onClick = onClose,
+                modifier = if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier,
             )
         }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp))
@@ -305,16 +314,19 @@ internal fun RemapGroupEditor(
             }
             if (editable) {
                 item(key = "editor-footer") {
+                    // Centered pair with a wide gap — the same composition rhythm as the
+                    // simple view's Gyro/Overlay strip.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        EditorInlineTextButton("Add new input") { blankRows++ }
+                        EditorInlineTextButton("Add input", Icons.Filled.Add) { blankRows++ }
+                        Spacer(Modifier.width(24.dp))
                         // Future: import inputs (and their mode) from other profiles.
-                        EditorInlineTextButton("Import an input") {}
+                        EditorInlineTextButton("Import input", Icons.Filled.Download) {}
                     }
                 }
             }
@@ -328,7 +340,8 @@ internal fun RemapSimpleGroup.headerLabel(): String = when (this) {
     RemapSimpleGroup.LEFT_SHOULDER -> "Left Trigger"
     RemapSimpleGroup.LEFT_STICK -> "Left Joystick"
     RemapSimpleGroup.DPAD -> "Directional Pad"
-    RemapSimpleGroup.FACE -> "Face Buttons"
+    // "Button Pad" (not "Face Buttons") — matches the mode name of the same concept.
+    RemapSimpleGroup.FACE -> "Button Pad"
     RemapSimpleGroup.RIGHT_SHOULDER -> "Right Trigger"
     RemapSimpleGroup.RIGHT_STICK -> "Right Joystick"
     RemapSimpleGroup.UTILITY -> "Utility Buttons"
@@ -392,7 +405,8 @@ private fun EditorCommandRow(
                 onClick = {},
                 modifier = Modifier.widthIn(min = EditorFlexPillMinWidth, max = flexMax),
             )
-            EditorFlowArrow()
+            // A hair of extra breathing room beyond the row's 6dp rhythm, both sides.
+            EditorFlowArrow(Modifier.padding(horizontal = 2.dp))
             RemapMiniPillButton(
                 text = outputLabel,
                 onClick = onTapOutput,
@@ -492,6 +506,7 @@ private fun InputPillButton(
         shape = RoundedCornerShape(50),
         color = RemapElevatedContainer,
         modifier = modifier
+            .remapFocusScale()
             .heightIn(min = RemapPillHeight)
             .remapOuterBorder(remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2), RemapPillHeight / 2)
             .then(
@@ -504,14 +519,14 @@ private fun InputPillButton(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = 8.dp),
+            modifier = Modifier.padding(horizontal = RemapPillContentPadding),
         ) {
             Text(
                 text = pressType.shortLabel(),
                 style = remapMiniTextStyle(),
                 maxLines = 1,
             )
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(RemapGlyphLabelGap))
             if (spec != null) {
                 InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = EditorGlyphSize)
             } else {
@@ -523,26 +538,39 @@ private fun InputPillButton(
 
 /** Non-interactive input→output flow marker: a filled Lucide play triangle. */
 @Composable
-private fun EditorFlowArrow() {
+private fun EditorFlowArrow(modifier: Modifier = Modifier) {
     Icon(
         painterResource(R.drawable.lucide_play_filled),
         contentDescription = null,
-        modifier = Modifier.size(EditorFlowArrowSize),
+        modifier = modifier.size(EditorFlowArrowSize),
         tint = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
-/** In-line text-variant action (the M3 text-button role at the editor's mini scale). */
+/** In-line text-variant action with a leading icon (the M3 text-button role at the editor's
+ *  mini scale). */
 @Composable
-private fun EditorInlineTextButton(text: String, onClick: () -> Unit) {
-    Box(
+private fun EditorInlineTextButton(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+) {
+    Row(
         modifier = Modifier
+            .remapFocusScale()
             .clip(RoundedCornerShape(50))
             .clickable(onClick = onClick)
             .heightIn(min = RemapPillHeight)
-            .padding(horizontal = 8.dp),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = RemapPillContentPadding),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(RemapPillIconSize),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(RemapGlyphLabelGap))
         Text(
             text = text,
             style = remapMiniTextStyle(),
@@ -587,6 +615,7 @@ private fun LabelPillField(
         shape = RoundedCornerShape(50),
         color = remapInputFieldContainer(),
         modifier = modifier
+            .remapFocusScale()
             .height(RemapPillHeight)
             .then(
                 if (enabled) {
@@ -596,7 +625,7 @@ private fun LabelPillField(
             ),
     ) {
         Box(
-            modifier = Modifier.padding(horizontal = 8.dp),
+            modifier = Modifier.padding(horizontal = RemapPillContentPadding),
             contentAlignment = Alignment.CenterStart,
         ) {
             Text(
@@ -689,7 +718,7 @@ internal fun ActivatorType.pressIcon(): androidx.compose.ui.graphics.vector.Imag
 @Composable
 internal fun RowKebab(onClick: () -> Unit, contentDescription: String = "Options") {
     RemapMiniIconButton(
-        icon = Icons.Filled.MoreHoriz,
+        icon = Icons.Filled.MoreVert,
         contentDescription = contentDescription,
         onClick = onClick,
     )
@@ -733,8 +762,10 @@ internal fun RichMenuItem(
     )
 }
 
-private val EditorHeaderHeight = 36.dp
-private val EditorRowHeight = 32.dp
+// Heights carry the rows' vertical breathing room (content is 24dp pills); +2dp each
+// 2026-07-13 — the rows read cramped at 36/32.
+private val EditorHeaderHeight = 38.dp
+private val EditorRowHeight = 34.dp
 
 /** Shared width floor for the flexing input/output buttons — roughly "Press" plus a glyph, so
  *  even a glyphless unassigned input keeps the full footprint. */

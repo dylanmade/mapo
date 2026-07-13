@@ -103,7 +103,7 @@ private fun StripCaption(icon: androidx.compose.ui.graphics.painter.Painter, tex
         modifier = Modifier.size(RemapPillIconSize),
         tint = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Spacer(Modifier.width(4.dp))
+    Spacer(Modifier.width(RemapGlyphLabelGap))
     Text(
         text = text,
         style = remapMiniTextStyle(),
@@ -125,6 +125,7 @@ private fun OverlayPillDropdown() {
             shape = RoundedCornerShape(50),
             color = container,
             modifier = Modifier
+                .remapFocusScale()
                 .heightIn(min = RemapPillHeight)
                 .width(RemapStripPillWidth)
                 .remapOuterBorder(remapBevelBorder(container, RemapPillHeight / 2), RemapPillHeight / 2)
@@ -133,7 +134,7 @@ private fun OverlayPillDropdown() {
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(horizontal = 8.dp),
+                modifier = Modifier.padding(horizontal = RemapPillContentPadding),
             ) {
                 Text(text = selected, style = remapMiniTextStyle())
             }

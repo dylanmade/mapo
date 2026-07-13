@@ -78,7 +78,7 @@ class RemapControlsScreenTest {
         // summarize as their own resting names (individualized defaults, not "Default").
         composeRule.onNodeWithText("A Button", useUnmergedTree = true).assertExists()
         composeRule.onNodeWithText("D-Pad Up", useUnmergedTree = true).assertExists()
-        composeRule.onNodeWithText("Left Stick Click", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("L-Stick Click", useUnmergedTree = true).assertExists()
         composeRule.onNodeWithText("Start Button", useUnmergedTree = true).assertExists()
     }
 

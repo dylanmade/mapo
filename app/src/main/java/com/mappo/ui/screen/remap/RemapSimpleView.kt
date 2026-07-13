@@ -141,101 +141,111 @@ internal fun RemapSimpleView(
     Box(
         modifier = modifier.onGloballyPositioned { rootCoords = it; rootSize = it.size },
     ) {
-        // The band + the Gyro/Overlay strip center vertically as ONE unit (the strip sits
-        // directly beneath the band rather than floating in the leftover space).
-        Column(
-            Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            // The three-column band. The Row's height is the tallest SIDE column's content
-            // (IntrinsicSize.Min; the controller image reports no intrinsic size — see the paint
-            // modifier below), which lets the middle column pin the Map button's top edge and the
-            // utility box's bottom edge to the flanking columns' extents.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(IntrinsicSize.Min)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                // Wide gutter keeps the side group boxes off the controller image.
-                horizontalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                val box: @Composable (RemapSimpleGroup, Modifier) -> Unit = { group, boxModifier ->
-                    GroupBox(
-                        group = group,
-                        viewingSet = viewingSet,
-                        viewingLayer = viewingLayer,
-                        config = config,
-                        placeholder = group == visibleGroup,
-                        placeholderSize = boxBounds[group]?.size,
-                        onPositioned = { coords ->
-                            rootCoords?.let { root -> boxBounds[group] = root.localBoundingBoxOf(coords) }
-                        },
-                        onOpenGroup = { expandedGroup = it },
-                        modifier = boxModifier,
-                    )
-                }
-                // Left column, counterclockwise start: shoulder → d-pad → stick. Boxes anchor
-                // toward the screen center (the controller), i.e. this column's END edge, and
-                // cluster toward the vertical center.
-                Column(
-                    // start gutter reserves room for the boxes' outside-left +N badges (they're
-                    // zero-footprint overlays — without this they'd clip off the view edge).
-                    modifier = Modifier.weight(1f).fillMaxHeight().padding(start = BadgeGutter),
-                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    box(RemapSimpleGroup.LEFT_SHOULDER, Modifier)
-                    box(RemapSimpleGroup.DPAD, Modifier)
-                    box(RemapSimpleGroup.LEFT_STICK, Modifier)
-                }
-                // Middle column: Map CTA top-aligned with the flanking columns' topmost boxes, the
-                // utility box bottom-aligned with their bottommost, controller between.
-                Column(
-                    modifier = Modifier.weight(1.25f).fillMaxHeight(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Button(
-                        onClick = onMap,
-                        modifier = Modifier.testTag("map-button"),
-                    ) {
-                        Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Map")
-                    }
-                    // sizeToIntrinsics=false is load-bearing: with it, the image contributes no
-                    // intrinsic height, so the Row's IntrinsicSize.Min is set by the side columns.
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp)
-                            .paint(
-                                painter = painterResource(R.drawable.controller_placeholder),
-                                sizeToIntrinsics = false,
-                                contentScale = ContentScale.Fit,
-                            ),
-                    )
-                    // SYMMETRIC gutter on the box only (not the column): clamps the box's max width so
-                    // its +N badge has room before the right column, without leaning the centering
-                    // axis or narrowing the controller image.
-                    box(RemapSimpleGroup.UTILITY, Modifier.padding(horizontal = BadgeGutter))
-                }
-                // Right column: shoulder → face buttons → stick. Boxes anchor toward the screen
-                // center (this column's START edge).
-                Column(
-                    // end gutter reserves room for the outside-right +N badges (see left column).
-                    modifier = Modifier.weight(1f).fillMaxHeight().padding(end = BadgeGutter),
-                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-                    horizontalAlignment = Alignment.Start,
-                ) {
-                    box(RemapSimpleGroup.RIGHT_SHOULDER, Modifier)
-                    box(RemapSimpleGroup.FACE, Modifier)
-                    box(RemapSimpleGroup.RIGHT_STICK, Modifier)
-                }
-            }
-            // The Gyro/Overlay strip, horizontally centered directly beneath the band.
+        // Flexbox-style column (React mapping: block = flex none + margin-top, strip
+        // container = flex 1, centered). The inputs block keeps its NATURAL intrinsic height
+        // — never a weighted slot, which is a hard size that CLAMPS content taller than its
+        // share (that clamp is what shaved the block's bottom) — nudged down by a fixed gap;
+        // the strip centers in whatever truly remains.
+        Column(Modifier.fillMaxSize()) {
+            Spacer(Modifier.height(BlockTopGap))
             Box(
                 modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                // The three-column band. The Row's height is the tallest SIDE column's content
+                // (IntrinsicSize.Min; the controller image reports no intrinsic size — see the paint
+                // modifier below), which lets the middle column pin the Map button's top edge and the
+                // utility box's bottom edge to the flanking columns' extents.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    // Wide gutter keeps the side group boxes off the controller image.
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    val box: @Composable (RemapSimpleGroup, Modifier) -> Unit = { group, boxModifier ->
+                        GroupBox(
+                            group = group,
+                            viewingSet = viewingSet,
+                            viewingLayer = viewingLayer,
+                            config = config,
+                            placeholder = group == visibleGroup,
+                            placeholderSize = boxBounds[group]?.size,
+                            onPositioned = { coords ->
+                                rootCoords?.let { root -> boxBounds[group] = root.localBoundingBoxOf(coords) }
+                            },
+                            onOpenGroup = { expandedGroup = it },
+                            modifier = boxModifier,
+                        )
+                    }
+                    // Left column, counterclockwise start: shoulder → d-pad → stick. Boxes anchor
+                    // toward the screen center (the controller), i.e. this column's END edge, and
+                    // cluster toward the vertical center.
+                    Column(
+                        // start gutter reserves room for the boxes' outside-left +N badges (they're
+                        // zero-footprint overlays — without this they'd clip off the view edge).
+                        modifier = Modifier.weight(1f).fillMaxHeight().padding(start = BadgeGutter),
+                        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                        horizontalAlignment = Alignment.End,
+                    ) {
+                        box(RemapSimpleGroup.LEFT_SHOULDER, Modifier)
+                        box(RemapSimpleGroup.DPAD, Modifier)
+                        box(RemapSimpleGroup.LEFT_STICK, Modifier)
+                    }
+                    // Middle column: Map CTA top-aligned with the flanking columns' topmost boxes, the
+                    // utility box bottom-aligned with their bottommost, controller between. Weight
+                    // trimmed from 1.25 to hand the flanking group boxes a little more inner width
+                    // (the controller image shrinks with its column).
+                    Column(
+                        modifier = Modifier.weight(1.1f).fillMaxHeight(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Button(
+                            onClick = onMap,
+                            modifier = Modifier.testTag("map-button"),
+                        ) {
+                            Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Map")
+                        }
+                        // sizeToIntrinsics=false is load-bearing: with it, the image contributes no
+                        // intrinsic height, so the Row's IntrinsicSize.Min is set by the side columns.
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .paint(
+                                    painter = painterResource(R.drawable.controller_placeholder),
+                                    sizeToIntrinsics = false,
+                                    contentScale = ContentScale.Fit,
+                                ),
+                        )
+                        // SYMMETRIC gutter on the box only (not the column), at HALF depth: the box's
+                        // right-side +N badge can also spill into the 18dp inter-column gap, so a half
+                        // gutter keeps enough clearance without squeezing the box (full BadgeGutter ate
+                        // too much width once the middle column narrowed to 1.1).
+                        box(RemapSimpleGroup.UTILITY, Modifier.padding(horizontal = BadgeGutter / 2))
+                    }
+                    // Right column: shoulder → face buttons → stick. Boxes anchor toward the screen
+                    // center (this column's START edge).
+                    Column(
+                        // end gutter reserves room for the outside-right +N badges (see left column).
+                        modifier = Modifier.weight(1f).fillMaxHeight().padding(end = BadgeGutter),
+                        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                        horizontalAlignment = Alignment.Start,
+                    ) {
+                        box(RemapSimpleGroup.RIGHT_SHOULDER, Modifier)
+                        box(RemapSimpleGroup.FACE, Modifier)
+                        box(RemapSimpleGroup.RIGHT_STICK, Modifier)
+                    }
+                }
+                }
+            // The Gyro/Overlay strip's flexed container: all remaining height, strip centered
+            // — so the block↔strip and strip↔bottom gaps stay balanced automatically.
+            Box(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
                 bottomContent()
@@ -636,6 +646,9 @@ private val SummaryRowSpacing = 4.dp
 /** Aligns a +N badge's text with its summary row (6dp box padding + the 17dp row against the
  *  badge's 14sp line height → 6 + (17−14)/2); each subsequent row adds one row pitch. */
 private val BadgeFirstRowAlignPadding = 7.5.dp
+
+/** Fixed downward nudge of the inputs block from the tab bar (its "margin-top"). */
+private val BlockTopGap = 16.dp
 
 /** Column-edge reserve for the zero-footprint +N badges (badge width + its 4dp gap) — kept as
  *  tight as the badge allows so the group boxes get the widest possible footprint. */

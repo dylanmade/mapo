@@ -119,6 +119,21 @@ internal fun RemapSimpleView(
     val editorFocus = remember { FocusRequester() }
     // Which group box should reclaim controller focus once the editor collapses back into it.
     var returnFocusGroup by remember { mutableStateOf<RemapSimpleGroup?>(null) }
+    val inputModeManager = LocalInputModeManager.current
+
+    // Basic-view flavor of the tap-focus-recovery below: a tap anywhere clears Compose focus
+    // (touch-mode entry); with no editor open, re-seat the controller cursor on the top-left
+    // group box (Left Trigger) so the next d-pad press navigates from a known home. Deferred
+    // + touch-gated for the same reasons as the editor's recovery.
+    var viewHadFocus by remember { mutableStateOf(false) }
+    var baseRefocusTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(baseRefocusTick) {
+        if (baseRefocusTick > 0 && inputModeManager.inputMode == InputMode.Touch &&
+            expandedGroup == null && visibleGroup == null
+        ) {
+            returnFocusGroup = RemapSimpleGroup.LEFT_SHOULDER
+        }
+    }
 
     // Drives expand / collapse / switch-to-another-group. Switching collapses the current
     // editor back to its home box before expanding the next one.
@@ -153,7 +168,15 @@ internal fun RemapSimpleView(
     }
 
     Box(
-        modifier = modifier.onGloballyPositioned { rootCoords = it; rootSize = it.size },
+        modifier = modifier
+            .onGloballyPositioned { rootCoords = it; rootSize = it.size }
+            .onFocusChanged { state ->
+                if (state.hasFocus) {
+                    viewHadFocus = true
+                } else if (viewHadFocus && expandedGroup == null) {
+                    baseRefocusTick++
+                }
+            },
     ) {
         // Flexbox-style column (React mapping: block = flex none + margin-top, strip
         // container = flex 1, centered). The inputs block keeps its NATURAL intrinsic height
@@ -317,7 +340,6 @@ internal fun RemapSimpleView(
             // closing editor doesn't fight the return-focus-to-box handoff.)
             var editorHadFocus by remember(vg) { mutableStateOf(false) }
             var refocusTick by remember(vg) { mutableIntStateOf(0) }
-            val inputModeManager = LocalInputModeManager.current
             LaunchedEffect(refocusTick) {
                 // Touch mode only: a tap is the thing that CLEARS focus wholesale. In key
                 // mode a subtree loss means focus legitimately moved elsewhere (e.g. up to

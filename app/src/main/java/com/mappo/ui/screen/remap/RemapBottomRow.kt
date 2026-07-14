@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,8 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -35,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mappo.data.model.steam.ActionSetGraph
 import com.mappo.data.model.steam.BindingMode
@@ -69,54 +71,67 @@ internal fun RemapBottomRow(
     val gyroGroup = viewingSet?.presetFor(InputSource.GYRO)?.group?.group
     val gyroModes = SourceModeCatalog.modesValidFor(InputSource.GYRO)
 
-    Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // ── Inherit ─────────────────────────────────────────────────────────
-        StripCaption("Inherit")
-        Spacer(Modifier.width(StripCaptionGap))
-        PlaceholderStripPill(
-            icon = rememberVectorPainter(Icons.Filled.AccountTree),
-            onClickLabel = "Choose set to inherit",
-            emptyHint = "Nothing to inherit yet",
-        )
-
-        Spacer(Modifier.width(StripGroupGap))
-
-        // ── Overlay ─────────────────────────────────────────────────────────
-        StripCaption("Overlay")
-        Spacer(Modifier.width(StripCaptionGap))
-        PlaceholderStripPill(
-            icon = rememberVectorPainter(Icons.Outlined.Layers),
-            onClickLabel = "Choose overlay",
-            emptyHint = "No overlays yet",
-        )
-
-        Spacer(Modifier.width(StripGroupGap))
-
-        // ── Gyro ────────────────────────────────────────────────────────────
-        StripCaption("Gyro")
-        Spacer(Modifier.width(StripCaptionGap))
-        if (gyroGroup != null && gyroModes.isNotEmpty()) {
-            ModePillDropdown(
-                source = InputSource.GYRO,
-                currentMode = gyroGroup.mode,
-                validModes = gyroModes,
-                enabled = !viewingLayerSelected && gyroModes.size > 1,
-                onPick = { mode -> onSetGyroMode(gyroGroup.id, mode) },
-                fixedWidth = RemapStripPillWidth,
-                // Lucide rotate-3d — the Material ScreenRotation glyph read oversized and
-                // off-style; identity icon lives INSIDE the pill (strip convention).
-                leadingIcon = painterResource(R.drawable.lucide_rotate_3d),
+    // One UNIFORM pill width for all three pickers on any screen: an equal share of what's
+    // left after the captions/gaps reserve, capped at the fullscreen-ideal width. Without the
+    // share math the 1:1 viewport overflowed — the fixed-width Inherit/Overlay pills read
+    // huge while Gyro (last in the row) got crushed off the edge.
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val pillWidth = ((maxWidth - StripReservedWidth) / 3)
+            .coerceAtMost(RemapStripPillWidth)
+            .coerceAtLeast(RemapPillMinWidth)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // ── Inherit ─────────────────────────────────────────────────────
+            StripCaption("Inherit")
+            Spacer(Modifier.width(StripCaptionGap))
+            // Once wired, the pill mirrors the inherited tab's icon + label; "None" wears
+            // the filled gamepad — the same icon a no-inheritance set tab carries.
+            PlaceholderStripPill(
+                icon = rememberVectorPainter(Icons.Filled.SportsEsports),
+                onClickLabel = "Choose set to inherit",
+                emptyHint = "Nothing to inherit yet",
+                width = pillWidth,
             )
-        } else {
-            Text(
-                text = "—",
-                style = remapMiniTextStyle(),
-                color = MaterialTheme.colorScheme.outline,
+
+            Spacer(Modifier.width(StripGroupGap))
+
+            // ── Overlay ─────────────────────────────────────────────────────
+            StripCaption("Overlay")
+            Spacer(Modifier.width(StripCaptionGap))
+            PlaceholderStripPill(
+                icon = rememberVectorPainter(Icons.Outlined.Layers),
+                onClickLabel = "Choose overlay",
+                emptyHint = "No overlays yet",
+                width = pillWidth,
             )
+
+            Spacer(Modifier.width(StripGroupGap))
+
+            // ── Gyro ────────────────────────────────────────────────────────
+            StripCaption("Gyro")
+            Spacer(Modifier.width(StripCaptionGap))
+            if (gyroGroup != null && gyroModes.isNotEmpty()) {
+                ModePillDropdown(
+                    source = InputSource.GYRO,
+                    currentMode = gyroGroup.mode,
+                    validModes = gyroModes,
+                    enabled = !viewingLayerSelected && gyroModes.size > 1,
+                    onPick = { mode -> onSetGyroMode(gyroGroup.id, mode) },
+                    fixedWidth = pillWidth,
+                    // Lucide rotate-3d — the Material ScreenRotation glyph read oversized and
+                    // off-style; identity icon lives INSIDE the pill (strip convention).
+                    leadingIcon = painterResource(R.drawable.lucide_rotate_3d),
+                )
+            } else {
+                Text(
+                    text = "—",
+                    style = remapMiniTextStyle(),
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
         }
     }
 }
@@ -142,12 +157,13 @@ private fun PlaceholderStripPill(
     icon: Painter,
     onClickLabel: String,
     emptyHint: String,
+    width: Dp,
 ) {
     var open by remember { mutableStateOf(false) }
     var selected by rememberSaveable { mutableStateOf("None") }
     Box {
-        // Shared box treatment — pill-style dropdown button, no trailing arrow. Static width,
-        // unified across the strip's pills.
+        // Shared box treatment — pill-style dropdown button, no trailing arrow. Uniform
+        // width across the strip's pills (computed by the caller).
         val container = remapBoxContainer()
         val interaction = remember { MutableInteractionSource() }
         Surface(
@@ -157,7 +173,7 @@ private fun PlaceholderStripPill(
             modifier = Modifier
                 .remapInteractiveScale(interaction)
                 .heightIn(min = RemapPillHeight)
-                .width(RemapStripPillWidth)
+                .width(width)
                 .clip(RoundedCornerShape(50))
                 .clickable(
                     interactionSource = interaction,
@@ -207,3 +223,8 @@ private val StripCaptionGap = 6.dp
 
 /** Gap between the strip's picker groups. Tightened from 24dp when the third picker landed. */
 private val StripGroupGap = 16.dp
+
+/** Estimated non-pill width of the strip (three caption labels + caption gaps + group gaps +
+ *  row padding) — drives where the uniform pill width starts shrinking below its fullscreen
+ *  ideal ([RemapStripPillWidth]). Tune if captions change. */
+private val StripReservedWidth = 176.dp

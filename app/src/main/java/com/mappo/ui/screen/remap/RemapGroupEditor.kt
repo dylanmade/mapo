@@ -77,6 +77,7 @@ import com.mappo.data.model.steam.displayNameFor
 import com.mappo.data.model.steam.InputSource
 import com.mappo.service.input.modes.SourceModeCatalog
 import com.mappo.ui.compact.CompactTextField
+import com.mappo.ui.component.dashedPlaceholderOutline
 import com.mappo.ui.glyph.InputGlyphs
 import com.mappo.ui.screen.activatorRenderOrder
 import com.mappo.ui.screen.displayLabel as activatorDisplayLabel
@@ -156,9 +157,23 @@ internal fun RemapGroupEditor(
     // Escape hatch for d-pad UP from the top command row. The rows' LazyColumn is a focus
     // group whose bounds contain the rows — an unresolved UP search would pick the group
     // itself as "above" and re-enter it at its first focusable (the first row's input button),
-    // trapping focus in the list. The top row instead routes UP explicitly to the header's
-    // kebab; from the header, UP reaches the set/layer tabs normally.
-    val headerFocus = remember { FocusRequester() }
+    // trapping focus in the list. The top row instead routes UP explicitly, per control (set
+    // DIRECTLY on each control's own node — an ancestor-cascaded route proved to win over
+    // per-child overrides, which is what collapsed every route to one target): input/output/
+    // label → the header's mode pill, row cog → the header kebab (directly above it), row
+    // kebab → Close. From the header, UP reaches the set/layer tabs normally.
+    val headerKebabFocus = remember { FocusRequester() }
+    val headerModePillFocus = remember { FocusRequester() }
+    val headerCloseFocus = remember { FocusRequester() }
+    val modePillFocusable = primaryGroup != null && validModes.isNotEmpty() &&
+        editable && validModes.size > 1
+    val headerCogFocusable = primaryGroup != null &&
+        SourceModeSettingsSchema.hasSettings(primarySource, primaryGroup.mode)
+    val upTargets = EditorHeaderUpTargets(
+        modePill = if (modePillFocusable) headerModePillFocus else headerKebabFocus,
+        kebab = headerKebabFocus,
+        close = headerCloseFocus,
+    )
 
     Column(modifier = modifier) {
         // ── Sticky header ─────────────────────────────────────────────────
@@ -197,6 +212,7 @@ internal fun RemapGroupEditor(
                     onPick = { mode -> callbacks.onSetBindingGroupMode(primaryGroup.id, mode) },
                     overline = true,
                     elevated = true,
+                    modifier = Modifier.focusRequester(headerModePillFocus),
                 )
             } else {
                 Text(
@@ -210,14 +226,13 @@ internal fun RemapGroupEditor(
                 icon = Icons.Filled.Settings,
                 contentDescription = "Configure $modeName",
                 onClick = { primaryGroup?.let { callbacks.onOpenModeSettings(it.id, primarySource) } },
-                enabled = primaryGroup != null &&
-                    SourceModeSettingsSchema.hasSettings(primarySource, primaryGroup.mode),
+                enabled = headerCogFocusable,
             )
             Box {
                 RowKebab(
                     onClick = { headerMore = true },
                     contentDescription = "Group options",
-                    modifier = Modifier.focusRequester(headerFocus),
+                    modifier = Modifier.focusRequester(headerKebabFocus),
                 )
                 DropdownMenu(expanded = headerMore, onDismissRequest = { headerMore = false }) {
                     RichMenuItem(
@@ -246,14 +261,18 @@ internal fun RemapGroupEditor(
                     )
                 }
             }
-            Spacer(Modifier.width(2.dp))
+            // No spacer: cog·kebab·close sit adjacent at one rhythm.
             RemapMiniIconButton(
                 icon = Icons.Filled.Close,
                 contentDescription = "Close",
                 onClick = onClose,
-                modifier = if (focusRequester != null && !focusFirstRow) {
-                    Modifier.focusRequester(focusRequester)
-                } else Modifier,
+                modifier = Modifier
+                    .focusRequester(headerCloseFocus)
+                    .then(
+                        if (focusRequester != null && !focusFirstRow) {
+                            Modifier.focusRequester(focusRequester)
+                        } else Modifier,
+                    ),
             )
         }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp))
@@ -277,7 +296,7 @@ internal fun RemapGroupEditor(
                             label = "",
                             outputLabel = BindingOutput.Unbound.displayLabel(config),
                             editable = false,
-                            upFocus = headerFocus.takeIf { spec == firstSpec },
+                            upTargets = upTargets.takeIf { spec == firstSpec },
                             onTapOutput = {
                                 callbacks.onOpenInputEditor(spec.source, spec.subInputKey, subLabel)
                             },
@@ -299,7 +318,7 @@ internal fun RemapGroupEditor(
                                 inputFocusRequester = focusRequester.takeIf {
                                     focusFirstRow && spec == firstSpec && idx == 0
                                 },
-                                upFocus = headerFocus.takeIf { spec == firstSpec && idx == 0 },
+                                upTargets = upTargets.takeIf { spec == firstSpec && idx == 0 },
                                 onTapOutput = {
                                     if (editable) callbacks.onEditCommand(binding.id, output, title)
                                     else callbacks.onOpenInputEditor(spec.source, spec.subInputKey, subLabel)
@@ -346,17 +365,23 @@ internal fun RemapGroupEditor(
             }
             if (editable) {
                 item(key = "editor-footer") {
-                    // Left-aligned on the rows' input-button column ("Import input" was cut
-                    // 2026-07-13 — profile import returns with the acquisition flow).
+                    // Centered dashed-outline action, sized like the rows' input/output
+                    // buttons ("Import input" was cut 2026-07-13 — profile import returns
+                    // with the acquisition flow).
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = EditorRowHeight)
                             .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.Start,
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        EditorPillActionButton("Add input", Icons.Filled.Add) { blankRows++ }
+                        EditorDashedActionButton(
+                            text = "Add input",
+                            icon = Icons.Filled.Add,
+                            modifier = Modifier.widthIn(min = EditorAddButtonMinWidth),
+                            dashedOutline = false,
+                        ) { blankRows++ }
                     }
                 }
             }
@@ -383,6 +408,15 @@ private fun GroupInputGraph?.commandRows(): List<Pair<Binding, ActivatorType>> =
         ?.sortedWith(activatorRenderOrder)
         ?.flatMap { ag -> ag.bindings.map { b -> b to ag.activator.type } }
         .orEmpty()
+
+/** Per-control d-pad UP destinations for the top command row: [modePill] for the input/
+ *  output/label buttons, [kebab] for the row's cog (the header kebab sits directly above it),
+ *  [close] for the row's kebab. */
+internal class EditorHeaderUpTargets(
+    val modePill: FocusRequester,
+    val kebab: FocusRequester,
+    val close: FocusRequester,
+)
 
 /** What the row's More menu offers. Null hides the kebab (a spacer keeps the grid aligned). */
 private sealed interface EditorRowMenu {
@@ -418,20 +452,20 @@ private fun EditorCommandRow(
     onCommitLabel: ((String) -> Unit)? = null,
     // Set on the FIRST row only: the editor's default controller-focus landing spot.
     inputFocusRequester: FocusRequester? = null,
-    // Set on the FIRST row only: explicit d-pad UP destination (cascades to every control in
-    // the row) — see the headerFocus comment in RemapGroupEditor.
-    upFocus: FocusRequester? = null,
+    // Set on the FIRST row only: per-control d-pad UP destinations. Each route sits DIRECTLY
+    // on its control's node — see the headerKebabFocus comment in RemapGroupEditor.
+    upTargets: EditorHeaderUpTargets? = null,
 ) {
+    fun upTo(target: (EditorHeaderUpTargets) -> FocusRequester): Modifier =
+        if (upTargets != null) Modifier.focusProperties { up = target(upTargets) } else Modifier
+
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val flexMax = maxWidth / 3
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = EditorRowHeight)
-                .padding(horizontal = 8.dp)
-                .then(
-                    if (upFocus != null) Modifier.focusProperties { up = upFocus } else Modifier,
-                ),
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -443,6 +477,7 @@ private fun EditorCommandRow(
                 onClick = {},
                 modifier = Modifier
                     .widthIn(min = EditorFlexPillMinWidth, max = flexMax)
+                    .then(upTo { it.modePill })
                     .then(
                         if (inputFocusRequester != null) Modifier.focusRequester(inputFocusRequester)
                         else Modifier,
@@ -455,13 +490,18 @@ private fun EditorCommandRow(
                 onClick = onTapOutput,
                 filled = true,
                 elevated = true,
-                modifier = Modifier.widthIn(min = EditorFlexPillMinWidth, max = flexMax),
+                modifier = Modifier
+                    .widthIn(min = EditorFlexPillMinWidth, max = flexMax)
+                    .then(upTo { it.modePill }),
             )
             LabelPillField(
                 value = label,
                 enabled = editable && onCommitLabel != null,
                 onCommit = { onCommitLabel?.invoke(it) },
-                modifier = Modifier.weight(1f).padding(start = EditorOutputLabelExtraGap),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = EditorOutputLabelExtraGap)
+                    .then(upTo { it.modePill }),
             )
             // Trailing icon buttons sit ADJACENT (no gap), matching the header's cog+kebab —
             // the nested Row opts them out of the row's 6dp rhythm.
@@ -471,21 +511,31 @@ private fun EditorCommandRow(
                     contentDescription = "Configure input",
                     onClick = onConfigure ?: {},
                     enabled = onConfigure != null,
+                    modifier = upTo { it.kebab },
                 )
-                RowKebabMenu(menu = menu, spec = spec)
+                RowKebabMenu(menu = menu, spec = spec, kebabModifier = upTo { it.close })
             }
         }
     }
 }
 
-/** The row's kebab + its dropdown, by menu flavor; null keeps the footprint as a spacer. */
+/** The row's kebab + its dropdown, by menu flavor; null keeps the footprint as a spacer.
+ *  [kebabModifier] rides on the kebab button itself (focus routing). */
 @Composable
-private fun RowKebabMenu(menu: EditorRowMenu?, spec: SimpleRowSpec?) {
+private fun RowKebabMenu(
+    menu: EditorRowMenu?,
+    spec: SimpleRowSpec?,
+    kebabModifier: Modifier = Modifier,
+) {
     when (menu) {
         null -> Spacer(Modifier.size(RemapIconButtonSize)) // kebab footprint, keeps rows aligned
         is EditorRowMenu.ClearOverride -> Box {
             var open by remember { mutableStateOf(false) }
-            RowKebab(onClick = { open = true }, contentDescription = "Override actions")
+            RowKebab(
+                onClick = { open = true },
+                contentDescription = "Override actions",
+                modifier = kebabModifier,
+            )
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 DropdownMenuItem(
                     text = { Text("Clear override") },
@@ -495,7 +545,7 @@ private fun RowKebabMenu(menu: EditorRowMenu?, spec: SimpleRowSpec?) {
         }
         is EditorRowMenu.BlankRow -> Box {
             var open by remember { mutableStateOf(false) }
-            RowKebab(onClick = { open = true })
+            RowKebab(onClick = { open = true }, modifier = kebabModifier)
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 RichMenuItem(
                     title = "Delete input",
@@ -507,7 +557,7 @@ private fun RowKebabMenu(menu: EditorRowMenu?, spec: SimpleRowSpec?) {
         }
         is EditorRowMenu.Editable -> Box {
             var open by remember { mutableStateOf(false) }
-            RowKebab(onClick = { open = true })
+            RowKebab(onClick = { open = true }, modifier = kebabModifier)
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 RichMenuItem(
                     title = "Add new input",
@@ -604,28 +654,44 @@ private fun EditorFlowArrow(modifier: Modifier = Modifier) {
     )
 }
 
-/** Footer action in the SAME pill treatment as the rows' input buttons (elevated container +
- *  bevel), with a leading icon. */
+/** Footer action at the editor's mini scale: transparent fill, centered flush icon + label.
+ *  [dashedOutline] adds the dashed hairline ring (shared [dashedPlaceholderOutline]) — the
+ *  "empty slot you can fill" look, kept as a variant; the Add-input button currently runs
+ *  outline-free (2026-07-13 trial). */
 @Composable
-private fun EditorPillActionButton(
+private fun EditorDashedActionButton(
     text: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
+    dashedOutline: Boolean = true,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = RemapElevatedContainer,
-        border = remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2),
-        modifier = Modifier
+    Box(
+        modifier = modifier
             .remapInteractiveScale(interaction)
             .heightIn(min = RemapPillHeight)
+            // Before the clip so the stroke's outer half doesn't shear off. Dashes run
+            // longer than the placeholder default — at pill scale the 3dp dashes read as
+            // stipple.
+            .then(
+                if (dashedOutline) {
+                    Modifier.dashedPlaceholderOutline(
+                        color = MaterialTheme.colorScheme.outline,
+                        cornerRadius = RemapPillHeight / 2,
+                        strokeWidth = RemapBoxStroke,
+                        dashLength = 6.dp,
+                        gapLength = 3.dp,
+                    )
+                } else Modifier,
+            )
             .clip(RoundedCornerShape(50))
             .clickable(
                 interactionSource = interaction,
                 indication = LocalIndication.current,
                 onClick = onClick,
             ),
+        contentAlignment = Alignment.Center,
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -635,12 +701,14 @@ private fun EditorPillActionButton(
                 icon,
                 contentDescription = null,
                 modifier = Modifier.size(RemapPillIconSize),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = MaterialTheme.colorScheme.primary,
             )
-            Spacer(Modifier.width(RemapGlyphLabelGap))
+            // A hair tighter than the shared glyph-label gap.
+            Spacer(Modifier.width(3.dp))
             Text(
                 text = text,
                 style = remapMiniTextStyle(),
+                color = MaterialTheme.colorScheme.primary,
                 maxLines = 1,
             )
         }
@@ -839,10 +907,11 @@ internal fun RichMenuItem(
     )
 }
 
-// Heights carry the rows' vertical breathing room (content is 24dp pills); +2dp each
-// 2026-07-13 — the rows read cramped at 36/32.
-private val EditorHeaderHeight = 38.dp
-private val EditorRowHeight = 34.dp
+// Heights carry the rows' vertical breathing room (content is 24dp pills); rows grew again
+// (34 → 38) 2026-07-13 — still read cramped, and the dashed footer needed the extra air.
+// The header keeps a 4dp lead over the rows.
+private val EditorHeaderHeight = 42.dp
+private val EditorRowHeight = 38.dp
 
 /** GOVERNING VARIABLE for the input/output buttons' width floor (they flex from here up to a
  *  third of the row). Sized for "Press" plus a glyph, so even a glyphless unassigned input
@@ -852,6 +921,10 @@ private val EditorFlexPillMinWidth = 80.dp
 /** Extra breathing room between the output button and the label field, on top of the row's
  *  6dp rhythm. */
 private val EditorOutputLabelExtraGap = 2.dp
+
+/** Width floor for the footer's dashed "Add input" button — deliberately wider than the
+ *  row pills' [EditorFlexPillMinWidth] so the empty-slot affordance reads as a slot. */
+private val EditorAddButtonMinWidth = 128.dp
 
 /** Button-glyph edge inside the input button. */
 private val EditorGlyphSize = 17.dp

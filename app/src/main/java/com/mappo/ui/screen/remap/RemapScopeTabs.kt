@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -100,7 +101,18 @@ private fun ScopeTabs(
     val tabs = remember(config) {
         buildList {
             sets.forEach { setGraph ->
-                add(TabBarItem(key = SET_PREFIX + setGraph.actionSet.id, label = setGraph.actionSet.title))
+                add(
+                    TabBarItem(
+                        key = SET_PREFIX + setGraph.actionSet.id,
+                        label = setGraph.actionSet.title,
+                        // Filled gamepad = a set with NO inheritance; when the Inherit
+                        // feature wires up, inheriting sets switch to the OUTLINED gamepad
+                        // (Icons.Outlined.SportsEsports) and the strip's Inherit pill mirrors
+                        // the inherited tab's icon + label. No inheritance exists in the data
+                        // model yet, so every set reads filled today.
+                        leadingIcon = Icons.Filled.SportsEsports,
+                    ),
+                )
                 setGraph.layers.forEach { layerGraph ->
                     add(
                         TabBarItem(

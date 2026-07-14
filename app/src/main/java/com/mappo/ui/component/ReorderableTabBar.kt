@@ -402,13 +402,19 @@ private fun TabSurface(
             Spacer(Modifier.width(if (dense) 5.dp else 6.dp))
         }
         // Tab labels are user-typed names (keyboards, action sets, layers) — cap + ellipsize.
+        // Dense (remap top bar) uses the OVERLINE treatment (uppercase, tracked out) matching
+        // the group editor's header labels — 2026-07-13 styling trial.
         val base = if (dense) {
-            MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, lineHeight = 14.sp)
+            MaterialTheme.typography.labelSmall.copy(
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                letterSpacing = 0.9.sp,
+            )
         } else {
             MaterialTheme.typography.labelMedium
         }
         NameableText(
-            text = label,
+            text = if (dense) label.uppercase() else label,
             style = if (selected && !dimmed) base else base.copy(fontWeight = FontWeight.Normal),
             color = labelColor,
         )

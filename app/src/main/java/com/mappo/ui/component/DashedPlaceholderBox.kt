@@ -19,8 +19,8 @@ import androidx.compose.ui.unit.dp
  * and animate the element back to it on release/close.
  *
  * Generalized from the remap screen's group-box placeholder (retired 2026-07-12: the expanded
- * editor grew to cover the whole band, so the dashes were never visible there). Currently
- * unused — kept as a shared component for the next surface that needs the pattern.
+ * editor grew to cover the whole band, so the dashes were never visible there). Also worn by
+ * the group editor's dashed "Add input" button (2026-07-13) — the empty-slot affordance.
  */
 fun Modifier.dashedPlaceholderOutline(
     color: Color,

@@ -191,8 +191,8 @@ class RemapControlsScreenTest {
         }
 
         // Every set renders as a top-bar tab; tapping one selects it.
-        composeRule.onNodeWithText("Menu", useUnmergedTree = true).assertExists()
-        composeRule.onNodeWithText("Menu", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Menu", ignoreCase = true, useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("Menu", ignoreCase = true, useUnmergedTree = true).performClick()
         composeRule.waitForIdle()
 
         assert(selectedSetId == 2L) {
@@ -324,8 +324,8 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Scope", useUnmergedTree = true).assertExists()
-        composeRule.onNodeWithText("Vehicle", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("Scope", ignoreCase = true, useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("Vehicle", ignoreCase = true, useUnmergedTree = true).assertExists()
     }
 
     @Test
@@ -349,7 +349,7 @@ class RemapControlsScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Vehicle", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Vehicle", ignoreCase = true, useUnmergedTree = true).performClick()
         composeRule.waitForIdle()
 
         assert(selectedLayerId == 11L) {
@@ -409,8 +409,8 @@ class RemapControlsScreenTest {
 
         // The tab bar is a global switcher: every set's layers are listed, not just the
         // viewing set's (unlike the old per-set pill row).
-        composeRule.onNodeWithText("ScopeA", useUnmergedTree = true).assertExists()
-        composeRule.onNodeWithText("ScopeB", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("ScopeA", ignoreCase = true, useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("ScopeB", ignoreCase = true, useUnmergedTree = true).assertExists()
     }
 
     // ── Overlay editing mode (Brick 5.5.c) ────────────────────────────────────

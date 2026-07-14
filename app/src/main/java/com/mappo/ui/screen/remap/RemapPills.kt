@@ -329,6 +329,7 @@ internal fun ModePillDropdown(
     elevated: Boolean = false,
     fixedWidth: Dp? = null,
     leadingIcon: androidx.compose.ui.graphics.painter.Painter? = null,
+    modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
     val container = if (elevated) RemapElevatedContainer else remapBoxContainer()
@@ -339,7 +340,7 @@ internal fun ModePillDropdown(
             shape = RoundedCornerShape(50),
             color = container,
             border = remapBevelBorder(container, RemapPillHeight / 2),
-            modifier = Modifier
+            modifier = modifier
                 .remapInteractiveScale(interaction)
                 .heightIn(min = RemapPillHeight)
                 .then(

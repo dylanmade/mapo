@@ -171,7 +171,7 @@ private fun PlaceholderStripPill(
             color = container,
             border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = Modifier
-                .remapInteractiveScale(interaction)
+                .remapInteractiveLift(interaction)
                 .heightIn(min = RemapPillHeight)
                 .width(width)
                 .clip(RoundedCornerShape(50))

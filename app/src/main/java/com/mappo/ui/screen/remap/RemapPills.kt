@@ -1,6 +1,6 @@
 package com.mappo.ui.screen.remap
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
@@ -207,37 +207,42 @@ internal val RemapIconButtonSize = 24.dp
 internal val RemapIconButtonIconSize = 16.dp
 
 /**
- * Interaction scale for the remap screen's interactive elements: subtle grow on controller
- * focus (matching the home flower petals' selected scale), a quick dip while pressed (release
- * springs it back — the down-then-up tap beat). Pass the SAME [interactionSource] to the
- * element's `clickable` so key-clicks and touch presses both register. Draw-phase only
- * ([graphicsLayer]), so layout bounds (and the morph-origin rects measured from them) never
- * move. Chain it BEFORE the element's border/background so the whole control scales as one.
+ * Interaction lift for the remap screen's interactive elements: a subtle upward translation
+ * on controller focus / hover (the element "rises" toward the user — an elevation read,
+ * replacing the 1.05× grow which read kitschy, 2026-07-14), and a press that drops it back
+ * through resting to a hair below (release springs it up — the physical press-and-release
+ * beat on ONE motion axis; the old scale dip was retired with the grow so nothing ever
+ * scales). Pass the SAME [interactionSource] to the element's `clickable` so key-clicks and
+ * touch presses both register. Draw-phase only ([graphicsLayer]), so layout bounds (and the
+ * morph-origin rects measured from them) never move. Chain it BEFORE the element's
+ * border/background so the whole control moves as one.
  */
 @Composable
-internal fun Modifier.remapInteractiveScale(interactionSource: InteractionSource): Modifier {
+internal fun Modifier.remapInteractiveLift(interactionSource: InteractionSource): Modifier {
     var focused by remember { mutableStateOf(false) }
     val pressed by interactionSource.collectIsPressedAsState()
-    // The press dip is a FRACTION of the element's current resting size, not an absolute
-    // target — dipping a focused (1.05×) element straight to an absolute 0.93 read as a
-    // violent double-jump.
-    val base = if (focused) RemapFocusedScale else 1f
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) base * RemapPressedFraction else base,
-        // The press dip lands faster than the focus grow — a tap should feel immediate.
+    val offset by animateDpAsState(
+        targetValue = when {
+            // Pressing drives BELOW rest even from the lifted position — full travel makes
+            // the press legible; an unfocused touch press still gets the small dip.
+            pressed -> RemapPressDip
+            focused -> -RemapFocusLift
+            else -> 0.dp
+        },
+        // The press lands faster than the focus lift — a tap should feel immediate.
         animationSpec = tween(if (pressed) 90 else 150),
-        label = "remapInteractiveScale",
+        label = "remapInteractiveLift",
     )
     return this
         .onFocusChanged { focused = it.isFocused }
-        .graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-        }
+        .graphicsLayer { translationY = offset.toPx() }
 }
 
-private const val RemapFocusedScale = 1.05f
-private const val RemapPressedFraction = 0.93f
+/** How far focus/hover raises an element. */
+private val RemapFocusLift = 2.dp
+
+/** How far below REST a press sinks (from focus that's FocusLift+PressDip of travel). */
+private val RemapPressDip = 0.dp
 
 /**
  * A hand-rolled miniature pill button, in the shared box treatment. [filled] (the
@@ -263,7 +268,7 @@ internal fun RemapMiniPillButton(
         color = container,
         border = remapBevelBorder(container, RemapPillHeight / 2),
         modifier = modifier
-            .remapInteractiveScale(interaction)
+            .remapInteractiveLift(interaction)
             .height(RemapPillHeight)
             .then(
                 if (enabled) {
@@ -299,7 +304,7 @@ internal fun RemapMiniIconButton(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
-            .remapInteractiveScale(interaction)
+            .remapInteractiveLift(interaction)
             .size(RemapIconButtonSize)
             .clip(CircleShape)
             .then(
@@ -360,7 +365,7 @@ internal fun ModePillDropdown(
             color = container,
             border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = modifier
-                .remapInteractiveScale(interaction)
+                .remapInteractiveLift(interaction)
                 .heightIn(min = RemapPillHeight)
                 .then(
                     if (fixedWidth != null) Modifier.width(fixedWidth)

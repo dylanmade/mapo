@@ -676,12 +676,13 @@ private fun GroupBox(
             // the same fixed-width card.
             modifier = Modifier
                 .fillMaxWidth()
-                // Bounds capture must sit OUTSIDE the scale layer: localBoundingBoxOf maps
-                // through graphicsLayer transforms, so capturing inside it baked the 1.05×
-                // focus grow into the placeholder/morph-origin rect — the stand-in came out
-                // oversized and the neighboring boxes jumped during the morph.
+                // Bounds capture must sit OUTSIDE the lift layer: localBoundingBoxOf maps
+                // through graphicsLayer transforms, so capturing inside it would bake the
+                // focus offset (historically the 1.05× focus grow) into the placeholder/
+                // morph-origin rect — the stand-in came out displaced/oversized and the
+                // neighboring boxes jumped during the morph.
                 .onGloballyPositioned(onPositioned)
-                .remapInteractiveScale(interaction)
+                .remapInteractiveLift(interaction)
                 .clip(shape)
                 .background(container)
                 .border(remapBevelBorder(container, GroupCorner), shape)

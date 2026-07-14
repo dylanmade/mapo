@@ -179,14 +179,15 @@ fun ReorderableTabBar(
                 }
 
                 // Controller focus: tabs are otherwise pure pointerInput (never focusable), so
-                // d-pad navigation skipped the bar entirely. Focus grows the tab slightly (the
-                // remap screen's interaction-scale convention) and confirm keys select. Gamepad
-                // A arrives as either ButtonA or the platform's DPAD_CENTER fallback.
+                // d-pad navigation skipped the bar entirely. Focus lifts the tab slightly out
+                // of its slot (the remap screen's interaction-lift convention — replaced the
+                // 1.05× grow, 2026-07-14) and confirm keys select. Gamepad A arrives as either
+                // ButtonA or the platform's DPAD_CENTER fallback.
                 var focused by remember { mutableStateOf(false) }
-                val focusScale by androidx.compose.animation.core.animateFloatAsState(
-                    targetValue = if (focused) 1.05f else 1f,
+                val focusLift by androidx.compose.animation.core.animateDpAsState(
+                    targetValue = if (focused) 2.dp else 0.dp,
                     animationSpec = tween(150),
-                    label = "tabFocusScale",
+                    label = "tabFocusLift",
                 )
 
                 // OUTER box: natural layout slot. Hosts pointerInput + bounds capture. Crucially
@@ -313,8 +314,7 @@ fun ReorderableTabBar(
                                     draggingKey == null -> 0f
                                     else -> displacement.value
                                 }
-                                scaleX = focusScale
-                                scaleY = focusScale
+                                translationY = -focusLift.toPx()
                             },
                     ) {
                         TabSurface(

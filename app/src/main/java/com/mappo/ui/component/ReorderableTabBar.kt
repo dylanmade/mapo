@@ -87,6 +87,20 @@ data class TabBarItem(
 )
 
 /**
+ * Controller-focus feedback motion for the bar's tabs (the tab-bar cousin of the remap
+ * screen's `RemapInteractionMotion`; tabs carry only the focus half — they select on
+ * touch-down, so there is no press state to animate).
+ */
+enum class TabFocusMotion {
+    /** Grow [TabFocusScale]× in place — the default: tabs sit flush in a slot against the
+     *  bar's divider, where rising out of it reads worse than a small swell. */
+    Scale,
+
+    /** Rise [TabFocusLift] out of the slot — matches the remap controls' Lift buttons. */
+    Lift,
+}
+
+/**
  * The shared tab bar behavior extracted from the original virtual-keyboard tab UI
  * (`KeyboardTabBar`) so the Remap Controls action-set/layer tabs get the same fully-fleshed
  * gesture model. Combined gesture detector per tab:
@@ -119,6 +133,7 @@ fun ReorderableTabBar(
     // Dense = sub-Material metrics (smaller type/icons/padding) for compressed hosts like the
     // Remap Controls top bar.
     dense: Boolean = false,
+    focusMotion: TabFocusMotion = TabFocusMotion.Scale,
     menuContent: @Composable ColumnScope.(tab: TabBarItem) -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
@@ -179,15 +194,14 @@ fun ReorderableTabBar(
                 }
 
                 // Controller focus: tabs are otherwise pure pointerInput (never focusable), so
-                // d-pad navigation skipped the bar entirely. Focus lifts the tab slightly out
-                // of its slot (the remap screen's interaction-lift convention — replaced the
-                // 1.05× grow, 2026-07-14) and confirm keys select. Gamepad A arrives as either
-                // ButtonA or the platform's DPAD_CENTER fallback.
+                // d-pad navigation skipped the bar entirely. Focus animates the tab per
+                // [focusMotion] and confirm keys select. Gamepad A arrives as either ButtonA
+                // or the platform's DPAD_CENTER fallback.
                 var focused by remember { mutableStateOf(false) }
-                val focusLift by androidx.compose.animation.core.animateDpAsState(
-                    targetValue = if (focused) 2.dp else 0.dp,
+                val focusProgress by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (focused) 1f else 0f,
                     animationSpec = tween(150),
-                    label = "tabFocusLift",
+                    label = "tabFocus",
                 )
 
                 // OUTER box: natural layout slot. Hosts pointerInput + bounds capture. Crucially
@@ -314,7 +328,15 @@ fun ReorderableTabBar(
                                     draggingKey == null -> 0f
                                     else -> displacement.value
                                 }
-                                translationY = -focusLift.toPx()
+                                when (focusMotion) {
+                                    TabFocusMotion.Scale -> {
+                                        val scale = 1f + (TabFocusScale - 1f) * focusProgress
+                                        scaleX = scale
+                                        scaleY = scale
+                                    }
+                                    TabFocusMotion.Lift ->
+                                        translationY = -TabFocusLift.toPx() * focusProgress
+                                }
                             },
                     ) {
                         TabSurface(
@@ -444,3 +466,9 @@ private fun computeTargetIndex(
 
 private val DefaultTabHeight = 40.dp
 private const val CHEVRON_SCROLL_PX = 240f
+
+/** Focus grow for [TabFocusMotion.Scale] — matches the remap chrome's retired-default scale. */
+internal const val TabFocusScale = 1.05f
+
+/** Focus rise for [TabFocusMotion.Lift] — matches the remap chrome's `RemapFocusLift`. */
+internal val TabFocusLift = 2.dp

@@ -611,7 +611,7 @@ private fun InputPillButton(
         color = RemapElevatedContainer,
         border = remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2),
         modifier = modifier
-            .remapInteractiveLift(interaction)
+            .remapInteractiveMotion(interaction)
             .heightIn(min = RemapPillHeight)
             .then(
                 if (enabled) {
@@ -669,7 +669,7 @@ private fun EditorDashedActionButton(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
-            .remapInteractiveLift(interaction)
+            .remapInteractiveMotion(interaction)
             .heightIn(min = RemapPillHeight)
             // Before the clip so the stroke's outer half doesn't shear off. Dashes run
             // longer than the placeholder default — at pill scale the 3dp dashes read as
@@ -752,7 +752,7 @@ private fun LabelPillField(
         shape = RoundedCornerShape(50),
         color = remapInputFieldContainer(),
         modifier = modifier
-            .remapInteractiveLift(interaction)
+            .remapInteractiveMotion(interaction)
             .height(RemapPillHeight)
             .then(
                 if (enabled) {

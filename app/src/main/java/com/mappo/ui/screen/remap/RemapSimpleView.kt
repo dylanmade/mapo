@@ -682,7 +682,7 @@ private fun GroupBox(
                 // morph-origin rect — the stand-in came out displaced/oversized and the
                 // neighboring boxes jumped during the morph.
                 .onGloballyPositioned(onPositioned)
-                .remapInteractiveLift(interaction)
+                .remapInteractiveMotion(interaction)
                 .clip(shape)
                 .background(container)
                 .border(remapBevelBorder(container, GroupCorner), shape)

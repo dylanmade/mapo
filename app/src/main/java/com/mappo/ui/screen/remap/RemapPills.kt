@@ -33,9 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -43,7 +41,6 @@ import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -140,25 +137,11 @@ internal fun remapBevelBorder(base: Color, cornerRadius: Dp): BorderStroke {
     )
 }
 
-/**
- * Draws [border] as an OUTER stroke — sitting entirely outside the component's bounds (CSS
- * `outline` semantics) instead of Compose's default inner stroke, which ate into the fill and
- * read as an inset ring against the hover/press states. Draw-phase only, zero layout footprint;
- * apply it BEFORE any `clip` in the chain or the overhang gets clipped off (Rows/Columns
- * themselves don't clip children).
- */
-internal fun Modifier.remapOuterBorder(border: BorderStroke, cornerRadius: Dp): Modifier =
-    drawBehind {
-        val strokePx = border.width.toPx()
-        val inflate = strokePx / 2f
-        drawRoundRect(
-            brush = border.brush,
-            topLeft = Offset(-inflate, -inflate),
-            size = Size(size.width + strokePx, size.height + strokePx),
-            cornerRadius = CornerRadius(cornerRadius.toPx() + inflate),
-            style = Stroke(width = strokePx),
-        )
-    }
+// NB: strokes are INNER (Surface `border=` / `Modifier.border`) by deliberate reversion
+// (2026-07-13). An outer-stroke experiment (CSS-outline semantics via drawBehind) was tried
+// and backed out: everything stateful in Compose — hover/press/focus layers, disabled alpha,
+// Surface clipping — operates WITHIN bounds, so outside chrome needed custom parallel handling
+// for every state and made borderless fields read smaller than their bordered siblings.
 
 private class BevelBrush(
     private val highlight: Color,
@@ -252,10 +235,10 @@ internal fun RemapMiniPillButton(
     Surface(
         shape = RoundedCornerShape(50),
         color = container,
+        border = remapBevelBorder(container, RemapPillHeight / 2),
         modifier = modifier
             .remapFocusScale()
             .height(RemapPillHeight)
-            .remapOuterBorder(remapBevelBorder(container, RemapPillHeight / 2), RemapPillHeight / 2)
             .then(
                 if (enabled) Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick)
                 else Modifier.alpha(0.55f),
@@ -321,6 +304,7 @@ internal fun ModePillDropdown(
         Surface(
             shape = RoundedCornerShape(50),
             color = container,
+            border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = Modifier
                 .remapFocusScale()
                 .heightIn(min = RemapPillHeight)
@@ -328,7 +312,6 @@ internal fun ModePillDropdown(
                     if (fixedWidth != null) Modifier.width(fixedWidth)
                     else Modifier.widthIn(min = RemapPillMinWidth),
                 )
-                .remapOuterBorder(remapBevelBorder(container, RemapPillHeight / 2), RemapPillHeight / 2)
                 .then(
                     if (enabled) {
                         Modifier.clip(RoundedCornerShape(50))

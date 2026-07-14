@@ -124,11 +124,11 @@ private fun OverlayPillDropdown() {
         Surface(
             shape = RoundedCornerShape(50),
             color = container,
+            border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = Modifier
                 .remapFocusScale()
                 .heightIn(min = RemapPillHeight)
                 .width(RemapStripPillWidth)
-                .remapOuterBorder(remapBevelBorder(container, RemapPillHeight / 2), RemapPillHeight / 2)
                 .clip(RoundedCornerShape(50))
                 .clickable(onClickLabel = "Choose overlay") { open = true },
         ) {

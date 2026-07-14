@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
@@ -313,10 +314,9 @@ internal fun RemapSimpleView(
                             }
                         }
                         .softDropShadow(cornerRadius = GroupCorner)
-                        // Outer stroke — before the clip, or the overhang gets clipped off.
-                        .remapOuterBorder(remapBevelBorder(container, GroupCorner), GroupCorner)
                         .clip(shape)
                         .background(container)
+                        .border(remapBevelBorder(container, GroupCorner), shape)
                         .testTag("group-editor"),
                 ) {
                     // Crossfade: the box's summary rows dissolve into the editor as it grows.
@@ -619,10 +619,9 @@ private fun GroupBox(
                 .remapFocusScale()
                 .fillMaxWidth()
                 .onGloballyPositioned(onPositioned)
-                // Outer stroke — before the clip, or the overhang gets clipped off.
-                .remapOuterBorder(remapBevelBorder(container, GroupCorner), GroupCorner)
                 .clip(shape)
                 .background(container)
+                .border(remapBevelBorder(container, GroupCorner), shape)
                 .focusRequester(focusRequester)
                 .clickable { onOpenGroup(group) }
                 .testTag("simple-group:${group.name}")

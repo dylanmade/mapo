@@ -147,7 +147,9 @@ internal fun RemapGroupEditor(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = EditorHeaderHeight)
-                .padding(start = 8.dp, end = 4.dp),
+                // Same horizontal inset as the command rows — the header's chrome must sit
+                // flush with the rows' columns.
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Non-interactive group identity: hardware glyph + overline label. The Kenney
@@ -418,72 +420,82 @@ private fun EditorCommandRow(
                 value = label,
                 enabled = editable && onCommitLabel != null,
                 onCommit = { onCommitLabel?.invoke(it) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).padding(start = EditorOutputLabelExtraGap),
             )
-            RemapMiniIconButton(
-                icon = Icons.Filled.Settings,
-                contentDescription = "Configure input",
-                onClick = onConfigure ?: {},
-                enabled = onConfigure != null,
-            )
-            when (menu) {
-                null -> Spacer(Modifier.size(RemapIconButtonSize)) // kebab footprint, keeps rows aligned
-                is EditorRowMenu.ClearOverride -> Box {
-                    var open by remember { mutableStateOf(false) }
-                    RowKebab(onClick = { open = true }, contentDescription = "Override actions")
-                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Clear override") },
-                            onClick = { open = false; menu.onClear() },
-                        )
-                    }
-                }
-                is EditorRowMenu.BlankRow -> Box {
-                    var open by remember { mutableStateOf(false) }
-                    RowKebab(onClick = { open = true })
-                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                        RichMenuItem(
-                            title = "Delete input",
-                            helper = "Remove this input row.",
-                            icon = Icons.Filled.Delete,
-                            onClick = { open = false; menu.onDelete() },
-                        )
-                    }
-                }
-                is EditorRowMenu.Editable -> Box {
-                    var open by remember { mutableStateOf(false) }
-                    RowKebab(onClick = { open = true })
-                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                        RichMenuItem(
-                            title = "Add new input",
-                            helper = "Bind another command to this input.",
-                            icon = Icons.Filled.Add,
-                            titleContent = { GlyphMenuTitle("Add new", spec) },
-                            onClick = { open = false; menu.onAdd() },
-                        )
-                        RichMenuItem(
-                            title = "Duplicate input",
-                            helper = "Copy this command and its settings.",
-                            icon = Icons.Filled.ContentCopy,
-                            titleContent = { GlyphMenuTitle("Duplicate", spec) },
-                            onClick = { open = false; menu.onDuplicate() },
-                        )
-                        RichMenuItem(
-                            title = "Reset input",
-                            helper = "Back to a default Press of this input.",
-                            icon = Icons.Filled.RestartAlt,
-                            titleContent = { GlyphMenuTitle("Reset", spec) },
-                            onClick = { open = false; menu.onReset() },
-                        )
-                        RichMenuItem(
-                            title = "Delete input",
-                            helper = "Remove this row — even the last one, to null the button.",
-                            icon = Icons.Filled.Delete,
-                            titleContent = { GlyphMenuTitle("Delete", spec) },
-                            onClick = { open = false; menu.onDelete() },
-                        )
-                    }
-                }
+            // Trailing icon buttons sit ADJACENT (no gap), matching the header's cog+kebab —
+            // the nested Row opts them out of the row's 6dp rhythm.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RemapMiniIconButton(
+                    icon = Icons.Filled.Settings,
+                    contentDescription = "Configure input",
+                    onClick = onConfigure ?: {},
+                    enabled = onConfigure != null,
+                )
+                RowKebabMenu(menu = menu, spec = spec)
+            }
+        }
+    }
+}
+
+/** The row's kebab + its dropdown, by menu flavor; null keeps the footprint as a spacer. */
+@Composable
+private fun RowKebabMenu(menu: EditorRowMenu?, spec: SimpleRowSpec?) {
+    when (menu) {
+        null -> Spacer(Modifier.size(RemapIconButtonSize)) // kebab footprint, keeps rows aligned
+        is EditorRowMenu.ClearOverride -> Box {
+            var open by remember { mutableStateOf(false) }
+            RowKebab(onClick = { open = true }, contentDescription = "Override actions")
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                DropdownMenuItem(
+                    text = { Text("Clear override") },
+                    onClick = { open = false; menu.onClear() },
+                )
+            }
+        }
+        is EditorRowMenu.BlankRow -> Box {
+            var open by remember { mutableStateOf(false) }
+            RowKebab(onClick = { open = true })
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                RichMenuItem(
+                    title = "Delete input",
+                    helper = "Remove this input row.",
+                    icon = Icons.Filled.Delete,
+                    onClick = { open = false; menu.onDelete() },
+                )
+            }
+        }
+        is EditorRowMenu.Editable -> Box {
+            var open by remember { mutableStateOf(false) }
+            RowKebab(onClick = { open = true })
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                RichMenuItem(
+                    title = "Add new input",
+                    helper = "Bind another command to this input.",
+                    icon = Icons.Filled.Add,
+                    titleContent = { GlyphMenuTitle("Add new", spec) },
+                    onClick = { open = false; menu.onAdd() },
+                )
+                RichMenuItem(
+                    title = "Duplicate input",
+                    helper = "Copy this command and its settings.",
+                    icon = Icons.Filled.ContentCopy,
+                    titleContent = { GlyphMenuTitle("Duplicate", spec) },
+                    onClick = { open = false; menu.onDuplicate() },
+                )
+                RichMenuItem(
+                    title = "Reset input",
+                    helper = "Back to a default Press of this input.",
+                    icon = Icons.Filled.RestartAlt,
+                    titleContent = { GlyphMenuTitle("Reset", spec) },
+                    onClick = { open = false; menu.onReset() },
+                )
+                RichMenuItem(
+                    title = "Delete input",
+                    helper = "Remove this row — even the last one, to null the button.",
+                    icon = Icons.Filled.Delete,
+                    titleContent = { GlyphMenuTitle("Delete", spec) },
+                    onClick = { open = false; menu.onDelete() },
+                )
             }
         }
     }
@@ -505,10 +517,10 @@ private fun InputPillButton(
     Surface(
         shape = RoundedCornerShape(50),
         color = RemapElevatedContainer,
+        border = remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2),
         modifier = modifier
             .remapFocusScale()
             .heightIn(min = RemapPillHeight)
-            .remapOuterBorder(remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2), RemapPillHeight / 2)
             .then(
                 if (enabled) {
                     Modifier.clip(RoundedCornerShape(50))
@@ -767,9 +779,14 @@ internal fun RichMenuItem(
 private val EditorHeaderHeight = 38.dp
 private val EditorRowHeight = 34.dp
 
-/** Shared width floor for the flexing input/output buttons — roughly "Press" plus a glyph, so
- *  even a glyphless unassigned input keeps the full footprint. */
-private val EditorFlexPillMinWidth = 68.dp
+/** GOVERNING VARIABLE for the input/output buttons' width floor (they flex from here up to a
+ *  third of the row). Sized for "Press" plus a glyph, so even a glyphless unassigned input
+ *  keeps the full footprint. */
+private val EditorFlexPillMinWidth = 80.dp
+
+/** Extra breathing room between the output button and the label field, on top of the row's
+ *  6dp rhythm. */
+private val EditorOutputLabelExtraGap = 2.dp
 
 /** Button-glyph edge inside the input button. */
 private val EditorGlyphSize = 17.dp

@@ -184,7 +184,12 @@ private fun PlaceholderStripPill(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(horizontal = RemapPillContentPadding),
+                // Icon-side bias: the centered block otherwise reads shifted right by the
+                // leading icon's live-area padding — see [RemapPillIconSideBias].
+                modifier = Modifier.padding(
+                    start = RemapPillContentPadding - RemapPillIconSideBias / 2,
+                    end = RemapPillContentPadding + RemapPillIconSideBias / 2,
+                ),
             ) {
                 Icon(
                     icon,

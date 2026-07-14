@@ -190,6 +190,16 @@ internal val RemapPillContentPadding = 10.dp
 /** Gap between a leading glyph and its label (pills, headers, strip captions). */
 internal val RemapGlyphLabelGap = 5.dp
 
+/** Optical-centering bias for the FIXED-WIDTH, center-arranged strip pills (Inherit / Overlay /
+ *  Gyro): total extra END padding vs START, shifting the icon+label block bias/2 toward the
+ *  icon. Cancels the leading icon's built-in live-area padding — Material/Lucide glyphs only
+ *  ink ~10-11dp of their 13dp box, so with symmetric padding the left flank measures ~2dp
+ *  wider than the right (device screenshot audit, 2026-07-13). Wrap-width pills don't need
+ *  this: their flanks are pure padding with no centering slack to compare. M3 precedent for
+ *  biasing padding toward the icon side: ButtonDefaults.ButtonWithIconContentPadding
+ *  (16dp icon side vs 24dp text side). NOT glyph scaling — layout-only, tune freely. */
+internal val RemapPillIconSideBias = 2.dp
+
 /** Outer tap-target edge of [RemapMiniIconButton] (also its footprint spacer in editor rows). */
 internal val RemapIconButtonSize = 24.dp
 
@@ -334,6 +344,15 @@ internal fun ModePillDropdown(
     var open by remember { mutableStateOf(false) }
     val container = if (elevated) RemapElevatedContainer else remapBoxContainer()
     val interaction = remember { MutableInteractionSource() }
+    // "None" shows bare on the pill — an absence carries no concept glyph there. (The menu
+    // ITEM keeps its glyph; in a list, the icon column reads as part of the option, not as a
+    // claim about current state.) A fixed [leadingIcon] overrides both rules: it's the
+    // element's identity, not the mode's.
+    val pillIcon = leadingIcon
+        ?: if (currentMode != BindingMode.NONE) InputGlyphs.modePainter(currentMode) else null
+    // Fixed-width pills center their content, which exposes the icon's live-area padding as a
+    // visibly wider left flank — bias the block toward the icon ([RemapPillIconSideBias]).
+    val iconBias = if (fixedWidth != null && pillIcon != null) RemapPillIconSideBias else 0.dp
     Box {
         // Shared box treatment — pill-style dropdown button, no trailing arrow.
         Surface(
@@ -360,14 +379,11 @@ internal fun ModePillDropdown(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(horizontal = RemapPillContentPadding),
+                modifier = Modifier.padding(
+                    start = RemapPillContentPadding - iconBias / 2,
+                    end = RemapPillContentPadding + iconBias / 2,
+                ),
             ) {
-                // "None" shows bare on the pill — an absence carries no concept glyph there.
-                // (The menu ITEM keeps its glyph; in a list, the icon column reads as part of
-                // the option, not as a claim about current state.) A fixed [leadingIcon]
-                // overrides both rules: it's the element's identity, not the mode's.
-                val pillIcon = leadingIcon
-                    ?: if (currentMode != BindingMode.NONE) InputGlyphs.modePainter(currentMode) else null
                 if (pillIcon != null) {
                     Icon(
                         pillIcon,

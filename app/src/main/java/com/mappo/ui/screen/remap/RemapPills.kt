@@ -209,10 +209,10 @@ internal val RemapIconButtonIconSize = 16.dp
 /**
  * Interaction lift for the remap screen's interactive elements: a subtle upward translation
  * on controller focus / hover (the element "rises" toward the user — an elevation read,
- * replacing the 1.05× grow which read kitschy, 2026-07-14), and a press that drops it back
- * through resting to a hair below (release springs it up — the physical press-and-release
- * beat on ONE motion axis; the old scale dip was retired with the grow so nothing ever
- * scales). Pass the SAME [interactionSource] to the element's `clickable` so key-clicks and
+ * replacing the 1.05× grow which read kitschy, 2026-07-14), and a press that displaces it a
+ * fixed distance down from wherever it currently rests (release springs it back — the
+ * physical press-and-release beat on ONE motion axis; the old scale dip was retired with the
+ * grow so nothing ever scales). Pass the SAME [interactionSource] to the element's `clickable` so key-clicks and
  * touch presses both register. Draw-phase only ([graphicsLayer]), so layout bounds (and the
  * morph-origin rects measured from them) never move. Chain it BEFORE the element's
  * border/background so the whole control moves as one.
@@ -221,14 +221,13 @@ internal val RemapIconButtonIconSize = 16.dp
 internal fun Modifier.remapInteractiveLift(interactionSource: InteractionSource): Modifier {
     var focused by remember { mutableStateOf(false) }
     val pressed by interactionSource.collectIsPressedAsState()
+    // The press travel is RELATIVE to the element's current resting position, not an
+    // absolute target — same lesson as the retired scale dip: driving a focused (lifted)
+    // element to a fixed below-rest depth made focus presses feel far more intense than
+    // unfocused ones. Travel is identical in every state.
+    val base = if (focused) -RemapFocusLift else 0.dp
     val offset by animateDpAsState(
-        targetValue = when {
-            // Pressing drives BELOW rest even from the lifted position — full travel makes
-            // the press legible; an unfocused touch press still gets the small dip.
-            pressed -> RemapPressDip
-            focused -> -RemapFocusLift
-            else -> 0.dp
-        },
+        targetValue = if (pressed) base + RemapPressTravel else base,
         // The press lands faster than the focus lift — a tap should feel immediate.
         animationSpec = tween(if (pressed) 90 else 150),
         label = "remapInteractiveLift",
@@ -241,8 +240,9 @@ internal fun Modifier.remapInteractiveLift(interactionSource: InteractionSource)
 /** How far focus/hover raises an element. */
 private val RemapFocusLift = 2.dp
 
-/** How far below REST a press sinks (from focus that's FocusLift+PressDip of travel). */
-private val RemapPressDip = 0.dp
+/** How far a press displaces an element DOWN from wherever it currently rests (focused:
+ *  lift → back to base; unfocused: base → below it) — always the same travel. */
+private val RemapPressTravel = 2.dp
 
 /**
  * A hand-rolled miniature pill button, in the shared box treatment. [filled] (the

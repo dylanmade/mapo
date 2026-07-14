@@ -4,10 +4,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,17 +46,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.lerp
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -139,8 +145,9 @@ internal fun RemapSimpleView(
 
     BackHandler(enabled = expandedGroup != null) { expandedGroup = null }
 
-    // Move controller focus onto the editor's Close button as it opens (see editorFocus
-    // above) — from there the d-pad walks the header controls and rows directly.
+    // Move controller focus into the editor as it opens (see editorFocus above) — it lands on
+    // the first command row's input button (Close when that isn't focusable), and the d-pad
+    // walks the rows and header controls from there.
     LaunchedEffect(visibleGroup) {
         if (visibleGroup != null) runCatching { editorFocus.requestFocus() }
     }
@@ -298,7 +305,38 @@ internal fun RemapSimpleView(
             // TopStart-anchored overlay layer: the panel is placed at absolute root coords.
             // (Placing it straight in the center-aligned root Box offset the rect from the
             // CENTER slot — every morph appeared to launch from the bottom-right.)
-            Box(Modifier.matchParentSize()) {
+            //
+            // Focus recovery: any TAP flips the window into touch mode, which CLEARS Compose
+            // focus — after that, d-pad navigation inside the editor was dead until it was
+            // reopened. When the editor subtree loses all focus while still open, re-request
+            // the editor's default target so the controller always has a live cursor. The
+            // request is DEFERRED through state + LaunchedEffect — focus-loss also fires while
+            // the composition is being disposed, and a synchronous requestFocus mid-detach
+            // corrupts the node lifecycle ("Must run runDetachLifecycle()..."); an effect
+            // simply never runs on a disposing composition. (Guarded on expandedGroup so a
+            // closing editor doesn't fight the return-focus-to-box handoff.)
+            var editorHadFocus by remember(vg) { mutableStateOf(false) }
+            var refocusTick by remember(vg) { mutableIntStateOf(0) }
+            val inputModeManager = LocalInputModeManager.current
+            LaunchedEffect(refocusTick) {
+                // Touch mode only: a tap is the thing that CLEARS focus wholesale. In key
+                // mode a subtree loss means focus legitimately moved elsewhere (e.g. up to
+                // the set/layer tabs) — recovering would yank it straight back.
+                if (refocusTick > 0 && inputModeManager.inputMode == InputMode.Touch) {
+                    runCatching { editorFocus.requestFocus() }
+                }
+            }
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .onFocusChanged { state ->
+                        if (state.hasFocus) {
+                            editorHadFocus = true
+                        } else if (editorHadFocus && expandedGroup == vg) {
+                            refocusTick++
+                        }
+                    },
+            ) {
                 Box(
                     modifier = Modifier
                         .layout { measurable, constraints ->
@@ -609,21 +647,27 @@ private fun GroupBox(
             onFocusHandled()
         }
     }
+    val interaction = remember { MutableInteractionSource() }
     Box(modifier = modifier) {
         Column(
             // Full column width regardless of label content — every box in a column reads as
             // the same fixed-width card.
             modifier = Modifier
-                // Focus scale is draw-phase only, so the measured bounds (the morph's origin
-                // rect, reported below) stay put while the box grows on controller focus.
-                .remapFocusScale()
                 .fillMaxWidth()
+                // Bounds capture must sit OUTSIDE the scale layer: localBoundingBoxOf maps
+                // through graphicsLayer transforms, so capturing inside it baked the 1.05×
+                // focus grow into the placeholder/morph-origin rect — the stand-in came out
+                // oversized and the neighboring boxes jumped during the morph.
                 .onGloballyPositioned(onPositioned)
+                .remapInteractiveScale(interaction)
                 .clip(shape)
                 .background(container)
                 .border(remapBevelBorder(container, GroupCorner), shape)
                 .focusRequester(focusRequester)
-                .clickable { onOpenGroup(group) }
+                .clickable(
+                    interactionSource = interaction,
+                    indication = LocalIndication.current,
+                ) { onOpenGroup(group) }
                 .testTag("simple-group:${group.name}")
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(SummaryRowSpacing),

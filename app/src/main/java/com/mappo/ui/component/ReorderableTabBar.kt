@@ -3,6 +3,7 @@ package com.mappo.ui.component
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -41,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -48,6 +50,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInParent
@@ -171,6 +178,17 @@ fun ReorderableTabBar(
                     }
                 }
 
+                // Controller focus: tabs are otherwise pure pointerInput (never focusable), so
+                // d-pad navigation skipped the bar entirely. Focus grows the tab slightly (the
+                // remap screen's interaction-scale convention) and confirm keys select. Gamepad
+                // A arrives as either ButtonA or the platform's DPAD_CENTER fallback.
+                var focused by remember { mutableStateOf(false) }
+                val focusScale by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (focused) 1.05f else 1f,
+                    animationSpec = tween(150),
+                    label = "tabFocusScale",
+                )
+
                 // OUTER box: natural layout slot. Hosts pointerInput + bounds capture. Crucially
                 // NO graphicsLayer here — pointerInput's local coords are post-graphicsLayer, so
                 // putting the transform on the same node creates a feedback loop where the tab
@@ -183,6 +201,16 @@ fun ReorderableTabBar(
                         .onGloballyPositioned { coords ->
                             tabBounds[tab.key] = coords.boundsInParent()
                         }
+                        .onFocusChanged { focused = it.isFocused }
+                        .onKeyEvent { event ->
+                            val confirm = event.type == KeyEventType.KeyDown && when (event.key) {
+                                Key.Enter, Key.NumPadEnter, Key.DirectionCenter, Key.ButtonA -> true
+                                else -> false
+                            }
+                            if (confirm) onSelect(tab.key)
+                            confirm
+                        }
+                        .focusable()
                         .pointerInput(tab.key, reorderEnabled) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
@@ -285,6 +313,8 @@ fun ReorderableTabBar(
                                     draggingKey == null -> 0f
                                     else -> displacement.value
                                 }
+                                scaleX = focusScale
+                                scaleY = focusScale
                             },
                     ) {
                         TabSurface(

@@ -1,6 +1,8 @@
 package com.mappo.ui.screen.remap
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -55,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -117,10 +120,11 @@ internal fun RemapGroupEditor(
     callbacks: RemapGroupEditorCallbacks,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    // Landing spot for controller focus when the editor opens — attached to the Close button
-    // (the one control that always exists and is always enabled). Directional focus can't
-    // step INTO an overlay from a focused container that spatially contains everything, so
-    // the simple view requests focus here explicitly.
+    // Landing spot for controller focus when the editor opens (and after a tap wipes focus):
+    // the FIRST command row's input button when it exists and is enabled, falling back to the
+    // always-present Close button. Directional focus can't step INTO an overlay from a focused
+    // container that spatially contains everything, so the simple view requests focus here
+    // explicitly.
     focusRequester: FocusRequester? = null,
 ) {
     // The header's mode pill edits the group's PRIMARY source (first row's source). Multi-source
@@ -140,6 +144,21 @@ internal fun RemapGroupEditor(
     var blankRows by remember(group, viewingSet?.actionSet?.id, viewingLayer?.layer?.id) {
         mutableIntStateOf(0)
     }
+
+    // Default focus target: the first row's input button — but only when that button will
+    // actually be focusable (enabled = editable, and empty seed rows render disabled). The
+    // Close button is the fallback landing spot.
+    val firstSpec = group.rows.first()
+    val firstRowInput = viewingLayer?.presetFor(firstSpec.source)?.group?.inputByKey(firstSpec.subInputKey)
+        ?: viewingSet?.presetFor(firstSpec.source)?.group?.inputByKey(firstSpec.subInputKey)
+    val focusFirstRow = editable && firstRowInput.commandRows().isNotEmpty()
+
+    // Escape hatch for d-pad UP from the top command row. The rows' LazyColumn is a focus
+    // group whose bounds contain the rows — an unresolved UP search would pick the group
+    // itself as "above" and re-enter it at its first focusable (the first row's input button),
+    // trapping focus in the list. The top row instead routes UP explicitly to the header's
+    // kebab; from the header, UP reaches the set/layer tabs normally.
+    val headerFocus = remember { FocusRequester() }
 
     Column(modifier = modifier) {
         // ── Sticky header ─────────────────────────────────────────────────
@@ -195,7 +214,11 @@ internal fun RemapGroupEditor(
                     SourceModeSettingsSchema.hasSettings(primarySource, primaryGroup.mode),
             )
             Box {
-                RowKebab(onClick = { headerMore = true }, contentDescription = "Group options")
+                RowKebab(
+                    onClick = { headerMore = true },
+                    contentDescription = "Group options",
+                    modifier = Modifier.focusRequester(headerFocus),
+                )
                 DropdownMenu(expanded = headerMore, onDismissRequest = { headerMore = false }) {
                     RichMenuItem(
                         title = "Add new input",
@@ -228,7 +251,9 @@ internal fun RemapGroupEditor(
                 icon = Icons.Filled.Close,
                 contentDescription = "Close",
                 onClick = onClose,
-                modifier = if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier,
+                modifier = if (focusRequester != null && !focusFirstRow) {
+                    Modifier.focusRequester(focusRequester)
+                } else Modifier,
             )
         }
         HorizontalDivider(Modifier.padding(horizontal = 8.dp))
@@ -252,6 +277,7 @@ internal fun RemapGroupEditor(
                             label = "",
                             outputLabel = BindingOutput.Unbound.displayLabel(config),
                             editable = false,
+                            upFocus = headerFocus.takeIf { spec == firstSpec },
                             onTapOutput = {
                                 callbacks.onOpenInputEditor(spec.source, spec.subInputKey, subLabel)
                             },
@@ -270,6 +296,10 @@ internal fun RemapGroupEditor(
                                 label = binding.label.orEmpty(),
                                 outputLabel = output.displayLabel(config),
                                 editable = editable,
+                                inputFocusRequester = focusRequester.takeIf {
+                                    focusFirstRow && spec == firstSpec && idx == 0
+                                },
+                                upFocus = headerFocus.takeIf { spec == firstSpec && idx == 0 },
                                 onTapOutput = {
                                     if (editable) callbacks.onEditCommand(binding.id, output, title)
                                     else callbacks.onOpenInputEditor(spec.source, spec.subInputKey, subLabel)
@@ -316,19 +346,17 @@ internal fun RemapGroupEditor(
             }
             if (editable) {
                 item(key = "editor-footer") {
-                    // Centered pair with a wide gap — the same composition rhythm as the
-                    // simple view's Gyro/Overlay strip.
+                    // Left-aligned on the rows' input-button column ("Import input" was cut
+                    // 2026-07-13 — profile import returns with the acquisition flow).
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.Center,
+                            .heightIn(min = EditorRowHeight)
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.Start,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        EditorInlineTextButton("Add input", Icons.Filled.Add) { blankRows++ }
-                        Spacer(Modifier.width(24.dp))
-                        // Future: import inputs (and their mode) from other profiles.
-                        EditorInlineTextButton("Import input", Icons.Filled.Download) {}
+                        EditorPillActionButton("Add input", Icons.Filled.Add) { blankRows++ }
                     }
                 }
             }
@@ -388,6 +416,11 @@ private fun EditorCommandRow(
     onConfigure: (() -> Unit)?,
     menu: EditorRowMenu?,
     onCommitLabel: ((String) -> Unit)? = null,
+    // Set on the FIRST row only: the editor's default controller-focus landing spot.
+    inputFocusRequester: FocusRequester? = null,
+    // Set on the FIRST row only: explicit d-pad UP destination (cascades to every control in
+    // the row) — see the headerFocus comment in RemapGroupEditor.
+    upFocus: FocusRequester? = null,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val flexMax = maxWidth / 3
@@ -395,7 +428,10 @@ private fun EditorCommandRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = EditorRowHeight)
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 8.dp)
+                .then(
+                    if (upFocus != null) Modifier.focusProperties { up = upFocus } else Modifier,
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -405,7 +441,12 @@ private fun EditorCommandRow(
                 enabled = editable,
                 // Future home of the Map flow; inert while the UI settles.
                 onClick = {},
-                modifier = Modifier.widthIn(min = EditorFlexPillMinWidth, max = flexMax),
+                modifier = Modifier
+                    .widthIn(min = EditorFlexPillMinWidth, max = flexMax)
+                    .then(
+                        if (inputFocusRequester != null) Modifier.focusRequester(inputFocusRequester)
+                        else Modifier,
+                    ),
             )
             // A hair of extra breathing room beyond the row's 6dp rhythm, both sides.
             EditorFlowArrow(Modifier.padding(horizontal = 2.dp))
@@ -514,17 +555,21 @@ private fun InputPillButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Surface(
         shape = RoundedCornerShape(50),
         color = RemapElevatedContainer,
         border = remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2),
         modifier = modifier
-            .remapFocusScale()
+            .remapInteractiveScale(interaction)
             .heightIn(min = RemapPillHeight)
             .then(
                 if (enabled) {
-                    Modifier.clip(RoundedCornerShape(50))
-                        .clickable(onClickLabel = "Change input") { onClick() }
+                    Modifier.clip(RoundedCornerShape(50)).clickable(
+                        interactionSource = interaction,
+                        indication = LocalIndication.current,
+                        onClickLabel = "Change input",
+                    ) { onClick() }
                 } else Modifier.alpha(0.6f),
             ),
     ) {
@@ -559,35 +604,46 @@ private fun EditorFlowArrow(modifier: Modifier = Modifier) {
     )
 }
 
-/** In-line text-variant action with a leading icon (the M3 text-button role at the editor's
- *  mini scale). */
+/** Footer action in the SAME pill treatment as the rows' input buttons (elevated container +
+ *  bevel), with a leading icon. */
 @Composable
-private fun EditorInlineTextButton(
+private fun EditorPillActionButton(
     text: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit,
 ) {
-    Row(
+    val interaction = remember { MutableInteractionSource() }
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = RemapElevatedContainer,
+        border = remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2),
         modifier = Modifier
-            .remapFocusScale()
-            .clip(RoundedCornerShape(50))
-            .clickable(onClick = onClick)
+            .remapInteractiveScale(interaction)
             .heightIn(min = RemapPillHeight)
-            .padding(horizontal = RemapPillContentPadding),
-        verticalAlignment = Alignment.CenterVertically,
+            .clip(RoundedCornerShape(50))
+            .clickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            ),
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(RemapPillIconSize),
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.width(RemapGlyphLabelGap))
-        Text(
-            text = text,
-            style = remapMiniTextStyle(),
-            color = MaterialTheme.colorScheme.primary,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = RemapPillContentPadding),
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(RemapPillIconSize),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(RemapGlyphLabelGap))
+            Text(
+                text = text,
+                style = remapMiniTextStyle(),
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -623,16 +679,20 @@ private fun LabelPillField(
     var editing by remember { mutableStateOf(false) }
     // Input-field well: darker than the editor card it sits on, and FLAT (no bevel) — it's a
     // field, not a button.
+    val interaction = remember { MutableInteractionSource() }
     Surface(
         shape = RoundedCornerShape(50),
         color = remapInputFieldContainer(),
         modifier = modifier
-            .remapFocusScale()
+            .remapInteractiveScale(interaction)
             .height(RemapPillHeight)
             .then(
                 if (enabled) {
-                    Modifier.clip(RoundedCornerShape(50))
-                        .clickable(onClickLabel = "Edit label") { editing = true }
+                    Modifier.clip(RoundedCornerShape(50)).clickable(
+                        interactionSource = interaction,
+                        indication = LocalIndication.current,
+                        onClickLabel = "Edit label",
+                    ) { editing = true }
                 } else Modifier.alpha(0.6f),
             ),
     ) {
@@ -728,11 +788,16 @@ internal fun ActivatorType.pressIcon(): androidx.compose.ui.graphics.vector.Imag
 
 /** The shared kebab ("more" button) used by editor rows and the editor header. */
 @Composable
-internal fun RowKebab(onClick: () -> Unit, contentDescription: String = "Options") {
+internal fun RowKebab(
+    onClick: () -> Unit,
+    contentDescription: String = "Options",
+    modifier: Modifier = Modifier,
+) {
     RemapMiniIconButton(
         icon = Icons.Filled.MoreVert,
         contentDescription = contentDescription,
         onClick = onClick,
+        modifier = modifier,
     )
 }
 

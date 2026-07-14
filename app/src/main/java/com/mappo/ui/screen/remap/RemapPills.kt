@@ -3,7 +3,11 @@ package com.mappo.ui.screen.remap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -193,18 +197,26 @@ internal val RemapIconButtonSize = 24.dp
 internal val RemapIconButtonIconSize = 16.dp
 
 /**
- * Subtle grow-on-focus for the remap screen's interactive elements — controller-navigation
- * feedback, matching the home flower petals' selected scale (1.04 there). Draw-phase only
+ * Interaction scale for the remap screen's interactive elements: subtle grow on controller
+ * focus (matching the home flower petals' selected scale), a quick dip while pressed (release
+ * springs it back — the down-then-up tap beat). Pass the SAME [interactionSource] to the
+ * element's `clickable` so key-clicks and touch presses both register. Draw-phase only
  * ([graphicsLayer]), so layout bounds (and the morph-origin rects measured from them) never
  * move. Chain it BEFORE the element's border/background so the whole control scales as one.
  */
 @Composable
-internal fun Modifier.remapFocusScale(): Modifier {
+internal fun Modifier.remapInteractiveScale(interactionSource: InteractionSource): Modifier {
     var focused by remember { mutableStateOf(false) }
+    val pressed by interactionSource.collectIsPressedAsState()
+    // The press dip is a FRACTION of the element's current resting size, not an absolute
+    // target — dipping a focused (1.05×) element straight to an absolute 0.93 read as a
+    // violent double-jump.
+    val base = if (focused) RemapFocusedScale else 1f
     val scale by animateFloatAsState(
-        targetValue = if (focused) 1.05f else 1f,
-        animationSpec = tween(150),
-        label = "remapFocusScale",
+        targetValue = if (pressed) base * RemapPressedFraction else base,
+        // The press dip lands faster than the focus grow — a tap should feel immediate.
+        animationSpec = tween(if (pressed) 90 else 150),
+        label = "remapInteractiveScale",
     )
     return this
         .onFocusChanged { focused = it.isFocused }
@@ -213,6 +225,9 @@ internal fun Modifier.remapFocusScale(): Modifier {
             scaleY = scale
         }
 }
+
+private const val RemapFocusedScale = 1.05f
+private const val RemapPressedFraction = 0.93f
 
 /**
  * A hand-rolled miniature pill button, in the shared box treatment. [filled] (the
@@ -232,16 +247,22 @@ internal fun RemapMiniPillButton(
     val content = if (filled) MaterialTheme.colorScheme.onSurface
     else MaterialTheme.colorScheme.onSurfaceVariant
     val container = if (elevated) RemapElevatedContainer else remapBoxContainer()
+    val interaction = remember { MutableInteractionSource() }
     Surface(
         shape = RoundedCornerShape(50),
         color = container,
         border = remapBevelBorder(container, RemapPillHeight / 2),
         modifier = modifier
-            .remapFocusScale()
+            .remapInteractiveScale(interaction)
             .height(RemapPillHeight)
             .then(
-                if (enabled) Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick)
-                else Modifier.alpha(0.55f),
+                if (enabled) {
+                    Modifier.clip(RoundedCornerShape(50)).clickable(
+                        interactionSource = interaction,
+                        indication = LocalIndication.current,
+                        onClick = onClick,
+                    )
+                } else Modifier.alpha(0.55f),
             ),
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = RemapPillContentPadding)) {
@@ -265,12 +286,21 @@ internal fun RemapMiniIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
-            .remapFocusScale()
+            .remapInteractiveScale(interaction)
             .size(RemapIconButtonSize)
             .clip(CircleShape)
-            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier.alpha(0.45f)),
+            .then(
+                if (enabled) {
+                    Modifier.clickable(
+                        interactionSource = interaction,
+                        indication = LocalIndication.current,
+                        onClick = onClick,
+                    )
+                } else Modifier.alpha(0.45f),
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -285,7 +315,9 @@ internal fun RemapMiniIconButton(
 /** The mode-selection pill: current mode glyph + name + dropdown arrow → menu of valid modes.
  *  [overline] renders the text in the overline treatment (uppercase, tracked out) for the
  *  group editor's header. [fixedWidth] pins the pill to a static footprint (the Gyro/Overlay
- *  strip) instead of flexing to the label. */
+ *  strip) instead of flexing to the label. [leadingIcon] swaps the mode concept glyph for a
+ *  FIXED identity icon (the strip pickers carry their element's identity inside the pill),
+ *  shown for every mode including None. */
 @Composable
 internal fun ModePillDropdown(
     source: InputSource,
@@ -296,9 +328,11 @@ internal fun ModePillDropdown(
     overline: Boolean = false,
     elevated: Boolean = false,
     fixedWidth: Dp? = null,
+    leadingIcon: androidx.compose.ui.graphics.painter.Painter? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     val container = if (elevated) RemapElevatedContainer else remapBoxContainer()
+    val interaction = remember { MutableInteractionSource() }
     Box {
         // Shared box treatment — pill-style dropdown button, no trailing arrow.
         Surface(
@@ -306,7 +340,7 @@ internal fun ModePillDropdown(
             color = container,
             border = remapBevelBorder(container, RemapPillHeight / 2),
             modifier = Modifier
-                .remapFocusScale()
+                .remapInteractiveScale(interaction)
                 .heightIn(min = RemapPillHeight)
                 .then(
                     if (fixedWidth != null) Modifier.width(fixedWidth)
@@ -314,8 +348,11 @@ internal fun ModePillDropdown(
                 )
                 .then(
                     if (enabled) {
-                        Modifier.clip(RoundedCornerShape(50))
-                            .clickable(onClickLabel = "Change input mode") { open = true }
+                        Modifier.clip(RoundedCornerShape(50)).clickable(
+                            interactionSource = interaction,
+                            indication = LocalIndication.current,
+                            onClickLabel = "Change input mode",
+                        ) { open = true }
                     } else Modifier.alpha(0.6f),
                 ),
         ) {
@@ -326,10 +363,13 @@ internal fun ModePillDropdown(
             ) {
                 // "None" shows bare on the pill — an absence carries no concept glyph there.
                 // (The menu ITEM keeps its glyph; in a list, the icon column reads as part of
-                // the option, not as a claim about current state.)
-                if (currentMode != BindingMode.NONE) {
+                // the option, not as a claim about current state.) A fixed [leadingIcon]
+                // overrides both rules: it's the element's identity, not the mode's.
+                val pillIcon = leadingIcon
+                    ?: if (currentMode != BindingMode.NONE) InputGlyphs.modePainter(currentMode) else null
+                if (pillIcon != null) {
                     Icon(
-                        InputGlyphs.modePainter(currentMode),
+                        pillIcon,
                         contentDescription = null,
                         modifier = Modifier.size(RemapPillIconSize),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,

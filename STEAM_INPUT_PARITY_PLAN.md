@@ -1207,6 +1207,8 @@ Mappo-specific enhancements that go *beyond* Steam Input parity. Recorded here s
 
 - **Virtual-keyboard buttons as chord partners** — today's chord partner is a physical input only (captured via the listen-for-press picker in 3.3). User direction (2026-05-13): the broader virtual-keyboard rework will explore on-screen overlay use of virtual keyboards, and that work may change the right way to use virtual buttons in chord activators. Punted to wait on that direction. Data shape doesn't preclude it — `chord_partner_source` could grow a new enum value for virtual buttons later without migrating existing rows.
 
+- **Action-set inheritance ("Inherit" picker) — DELIBERATE STRUCTURAL DEVIATION from Steam Input.** User direction (2026-07-13): an action set will be able to *inherit* from another action set — this covers what Steam models as action layers, but without Steam's restriction that a layer must be a direct child of exactly one parent set (any set can inherit from any other). UI scaffolding landed 2026-07-13 as the "Inherit" picker on the Remap Controls strip (`RemapBottomRow.kt`, UI-only, defaults "None"); the data model / persistence / runtime resolution are not designed yet. **VDF import consequence (Phase 8):** Steam layers should map onto inheritance (a layer imports as a set inheriting its parent), and any future export back to VDF must flatten or restrict inheritance chains to Steam's parent-child layer shape (or warn on inexpressible graphs). Cycle prevention becomes Mappo's own responsibility since Steam's structure made cycles impossible by construction.
+
 ---
 
 ## Critical files index

@@ -111,10 +111,9 @@ internal fun remapInputFieldContainer(): Color =
 /** Bevel stroke width for the boxes + pill controls (slightly under the original 1dp). */
 internal val RemapBoxStroke = 0.75.dp
 
-/** How far the bevel's highlight/shadow deviate from the base fill — "ever so slightly".
- *  Highlights read hotter than shadows on the dark theme, so they get the lighter touch. */
-private const val BevelHighlightStrength = 0.10f
-private const val BevelShadowStrength = 0.05f
+/** How far the bevel's highlights deviate from the base fill — "ever so slightly". */
+private const val BevelTopHighlightStrength = 0.10f
+private const val BevelBottomHighlightStrength = 0.05f
 
 /** Where along the corner arc the bevel finishes fading: 1−cos(45°) of the radius — the
  *  point where the outline's tangent passes 45° and "top" geometrically becomes "side". */
@@ -122,7 +121,7 @@ private const val BevelFadeOfRadius = 0.9f
 
 /**
  * The bevel border on buttons + cards (replaced the old solid accent outline): a very faint
- * thin top highlight and bottom shadow, each the base fill nudged toward white/black, fading
+ * thin top and bottom highlight, each the base fill nudged toward white, fading
  * to transparent (same hue, zero alpha — not transparent-black, which muddies the fade).
  * The fade completes WITHIN the corner rounding — by the arc's 45° point — so the highlight
  * ends just before the top border becomes the side border; that needs the real component
@@ -135,8 +134,8 @@ internal fun remapBevelBorder(base: Color, cornerRadius: Dp): BorderStroke {
     return BorderStroke(
         RemapBoxStroke,
         BevelBrush(
-            highlight = lerp(base, Color.White, BevelHighlightStrength),
-            shadow = lerp(base, Color.Black, BevelShadowStrength),
+            topHighlight = lerp(base, Color.White, BevelTopHighlightStrength),
+            bottomHighlight = lerp(base, Color.White, BevelBottomHighlightStrength),
             fadePx = fadePx,
         ),
     )
@@ -149,8 +148,8 @@ internal fun remapBevelBorder(base: Color, cornerRadius: Dp): BorderStroke {
 // for every state and made borderless fields read smaller than their bordered siblings.
 
 private class BevelBrush(
-    private val highlight: Color,
-    private val shadow: Color,
+    private val topHighlight: Color,
+    private val bottomHighlight: Color,
     private val fadePx: Float,
 ) : ShaderBrush() {
     override fun createShader(size: Size): Shader {
@@ -158,16 +157,16 @@ private class BevelBrush(
         return LinearGradientShader(
             from = Offset.Zero,
             to = Offset(0f, size.height),
-            colors = listOf(highlight, highlight.copy(alpha = 0f), shadow.copy(alpha = 0f), shadow),
+            colors = listOf(topHighlight, topHighlight.copy(alpha = 0f), bottomHighlight.copy(alpha = 0f), bottomHighlight),
             colorStops = listOf(0f, fade, 1f - fade, 1f),
         )
     }
 
     override fun equals(other: Any?): Boolean = other is BevelBrush &&
-        other.highlight == highlight && other.shadow == shadow && other.fadePx == fadePx
+        other.topHighlight == topHighlight && other.bottomHighlight == bottomHighlight && other.fadePx == fadePx
 
     override fun hashCode(): Int =
-        31 * (31 * highlight.hashCode() + shadow.hashCode()) + fadePx.hashCode()
+        31 * (31 * topHighlight.hashCode() + bottomHighlight.hashCode()) + fadePx.hashCode()
 }
 
 /** Height of the pill dropdowns (mode / overlay pickers). */
@@ -266,7 +265,7 @@ internal fun Modifier.remapInteractiveMotion(
 }
 
 /** How far focus/hover raises an element ([RemapInteractionMotion.Lift]). */
-private val RemapFocusLift = 2.dp
+private val RemapFocusLift = 1.25.dp
 
 /** How far a press displaces an element DOWN from wherever it currently rests (focused:
  *  lift → back to base; unfocused: base → below it) — always the same travel. */

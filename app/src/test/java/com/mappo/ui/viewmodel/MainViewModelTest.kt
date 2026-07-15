@@ -20,6 +20,8 @@ import com.mappo.data.repository.ProfileRepository
 import com.mappo.data.settings.ShizukuRequiredPreferences
 import com.mappo.service.shizuku.ShizukuConnection
 import com.mappo.data.settings.AutoSwitchSettings
+import com.mappo.data.settings.FrameSettings
+import com.mappo.data.settings.FrameStyle
 import com.mappo.service.autoswitch.ProfileAutoSwitcher
 import com.mappo.service.foreground.ForegroundAppFilter
 import com.mappo.service.input.InputDispatcher
@@ -64,6 +66,7 @@ class MainViewModelTest {
     private lateinit var bindingRepo: AppProfileBindingRepository
     private lateinit var installedAppsRepo: InstalledAppsRepository
     private lateinit var settings: AutoSwitchSettings
+    private lateinit var frameSettings: FrameSettings
     private lateinit var shizukuRequiredPrefs: ShizukuRequiredPreferences
     private lateinit var shizukuConnection: ShizukuConnection
     private lateinit var autoSwitcher: ProfileAutoSwitcher
@@ -100,6 +103,7 @@ class MainViewModelTest {
         bindingRepo = mockk(relaxed = true)
         installedAppsRepo = mockk(relaxed = true)
         settings = mockk(relaxed = true)
+        frameSettings = mockk(relaxed = true)
         shizukuRequiredPrefs = mockk(relaxed = true)
         shizukuConnection = mockk(relaxed = true)
         autoSwitcher = mockk(relaxed = true)
@@ -127,6 +131,7 @@ class MainViewModelTest {
         every { profileRepo.getAllProfiles() } returns allProfiles
         every { bindingRepo.getAll() } returns allBindings
         every { layoutRepo.getLayoutsByProfile(any()) } returns allLayouts
+        every { frameSettings.style } returns MutableStateFlow(FrameStyle())
         every { settings.autoSwitchEnabled } returns autoSwitchEnabled
         every { settings.autoCreateProfilesEnabled } returns autoCreateEnabled
         every { settings.ignoredPackages } returns ignoredPackages
@@ -142,6 +147,7 @@ class MainViewModelTest {
             appProfileBindingRepository = bindingRepo,
             installedAppsRepository = installedAppsRepo,
             autoSwitchSettings = settings,
+            frameSettings = frameSettings,
             shizukuRequiredPreferences = shizukuRequiredPrefs,
             shizukuConnection = shizukuConnection,
             autoSwitcher = autoSwitcher,
@@ -517,6 +523,7 @@ class MainViewModelTest {
             appProfileBindingRepository = bindingRepo,
             installedAppsRepository = installedAppsRepo,
             autoSwitchSettings = settings,
+            frameSettings = frameSettings,
             shizukuRequiredPreferences = shizukuRequiredPrefs,
             shizukuConnection = shizukuConnection,
             autoSwitcher = autoSwitcher,
@@ -926,6 +933,7 @@ class MainViewModelTest {
         appProfileBindingRepository = bindingRepo,
         installedAppsRepository = installedAppsRepo,
         autoSwitchSettings = settings,
+        frameSettings = frameSettings,
         shizukuRequiredPreferences = shizukuRequiredPrefs,
         shizukuConnection = shizukuConnection,
         autoSwitcher = autoSwitcher,

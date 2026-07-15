@@ -38,6 +38,8 @@ import com.mappo.data.repository.LayoutRepository
 import com.mappo.data.repository.ProfileRepository
 import com.mappo.data.settings.ShizukuRequiredPreferences
 import com.mappo.data.settings.AutoSwitchSettings
+import com.mappo.data.settings.FrameSettings
+import com.mappo.data.settings.FrameStyle
 import com.mappo.di.IoDispatcher
 import com.mappo.service.shizuku.ShizukuConnection
 import com.mappo.steam.auth.SteamCredentialStore
@@ -95,6 +97,7 @@ class MainViewModel @Inject constructor(
     private val appProfileBindingRepository: AppProfileBindingRepository,
     private val installedAppsRepository: InstalledAppsRepository,
     private val autoSwitchSettings: AutoSwitchSettings,
+    private val frameSettings: FrameSettings,
     private val shizukuRequiredPreferences: ShizukuRequiredPreferences,
     shizukuConnection: ShizukuConnection,
     private val autoSwitcher: ProfileAutoSwitcher,
@@ -167,6 +170,9 @@ class MainViewModel @Inject constructor(
     val autoCreateProfilesEnabled: StateFlow<Boolean> = autoSwitchSettings.autoCreateProfilesEnabled
 
     val ignoredPackages: StateFlow<Set<String>> = autoSwitchSettings.ignoredPackages
+
+    /** Handheld-frame chrome styling (Frame style settings screen + HandheldFrame). */
+    val frameStyle: StateFlow<FrameStyle> = frameSettings.style
 
     val appProfileBindings: StateFlow<ImmutableList<AppProfileBinding>> =
         appProfileBindingRepository.getAll()
@@ -380,6 +386,16 @@ class MainViewModel @Inject constructor(
     fun setAutoCreateProfilesEnabled(enabled: Boolean) {
         autoSwitchSettings.setAutoCreateProfilesEnabled(enabled)
     }
+
+    // ── Frame style ───────────────────────────────────────────────────────────
+
+    /** Live-preview a frame restyle (slider drag) without persisting. */
+    fun previewFrameStyle(style: FrameStyle) = frameSettings.preview(style)
+
+    /** Persist a frame restyle (drag end / color pick / toggle). */
+    fun setFrameStyle(style: FrameStyle) = frameSettings.set(style)
+
+    fun resetFrameStyle() = frameSettings.reset()
 
     /** Re-fire auto-switch against the cached foreground package; called on activity resume. */
     fun reevaluateAutoSwitch() {

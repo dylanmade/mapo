@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SecurityUpdateGood
 import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -466,6 +467,9 @@ fun MainScreen(
                             },
                             HomeMenuEntry("theme_studio", "Theme studio", Icons.Filled.Palette) {
                                 navController.navigate(MappoRoute.THEME_STUDIO)
+                            },
+                            HomeMenuEntry("frame_style", "Frame style", Icons.Filled.Smartphone) {
+                                navController.navigate(MappoRoute.FRAME_STYLE)
                             },
                             HomeMenuEntry("shizuku_setup", "Shizuku setup", Icons.Filled.SecurityUpdateGood) {
                                 navController.navigate(MappoRoute.SHIZUKU_SETUP)
@@ -949,6 +953,9 @@ fun MainScreen(
             composable(MappoRoute.SHIZUKU_SETUP) {
                 ShizukuSetupScreen(onBack = { navController.popBackStack() })
             }
+            composable(MappoRoute.FRAME_STYLE) {
+                FrameSettingsScreen(onBack = { navController.popBackStack() })
+            }
             composable(MappoRoute.COMPACT_GALLERY) {
                 com.mappo.ui.compact.CompactGalleryScreen(onBack = { navController.popBackStack() })
             }
@@ -1108,10 +1115,12 @@ fun MainScreen(
         // ── The handheld device frame: home chrome + the 1:1 screen canvas hosting every
         // route. Slides up on launch; on MAIN a tap on the scrim (or Back / B) slides it down
         // and backgrounds the task (see the frameVisible effect above). ──
+        val frameStyle by viewModel.frameStyle.collectAsStateWithLifecycle()
         HandheldFrame(
             shown = frameVisible,
             dismissEnabled = isMainRoute,
             onDismissRequest = { frameVisible = false },
+            style = frameStyle,
             screenContent = screenContent,
         )
 

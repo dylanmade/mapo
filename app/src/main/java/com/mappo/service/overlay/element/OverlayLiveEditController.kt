@@ -163,10 +163,7 @@ import com.mappo.service.overlay.OverlayLifecycleOwner
 import com.mappo.ui.compact.CompactCheckbox
 import com.mappo.ui.overlay.OverlayEditActivity
 import com.mappo.ui.screen.overlay.OverlayElementConfigContent
-import com.mappo.ui.screen.overlay.OverlayElementLabel
-import com.mappo.ui.screen.overlay.overlayContentColor
-import com.mappo.ui.screen.overlay.overlayFillColor
-import com.mappo.ui.screen.overlay.overlayShape
+import com.mappo.ui.screen.overlay.OverlayElementVisual
 import com.mappo.ui.theme.MappoTheme
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -2851,18 +2848,12 @@ class OverlayLiveEditController @Inject constructor(
                 .fillMaxSize()
                 .pointerInteropFilter(onTouchEvent = onTouch),
         ) {
-            // WYSIWYG — same shape / fill / content / opacity as the run-mode button, with a
+            // WYSIWYG — the run-mode visual itself (incl. layered appearance), with a
             // selection outline added.
-            Surface(
-                shape = overlayShape(element),
-                color = overlayFillColor(element),
-                contentColor = overlayContentColor(element),
-                tonalElevation = 3.dp,
-                border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-                modifier = Modifier.fillMaxSize().alpha(element.opacity),
-            ) {
-                OverlayElementLabel(element)
-            }
+            OverlayElementVisual(
+                element = element,
+                selectionColor = if (selected) MaterialTheme.colorScheme.primary else null,
+            )
         }
     }
 

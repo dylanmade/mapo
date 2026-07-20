@@ -182,6 +182,54 @@ sibling centers). Build + unit tests green (only the 5 pre-existing unrelated fa
 - Per-overlay settings (snap on/off + grid size) in an overlay-settings sheet (M3,
   sentence case). Snap-on-drag math: grid + nearby-sibling-edge alignment guides.
 
+### Brick E — Layered skeuomorphic appearance system — 🔨 CODE COMPLETE (awaiting device verify)
+The "shape builder" (2026-07-19, from the user's Illustrator reference
+`shape_and_gradient_examples.svg`): buttons are painted as an ordered stack of fills and
+strokes over one rounded-rect geometry. This is also the planned foundation for the
+user-facing appearance editor generally — the handheld frame is intended to eventually be
+authored in it and saved as a template.
+
+- **Model** `data/model/overlay/ElementAppearance.kt`: `cornerRadius` (fraction of half the
+  short side; 0 = square, 1 = pill/circle) + `layers: List<AppearanceLayer>` (bottom→top).
+  Layer = FILL|STROKE, `LayerPaint.Solid|Gradient` (multi-stop, per-stop color/opacity +
+  Illustrator midpoints, 0–360° angle), layer opacity; stroke width/align
+  (inside/center/outside)/style (solid/dashed/dotted)/x-y offsets; gradient strokes are
+  LINEAR (shape-space gradient visible within the band → one-edge highlights) or ACROSS
+  (ramp runs outer→inner edge, wrapping corners). Hand-rolled org.json codec
+  (`encode`/`decodeElementAppearance`) — the JSON is the future template/sharing format.
+- **Storage**: `OverlayElement.appearanceJson: String?` (DB v19, destructive fallback).
+  Null = legacy light-appearance rendering; the two coexist so old elements keep their
+  look until first edited.
+- **Renderer** `ui/screen/overlay/AppearanceRenderer.kt`: pure draw-phase; ACROSS
+  gradients band into ≤32 concentric ~1dp sub-strokes (Illustrator itself rasterizes
+  these — the SVG embeds PNGs). Wired into `OverlayElementButton`.
+- **Editor** in `OverlayElementConfigContent`: corner-radius slider replaces the shape
+  presets; reorderable layer panel (top-first, secondaryContainer selection) with +Fill /
+  +Stroke (stroke seeds as a white top-edge highlight gradient); per-layer paint/opacity/
+  stroke controls; `ui/component/GradientEditor.kt` = Illustrator-style ramp with
+  draggable stops + midpoint diamonds, tap-ramp-to-add, per-stop dialog color picker.
+  Legacy elements seed their stack from shape/fill fields on first edit. Text color moved
+  to a ColorPickerButton row.
+- Known caveats: OUTSIDE strokes/offsets clip at the element's own window edge; layered
+  elements lose the Surface tonalElevation tint; decoding corrupt JSON silently falls
+  back to legacy rendering.
+- **Fix round (2026-07-19, on-device feedback):** (a) the live editor's `EditableElement`
+  was a hand-copied Surface replica that ignored `appearanceJson` — every appearance edit
+  was invisible in edit mode. Extracted `OverlayElementVisual` (run mode + edit replica
+  share it; `selectionColor` draws the outline along the actual silhouette via
+  `drawAppearanceOutline`). (b) The three `MappoColorPickerDialog`s crashed — dialog
+  composables can't attach inside `TYPE_APPLICATION_OVERLAY` windows (the pre-existing
+  reason the drawer used the inline `ColorPicker`); all color editing in the drawer +
+  `GradientEditor` is now the inline picker, expanded under the swatch. (c) Corner radius
+  is now per-corner (`CornerRadii`; renderer moved from `drawRoundRect` to per-corner
+  `Path`s; JSON `"corners":[tl,tr,br,bl]` with legacy `"cornerRadius"` decode fallback;
+  master slider + "Per-corner radii" expander). (d) Default new button = plain unbound
+  circle: `SHAPE_CIRCLE`, square-in-px via display aspect (`DEFAULT_DIAMETER` 0.10 of
+  width; OverlayEditor now injects context), no label — `OverlayElementLabel` renders
+  nothing for blank-label Unbound elements ("(Device default)" is physical-remap
+  vocabulary; overlay buttons have no device default), and the config drawer says
+  "Fires: nothing".
+
 ### Later (out of MVP scope, noted as seams)
 - Converge to the chosen editor; delete the other + the `OverlayTouchable*` bridge; retire
   the tabbed keyboard once superseded.

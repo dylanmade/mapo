@@ -1,6 +1,8 @@
 package com.mappo.service.overlay.element
 
+import android.content.Context
 import com.mappo.data.model.OverlayElement
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.mappo.data.repository.ControllerConfigRepository
 import com.mappo.data.repository.OverlayRepository
 import com.mappo.data.repository.ProfileRepository
@@ -50,6 +52,7 @@ data class ScopeOption(
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
 class OverlayEditor @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val overlayRepository: OverlayRepository,
     private val profileRepository: ProfileRepository,
     private val controllerConfigRepository: ControllerConfigRepository,
@@ -168,23 +171,32 @@ class OverlayEditor @Inject constructor(
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    /** Add a button near screen center, stamped with the current scope. No-op without a scope. */
+    /**
+     * Add a button near screen center, stamped with the current scope. No-op without a
+     * scope. Defaults to a plain unbound circle (no label): width is a display fraction,
+     * and height is derived from the display's aspect ratio so the button lands square
+     * in pixels.
+     */
     fun addDefaultElement() {
         val profileId = activeProfileId.value ?: return
         val current = _editingScope.value ?: return
         scope.launch {
             val n = elements.value.size
             val nudge = (n % 5) * 0.04f
+            val dm = context.resources.displayMetrics
+            val height = (DEFAULT_DIAMETER * dm.widthPixels.toFloat() / dm.heightPixels.toFloat())
+                .coerceIn(MIN_SIZE, 1f)
             overlayRepository.add(
                 OverlayElement(
                     profileId = profileId,
                     actionSetId = (current as? OverlayScope.Set)?.actionSetId,
                     actionLayerId = (current as? OverlayScope.Layer)?.actionLayerId,
                     label = "",
-                    x = (0.40f + nudge).coerceIn(0f, 0.84f),
-                    y = (0.40f + nudge).coerceIn(0f, 0.88f),
-                    width = DEFAULT_WIDTH,
-                    height = DEFAULT_HEIGHT,
+                    x = (0.40f + nudge).coerceIn(0f, 1f - DEFAULT_DIAMETER),
+                    y = (0.40f + nudge).coerceIn(0f, 1f - height),
+                    width = DEFAULT_DIAMETER,
+                    height = height,
+                    shape = OverlayElement.SHAPE_CIRCLE,
                     zIndex = n,
                 ),
             )
@@ -298,8 +310,8 @@ class OverlayEditor @Inject constructor(
     }
 
     companion object {
-        const val DEFAULT_WIDTH = 0.16f
-        const val DEFAULT_HEIGHT = 0.10f
+        // New buttons are circles: this display-width fraction is the diameter.
+        const val DEFAULT_DIAMETER = 0.10f
         const val MIN_SIZE = 0.04f
         // Normalized offset applied to pasted/duplicated copies so they don't overlap the originals.
         const val PASTE_OFFSET = 0.03f

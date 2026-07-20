@@ -82,6 +82,11 @@ data class OverlayElement(
     val fillColorArgb: Int? = null,
     val contentColorArgb: Int? = null,
 
+    // Encoded ElementAppearance (layered fills/strokes — see data/model/overlay/). Null =
+    // element still renders via the light-appearance fields above; the two coexist because
+    // pre-layer elements must keep their look until first edited in the layer editor.
+    val appearanceJson: String? = null,
+
     // Paint order: higher draws on top. Mirrors the window z-order the manager assigns.
     val zIndex: Int = 0,
 ) {

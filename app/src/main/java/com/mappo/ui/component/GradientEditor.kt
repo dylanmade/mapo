@@ -12,13 +12,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -47,6 +42,9 @@ import com.mappo.data.model.overlay.color
 import com.mappo.data.model.overlay.resolvedStops
 import com.mappo.data.model.overlay.sampleResolvedStops
 import com.mappo.ui.component.colorpicker.ColorPickerButton
+import com.mappo.ui.control.MappoPercentSlider
+import com.mappo.ui.control.MappoPillButton
+import com.mappo.ui.control.MappoSlider
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -169,30 +167,28 @@ fun GradientEditor(
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(
+                    MappoPillButton(
+                        text = "Remove",
                         onClick = {
                             val g = current
-                            if (g.stops.size <= 2) return@TextButton
+                            if (g.stops.size <= 2) return@MappoPillButton
                             selection = GradientSelection.Stop((sel.index - 1).coerceAtLeast(0))
                             commit(g.copy(stops = g.stops.filterIndexed { i, _ -> i != sel.index }))
                         },
                         enabled = stops.size > 2,
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = null)
-                        Text("  Remove")
-                    }
+                    )
                 }
-                LabeledPercentSlider("Location", stop.position, onChange = { v ->
+                MappoPercentSlider("Location", stop.position, onChange = { v ->
                     val g = current
-                    val s = g.stops.getOrNull(sel.index) ?: return@LabeledPercentSlider
+                    val s = g.stops.getOrNull(sel.index) ?: return@MappoPercentSlider
                     val lo = (g.stops.getOrNull(sel.index - 1)?.position ?: 0f) + STOP_MIN_GAP
                     val hi = (g.stops.getOrNull(sel.index + 1)?.position ?: 1f) - STOP_MIN_GAP
-                    if (lo > hi) return@LabeledPercentSlider
+                    if (lo > hi) return@MappoPercentSlider
                     commit(g.copy(stops = g.stops.toMutableList().also { it[sel.index] = s.copy(position = v.coerceIn(lo, hi)) }))
                 })
-                LabeledPercentSlider("Opacity", stop.opacity, onChange = { v ->
+                MappoPercentSlider("Opacity", stop.opacity, onChange = { v ->
                     val g = current
-                    val s = g.stops.getOrNull(sel.index) ?: return@LabeledPercentSlider
+                    val s = g.stops.getOrNull(sel.index) ?: return@MappoPercentSlider
                     commit(g.copy(stops = g.stops.toMutableList().also { it[sel.index] = s.copy(opacity = v) }))
                 })
                 if (picking) {
@@ -213,13 +209,13 @@ fun GradientEditor(
             }
             is GradientSelection.Midpoint -> {
                 val s0 = stopAt(sel.index) ?: return@Column
-                LabeledPercentSlider(
+                MappoPercentSlider(
                     "Midpoint",
                     s0.midpoint,
-                    range = MIDPOINT_MIN..MIDPOINT_MAX,
+                    valueRange = MIDPOINT_MIN..MIDPOINT_MAX,
                     onChange = { v ->
                         val g = current
-                        val s = g.stops.getOrNull(sel.index) ?: return@LabeledPercentSlider
+                        val s = g.stops.getOrNull(sel.index) ?: return@MappoPercentSlider
                         commit(g.copy(stops = g.stops.toMutableList().also { it[sel.index] = s.copy(midpoint = v) }))
                     },
                 )
@@ -227,18 +223,15 @@ fun GradientEditor(
         }
 
         if (showAngle) {
-            Column {
-                Text(
-                    "Angle  ${gradient.angleDeg.roundToInt()}°",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Slider(
-                    value = gradient.angleDeg.coerceIn(0f, 360f),
-                    onValueChange = { commit(current.copy(angleDeg = it)) },
-                    valueRange = 0f..360f,
-                )
-            }
+            MappoSlider(
+                label = "Angle",
+                value = gradient.angleDeg.coerceIn(0f, 360f),
+                onChange = { commit(current.copy(angleDeg = it)) },
+                valueRange = 0f..360f,
+                step = 1f,
+                valueText = { it.roundToInt().toString() },
+                unitLabel = "°",
+            )
         }
     }
 }
@@ -331,23 +324,6 @@ private fun GradientMarkerStrip(
                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = if (selected) 3.dp.toPx() else 1.5.dp.toPx()),
             )
         }
-    }
-}
-
-@Composable
-private fun LabeledPercentSlider(
-    label: String,
-    value: Float,
-    onChange: (Float) -> Unit,
-    range: ClosedFloatingPointRange<Float> = 0f..1f,
-) {
-    Column {
-        Text(
-            "$label  ${(value * 100).roundToInt()}%",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Slider(value = value, onValueChange = onChange, valueRange = range)
     }
 }
 

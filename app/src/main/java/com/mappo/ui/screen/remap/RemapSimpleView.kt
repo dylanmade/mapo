@@ -79,6 +79,10 @@ import com.mappo.data.model.steam.displayNameFor
 import com.mappo.ui.glyph.InputGlyphs
 import com.mappo.ui.screen.softDropShadow
 import kotlin.math.roundToInt
+import com.mappo.ui.control.mappoBevelBorder
+import com.mappo.ui.control.mappoBoxContainer
+import com.mappo.ui.control.mappoInteractiveMotion
+import com.mappo.ui.control.mappoMiniTextStyle
 
 /**
  * The simplified remap view: a controller diagram in the middle flanked by one tappable box per
@@ -320,7 +324,7 @@ internal fun RemapSimpleView(
                 size = Size(rootSize.width - marginPx * 2, rootSize.height - marginPx * 2),
             )
             val shape = RoundedCornerShape(GroupCorner)
-            val container = remapBoxContainer()
+            val container = mappoBoxContainer()
             // Recompose only when the animation starts/ends; the per-frame rect is read in the
             // LAYOUT phase (the layout modifier below) and the fades in the DRAW phase
             // (graphicsLayer) — recomposing every frame is what made the morph jitter.
@@ -376,7 +380,7 @@ internal fun RemapSimpleView(
                         .softDropShadow(cornerRadius = GroupCorner)
                         .clip(shape)
                         .background(container)
-                        .border(remapBevelBorder(container, GroupCorner), shape)
+                        .border(mappoBevelBorder(container, GroupCorner), shape)
                         .testTag("group-editor"),
                 ) {
                     // Crossfade: the box's summary rows dissolve into the editor as it grows.
@@ -605,7 +609,7 @@ private fun GroupSummaryRows(
             InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = 14.dp)
             Text(
                 text = simpleRowLabel(viewingSet, viewingLayer, config, spec),
-                style = remapMiniTextStyle(),
+                style = mappoMiniTextStyle(),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -653,8 +657,8 @@ private fun GroupBox(
         return
     }
     // Shared box treatment (same identity as the home flower's petal cards) — also the basis
-    // the pill controls now copy, via the remapBoxContainer/remapBoxOutline helpers.
-    val container = remapBoxContainer()
+    // the pill controls now copy, via the mappoBoxContainer/remapBoxOutline helpers.
+    val container = mappoBoxContainer()
     val rowExtras = rowExtraInputCounts(group, viewingSet, viewingLayer)
     // Each +N hangs OUTSIDE the box as a ZERO-FOOTPRINT overlay, aligned with ITS OWN summary
     // row (per-row extras, not one group total). Zero-footprint: it reports no layout size, so
@@ -682,10 +686,10 @@ private fun GroupBox(
                 // morph-origin rect — the stand-in came out displaced/oversized and the
                 // neighboring boxes jumped during the morph.
                 .onGloballyPositioned(onPositioned)
-                .remapInteractiveMotion(interaction)
+                .mappoInteractiveMotion(interaction)
                 .clip(shape)
                 .background(container)
-                .border(remapBevelBorder(container, GroupCorner), shape)
+                .border(mappoBevelBorder(container, GroupCorner), shape)
                 .focusRequester(focusRequester)
                 .clickable(
                     interactionSource = interaction,
@@ -708,7 +712,7 @@ private fun GroupBox(
                     // Hair spaces: between the plus and the count (thin space read a touch too
                     // wide), and on the box-facing side to pad the badge off the box border.
                     text = if (onLeft) "+\u200A$extra\u200A" else "\u200A+\u200A$extra",
-                    style = remapMiniTextStyle(),
+                    style = mappoMiniTextStyle(),
                     color = accent,
                     maxLines = 1,
                     softWrap = false,

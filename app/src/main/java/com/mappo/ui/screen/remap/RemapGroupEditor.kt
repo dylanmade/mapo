@@ -82,6 +82,20 @@ import com.mappo.ui.glyph.InputGlyphs
 import com.mappo.ui.screen.activatorRenderOrder
 import com.mappo.ui.screen.displayLabel as activatorDisplayLabel
 import com.mappo.ui.screen.remap.settings.SourceModeSettingsSchema
+import com.mappo.ui.control.MappoBoxStroke
+import com.mappo.ui.control.MappoElevatedContainer
+import com.mappo.ui.control.MappoGlyphLabelGap
+import com.mappo.ui.control.MappoIconButton
+import com.mappo.ui.control.MappoIconButtonSize
+import com.mappo.ui.control.MappoPillButton
+import com.mappo.ui.control.MappoPillContentPadding
+import com.mappo.ui.control.MappoPillHeight
+import com.mappo.ui.control.MappoPillIconSize
+import com.mappo.ui.control.mappoBevelBorder
+import com.mappo.ui.control.mappoInputFieldContainer
+import com.mappo.ui.control.mappoInteractiveMotion
+import com.mappo.ui.control.mappoMiniTextStyle
+import com.mappo.ui.control.mappoOverlineTextStyle
 
 /**
  * The expanded ("advanced") in-place editor a group box grows into. Sticky header — group
@@ -191,13 +205,13 @@ internal fun RemapGroupEditor(
             Icon(
                 InputGlyphs.sourcePainter(primarySource),
                 contentDescription = null,
-                modifier = Modifier.size(RemapPillIconSize),
+                modifier = Modifier.size(MappoPillIconSize),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.width(RemapGlyphLabelGap))
+            Spacer(Modifier.width(MappoGlyphLabelGap))
             Text(
                 text = group.headerLabel().uppercase(),
-                style = remapOverlineTextStyle(),
+                style = mappoOverlineTextStyle(),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(8.dp))
@@ -217,12 +231,12 @@ internal fun RemapGroupEditor(
             } else {
                 Text(
                     text = "DEFAULT",
-                    style = remapOverlineTextStyle(),
+                    style = mappoOverlineTextStyle(),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(Modifier.weight(1f))
-            RemapMiniIconButton(
+            MappoIconButton(
                 icon = Icons.Filled.Settings,
                 contentDescription = "Configure $modeName",
                 onClick = { primaryGroup?.let { callbacks.onOpenModeSettings(it.id, primarySource) } },
@@ -262,7 +276,7 @@ internal fun RemapGroupEditor(
                 }
             }
             // No spacer: cog·kebab·close sit adjacent at one rhythm.
-            RemapMiniIconButton(
+            MappoIconButton(
                 icon = Icons.Filled.Close,
                 contentDescription = "Close",
                 onClick = onClose,
@@ -485,7 +499,7 @@ private fun EditorCommandRow(
             )
             // A hair of extra breathing room beyond the row's 6dp rhythm, both sides.
             EditorFlowArrow(Modifier.padding(horizontal = 2.dp))
-            RemapMiniPillButton(
+            MappoPillButton(
                 text = outputLabel,
                 onClick = onTapOutput,
                 filled = true,
@@ -506,7 +520,7 @@ private fun EditorCommandRow(
             // Trailing icon buttons sit ADJACENT (no gap), matching the header's cog+kebab —
             // the nested Row opts them out of the row's 6dp rhythm.
             Row(verticalAlignment = Alignment.CenterVertically) {
-                RemapMiniIconButton(
+                MappoIconButton(
                     icon = Icons.Filled.Settings,
                     contentDescription = "Configure input",
                     onClick = onConfigure ?: {},
@@ -528,7 +542,7 @@ private fun RowKebabMenu(
     kebabModifier: Modifier = Modifier,
 ) {
     when (menu) {
-        null -> Spacer(Modifier.size(RemapIconButtonSize)) // kebab footprint, keeps rows aligned
+        null -> Spacer(Modifier.size(MappoIconButtonSize)) // kebab footprint, keeps rows aligned
         is EditorRowMenu.ClearOverride -> Box {
             var open by remember { mutableStateOf(false) }
             RowKebab(
@@ -608,11 +622,11 @@ private fun InputPillButton(
     val interaction = remember { MutableInteractionSource() }
     Surface(
         shape = RoundedCornerShape(50),
-        color = RemapElevatedContainer,
-        border = remapBevelBorder(RemapElevatedContainer, RemapPillHeight / 2),
+        color = MappoElevatedContainer,
+        border = mappoBevelBorder(MappoElevatedContainer, MappoPillHeight / 2),
         modifier = modifier
-            .remapInteractiveMotion(interaction)
-            .heightIn(min = RemapPillHeight)
+            .mappoInteractiveMotion(interaction)
+            .heightIn(min = MappoPillHeight)
             .then(
                 if (enabled) {
                     Modifier.clip(RoundedCornerShape(50)).clickable(
@@ -626,14 +640,14 @@ private fun InputPillButton(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = RemapPillContentPadding),
+            modifier = Modifier.padding(horizontal = MappoPillContentPadding),
         ) {
             Text(
                 text = pressType.shortLabel(),
-                style = remapMiniTextStyle(),
+                style = mappoMiniTextStyle(),
                 maxLines = 1,
             )
-            Spacer(Modifier.width(RemapGlyphLabelGap))
+            Spacer(Modifier.width(MappoGlyphLabelGap))
             if (spec != null) {
                 InputGlyphs.SubInputGlyph(spec.source, spec.subInputKey, size = EditorGlyphSize)
             } else {
@@ -669,8 +683,8 @@ private fun EditorDashedActionButton(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
-            .remapInteractiveMotion(interaction)
-            .heightIn(min = RemapPillHeight)
+            .mappoInteractiveMotion(interaction)
+            .heightIn(min = MappoPillHeight)
             // Before the clip so the stroke's outer half doesn't shear off. Dashes run
             // longer than the placeholder default — at pill scale the 3dp dashes read as
             // stipple.
@@ -678,8 +692,8 @@ private fun EditorDashedActionButton(
                 if (dashedOutline) {
                     Modifier.dashedPlaceholderOutline(
                         color = MaterialTheme.colorScheme.outline,
-                        cornerRadius = RemapPillHeight / 2,
-                        strokeWidth = RemapBoxStroke,
+                        cornerRadius = MappoPillHeight / 2,
+                        strokeWidth = MappoBoxStroke,
                         dashLength = 6.dp,
                         gapLength = 3.dp,
                     )
@@ -695,19 +709,19 @@ private fun EditorDashedActionButton(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = RemapPillContentPadding),
+            modifier = Modifier.padding(horizontal = MappoPillContentPadding),
         ) {
             Icon(
                 icon,
                 contentDescription = null,
-                modifier = Modifier.size(RemapPillIconSize),
+                modifier = Modifier.size(MappoPillIconSize),
                 tint = MaterialTheme.colorScheme.primary,
             )
             // A hair tighter than the shared glyph-label gap.
             Spacer(Modifier.width(3.dp))
             Text(
                 text = text,
-                style = remapMiniTextStyle(),
+                style = mappoMiniTextStyle(),
                 color = MaterialTheme.colorScheme.primary,
                 maxLines = 1,
             )
@@ -750,10 +764,10 @@ private fun LabelPillField(
     val interaction = remember { MutableInteractionSource() }
     Surface(
         shape = RoundedCornerShape(50),
-        color = remapInputFieldContainer(),
+        color = mappoInputFieldContainer(),
         modifier = modifier
-            .remapInteractiveMotion(interaction)
-            .height(RemapPillHeight)
+            .mappoInteractiveMotion(interaction)
+            .height(MappoPillHeight)
             .then(
                 if (enabled) {
                     Modifier.clip(RoundedCornerShape(50)).clickable(
@@ -765,12 +779,12 @@ private fun LabelPillField(
             ),
     ) {
         Box(
-            modifier = Modifier.padding(horizontal = RemapPillContentPadding),
+            modifier = Modifier.padding(horizontal = MappoPillContentPadding),
             contentAlignment = Alignment.CenterStart,
         ) {
             Text(
                 text = value.ifEmpty { "Label" },
-                style = remapMiniTextStyle(),
+                style = mappoMiniTextStyle(),
                 color = if (value.isEmpty()) {
                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 } else {
@@ -861,7 +875,7 @@ internal fun RowKebab(
     contentDescription: String = "Options",
     modifier: Modifier = Modifier,
 ) {
-    RemapMiniIconButton(
+    MappoIconButton(
         icon = Icons.Filled.MoreVert,
         contentDescription = contentDescription,
         onClick = onClick,

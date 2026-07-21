@@ -18,19 +18,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,7 +64,12 @@ import com.mappo.data.model.withTarget
 import com.mappo.ui.component.ColorPicker
 import com.mappo.ui.component.GradientEditor
 import com.mappo.ui.component.colorpicker.ColorPickerButton
-import kotlin.math.roundToInt
+import com.mappo.ui.control.MappoIconButton
+import com.mappo.ui.control.MappoPercentSlider
+import com.mappo.ui.control.MappoPillButton
+import com.mappo.ui.control.MappoPillDropdown
+import com.mappo.ui.control.MappoSlider
+import com.mappo.ui.control.mappoMiniTextStyle
 import com.mappo.ui.imeActivation
 import com.mappo.ui.mappoKeyboardOptions
 
@@ -156,23 +156,25 @@ fun OverlayElementConfigContent(
         // ── Geometry ──
         HorizontalDivider()
         SectionLabel("Size & position")
-        PercentSlider("Width", draft.width, 0.04f..1f) {
+        MappoPercentSlider("Width", draft.width, valueRange = 0.04f..1f, onChange = {
             commit(draft.copy(width = it, x = draft.x.coerceAtMost(1f - it)))
-        }
-        PercentSlider("Height", draft.height, 0.04f..1f) {
+        })
+        MappoPercentSlider("Height", draft.height, valueRange = 0.04f..1f, onChange = {
             commit(draft.copy(height = it, y = draft.y.coerceAtMost(1f - it)))
-        }
-        PercentSlider("X", draft.x, 0f..1f) {
+        })
+        MappoPercentSlider("X", draft.x, onChange = {
             commit(draft.copy(x = it.coerceAtMost(1f - draft.width)))
-        }
-        PercentSlider("Y", draft.y, 0f..1f) {
+        })
+        MappoPercentSlider("Y", draft.y, onChange = {
             commit(draft.copy(y = it.coerceAtMost(1f - draft.height)))
-        }
+        })
 
         // ── Appearance (layered fills/strokes — see ElementAppearance) ──
         HorizontalDivider()
         SectionLabel("Appearance")
-        PercentSlider("Opacity", draft.opacity, 0.2f..1f) { commit(draft.copy(opacity = it)) }
+        MappoPercentSlider("Opacity", draft.opacity, valueRange = 0.2f..1f, onChange = {
+            commit(draft.copy(opacity = it))
+        })
 
         // Effective stack: the element's own layers, else a seed built from the legacy
         // light-appearance fields (one solid fill) so editing always starts from the
@@ -188,27 +190,28 @@ fun OverlayElementConfigContent(
             appearance.copy(layers = appearance.layers.map { if (it.id == updated.id) updated else it }),
         )
 
-        PercentSlider("Corner radius", appearance.corners.average, 0f..1f) {
+        MappoPercentSlider("Corner radius", appearance.corners.average, onChange = {
             commitAppearance(appearance.copy(corners = CornerRadii.uniform(it)))
-        }
+        })
         var perCorner by remember(element.id) { mutableStateOf(false) }
-        TextButton(onClick = { perCorner = !perCorner }) {
-            Text(if (perCorner) "Hide per-corner radii" else "Per-corner radii")
-        }
+        MappoPillButton(
+            text = if (perCorner) "Hide per-corner radii" else "Per-corner radii",
+            onClick = { perCorner = !perCorner },
+        )
         if (perCorner) {
             val c = appearance.corners
-            PercentSlider("Top left", c.topLeft, 0f..1f) {
+            MappoPercentSlider("Top left", c.topLeft, onChange = {
                 commitAppearance(appearance.copy(corners = c.copy(topLeft = it)))
-            }
-            PercentSlider("Top right", c.topRight, 0f..1f) {
+            })
+            MappoPercentSlider("Top right", c.topRight, onChange = {
                 commitAppearance(appearance.copy(corners = c.copy(topRight = it)))
-            }
-            PercentSlider("Bottom left", c.bottomLeft, 0f..1f) {
+            })
+            MappoPercentSlider("Bottom left", c.bottomLeft, onChange = {
                 commitAppearance(appearance.copy(corners = c.copy(bottomLeft = it)))
-            }
-            PercentSlider("Bottom right", c.bottomRight, 0f..1f) {
+            })
+            MappoPercentSlider("Bottom right", c.bottomRight, onChange = {
                 commitAppearance(appearance.copy(corners = c.copy(bottomRight = it)))
-            }
+            })
         }
 
         Row(
@@ -217,22 +220,29 @@ fun OverlayElementConfigContent(
         ) {
             SectionLabel("Layers")
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = {
-                commitAppearance(
-                    appearance.copy(
-                        layers = appearance.layers +
-                            defaultFillLayer(nextLayerId(appearance.layers), defaultFill),
-                    ),
-                )
-            }) { Text("+ Fill") }
-            TextButton(onClick = {
-                commitAppearance(
-                    appearance.copy(
-                        layers = appearance.layers +
-                            defaultStrokeLayer(nextLayerId(appearance.layers), Color.White),
-                    ),
-                )
-            }) { Text("+ Stroke") }
+            MappoPillButton(
+                text = "+ Fill",
+                onClick = {
+                    commitAppearance(
+                        appearance.copy(
+                            layers = appearance.layers +
+                                defaultFillLayer(nextLayerId(appearance.layers), defaultFill),
+                        ),
+                    )
+                },
+            )
+            Spacer(Modifier.width(8.dp))
+            MappoPillButton(
+                text = "+ Stroke",
+                onClick = {
+                    commitAppearance(
+                        appearance.copy(
+                            layers = appearance.layers +
+                                defaultStrokeLayer(nextLayerId(appearance.layers), Color.White),
+                        ),
+                    )
+                },
+            )
         }
         Text(
             "Layers stack bottom to top; tap one to edit it",
@@ -264,9 +274,15 @@ fun OverlayElementConfigContent(
         // ── Text color ──
         var pickingTextColor by remember { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text("Text color", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Text(
+                "Text color",
+                style = mappoMiniTextStyle(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
             if (draft.contentColorArgb != null) {
-                TextButton(onClick = { commit(draft.copy(contentColorArgb = null)) }) { Text("Reset") }
+                MappoPillButton(text = "Reset", onClick = { commit(draft.copy(contentColorArgb = null)) })
+                Spacer(Modifier.width(8.dp))
             }
             ColorPickerButton(
                 color = draft.contentColorArgb?.let { Color(it) } ?: defaultText,
@@ -290,11 +306,8 @@ fun OverlayElementConfigContent(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            TextButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = null)
-                Text("  Delete")
-            }
-            FilledTonalButton(onClick = onDone) { Text("Done") }
+            MappoPillButton(text = "Delete", onClick = onDelete)
+            MappoPillButton(text = "Done", onClick = onDone, filled = true)
         }
     }
 }
@@ -306,23 +319,6 @@ private fun SectionLabel(text: String) {
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-}
-
-@Composable
-private fun PercentSlider(
-    label: String,
-    value: Float,
-    range: ClosedFloatingPointRange<Float>,
-    onChange: (Float) -> Unit,
-) {
-    Column {
-        Text(
-            "$label  ${(value * 100).roundToInt()}%",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Slider(value = value, onValueChange = onChange, valueRange = range)
-    }
 }
 
 /** One row in the layers panel (top of the visual stack listed first). */
@@ -351,18 +347,14 @@ private fun LayerRow(
         Spacer(Modifier.width(10.dp))
         Text(
             if (layer.kind == LayerKind.FILL) "Fill" else "Stroke",
-            style = MaterialTheme.typography.bodyLarge,
+            style = mappoMiniTextStyle(),
             modifier = Modifier.weight(1f),
         )
-        IconButton(onClick = onRaise, enabled = canRaise) {
-            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move layer up")
-        }
-        IconButton(onClick = onLower, enabled = canLower) {
-            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move layer down")
-        }
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Default.Delete, contentDescription = "Delete layer")
-        }
+        MappoIconButton(Icons.Default.KeyboardArrowUp, "Move layer up", onClick = onRaise, enabled = canRaise)
+        Spacer(Modifier.width(4.dp))
+        MappoIconButton(Icons.Default.KeyboardArrowDown, "Move layer down", onClick = onLower, enabled = canLower)
+        Spacer(Modifier.width(4.dp))
+        MappoIconButton(Icons.Default.Delete, "Delete layer", onClick = onDelete)
     }
 }
 
@@ -395,11 +387,12 @@ private fun LayerControls(layer: AppearanceLayer, onChange: (AppearanceLayer) ->
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp, bottom = 8.dp),
     ) {
         val isGradient = layer.paint is LayerPaint.Gradient
-        OptionsRow(
+        OptionPillRow(
+            label = "Paint",
             options = listOf(false to "Solid", true to "Gradient"),
             selected = isGradient,
             onSelect = { wantGradient ->
-                if (wantGradient == isGradient) return@OptionsRow
+                if (wantGradient == isGradient) return@OptionPillRow
                 onChange(
                     layer.copy(
                         paint = if (wantGradient) {
@@ -423,7 +416,12 @@ private fun LayerControls(layer: AppearanceLayer, onChange: (AppearanceLayer) ->
             is LayerPaint.Solid -> {
                 var picking by remember(layer.id) { mutableStateOf(false) }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("Color", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text(
+                        "Color",
+                        style = mappoMiniTextStyle(),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
                     ColorPickerButton(color = Color(paint.argb), onClick = { picking = !picking }, size = 28.dp)
                 }
                 if (picking) {
@@ -446,22 +444,19 @@ private fun LayerControls(layer: AppearanceLayer, onChange: (AppearanceLayer) ->
                 showAngle = !(layer.kind == LayerKind.STROKE && layer.strokeGradientMode == StrokeGradientMode.ACROSS),
             )
         }
-        PercentSlider("Layer opacity", layer.opacity, 0f..1f) { onChange(layer.copy(opacity = it)) }
+        MappoPercentSlider("Layer opacity", layer.opacity, onChange = { onChange(layer.copy(opacity = it)) })
 
         if (layer.kind == LayerKind.STROKE) {
-            Column {
-                Text(
-                    "Width  ${"%.1f".format(layer.strokeWidthDp)}dp",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Slider(
-                    value = layer.strokeWidthDp,
-                    onValueChange = { onChange(layer.copy(strokeWidthDp = it)) },
-                    valueRange = 0.5f..24f,
-                )
-            }
-            OptionsRow(
+            MappoSlider(
+                label = "Width",
+                value = layer.strokeWidthDp,
+                onChange = { onChange(layer.copy(strokeWidthDp = it)) },
+                valueRange = 0.5f..24f,
+                step = 0.5f,
+                unitLabel = "dp",
+            )
+            OptionPillRow(
+                label = "Alignment",
                 options = listOf(
                     StrokeAlign.INSIDE to "Inside",
                     StrokeAlign.CENTER to "Center",
@@ -470,7 +465,8 @@ private fun LayerControls(layer: AppearanceLayer, onChange: (AppearanceLayer) ->
                 selected = layer.strokeAlign,
                 onSelect = { onChange(layer.copy(strokeAlign = it)) },
             )
-            OptionsRow(
+            OptionPillRow(
+                label = "Style",
                 options = listOf(
                     StrokeStyle.SOLID to "Solid",
                     StrokeStyle.DASHED to "Dashed",
@@ -480,7 +476,8 @@ private fun LayerControls(layer: AppearanceLayer, onChange: (AppearanceLayer) ->
                 onSelect = { onChange(layer.copy(strokeStyle = it)) },
             )
             if (isGradient) {
-                OptionsRow(
+                OptionPillRow(
+                    label = "Gradient",
                     options = listOf(
                         StrokeGradientMode.LINEAR to "Linear",
                         StrokeGradientMode.ACROSS to "Across stroke",
@@ -494,34 +491,48 @@ private fun LayerControls(layer: AppearanceLayer, onChange: (AppearanceLayer) ->
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            DpOffsetSlider("Offset X", layer.offsetXDp) { onChange(layer.copy(offsetXDp = it)) }
-            DpOffsetSlider("Offset Y", layer.offsetYDp) { onChange(layer.copy(offsetYDp = it)) }
+            MappoSlider(
+                label = "Offset X",
+                value = layer.offsetXDp,
+                onChange = { onChange(layer.copy(offsetXDp = it)) },
+                valueRange = -24f..24f,
+                step = 0.5f,
+                unitLabel = "dp",
+            )
+            MappoSlider(
+                label = "Offset Y",
+                value = layer.offsetYDp,
+                onChange = { onChange(layer.copy(offsetYDp = it)) },
+                valueRange = -24f..24f,
+                step = 0.5f,
+                unitLabel = "dp",
+            )
         }
     }
 }
 
+/** Settings row in the control family: mini label left, pill dropdown of options right. */
 @Composable
-private fun <T> OptionsRow(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        options.forEachIndexed { i, (value, label) ->
-            SegmentedButton(
-                selected = selected == value,
-                onClick = { onSelect(value) },
-                shape = SegmentedButtonDefaults.itemShape(i, options.size),
-            ) { Text(label) }
-        }
-    }
-}
-
-@Composable
-private fun DpOffsetSlider(label: String, value: Float, onChange: (Float) -> Unit) {
-    Column {
+private fun <T> OptionPillRow(
+    label: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Text(
-            "$label  ${"%.1f".format(value)}dp",
-            style = MaterialTheme.typography.bodySmall,
+            text = label,
+            style = mappoMiniTextStyle(),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
         )
-        Slider(value = value, onValueChange = onChange, valueRange = -24f..24f)
+        val labels = options.toMap()
+        MappoPillDropdown(
+            current = selected,
+            options = options.map { it.first },
+            optionLabel = { labels[it] ?: it.toString() },
+            onPick = onSelect,
+        )
     }
 }
 

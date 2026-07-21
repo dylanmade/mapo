@@ -1,365 +1,24 @@
 package com.mappo.ui.screen.remap
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.InteractionSource
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.LinearGradientShader
-import androidx.compose.ui.graphics.Shader
-import androidx.compose.ui.graphics.ShaderBrush
-import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.mappo.data.model.steam.BindingMode
 import com.mappo.data.model.steam.InputSource
 import com.mappo.data.model.steam.displayNameFor
+import com.mappo.ui.control.MappoPillDropdown
 import com.mappo.ui.glyph.InputGlyphs
 
 /**
- * Compact hand-rolled chrome shared across the simplified Remap Controls screen (group boxes,
- * Gyro/Overlay strip). All metrics live here — never re-derive a private size constant per call
- * site. DELIBERATE M3 DEVIATION: sub-touch-target scale, accepted to fit the 1:1 viewport.
- * (Scaled back up ~20% from the density-experiment sizes once the layout settled — readability
- * pass, 2026-07-12; still deliberately below the 48dp M3 floor.)
+ * Remap-specific pill chrome. The general control family (beveled pill buttons, icon
+ * buttons, the generic pill dropdown, motion, and every shared metric) lives in
+ * `com.mappo.ui.control` — this file holds only what's inherently about the remap domain.
  */
-
-/** Compressed body text for the simple view's rows and pills. */
-@Composable
-internal fun remapMiniTextStyle(): TextStyle =
-    MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, lineHeight = 14.sp)
-
-/** Overline treatment (uppercase callers + tracked-out small caps look) for editor headers. */
-@Composable
-internal fun remapOverlineTextStyle(): TextStyle =
-    MaterialTheme.typography.labelSmall.copy(
-        fontSize = 10.sp,
-        lineHeight = 12.sp,
-        letterSpacing = 0.9.sp,
-    )
-
-/**
- * Container fill shared by the group input boxes and every pill control (dropdowns, label
- * field, output button): the accent tint composited over the low container plane. One family,
- * one treatment — the pills deliberately match the boxes' attributes (2026-07-12 experiment).
- */
-@Composable
-internal fun remapBoxContainer(): Color =
-    MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-        .compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
-
-/**
- * The topmost button plane: buttons sitting ON an elevated box/card background (the expanded
- * group editor's dropdowns and output button) use this fill instead of [remapBoxContainer],
- * which would vanish against its own plane.
- */
-internal val RemapElevatedContainer = Color(0xFF434A5B)
-
-/**
- * Fill for text-input fields sitting on a box/card plane (e.g. the label field on the
- * expanded editor): a slightly darker "well" than the card it sits on. Deliberately FLAT —
- * no bevel border — because an input is not a button.
- */
-@Composable
-internal fun remapInputFieldContainer(): Color =
-    lerp(remapBoxContainer(), Color.Black, 0.22f)
-
-/** Bevel stroke width for the boxes + pill controls (slightly under the original 1dp). */
-internal val RemapBoxStroke = 0.75.dp
-
-/** How far the bevel's highlights deviate from the base fill — "ever so slightly". */
-private const val BevelTopHighlightStrength = 0.10f
-private const val BevelBottomHighlightStrength = 0.05f
-
-/** Where along the corner arc the bevel finishes fading: 1−cos(45°) of the radius — the
- *  point where the outline's tangent passes 45° and "top" geometrically becomes "side". */
-private const val BevelFadeOfRadius = 0.9f
-
-/**
- * The bevel border on buttons + cards (replaced the old solid accent outline): a very faint
- * thin top and bottom highlight, each the base fill nudged toward white, fading
- * to transparent (same hue, zero alpha — not transparent-black, which muddies the fade).
- * The fade completes WITHIN the corner rounding — by the arc's 45° point — so the highlight
- * ends just before the top border becomes the side border; that needs the real component
- * size, hence a [ShaderBrush] with per-size stops rather than fraction-based gradient stops
- * (which overshot the corners on anything taller than a pill).
- */
-@Composable
-internal fun remapBevelBorder(base: Color, cornerRadius: Dp): BorderStroke {
-    val fadePx = with(LocalDensity.current) { (cornerRadius * BevelFadeOfRadius).toPx() }
-    return BorderStroke(
-        RemapBoxStroke,
-        BevelBrush(
-            topHighlight = lerp(base, Color.White, BevelTopHighlightStrength),
-            bottomHighlight = lerp(base, Color.White, BevelBottomHighlightStrength),
-            fadePx = fadePx,
-        ),
-    )
-}
-
-// NB: strokes are INNER (Surface `border=` / `Modifier.border`) by deliberate reversion
-// (2026-07-13). An outer-stroke experiment (CSS-outline semantics via drawBehind) was tried
-// and backed out: everything stateful in Compose — hover/press/focus layers, disabled alpha,
-// Surface clipping — operates WITHIN bounds, so outside chrome needed custom parallel handling
-// for every state and made borderless fields read smaller than their bordered siblings.
-
-private class BevelBrush(
-    private val topHighlight: Color,
-    private val bottomHighlight: Color,
-    private val fadePx: Float,
-) : ShaderBrush() {
-    override fun createShader(size: Size): Shader {
-        val fade = (fadePx / size.height).coerceIn(0.01f, 0.49f)
-        return LinearGradientShader(
-            from = Offset.Zero,
-            to = Offset(0f, size.height),
-            colors = listOf(topHighlight, topHighlight.copy(alpha = 0f), bottomHighlight.copy(alpha = 0f), bottomHighlight),
-            colorStops = listOf(0f, fade, 1f - fade, 1f),
-        )
-    }
-
-    override fun equals(other: Any?): Boolean = other is BevelBrush &&
-        other.topHighlight == topHighlight && other.bottomHighlight == bottomHighlight && other.fadePx == fadePx
-
-    override fun hashCode(): Int =
-        31 * (31 * topHighlight.hashCode() + bottomHighlight.hashCode()) + fadePx.hashCode()
-}
-
-/** Height of the pill dropdowns (mode / overlay pickers). */
-internal val RemapPillHeight = 24.dp
-
-/** Width floor for pill dropdowns — matches the advanced view's output-button footprint so
- *  short values ("None") don't collapse the pill into a tiny chip. */
-internal val RemapPillMinWidth = 62.dp
 
 /** FIXED width of the Gyro/Overlay strip pills — a static, unified footprint (both pickers
  *  identical) instead of flexing to the selected value's label. */
 internal val RemapStripPillWidth = 116.dp
-
-/** Icon edge inside the pills. */
-internal val RemapPillIconSize = 13.dp
-
-/** Horizontal content inset shared by every pill control (buttons, dropdowns, label field) —
- *  bumped from 8dp 2026-07-13; content read cramped against the pill ends. */
-internal val RemapPillContentPadding = 10.dp
-
-/** Gap between a leading glyph and its label (pills, headers, strip captions). */
-internal val RemapGlyphLabelGap = 5.dp
-
-/** Optical-centering bias for the FIXED-WIDTH, center-arranged strip pills (Inherit / Overlay /
- *  Gyro): total extra END padding vs START, shifting the icon+label block bias/2 toward the
- *  icon. Cancels the leading icon's built-in live-area padding — Material/Lucide glyphs only
- *  ink ~10-11dp of their 13dp box, so with symmetric padding the left flank measures ~2dp
- *  wider than the right (device screenshot audit, 2026-07-13). Wrap-width pills don't need
- *  this: their flanks are pure padding with no centering slack to compare. M3 precedent for
- *  biasing padding toward the icon side: ButtonDefaults.ButtonWithIconContentPadding
- *  (16dp icon side vs 24dp text side). NOT glyph scaling — layout-only, tune freely. */
-internal val RemapPillIconSideBias = 2.dp
-
-/** Outer tap-target edge of [RemapMiniIconButton] (also its footprint spacer in editor rows). */
-internal val RemapIconButtonSize = 24.dp
-
-/** Icon edge inside [RemapMiniIconButton]. */
-internal val RemapIconButtonIconSize = 16.dp
-
-/** The motion vocabulary [remapInteractiveMotion] speaks. Both variants are RELATIVE on
- *  press — the same travel from wherever the element currently rests, never an absolute
- *  target (absolute targets made focus presses feel far more intense than unfocused ones,
- *  a lesson learned once per variant). */
-internal enum class RemapInteractionMotion {
-    /** Focus/hover raises the element [RemapFocusLift]; press displaces it [RemapPressTravel]
-     *  down from its current position (release springs it back). The elevation metaphor —
-     *  screen-wide default since 2026-07-14. */
-    Lift,
-
-    /** Focus/hover grows the element [RemapFocusedScale]×; press dips it to
-     *  [RemapPressedFraction] of its current size. The original treatment (retired as the
-     *  default 2026-07-14 — read kitschy) — kept for spots where a grow fits better. */
-    Scale,
-}
-
-/**
- * Interaction motion for the remap screen's interactive elements — [Lift] (default) or
- * [Scale], see [RemapInteractionMotion]. Pass the SAME [interactionSource] to the element's
- * `clickable` so key-clicks and touch presses both register. Draw-phase only
- * ([graphicsLayer]), so layout bounds (and the morph-origin rects measured from them) never
- * move. Chain it BEFORE the element's border/background so the whole control moves as one.
- */
-@Composable
-internal fun Modifier.remapInteractiveMotion(
-    interactionSource: InteractionSource,
-    motion: RemapInteractionMotion = RemapInteractionMotion.Lift,
-): Modifier {
-    var focused by remember { mutableStateOf(false) }
-    val pressed by interactionSource.collectIsPressedAsState()
-    // The press lands faster than the focus lift/grow — a tap should feel immediate.
-    val durationMillis = if (pressed) 90 else 150
-    val tracked = this.onFocusChanged { focused = it.isFocused }
-    return when (motion) {
-        RemapInteractionMotion.Lift -> {
-            val base = if (focused) -RemapFocusLift else 0.dp
-            val offset by animateDpAsState(
-                targetValue = if (pressed) base + RemapPressTravel else base,
-                animationSpec = tween(durationMillis),
-                label = "remapInteractiveLift",
-            )
-            tracked.graphicsLayer { translationY = offset.toPx() }
-        }
-        RemapInteractionMotion.Scale -> {
-            val base = if (focused) RemapFocusedScale else 1f
-            val scale by animateFloatAsState(
-                targetValue = if (pressed) base * RemapPressedFraction else base,
-                animationSpec = tween(durationMillis),
-                label = "remapInteractiveScale",
-            )
-            tracked.graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-        }
-    }
-}
-
-/** How far focus/hover raises an element ([RemapInteractionMotion.Lift]). */
-private val RemapFocusLift = 1.25.dp
-
-/** How far a press displaces an element DOWN from wherever it currently rests (focused:
- *  lift → back to base; unfocused: base → below it) — always the same travel. */
-private val RemapPressTravel = 2.dp
-
-/** Focus/hover grow for [RemapInteractionMotion.Scale]. */
-private const val RemapFocusedScale = 1.05f
-
-/** Press dip for [RemapInteractionMotion.Scale] — a fraction of the CURRENT resting size
- *  (focused+pressed = 1.05×0.93), never an absolute scale. */
-private const val RemapPressedFraction = 0.93f
-
-/**
- * A hand-rolled miniature pill button, in the shared box treatment. [filled] (the
- * command/output button) keeps its emphasis through the stronger text color only. [elevated]
- * uses the topmost button plane for buttons sitting on a box/card background. Disabled =
- * dimmed + inert.
- */
-@Composable
-internal fun RemapMiniPillButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    filled: Boolean = false,
-    elevated: Boolean = false,
-) {
-    val content = if (filled) MaterialTheme.colorScheme.onSurface
-    else MaterialTheme.colorScheme.onSurfaceVariant
-    val container = if (elevated) RemapElevatedContainer else remapBoxContainer()
-    val interaction = remember { MutableInteractionSource() }
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = container,
-        border = remapBevelBorder(container, RemapPillHeight / 2),
-        modifier = modifier
-            .remapInteractiveMotion(interaction)
-            .height(RemapPillHeight)
-            .then(
-                if (enabled) {
-                    Modifier.clip(RoundedCornerShape(50)).clickable(
-                        interactionSource = interaction,
-                        indication = LocalIndication.current,
-                        onClick = onClick,
-                    )
-                } else Modifier.alpha(0.55f),
-            ),
-    ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = RemapPillContentPadding)) {
-            Text(
-                text = text,
-                style = remapMiniTextStyle(),
-                color = content,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-/** A hand-rolled miniature icon button (cogs etc.) — ripple-clipped circle, no 48dp halo. */
-@Composable
-internal fun RemapMiniIconButton(
-    icon: ImageVector,
-    contentDescription: String?,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    val interaction = remember { MutableInteractionSource() }
-    Box(
-        modifier = modifier
-            .remapInteractiveMotion(interaction)
-            .size(RemapIconButtonSize)
-            .clip(CircleShape)
-            .then(
-                if (enabled) {
-                    Modifier.clickable(
-                        interactionSource = interaction,
-                        indication = LocalIndication.current,
-                        onClick = onClick,
-                    )
-                } else Modifier.alpha(0.45f),
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(RemapIconButtonIconSize),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
 
 /** The mode-selection pill: current mode glyph + name + dropdown arrow → menu of valid modes.
  *  [overline] renders the text in the overline treatment (uppercase, tracked out) for the
@@ -380,79 +39,24 @@ internal fun ModePillDropdown(
     leadingIcon: androidx.compose.ui.graphics.painter.Painter? = null,
     modifier: Modifier = Modifier,
 ) {
-    var open by remember { mutableStateOf(false) }
-    val container = if (elevated) RemapElevatedContainer else remapBoxContainer()
-    val interaction = remember { MutableInteractionSource() }
     // "None" shows bare on the pill — an absence carries no concept glyph there. (The menu
     // ITEM keeps its glyph; in a list, the icon column reads as part of the option, not as a
     // claim about current state.) A fixed [leadingIcon] overrides both rules: it's the
     // element's identity, not the mode's.
     val pillIcon = leadingIcon
         ?: if (currentMode != BindingMode.NONE) InputGlyphs.modePainter(currentMode) else null
-    // Fixed-width pills center their content, which exposes the icon's live-area padding as a
-    // visibly wider left flank — bias the block toward the icon ([RemapPillIconSideBias]).
-    val iconBias = if (fixedWidth != null && pillIcon != null) RemapPillIconSideBias else 0.dp
-    Box {
-        // Shared box treatment — pill-style dropdown button, no trailing arrow.
-        Surface(
-            shape = RoundedCornerShape(50),
-            color = container,
-            border = remapBevelBorder(container, RemapPillHeight / 2),
-            modifier = modifier
-                .remapInteractiveMotion(interaction)
-                .heightIn(min = RemapPillHeight)
-                .then(
-                    if (fixedWidth != null) Modifier.width(fixedWidth)
-                    else Modifier.widthIn(min = RemapPillMinWidth),
-                )
-                .then(
-                    if (enabled) {
-                        Modifier.clip(RoundedCornerShape(50)).clickable(
-                            interactionSource = interaction,
-                            indication = LocalIndication.current,
-                            onClickLabel = "Change input mode",
-                        ) { open = true }
-                    } else Modifier.alpha(0.6f),
-                ),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(
-                    start = RemapPillContentPadding - iconBias / 2,
-                    end = RemapPillContentPadding + iconBias / 2,
-                ),
-            ) {
-                if (pillIcon != null) {
-                    Icon(
-                        pillIcon,
-                        contentDescription = null,
-                        modifier = Modifier.size(RemapPillIconSize),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(RemapGlyphLabelGap))
-                }
-                Text(
-                    text = currentMode.displayNameFor(source)
-                        .let { if (overline) it.uppercase() else it },
-                    style = if (overline) remapOverlineTextStyle() else remapMiniTextStyle(),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 156.dp),
-                )
-            }
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            validModes.forEach { mode ->
-                DropdownMenuItem(
-                    leadingIcon = { Icon(InputGlyphs.modePainter(mode), contentDescription = null) },
-                    text = { Text(mode.displayNameFor(source)) },
-                    trailingIcon = if (mode == currentMode) {
-                        { Icon(Icons.Filled.Check, contentDescription = null) }
-                    } else null,
-                    onClick = { open = false; if (mode != currentMode) onPick(mode) },
-                )
-            }
-        }
-    }
+    MappoPillDropdown(
+        current = currentMode,
+        options = validModes,
+        optionLabel = { it.displayNameFor(source) },
+        onPick = onPick,
+        enabled = enabled,
+        optionIcon = { InputGlyphs.modePainter(it) },
+        pillIcon = pillIcon,
+        overline = overline,
+        elevated = elevated,
+        fixedWidth = fixedWidth,
+        onClickLabel = "Change input mode",
+        modifier = modifier,
+    )
 }

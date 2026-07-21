@@ -43,6 +43,16 @@ import com.mappo.data.model.steam.BindingMode
 import com.mappo.data.model.steam.InputSource
 import com.mappo.R
 import com.mappo.service.input.modes.SourceModeCatalog
+import com.mappo.ui.control.MappoGlyphLabelGap
+import com.mappo.ui.control.MappoPillContentPadding
+import com.mappo.ui.control.MappoPillHeight
+import com.mappo.ui.control.MappoPillIconSideBias
+import com.mappo.ui.control.MappoPillIconSize
+import com.mappo.ui.control.MappoPillMinWidth
+import com.mappo.ui.control.mappoBevelBorder
+import com.mappo.ui.control.mappoBoxContainer
+import com.mappo.ui.control.mappoInteractiveMotion
+import com.mappo.ui.control.mappoMiniTextStyle
 
 /**
  * The control strip beneath the simple remap view's band: three set-scoped pickers, each a
@@ -78,7 +88,7 @@ internal fun RemapBottomRow(
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val pillWidth = ((maxWidth - StripReservedWidth) / 3)
             .coerceAtMost(RemapStripPillWidth)
-            .coerceAtLeast(RemapPillMinWidth)
+            .coerceAtLeast(MappoPillMinWidth)
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.Center,
@@ -128,7 +138,7 @@ internal fun RemapBottomRow(
             } else {
                 Text(
                     text = "—",
-                    style = remapMiniTextStyle(),
+                    style = mappoMiniTextStyle(),
                     color = MaterialTheme.colorScheme.outline,
                 )
             }
@@ -142,7 +152,7 @@ internal fun RemapBottomRow(
 private fun StripCaption(text: String) {
     Text(
         text = text,
-        style = remapMiniTextStyle(),
+        style = mappoMiniTextStyle(),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
@@ -164,15 +174,15 @@ private fun PlaceholderStripPill(
     Box {
         // Shared box treatment — pill-style dropdown button, no trailing arrow. Uniform
         // width across the strip's pills (computed by the caller).
-        val container = remapBoxContainer()
+        val container = mappoBoxContainer()
         val interaction = remember { MutableInteractionSource() }
         Surface(
             shape = RoundedCornerShape(50),
             color = container,
-            border = remapBevelBorder(container, RemapPillHeight / 2),
+            border = mappoBevelBorder(container, MappoPillHeight / 2),
             modifier = Modifier
-                .remapInteractiveMotion(interaction)
-                .heightIn(min = RemapPillHeight)
+                .mappoInteractiveMotion(interaction)
+                .heightIn(min = MappoPillHeight)
                 .width(width)
                 .clip(RoundedCornerShape(50))
                 .clickable(
@@ -185,20 +195,20 @@ private fun PlaceholderStripPill(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
                 // Icon-side bias: the centered block otherwise reads shifted right by the
-                // leading icon's live-area padding — see [RemapPillIconSideBias].
+                // leading icon's live-area padding — see [MappoPillIconSideBias].
                 modifier = Modifier.padding(
-                    start = RemapPillContentPadding - RemapPillIconSideBias / 2,
-                    end = RemapPillContentPadding + RemapPillIconSideBias / 2,
+                    start = MappoPillContentPadding - MappoPillIconSideBias / 2,
+                    end = MappoPillContentPadding + MappoPillIconSideBias / 2,
                 ),
             ) {
                 Icon(
                     icon,
                     contentDescription = null,
-                    modifier = Modifier.size(RemapPillIconSize),
+                    modifier = Modifier.size(MappoPillIconSize),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.width(RemapGlyphLabelGap))
-                Text(text = selected, style = remapMiniTextStyle())
+                Spacer(Modifier.width(MappoGlyphLabelGap))
+                Text(text = selected, style = mappoMiniTextStyle())
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

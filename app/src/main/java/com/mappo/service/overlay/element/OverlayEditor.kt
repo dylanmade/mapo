@@ -1,7 +1,11 @@
 package com.mappo.service.overlay.element
 
 import android.content.Context
+import android.graphics.Point
+import android.os.Build
+import android.view.WindowManager
 import com.mappo.data.model.OverlayElement
+import com.mappo.data.settings.OverlaySettings
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.mappo.data.repository.ControllerConfigRepository
 import com.mappo.data.repository.OverlayRepository
@@ -56,6 +60,7 @@ class OverlayEditor @Inject constructor(
     private val overlayRepository: OverlayRepository,
     private val profileRepository: ProfileRepository,
     private val controllerConfigRepository: ControllerConfigRepository,
+    private val overlaySettings: OverlaySettings,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -183,21 +188,25 @@ class OverlayEditor @Inject constructor(
         scope.launch {
             val n = elements.value.size
             val nudge = (n % 5) * 0.04f
-            val dm = context.resources.displayMetrics
-            val height = (DEFAULT_DIAMETER * dm.widthPixels.toFloat() / dm.heightPixels.toFloat())
-                .coerceIn(MIN_SIZE, 1f)
+            val size = displaySizePx()
+            val height = if (size.y > 0) {
+                (DEFAULT_DIAMETER * size.x.toFloat() / size.y.toFloat()).coerceIn(MIN_SIZE, 1f)
+            } else DEFAULT_DIAMETER
             overlayRepository.add(
-                OverlayElement(
-                    profileId = profileId,
-                    actionSetId = (current as? OverlayScope.Set)?.actionSetId,
-                    actionLayerId = (current as? OverlayScope.Layer)?.actionLayerId,
-                    label = "",
-                    x = (0.40f + nudge).coerceIn(0f, 1f - DEFAULT_DIAMETER),
-                    y = (0.40f + nudge).coerceIn(0f, 1f - height),
-                    width = DEFAULT_DIAMETER,
-                    height = height,
-                    shape = OverlayElement.SHAPE_CIRCLE,
-                    zIndex = n,
+                clampGeometry(
+                    OverlayElement(
+                        profileId = profileId,
+                        actionSetId = (current as? OverlayScope.Set)?.actionSetId,
+                        actionLayerId = (current as? OverlayScope.Layer)?.actionLayerId,
+                        label = "",
+                        x = 0.40f + nudge,
+                        y = 0.40f + nudge,
+                        width = DEFAULT_DIAMETER,
+                        height = height,
+                        shape = OverlayElement.SHAPE_CIRCLE,
+                        zIndex = n,
+                    ),
+                    editBounds(),
                 ),
             )
         }
@@ -227,16 +236,10 @@ class OverlayEditor @Inject constructor(
     fun moveResizeAll(rects: List<ElementRect>) {
         if (rects.isEmpty()) return
         scope.launch {
+            val b = editBounds()
             val updated = rects.mapNotNull { r ->
                 val current = overlayRepository.getById(r.id) ?: return@mapNotNull null
-                val w = r.width.coerceIn(MIN_SIZE, 1f)
-                val h = r.height.coerceIn(MIN_SIZE, 1f)
-                current.copy(
-                    x = r.x.coerceIn(0f, 1f - w),
-                    y = r.y.coerceIn(0f, 1f - h),
-                    width = w,
-                    height = h,
-                )
+                clampGeometry(current.copy(x = r.x, y = r.y, width = r.width, height = r.height), b)
             }
             if (updated.isNotEmpty()) overlayRepository.update(updated)
         }
@@ -244,7 +247,54 @@ class OverlayEditor @Inject constructor(
 
     /** Persist a full element edit (instant-commit from the config drawer). */
     fun update(element: OverlayElement) {
-        scope.launch { overlayRepository.update(element) }
+        scope.launch { overlayRepository.update(clampGeometry(element, editBounds())) }
+    }
+
+    // ── Editable-area bounds ──────────────────────────────────────────────────────
+    //
+    // Normally the full display (normalized 0..1). With OverlaySettings.squareEditArea on
+    // ("1:1 screen"), the centered square of side min(displayW, displayH) — the smallest
+    // supported screen shape. This is the single DATA-LEVEL chokepoint: every geometry
+    // write (drag/resize commits, nudges, config-drawer sliders, duplicates, adds) passes
+    // through it, so nothing can persist outside the active bounds.
+
+    private data class NormBounds(val minX: Float, val minY: Float, val maxX: Float, val maxY: Float) {
+        val width: Float get() = maxX - minX
+        val height: Float get() = maxY - minY
+    }
+
+    private fun editBounds(): NormBounds {
+        if (!overlaySettings.squareEditArea.value) return FULL_BOUNDS
+        val size = displaySizePx()
+        if (size.x <= 0 || size.y <= 0) return FULL_BOUNDS
+        val side = minOf(size.x, size.y).toFloat()
+        val left = (size.x - side) / 2f / size.x
+        val top = (size.y - side) / 2f / size.y
+        return NormBounds(left, top, left + side / size.x, top + side / size.y)
+    }
+
+    private fun clampGeometry(el: OverlayElement, b: NormBounds): OverlayElement {
+        val w = el.width.coerceIn(MIN_SIZE, b.width)
+        val h = el.height.coerceIn(MIN_SIZE, b.height)
+        return el.copy(
+            x = el.x.coerceIn(b.minX, b.maxX - w),
+            y = el.y.coerceIn(b.minY, b.maxY - h),
+            width = w,
+            height = h,
+        )
+    }
+
+    private fun displaySizePx(): Point {
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = wm.maximumWindowMetrics.bounds
+            Point(bounds.width(), bounds.height())
+        } else {
+            val p = Point()
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealSize(p)
+            p
+        }
     }
 
     /**
@@ -258,17 +308,21 @@ class OverlayEditor @Inject constructor(
         if (sources.isEmpty()) return
         scope.launch {
             val base = elements.value.size
+            val b = editBounds()
             // ONE batched insert → a single flow emission → renderElements/raiseToolbar run ONCE
             // (inserting the clones one-by-one storms the toolbar recreation and can crash it).
             val clones = sources.mapIndexed { i, src ->
-                src.copy(
-                    id = 0,
-                    profileId = profileId,
-                    actionSetId = (current as? OverlayScope.Set)?.actionSetId,
-                    actionLayerId = (current as? OverlayScope.Layer)?.actionLayerId,
-                    x = (src.x + PASTE_OFFSET).coerceIn(0f, 1f - src.width),
-                    y = (src.y + PASTE_OFFSET).coerceIn(0f, 1f - src.height),
-                    zIndex = base + i,
+                clampGeometry(
+                    src.copy(
+                        id = 0,
+                        profileId = profileId,
+                        actionSetId = (current as? OverlayScope.Set)?.actionSetId,
+                        actionLayerId = (current as? OverlayScope.Layer)?.actionLayerId,
+                        x = src.x + PASTE_OFFSET,
+                        y = src.y + PASTE_OFFSET,
+                        zIndex = base + i,
+                    ),
+                    b,
                 )
             }
             onDone(overlayRepository.addAll(clones))
@@ -310,6 +364,8 @@ class OverlayEditor @Inject constructor(
     }
 
     companion object {
+        private val FULL_BOUNDS = NormBounds(0f, 0f, 1f, 1f)
+
         // New buttons are circles: this display-width fraction is the diameter.
         const val DEFAULT_DIAMETER = 0.10f
         const val MIN_SIZE = 0.04f

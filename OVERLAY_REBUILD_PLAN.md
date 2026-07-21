@@ -230,6 +230,31 @@ authored in it and saved as a template.
   vocabulary; overlay buttons have no device default), and the config drawer says
   "Fires: nothing".
 
+### Editor option — "1:1 screen" (2026-07-20) — 🔨 CODE COMPLETE (awaiting device verify)
+Options-submenu toggle (`OverlaySettings.squareEditArea`, key `square_edit_area`, default
+off, CropSquare icon) that constrains the EDITABLE overlay area to the centered square of
+side min(displayW, displayH) — the smallest supported screen (1:1 LCD) — so overlay
+layouts can be designed against it. While on, nothing can leave the square:
+- **Data chokepoint** in `OverlayEditor` (`editBounds()`/`clampGeometry()`): every
+  geometry write — drag/resize commits, nudges, config-drawer sliders, duplicate, add —
+  clamps to normalized square bounds (OverlayEditor now reads display size via
+  WindowManager maximumWindowMetrics, matching the controller).
+- **Live clamps** in `OverlayLiveEditController` (`editBoundsPx()`/`clampWindow()`):
+  element drags (`moveGroup`), corner-resize box, snap lattice + final snap clamp, the
+  TOOLBAR (drag + `resizeToolbarToContent` placement incl. the centered default), fly-out
+  submenus (`placeMenuX`/`pushMenuLevel`), and the positioner (drag + initial spot).
+- **Toggle sweep** (`clampEverythingToEditBounds`, collector started in `start()`):
+  flipping it on mid-session persists clamped element rects as ONE undoable batch,
+  re-clamps toolbar/positioner, dismisses open fly-outs.
+- **Scrim**: outside the square masked darker (black 55%) + 1dp outline; the grid guide
+  (and its snap lattice) tiles the SQUARE, not the screen.
+- The per-button CONFIG DRAWER adheres to the square too (user: it's the serviceability
+  test for the 1:1 form factor): the window stays full-screen (modality + IME) but the
+  whole stage — scrim, sheet, docking edge, slide-in — is padded to the square and
+  `clipToBounds`, so the sheet enters from the SQUARE's edge exactly as on a 1:1 display;
+  taps on the masked area outside dismiss like scrim taps. Only the EXIT CONFIRM stays
+  truly full-screen.
+
 ### Later (out of MVP scope, noted as seams)
 - Converge to the chosen editor; delete the other + the `OverlayTouchable*` bridge; retire
   the tabbed keyboard once superseded.

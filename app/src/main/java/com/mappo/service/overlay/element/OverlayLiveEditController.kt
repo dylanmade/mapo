@@ -36,6 +36,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -71,6 +72,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.ControlCamera
+import androidx.compose.material.icons.filled.CropSquare
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FastForward
@@ -119,12 +121,14 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -224,6 +228,8 @@ class OverlayLiveEditController @Inject constructor(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var collectJob: Job? = null
+    // Reacts to the "1:1 screen" setting flipping mid-session (clamps everything back in).
+    private var squareJob: Job? = null
 
     private val _editing = MutableStateFlow(false)
     val editing: StateFlow<Boolean> = _editing
@@ -359,6 +365,13 @@ class OverlayLiveEditController @Inject constructor(
             selectionJob = scope.launch {
                 selectedIds.collect { onSelectionChanged() }
             }
+            // "1:1 screen" flips (or is already on at session start): bring every element and
+            // the movable chrome back inside the new editable bounds.
+            squareJob = scope.launch {
+                overlaySettings.squareEditArea.collect { on ->
+                    if (_editing.value && on) clampEverythingToEditBounds()
+                }
+            }
             Log.i(TAG, "live edit started")
         }
     }
@@ -369,6 +382,8 @@ class OverlayLiveEditController @Inject constructor(
             collectJob = null
             selectionJob?.cancel()
             selectionJob = null
+            squareJob?.cancel()
+            squareJob = null
             removeChrome()
             removePositioner()
             dismissConfig()
@@ -522,10 +537,11 @@ class OverlayLiveEditController @Inject constructor(
      */
     private fun moveGroup(primaryId: Long, groupStart: Map<Long, Point>, dx: Float, dy: Float) {
         val size = displaySizePx()
+        val b = editBoundsPx(size)
         val primary = elementWindows[primaryId] ?: return
         val ps = groupStart[primaryId] ?: return
-        var px = (ps.x + dx).roundToInt().coerceIn(0, size.x - primary.params.width)
-        var py = (ps.y + dy).roundToInt().coerceIn(0, size.y - primary.params.height)
+        var px = clampWindow((ps.x + dx).roundToInt(), primary.params.width, b.left, b.right)
+        var py = clampWindow((ps.y + dy).roundToInt(), primary.params.height, b.top, b.bottom)
         if (overlaySettings.snapEnabled.value) {
             val snapped = snapPosition(px, py, primary.params.width, primary.params.height, size, groupStart.keys)
             px = snapped.x; py = snapped.y
@@ -534,8 +550,8 @@ class OverlayLiveEditController @Inject constructor(
         val appliedDy = py - ps.y
         groupStart.forEach { (gid, start) ->
             val w = elementWindows[gid] ?: return@forEach
-            w.params.x = (start.x + appliedDx).coerceIn(0, size.x - w.params.width)
-            w.params.y = (start.y + appliedDy).coerceIn(0, size.y - w.params.height)
+            w.params.x = clampWindow(start.x + appliedDx, w.params.width, b.left, b.right)
+            w.params.y = clampWindow(start.y + appliedDy, w.params.height, b.top, b.bottom)
             runCatching { windowManager.updateViewLayout(w.view, w.params) }
         }
         // Keep the resize chrome glued to the selection as it moves.
@@ -776,13 +792,14 @@ class OverlayLiveEditController @Inject constructor(
         minH: Int,
         size: Point,
     ): android.graphics.Rect {
+        val b = editBoundsPx(size)
         var left = start.left; var top = start.top; var right = start.right; var bottom = start.bottom
         val leftMoved = corner == Corner.TopLeft || corner == Corner.BottomLeft
         val topMoved = corner == Corner.TopLeft || corner == Corner.TopRight
-        if (leftMoved) left = (start.left + dx).coerceIn(0, right - minW)
-        else right = (start.right + dx).coerceIn(left + minW, size.x)
-        if (topMoved) top = (start.top + dy).coerceIn(0, bottom - minH)
-        else bottom = (start.bottom + dy).coerceIn(top + minH, size.y)
+        if (leftMoved) left = (start.left + dx).coerceIn(minOf(b.left, right - minW), right - minW)
+        else right = (start.right + dx).coerceIn(left + minW, maxOf(b.right, left + minW))
+        if (topMoved) top = (start.top + dy).coerceIn(minOf(b.top, bottom - minH), bottom - minH)
+        else bottom = (start.bottom + dy).coerceIn(top + minH, maxOf(b.bottom, top + minH))
         return android.graphics.Rect(left, top, right, bottom)
     }
 
@@ -822,7 +839,9 @@ class OverlayLiveEditController @Inject constructor(
         var current by remember { mutableStateOf(Offset.Zero) }
         val primary = MaterialTheme.colorScheme.primary
         val gridOn by showGrid.collectAsStateWithLifecycle()
+        val squareOn by overlaySettings.squareEditArea.collectAsStateWithLifecycle()
         val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+        val squareOutline = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
         val density = LocalDensity.current.density
         Box(
             Modifier
@@ -840,17 +859,41 @@ class OverlayLiveEditController @Inject constructor(
                     )
                 }
                 .drawBehind {
+                    // "1:1 screen": the editable square (scrim-local px == screen px). Everything
+                    // outside it is masked darker + the square gets a thin outline, so the design
+                    // space reads at a glance.
+                    val bLeft: Float; val bTop: Float; val bW: Float; val bH: Float
+                    if (squareOn) {
+                        val side = minOf(size.width, size.height)
+                        bLeft = (size.width - side) / 2f
+                        bTop = (size.height - side) / 2f
+                        bW = side; bH = side
+                        // Black is the sanctioned raw color for scrims/masks.
+                        val mask = Color.Black.copy(alpha = 0.55f)
+                        drawRect(mask, topLeft = Offset.Zero, size = androidx.compose.ui.geometry.Size(bLeft, size.height))
+                        drawRect(mask, topLeft = Offset(bLeft + bW, 0f), size = androidx.compose.ui.geometry.Size(size.width - bLeft - bW, size.height))
+                        drawRect(mask, topLeft = Offset(bLeft, 0f), size = androidx.compose.ui.geometry.Size(bW, bTop))
+                        drawRect(mask, topLeft = Offset(bLeft, bTop + bH), size = androidx.compose.ui.geometry.Size(bW, size.height - bTop - bH))
+                        drawRect(
+                            squareOutline,
+                            topLeft = Offset(bLeft, bTop),
+                            size = androidx.compose.ui.geometry.Size(bW, bH),
+                            style = Stroke(width = 1.dp.toPx()),
+                        )
+                    } else {
+                        bLeft = 0f; bTop = 0f; bW = size.width; bH = size.height
+                    }
                     // Grid guide (behind buttons): translucent PLUSES at every lattice corner. Cells
-                    // auto-size to tile the screen exactly (whole number of near-square cells per axis,
-                    // derived from the aspect ratio — see [gridCellPx]), so the lattice fits perfectly
-                    // and lines up with snapping on any screen.
+                    // auto-size to tile the EDITABLE BOUNDS exactly (whole number of near-square cells
+                    // per axis — see [gridCellPx]), so the lattice fits perfectly and lines up with
+                    // snapping on any screen, full or 1:1.
                     if (gridOn) {
-                        val (cellX, cellY) = gridCellPx(size.width, size.height, density)
-                        val cols = (size.width / cellX).roundToInt()
-                        val rows = (size.height / cellY).roundToInt()
+                        val (cellX, cellY) = gridCellPx(bW, bH, density)
+                        val cols = (bW / cellX).roundToInt()
+                        val rows = (bH / cellY).roundToInt()
                         val arm = 4.dp.toPx()
                         for (i in 0..cols) for (j in 0..rows) {
-                            val px = i * cellX; val py = j * cellY
+                            val px = bLeft + i * cellX; val py = bTop + j * cellY
                             drawLine(gridColor, Offset(px - arm, py), Offset(px + arm, py), 1f)
                             drawLine(gridColor, Offset(px, py - arm), Offset(px, py + arm), 1f)
                         }
@@ -987,9 +1030,9 @@ class OverlayLiveEditController @Inject constructor(
                     if (dragging && p != null) {
                         val v = positioner?.first
                         val w = v?.width ?: 0; val h = v?.height ?: 0
-                        val size = displaySizePx()
-                        p.x = (startX + (ev.rawX - startRawX)).roundToInt().coerceIn(0, maxOf(0, size.x - w))
-                        p.y = (startY + (ev.rawY - startRawY)).roundToInt().coerceIn(0, maxOf(0, size.y - h))
+                        val b = editBoundsPx()
+                        p.x = clampWindow((startX + (ev.rawX - startRawX)).roundToInt(), w, b.left, b.right)
+                        p.y = clampWindow((startY + (ev.rawY - startRawY)).roundToInt(), h, b.top, b.bottom)
                         runCatching { windowManager.updateViewLayout(v, p) }
                     }
                     true
@@ -1016,15 +1059,15 @@ class OverlayLiveEditController @Inject constructor(
             setContent { MappoTheme { ProvideMenuRipple { PositionerContent(onTouch) } } }
         }
         owner.resumeTo()
-        val size = displaySizePx()
+        val b = editBoundsPx()
         val params = layoutParams(
             width = WindowManager.LayoutParams.WRAP_CONTENT,
             height = WindowManager.LayoutParams.WRAP_CONTENT,
             focusable = false,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (size.x * 0.72f).roundToInt()
-            y = (size.y * 0.40f).roundToInt()
+            x = b.left + (b.width() * 0.72f).roundToInt()
+            y = b.top + (b.height() * 0.40f).roundToInt()
         }
         runCatching { windowManager.addView(view, params) }
             .onFailure { Log.e(TAG, "addView(positioner) failed", it); return }
@@ -1218,12 +1261,12 @@ class OverlayLiveEditController @Inject constructor(
                             dismissSubmenus() // starting a drag closes submenus (anchored to the toolbar)
                         }
                         if (dragging) {
-                            val size = displaySizePx()
+                            val b = editBoundsPx()
                             val v = toolbar?.first
                             val w = v?.width ?: 0
                             val h = v?.height ?: 0
-                            p.x = (startX + dx).roundToInt().coerceIn(minOf(0, size.x - w), maxOf(0, size.x - w))
-                            p.y = (startY + dy).roundToInt().coerceIn(minOf(0, size.y - h), maxOf(0, size.y - h))
+                            p.x = clampWindow((startX + dx).roundToInt(), w, b.left, b.right)
+                            p.y = clampWindow((startY + dy).roundToInt(), h, b.top, b.bottom)
                             runCatching { windowManager.updateViewLayout(v, p) }
                         }
                     }
@@ -1365,10 +1408,11 @@ class OverlayLiveEditController @Inject constructor(
             }
             centerToolbarPending -> {
                 centerToolbarPending = false
-                // Default: docked to the left, vertically centered. (The window carries the shadow
-                // margin, so x = 0 leaves the visible menu a hair in from the screen's left edge.)
-                nx = 0
-                ny = (size.y - h) / 2
+                // Default: docked to the editable area's left edge, vertically centered. (The
+                // window carries the shadow margin, so the visible menu sits a hair in from it.)
+                val b = editBoundsPx(size)
+                nx = b.left
+                ny = b.top + (b.height() - h) / 2
             }
             else -> {
                 // Any content-driven resize (incl. the rotate settle): preserve the corner on the
@@ -1382,9 +1426,11 @@ class OverlayLiveEditController @Inject constructor(
                 else (params.y + params.height) - h
             }
         }
-        // Keep on-screen. Allow negative offsets only when the menu genuinely exceeds the screen.
-        nx = nx.coerceIn(minOf(0, size.x - w), maxOf(0, size.x - w))
-        ny = ny.coerceIn(minOf(0, size.y - h), maxOf(0, size.y - h))
+        // Keep inside the editable bounds. Offsets past an edge only when the menu genuinely
+        // exceeds the bounds (clampWindow centers oversize windows).
+        val bounds = editBoundsPx(size)
+        nx = clampWindow(nx, w, bounds.left, bounds.right)
+        ny = clampWindow(ny, h, bounds.top, bounds.bottom)
         if (params.width == w && params.height == h && params.x == nx && params.y == ny) return
         params.width = w; params.height = h; params.x = nx; params.y = ny
         runCatching { windowManager.updateViewLayout(view, params) }
@@ -1467,7 +1513,35 @@ class OverlayLiveEditController @Inject constructor(
             }
         }
 
-        Box(Modifier.fillMaxSize()) {
+        // "1:1 screen": the drawer is the serviceability test for the square form factor, so
+        // its whole stage (scrim + sheet + docking edge + slide-in) lives INSIDE the square —
+        // the sheet enters from the square's edge, clipped to it, exactly as on a 1:1 display.
+        // The window stays full-screen for modality (and the IME); taps on the masked area
+        // outside the stage dismiss like scrim taps.
+        val squareOn by overlaySettings.squareEditArea.collectAsStateWithLifecycle()
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val stageHPad: Dp
+            val stageVPad: Dp
+            if (squareOn) {
+                val side = if (maxWidth < maxHeight) maxWidth else maxHeight
+                stageHPad = (maxWidth - side) / 2
+                stageVPad = (maxHeight - side) / 2
+            } else {
+                stageHPad = 0.dp
+                stageVPad = 0.dp
+            }
+            // Outside-the-stage dismiss catcher (dead area beyond the 1:1 square).
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) { detectTapGestures { requestClose() } },
+            )
+            Box(
+                Modifier
+                    .padding(horizontal = stageHPad, vertical = stageVPad)
+                    .fillMaxSize()
+                    .clipToBounds(),
+            ) {
             // Scrim — fades with the open fraction; tap outside the sheet to dismiss.
             Box(
                 Modifier
@@ -1537,6 +1611,7 @@ class OverlayLiveEditController @Inject constructor(
                         onDone = { requestClose() },
                     )
                 }
+            }
             }
         }
     }
@@ -1900,9 +1975,9 @@ class OverlayLiveEditController @Inject constructor(
      * to the right, else LEFT (else RIGHT and clamp) — and stores it in [menuCascadeSide]; deeper
      * levels inherit that side so they open into the same open space instead of over their parents.
      */
-    private fun placeMenuX(parentLeft: Int, parentRight: Int, width: Int, screenW: Int): Int {
-        val rightFits = parentRight + width <= screenW
-        val leftFits = parentLeft - width >= 0
+    private fun placeMenuX(parentLeft: Int, parentRight: Int, width: Int, boundsLeft: Int, boundsRight: Int): Int {
+        val rightFits = parentRight + width <= boundsRight
+        val leftFits = parentLeft - width >= boundsLeft
         // Honor the cascade's preferred side IF it fits; otherwise flip FULLY to the other side (never
         // clamp on top of the parent). The first level records the side; deeper levels inherit it.
         val pref = menuCascadeSide
@@ -1917,9 +1992,9 @@ class OverlayLiveEditController @Inject constructor(
         }
         if (menuCascadeSide == null) menuCascadeSide = side
         // Flush against the parent's near edge on the chosen side. Only clamp if even the chosen side
-        // overflows the screen (neither side had room) — the unavoidable last-resort overlap.
+        // overflows the bounds (neither side had room) — the unavoidable last-resort overlap.
         val x = if (side == MenuSide.RIGHT) parentRight else parentLeft - width
-        return x.coerceIn(0, maxOf(0, screenW - width))
+        return clampWindow(x, width, boundsLeft, boundsRight)
     }
 
     /**
@@ -1995,7 +2070,7 @@ class OverlayLiveEditController @Inject constructor(
         view.post {
             val unspec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
             view.measure(unspec, unspec)
-            val size = displaySizePx()
+            val b = editBoundsPx()
             // The window includes a transparent MENU_SHADOW_MARGIN inset on every side (room for the
             // shadow); place by the VISIBLE surface size, then offset the window by -margin so the
             // visible edges land where intended (anchored flush to the parent).
@@ -2006,10 +2081,10 @@ class OverlayLiveEditController @Inject constructor(
             // sits at anchorTop (used by the horizontal menu when it's in the screen's bottom half).
             val baseVisTop = if (growUp) anchorTop - visH else anchorTop
             val visLeft = when {
-                sideParent != null -> placeMenuX(sideParent.first, sideParent.second, visW, size.x)
-                else -> (fixedLeft ?: 0).coerceIn(0, maxOf(0, size.x - visW))
+                sideParent != null -> placeMenuX(sideParent.first, sideParent.second, visW, b.left, b.right)
+                else -> clampWindow(fixedLeft ?: b.left, visW, b.left, b.right)
             }
-            val visTop = baseVisTop.coerceIn(0, maxOf(0, size.y - visH))
+            val visTop = clampWindow(baseVisTop, visH, b.top, b.bottom)
             params.x = visLeft - margin
             params.y = visTop - margin
             params.alpha = 1f
@@ -2445,10 +2520,12 @@ class OverlayLiveEditController @Inject constructor(
     private fun OptionsEntries(): List<MenuEntry> {
         val snap by overlaySettings.snapEnabled.collectAsStateWithLifecycle()
         val grid by showGrid.collectAsStateWithLifecycle()
+        val square by overlaySettings.squareEditArea.collectAsStateWithLifecycle()
         val positionerShown by positionerOpen.collectAsStateWithLifecycle()
         return listOf(
             MenuEntry.Item("Snapping", leadingIcon = Icons.Default.GridOn, trailing = MenuTrailing.Check(snap) { overlaySettings.setSnapEnabled(it) }),
             MenuEntry.Item("Show grid", leadingIcon = Icons.Default.Grid4x4, trailing = MenuTrailing.Check(grid) { showGrid.value = it }),
+            MenuEntry.Item("1:1 screen", leadingIcon = Icons.Default.CropSquare, trailing = MenuTrailing.Check(square) { overlaySettings.setSquareEditArea(it) }),
             MenuEntry.Divider,
             MenuEntry.Item(
                 "Positioner",
@@ -2991,11 +3068,13 @@ class OverlayLiveEditController @Inject constructor(
      */
     private fun snapPosition(x: Int, y: Int, w: Int, h: Int, size: Point, exclude: Set<Long>): Point {
         val others = overlayEditor.elements.value.filter { it.id !in exclude }
-        // Snap to the SAME lattice the guide draws (whole near-square cells that tile the screen).
-        val (gridX, gridY) = gridCellPx(size.x.toFloat(), size.y.toFloat(), context.resources.displayMetrics.density)
+        // Snap to the SAME lattice the guide draws (whole near-square cells tiling the editable
+        // bounds — the full screen, or the 1:1 square when that option is on).
+        val b = editBoundsPx(size)
+        val (gridX, gridY) = gridCellPx(b.width().toFloat(), b.height().toFloat(), context.resources.displayMetrics.density)
 
-        val xCandidates = mutableListOf(((x / gridX).roundToInt() * gridX).roundToInt())
-        val yCandidates = mutableListOf(((y / gridY).roundToInt() * gridY).roundToInt())
+        val xCandidates = mutableListOf((b.left + ((x - b.left) / gridX).roundToInt() * gridX).roundToInt())
+        val yCandidates = mutableListOf((b.top + ((y - b.top) / gridY).roundToInt() * gridY).roundToInt())
         others.forEach { o ->
             val ol = (o.x * size.x).roundToInt()
             val or = ((o.x + o.width) * size.x).roundToInt()
@@ -3006,8 +3085,8 @@ class OverlayLiveEditController @Inject constructor(
             val ocy = ((o.y + o.height / 2f) * size.y).roundToInt()
             yCandidates += listOf(ot, ob, ot - h, ob - h, ocy - h / 2)
         }
-        val sx = snapValue(x, xCandidates).coerceIn(0, size.x - w)
-        val sy = snapValue(y, yCandidates).coerceIn(0, size.y - h)
+        val sx = clampWindow(snapValue(x, xCandidates), w, b.left, b.right)
+        val sy = clampWindow(snapValue(y, yCandidates), h, b.top, b.bottom)
         return Point(sx, sy)
     }
 
@@ -3035,6 +3114,75 @@ class OverlayLiveEditController @Inject constructor(
             @Suppress("DEPRECATION")
             wm.defaultDisplay.getRealSize(p)
             p
+        }
+    }
+
+    // ── "1:1 screen" editable bounds ─────────────────────────────────────────────
+
+    /**
+     * The editable area in screen px: the full display normally, or (with the "1:1 screen"
+     * option on) the centered square of side min(w, h) — the smallest supported screen
+     * shape. EVERYTHING movable in the editor (element windows, toolbar, submenus, the
+     * positioner) clamps to this rect; the data-level clamp lives in
+     * [OverlayEditor]'s editBounds so persisted geometry agrees.
+     */
+    private fun editBoundsPx(size: Point = displaySizePx()): android.graphics.Rect =
+        if (overlaySettings.squareEditArea.value) {
+            val side = minOf(size.x, size.y)
+            val left = (size.x - side) / 2
+            val top = (size.y - side) / 2
+            android.graphics.Rect(left, top, left + side, top + side)
+        } else {
+            android.graphics.Rect(0, 0, size.x, size.y)
+        }
+
+    /** [value] clamped so a window of [extent] stays inside [lo, hi]. A window bigger than
+     *  the bounds may overflow past an edge (mirrors the old whole-screen clamp semantics). */
+    private fun clampWindow(value: Int, extent: Int, lo: Int, hi: Int): Int =
+        value.coerceIn(minOf(lo, hi - extent), maxOf(lo, hi - extent))
+
+    /**
+     * One-shot sweep when "1:1 screen" turns on mid-session: persist clamped element rects
+     * (one undoable batch), pull the toolbar + positioner windows inside, and close any open
+     * fly-outs (their anchors may have moved).
+     */
+    private fun clampEverythingToEditBounds() {
+        val size = displaySizePx()
+        val b = editBoundsPx(size)
+        val els = overlayEditor.elements.value
+        if (els.isNotEmpty()) {
+            val rects = els.map { el ->
+                val w = minOf(el.width, b.width().toFloat() / size.x)
+                val h = minOf(el.height, b.height().toFloat() / size.y)
+                OverlayEditor.ElementRect(
+                    id = el.id,
+                    x = el.x.coerceIn(b.left.toFloat() / size.x, b.right.toFloat() / size.x - w),
+                    y = el.y.coerceIn(b.top.toFloat() / size.y, b.bottom.toFloat() / size.y - h),
+                    width = w,
+                    height = h,
+                )
+            }
+            val changed = els.zip(rects).any { (el, r) ->
+                abs(el.x - r.x) > 1e-4f || abs(el.y - r.y) > 1e-4f ||
+                    abs(el.width - r.width) > 1e-4f || abs(el.height - r.height) > 1e-4f
+            }
+            if (changed) {
+                overlayEditor.pushUndoSnapshot()
+                overlayEditor.moveResizeAll(rects)
+            }
+        }
+        dismissSubmenus()
+        // Toolbar: re-run the size/position pass — its final clamp now honors the bounds.
+        resizeToolbarToContent()
+        positionerParams?.let { p ->
+            positioner?.first?.let { v ->
+                val nx = clampWindow(p.x, v.width, b.left, b.right)
+                val ny = clampWindow(p.y, v.height, b.top, b.bottom)
+                if (nx != p.x || ny != p.y) {
+                    p.x = nx; p.y = ny
+                    runCatching { windowManager.updateViewLayout(v, p) }
+                }
+            }
         }
     }
 
